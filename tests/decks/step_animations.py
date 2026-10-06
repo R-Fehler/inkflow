@@ -116,8 +116,8 @@ def main() -> Deck:
                     animations.SlideOut(
                         "e", direction=Direction.UP, distance=600, duration=1.4
                     ),
-                    animations.ZoomIn("f", scale=0.15, duration=1.4),
-                    animations.ZoomOut("g", scale=2.5, duration=1.4),
+                    animations.ScaleIn("f", scale=0.15, duration=1.4),
+                    animations.ScaleOut("g", scale=2.5, duration=1.4),
                     animations.Highlight(
                         "h", color="#f38ba8", iterations=3, duration=0.7
                     ),

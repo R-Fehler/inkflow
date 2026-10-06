@@ -18,8 +18,8 @@ from inkflow.animations import (
     FadeOut,
     Highlight,
     PlayVideo,
+    ScaleIn,
     SlideIn,
-    ZoomIn,
 )
 from inkflow.enums import Direction, Trigger
 from inkflow.logging import collect_logs
@@ -142,13 +142,13 @@ class TestAnnotateSvg:
         assert str(cue["opts"]["easing"]).startswith("cubic-bezier")
 
     def test_emits_anim_slug_styling_hook_class(self) -> None:
-        result = annotate_svg(_PLAIN_SVG, [(ZoomIn("box"), 1)])
-        assert "anim-zoom-in" in self._classes(result, "box")
+        result = annotate_svg(_PLAIN_SVG, [(ScaleIn("box"), 1)])
+        assert "anim-scale-in" in self._classes(result, "box")
 
     def test_multi_cue_emits_a_class_per_type(self) -> None:
-        result = annotate_svg(_PLAIN_SVG, [(FadeIn("box"), 1), (ZoomIn("box"), 2)])
+        result = annotate_svg(_PLAIN_SVG, [(FadeIn("box"), 1), (ScaleIn("box"), 2)])
         classes = self._classes(result, "box")
-        assert "anim-fade-in" in classes and "anim-zoom-in" in classes
+        assert "anim-fade-in" in classes and "anim-scale-in" in classes
 
     def test_enter_first_adds_pending_class(self) -> None:
         result = annotate_svg(_PLAIN_SVG, [(FadeIn("box"), 1)])
@@ -187,8 +187,8 @@ class TestAnnotateSvg:
         assert 'id="box"' in result
 
     def test_name_derived_from_type(self) -> None:
-        [cue] = self._cues(annotate_svg(_PLAIN_SVG, [(ZoomIn("box"), 1)]), "box")
-        assert cue["name"] == "zoom-in"
+        [cue] = self._cues(annotate_svg(_PLAIN_SVG, [(ScaleIn("box"), 1)]), "box")
+        assert cue["name"] == "scale-in"
         assert cue["vars"] == {"scale": "0.8"}
 
     def test_lone_distance_is_a_var_not_a_slide_offset(self) -> None:

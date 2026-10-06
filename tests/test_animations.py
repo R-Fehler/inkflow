@@ -6,10 +6,10 @@ from inkflow.animations import (
     FadeIn,
     FadeOut,
     Highlight,
+    ScaleIn,
+    ScaleOut,
     SlideIn,
     SlideOut,
-    ZoomIn,
-    ZoomOut,
 )
 from inkflow.enums import Direction, Easing, Trigger
 
@@ -49,9 +49,9 @@ def test_slide_out_defaults() -> None:
     assert SlideOut("a").direction == "left"
 
 
-def test_zoom_scale_field() -> None:
-    assert ZoomIn("a").scale == 0.8
-    assert ZoomOut("a", scale=0.5).scale == 0.5
+def test_scale_field() -> None:
+    assert ScaleIn("a").scale == 0.8
+    assert ScaleOut("a", scale=0.5).scale == 0.5
 
 
 def test_bounce_defaults() -> None:
@@ -70,5 +70,14 @@ def test_highlight_fields() -> None:
 
 
 def test_all_types_are_animations() -> None:
-    for cls in (FadeIn, FadeOut, Bounce, SlideIn, SlideOut, ZoomIn, ZoomOut, Highlight):
+    for cls in (
+        FadeIn,
+        FadeOut,
+        Bounce,
+        SlideIn,
+        SlideOut,
+        ScaleIn,
+        ScaleOut,
+        Highlight,
+    ):
         assert isinstance(cls("a"), Animation)
