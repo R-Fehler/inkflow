@@ -1154,12 +1154,12 @@ body.pv-open #pv-resize-handle {
     translate: var(--anim-from-x) var(--anim-from-y);
   }
 }
-.anim-zoom-in,
-.anim-zoom-out {
+.anim-scale-in,
+.anim-scale-out {
   transform-box: fill-box;
   transform-origin: center;
 }
-@keyframes anim-zoom-in {
+@keyframes anim-scale-in {
   from {
     opacity: 0;
     scale: var(--anim-scale);
@@ -1169,7 +1169,7 @@ body.pv-open #pv-resize-handle {
     scale: 1;
   }
 }
-@keyframes anim-zoom-out {
+@keyframes anim-scale-out {
   from {
     opacity: 1;
     scale: 1;
