@@ -37,14 +37,14 @@ The [animations reference](../reference/animations.md) has the full signatures.
 | `FadeOut` | Opacity 1 to 0 | Visible |
 | `Bounce` | Springs up into place from just below (`distance`) | Hidden |
 | `SlideIn` / `SlideOut` | Travels from or to an edge (`direction`, `distance`) | Hidden / Visible |
-| `ZoomIn` / `ZoomOut` | Scales into or out of place (`scale`) | Hidden / Visible |
+| `ScaleIn` / `ScaleOut` | Scales into or out of place (`scale`) | Hidden / Visible |
 | `Highlight` | Pulses a glow (`color`, `iterations`) without hiding | Visible |
 
 ```python
 from inkflow import Direction, animations
 
 animations.SlideIn("box", direction=Direction.LEFT, duration=0.6)
-animations.ZoomIn("logo", scale=0.6)
+animations.ScaleIn("logo", scale=0.6)
 animations.Highlight("total", color="#cba6f7", iterations=2)
 ```
 

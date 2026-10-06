@@ -52,9 +52,9 @@
   <g id="g8" transform="rotate(-26.627998,1555.8774,-1922.0598)" class="inkflow-fill-accent inkflow-fill-purple">
     <rect id="shape-slide" x="414.15024" y="283.52585" width="200" height="324.27051" rx="63.69952" class="inkflow-fill-green inkflow-fill-accent inkflow-fill-purple" style="stroke-width: 1.27332"/>
   </g>
-  <!-- ZoomIn -->
+  <!-- ScaleIn -->
   <g id="g9" transform="matrix(1.4041442,-0.12484075,0.12484075,1.4041442,-52.327611,-222.87282)" class="inkflow-fill-green">
-    <rect id="shape-zoom" x="722" y="360" width="200" height="200" rx="20" class="inkflow-fill-yellow inkflow-fill-green"/>
+    <rect id="shape-scale" x="722" y="360" width="200" height="200" rx="20" class="inkflow-fill-yellow inkflow-fill-green"/>
   </g>
   <!-- Bounce -->
   <g id="g10" transform="matrix(2.5210029,1.0935916,-0.02840859,0.06548893,-2360.9011,-888.96294)" class="inkflow-fill-blue">

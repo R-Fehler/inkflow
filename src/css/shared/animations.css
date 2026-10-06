@@ -81,20 +81,20 @@
     }
 }
 
-/* ── Zoom ─────────────────────────────────────────────────────────────────── */
+/* ── Scale ────────────────────────────────────────────────────────────────── */
 /* fill-box + center origin so SVG elements scale about their own centre. Kept on the
  * element's `anim-<slug>` styling-hook class (normal author origin) rather than in the
  * keyframes: the morph transition pins `transform-box: view-box` inline to drive its own
  * matrix, and a normal author declaration is beatable by that inline style, whereas a
  * keyframe declaration (animation origin) would not be. The scale itself animates. */
 
-.anim-zoom-in,
-.anim-zoom-out {
+.anim-scale-in,
+.anim-scale-out {
     transform-box: fill-box;
     transform-origin: center;
 }
 
-@keyframes anim-zoom-in {
+@keyframes anim-scale-in {
     from {
         opacity: 0;
         scale: var(--anim-scale);
@@ -105,7 +105,7 @@
     }
 }
 
-@keyframes anim-zoom-out {
+@keyframes anim-scale-out {
     from {
         opacity: 1;
         scale: 1;

@@ -76,8 +76,8 @@ def main() -> Deck:
                     animations.SlideIn(
                         "box-svg", direction=Direction.LEFT, distance=300
                     ),
-                    animations.ZoomIn("arrow-svg", scale=0.6),
-                    animations.ZoomIn("box-deck", Trigger.WITH_PREVIOUS, scale=0.6),
+                    animations.ScaleIn("arrow-svg", scale=0.6),
+                    animations.ScaleIn("box-deck", Trigger.WITH_PREVIOUS, scale=0.6),
                     animations.SlideIn(
                         "box-md", direction=Direction.DOWN, distance=300
                     ),
@@ -124,7 +124,7 @@ def main() -> Deck:
                 animations=[
                     animations.FadeIn("shape-fade"),
                     animations.SlideIn("shape-slide", direction=Direction.DOWN),
-                    animations.ZoomIn("shape-zoom", scale=0.4),
+                    animations.ScaleIn("shape-scale", scale=0.4),
                     animations.Bounce("shape-bounce"),
                     animations.Highlight("shape-highlight"),
                     Flicker("shape-flicker", delay=0.1),

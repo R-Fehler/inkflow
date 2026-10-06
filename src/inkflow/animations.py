@@ -40,10 +40,10 @@ __all__ = [
     "FadeOut",
     "Highlight",
     "PlayVideo",
+    "ScaleIn",
+    "ScaleOut",
     "SlideIn",
     "SlideOut",
-    "ZoomIn",
-    "ZoomOut",
 ]
 
 
@@ -180,7 +180,7 @@ class SlideIn(Enter):
 
 
 @dataclass
-class ZoomIn(Enter):
+class ScaleIn(Enter):
     """Element scales up into place from ``scale``."""
 
     scale: float = 0.8
@@ -206,7 +206,7 @@ class SlideOut(Exit):
 
 
 @dataclass
-class ZoomOut(Exit):
+class ScaleOut(Exit):
     """Element scales down out of place toward ``scale``."""
 
     scale: float = 0.8

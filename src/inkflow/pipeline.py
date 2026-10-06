@@ -350,7 +350,7 @@ def annotate_svg(root: SvgElement, cues: list[tuple[Cue, int]]) -> SvgElement:
         el.set("data-cues", json.dumps(entries, separators=(",", ":")))
         # An `anim-<slug>` class per cue type: a pure styling hook (the engine drives
         # animation from `data-cues`). Built-in CSS uses it only for constant styles a
-        # keyframe cannot hold at the right cascade origin (zoom's transform-box);
+        # keyframe cannot hold at the right cascade origin (scale's transform-box);
         # custom animations can hook their own static styles the same way.
         for name in dict.fromkeys(cast("str", e["name"]) for e in entries):
             _add_class(el, f"anim-{name}")

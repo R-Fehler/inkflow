@@ -33,7 +33,7 @@ layout zone. Every other slide leaves it empty, so it is pruned there.
 
 ANIMATED_CHROME = """
 Overlays composite before annotation, so a cue can target an element inside
-them. Press right and the footer badge zooms in.
+them. Press right and the footer badge scales in.
 """
 
 CHROME_TRANSITIONS = """
@@ -80,7 +80,7 @@ def main() -> Deck:
                 "animated-chrome",
                 "Animating overlay chrome",
                 ANIMATED_CHROME,
-                animations=[animations.ZoomIn("footer-badge", scale=0.2)],
+                animations=[animations.ScaleIn("footer-badge", scale=0.2)],
             ),
             _slide(
                 "chrome-transitions",
