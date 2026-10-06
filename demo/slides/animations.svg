@@ -54,10 +54,10 @@
     <rect id="shape-slide" x="436" y="360" width="200" height="200" rx="20" class="inkflow-fill-green"/>
     <text x="536" y="630" text-anchor="middle" font-family="monospace" font-size="28" class="inkflow-fill-text-muted" id="text6">SlideIn</text>
   </g>
-  <!-- ZoomIn -->
+  <!-- ScaleIn -->
   <g id="g9">
-    <rect id="shape-zoom" x="722" y="360" width="200" height="200" rx="20" class="inkflow-fill-yellow"/>
-    <text x="822" y="630" text-anchor="middle" font-family="monospace" font-size="28" class="inkflow-fill-text-muted" id="text7">ZoomIn</text>
+    <rect id="shape-scale" x="722" y="360" width="200" height="200" rx="20" class="inkflow-fill-yellow"/>
+    <text x="822" y="630" text-anchor="middle" font-family="monospace" font-size="28" class="inkflow-fill-text-muted" id="text7">ScaleIn</text>
   </g>
   <!-- Bounce -->
   <g id="g10">
