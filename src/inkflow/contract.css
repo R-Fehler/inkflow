@@ -143,7 +143,6 @@
     font-size: 1em;
     color: var(--inkflow-text);
     box-sizing: border-box;
-    overflow: hidden;
     line-height: var(--inkflow-line-height);
     text-align: var(--inkflow-align, left);
 }
