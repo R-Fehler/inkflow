@@ -13,8 +13,10 @@
  * rule would become a global default that every custom theme inherits and has to
  * override. Themes load after this file, so they can restyle any of it. */
 
-/* content -------------------------------------------------------------------- */
-.layout-content #zone-title .inkflow-content h1 {
+/* base --------------------------------------------------------------------- */
+/* Scoped to the shared parent rather than each layout so a project's own layouts and
+   slides get the same title as the built-in ones. */
+.layout-base #zone-title .inkflow-content h1 {
     color: var(--inkflow-accent);
 }
 
@@ -29,6 +31,7 @@
 }
 
 .layout-cover #zone-title .inkflow-content h1 {
+    color: var(--inkflow-heading);
     font-size: 2.8em;
     font-weight: 700;
     line-height: 1.1;
@@ -51,7 +54,6 @@
 }
 
 .layout-section #zone-title .inkflow-content h1 {
-    color: var(--inkflow-accent);
     font-size: 3.5em;
     font-weight: 500;
     line-height: 1.1;
@@ -71,7 +73,6 @@
 }
 
 .layout-end #zone-title .inkflow-content h1 {
-    color: var(--inkflow-accent);
     font-size: 3em;
     font-weight: 500;
 }
