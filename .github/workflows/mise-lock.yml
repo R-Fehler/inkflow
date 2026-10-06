@@ -1,12 +1,12 @@
 name: Update mise lockfile
 
-# Weekly refresh of mise.lock, analogous to dependabot (which has no mise
+# Monthly refresh of mise.lock, analogous to dependabot (which has no mise
 # support). `mise upgrade` re-resolves the latest/lts tool specs in mise.toml
 # and `mise lock` rewrites the pinned versions/checksums for every platform. A
 # PR is opened (or its rolling branch updated) only when the lockfile changes.
 on:
   schedule:
-    - cron: "0 6 * * 1" # Mondays 06:00 UTC, matching dependabot's weekly cadence
+    - cron: "0 6 1 * *" # 1st of the month, 06:00 UTC, matching dependabot's monthly cadence
   workflow_dispatch:
 
 permissions:
