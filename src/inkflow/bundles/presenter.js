@@ -400,6 +400,338 @@
     return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:middle" aria-label="Step ${current} of ${total}">${paths}</svg>`;
   }
 
+  // src/ts/shared/easing.ts
+  var NAMED_CURVES = {
+    linear: [0, 0, 1, 1],
+    ease: [0.25, 0.1, 0.25, 1],
+    "ease-in": [0.42, 0, 1, 1],
+    "ease-out": [0, 0, 0.58, 1],
+    "ease-in-out": [0.42, 0, 0.58, 1]
+  };
+  var CUBIC_BEZIER_PATTERN = /^cubic-bezier\(\s*([\d.+-]+)\s*,\s*([\d.+-]+)\s*,\s*([\d.+-]+)\s*,\s*([\d.+-]+)\s*\)$/;
+  function parseControlPoints(spec) {
+    if (!spec) return null;
+    const trimmed = spec.trim();
+    if (trimmed in NAMED_CURVES) return NAMED_CURVES[trimmed];
+    const match = CUBIC_BEZIER_PATTERN.exec(trimmed);
+    if (!match) return null;
+    const points = [match[1], match[2], match[3], match[4]].map(Number);
+    return points.every(Number.isFinite) ? points : null;
+  }
+  var identity = (progress) => progress;
+  function makeCubicBezier(points) {
+    const [x1, y1, x2, y2] = points;
+    const cx = 3 * x1;
+    const bx = 3 * (x2 - x1) - cx;
+    const ax = 1 - cx - bx;
+    const cy = 3 * y1;
+    const by = 3 * (y2 - y1) - cy;
+    const ay = 1 - cy - by;
+    const sampleX = (t) => ((ax * t + bx) * t + cx) * t;
+    const sampleY = (t) => ((ay * t + by) * t + cy) * t;
+    const sampleSlopeX = (t) => (3 * ax * t + 2 * bx) * t + cx;
+    const solveForT = (x) => {
+      let t = x;
+      for (let iteration = 0; iteration < 8; iteration++) {
+        const error = sampleX(t) - x;
+        if (Math.abs(error) < 1e-6) return t;
+        const slope = sampleSlopeX(t);
+        if (Math.abs(slope) < 1e-6) break;
+        t -= error / slope;
+      }
+      let lower = 0;
+      let upper = 1;
+      t = x;
+      while (lower < upper) {
+        const value = sampleX(t);
+        if (Math.abs(value - x) < 1e-6) return t;
+        if (x > value) lower = t;
+        else upper = t;
+        t = (lower + upper) / 2;
+      }
+      return t;
+    };
+    return (progress) => {
+      if (progress <= 0) return 0;
+      if (progress >= 1) return 1;
+      return sampleY(solveForT(progress));
+    };
+  }
+  function cubicBezierEasing(spec) {
+    const points = parseControlPoints(spec);
+    if (!points) return identity;
+    const [x1, y1, x2, y2] = points;
+    if (x1 === 0 && y1 === 0 && x2 === 1 && y2 === 1) return identity;
+    return makeCubicBezier(points);
+  }
+
+  // src/ts/shared/zoom-camera.ts
+  function clamp(n, lo, hi) {
+    return Math.min(Math.max(n, lo), hi);
+  }
+  function scaleOf(vb, base) {
+    return base.w / vb.w;
+  }
+  function isZoomedIn(vb, base, epsilon = 1e-3) {
+    return scaleOf(vb, base) > 1 + epsilon;
+  }
+  function clampToBounds(vb, base) {
+    const w = Math.min(vb.w, base.w);
+    const h = Math.min(vb.h, base.h);
+    const x = w >= base.w ? base.x + (base.w - w) / 2 : clamp(vb.x, base.x, base.x + base.w - w);
+    const y = h >= base.h ? base.y + (base.h - h) / 2 : clamp(vb.y, base.y, base.y + base.h - h);
+    return { x, y, w, h };
+  }
+  function zoomAt(current, base, factor, focus, limits) {
+    const targetScale = clamp(
+      scaleOf(current, base) * factor,
+      limits.minScale,
+      limits.maxScale
+    );
+    const w = base.w / targetScale;
+    const h = base.h / targetScale;
+    const fx = (focus.ux - current.x) / current.w;
+    const fy = (focus.uy - current.y) / current.h;
+    return clampToBounds(
+      { x: focus.ux - fx * w, y: focus.uy - fy * h, w, h },
+      base
+    );
+  }
+  function panBy(current, base, dxUser, dyUser) {
+    return clampToBounds(
+      { ...current, x: current.x + dxUser, y: current.y + dyUser },
+      base
+    );
+  }
+  function lerpViewBox(a, b, t) {
+    return {
+      x: a.x + (b.x - a.x) * t,
+      y: a.y + (b.y - a.y) * t,
+      w: a.w + (b.w - a.w) * t,
+      h: a.h + (b.h - a.h) * t
+    };
+  }
+
+  // src/ts/shared/camera.ts
+  function parseCameraCues(raw) {
+    if (!raw) return [];
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  function fitFrame(rect, margin, base) {
+    let w = rect.w + 2 * margin;
+    let h = rect.h + 2 * margin;
+    if (w <= 0 && h <= 0) return { ...base };
+    const aspect = base.w / base.h;
+    if (w / aspect > h) h = w / aspect;
+    else w = h * aspect;
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h / 2;
+    return clampToBounds({ x: cx - w / 2, y: cy - h / 2, w, h }, base);
+  }
+  var RHO = Math.SQRT2;
+  var RHO2 = 2;
+  var RHO4 = 4;
+  var EPSILON2 = 1e-12;
+  function zoomPath(from, to) {
+    const cx0 = from.x + from.w / 2;
+    const cy0 = from.y + from.h / 2;
+    const cx1 = to.x + to.w / 2;
+    const cy1 = to.y + to.h / 2;
+    const w0 = from.w;
+    const w1 = to.w;
+    const dx = cx1 - cx0;
+    const dy = cy1 - cy0;
+    const d2 = dx * dx + dy * dy;
+    const aspect0 = from.h / from.w;
+    const aspect1 = to.h / to.w;
+    const view = (t, cx, cy, w) => {
+      const h = w * (aspect0 + (aspect1 - aspect0) * t);
+      return { x: cx - w / 2, y: cy - h / 2, w, h };
+    };
+    let at;
+    if (d2 < EPSILON2) {
+      at = (t) => view(t, cx0 + dx * t, cy0 + dy * t, w0 * (w1 / w0) ** t);
+    } else {
+      const d1 = Math.sqrt(d2);
+      const b0 = (w1 * w1 - w0 * w0 + RHO4 * d2) / (2 * w0 * RHO2 * d1);
+      const b1 = (w1 * w1 - w0 * w0 - RHO4 * d2) / (2 * w1 * RHO2 * d1);
+      const r0 = Math.log(Math.sqrt(b0 * b0 + 1) - b0);
+      const r1 = Math.log(Math.sqrt(b1 * b1 + 1) - b1);
+      const length = (r1 - r0) / RHO;
+      at = (t) => {
+        const s = t * length;
+        const coshR0 = Math.cosh(r0);
+        const u = w0 / (RHO2 * d1) * (coshR0 * Math.tanh(RHO * s + r0) - Math.sinh(r0));
+        return view(
+          t,
+          cx0 + u * dx,
+          cy0 + u * dy,
+          w0 * coshR0 / Math.cosh(RHO * s + r0)
+        );
+      };
+    }
+    return (t) => t <= 0 ? { ...from } : t >= 1 ? { ...to } : at(t);
+  }
+  function cameraTimeline(cues, start, resolve) {
+    const segments = cues.map((cue) => ({
+      startMs: (Math.max(0, cue.offset) + Math.max(0, cue.opts.delay)) * 1e3,
+      durationMs: Math.max(0, cue.opts.duration) * 1e3,
+      ease: cubicBezierEasing(cue.opts.easing),
+      to: resolve(cue),
+      path: null
+    })).sort((a, b) => a.startMs - b.startMs);
+    const evaluate = (timeMs, upTo) => {
+      let current = null;
+      for (let i = 0; i < upTo; i++) {
+        if (segments[i].startMs <= timeMs) current = segments[i];
+      }
+      if (!current?.path) return { ...start };
+      const progress = current.durationMs > 0 ? Math.min(1, (timeMs - current.startMs) / current.durationMs) : 1;
+      return current.path(current.ease(progress));
+    };
+    segments.forEach((segment, i) => {
+      segment.path = zoomPath(evaluate(segment.startMs, i), segment.to);
+    });
+    return {
+      totalMs: segments.reduce(
+        (m, s) => Math.max(m, s.startMs + s.durationMs),
+        0
+      ),
+      at: (timeMs) => evaluate(timeMs, segments.length)
+    };
+  }
+  function stepStartView(cues, step, base, resolve) {
+    return step <= 0 ? { ...base } : restingCamera(cues, step - 1, base, resolve);
+  }
+  function restingCamera(cues, step, base, resolve) {
+    let view = { ...base };
+    const steps = [...new Set(cues.map((c) => c.step))].sort((a, b) => a - b);
+    for (const s of steps) {
+      if (s > Math.max(step, 0)) break;
+      const timeline = cameraTimeline(
+        cues.filter((c) => c.step === s),
+        view,
+        resolve
+      );
+      view = timeline.at(step < 0 ? 0 : Number.POSITIVE_INFINITY);
+    }
+    return view;
+  }
+
+  // src/ts/shared/viewbox.ts
+  var DEFAULT_VIEWBOX = "0 0 1920 1080";
+  function parseViewBox(attr, fallback = DEFAULT_VIEWBOX) {
+    const parts = (attr ?? "").trim().split(/[\s,]+/).map(Number);
+    const valid = parts.length === 4 && parts.every((n) => Number.isFinite(n)) && parts[2] > 0 && parts[3] > 0;
+    const [x, y, w, h] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
+    return { x, y, w, h };
+  }
+  function formatViewBox(vb) {
+    const round2 = (n) => Math.round(n * 1e3) / 1e3;
+    return `${round2(vb.x)} ${round2(vb.y)} ${round2(vb.w)} ${round2(vb.h)}`;
+  }
+
+  // src/ts/shared/camera-dom.ts
+  var authoredViews = /* @__PURE__ */ new WeakMap();
+  function cameraSvg(root) {
+    const svg = root.matches("svg[data-camera]") ? root : root.querySelector("svg[data-camera]");
+    return svg instanceof SVGSVGElement ? svg : null;
+  }
+  function authoredView(svg) {
+    let view = authoredViews.get(svg);
+    if (!view) {
+      view = parseViewBox(svg.getAttribute("viewBox"));
+      authoredViews.set(svg, view);
+    }
+    return view;
+  }
+  function measureShown(svg, el, measure) {
+    const lifted = [];
+    for (let node = el; node && node !== svg; node = node.parentElement) {
+      if (node instanceof SVGElement && getComputedStyle(node).display === "none") {
+        lifted.push({
+          node,
+          value: node.style.getPropertyValue("display"),
+          priority: node.style.getPropertyPriority("display")
+        });
+        node.style.setProperty("display", "inline", "important");
+      }
+    }
+    try {
+      return measure();
+    } finally {
+      for (const { node, value, priority } of lifted.reverse()) {
+        if (value) node.style.setProperty("display", value, priority);
+        else node.style.removeProperty("display");
+      }
+    }
+  }
+  function targetRect(svg, id) {
+    const el = svg.querySelector(`[id="${CSS.escape(id)}"]`);
+    if (!(el instanceof SVGGraphicsElement)) return null;
+    return measureShown(svg, el, () => {
+      const svgMatrix = svg.getScreenCTM();
+      const elMatrix = el.getScreenCTM();
+      if (!svgMatrix || !elMatrix) return null;
+      const toSlide = DOMMatrix.fromMatrix(svgMatrix).inverse().multiply(DOMMatrix.fromMatrix(elMatrix));
+      const box = el.getBBox();
+      const corners = [
+        new DOMPoint(box.x, box.y),
+        new DOMPoint(box.x + box.width, box.y),
+        new DOMPoint(box.x, box.y + box.height),
+        new DOMPoint(box.x + box.width, box.y + box.height)
+      ].map((point) => point.matrixTransform(toSlide));
+      const xs = corners.map((point) => point.x);
+      const ys = corners.map((point) => point.y);
+      const rect = {
+        x: Math.min(...xs),
+        y: Math.min(...ys),
+        w: Math.max(...xs) - Math.min(...xs),
+        h: Math.max(...ys) - Math.min(...ys)
+      };
+      return Object.values(rect).every(Number.isFinite) ? rect : null;
+    });
+  }
+  function resolver(svg) {
+    const base = authoredView(svg);
+    return (cue) => {
+      const rect = cue.target === null ? null : targetRect(svg, cue.target);
+      return rect ? fitFrame(rect, cue.margin, base) : { ...base };
+    };
+  }
+  function writeView(svg, view) {
+    svg.setAttribute("viewBox", formatViewBox(view));
+  }
+  function applyCameraInstant(root, step) {
+    const svg = cameraSvg(root);
+    if (!svg) return;
+    const cues = parseCameraCues(svg.getAttribute("data-camera"));
+    writeView(svg, restingCamera(cues, step, authoredView(svg), resolver(svg)));
+  }
+  function cameraRun(root, step) {
+    const svg = cameraSvg(root);
+    if (!svg) return null;
+    const cues = parseCameraCues(svg.getAttribute("data-camera"));
+    const stepCues = cues.filter((c) => c.step === step);
+    if (stepCues.length === 0) return null;
+    const resolve = resolver(svg);
+    const timeline = cameraTimeline(
+      stepCues,
+      stepStartView(cues, step, authoredView(svg), resolve),
+      resolve
+    );
+    return { timeline, seek: (timeMs) => writeView(svg, timeline.at(timeMs)) };
+  }
+  function maxCameraStep(root) {
+    const svg = root.matches("[data-camera]") ? root : root.querySelector("[data-camera]");
+    const cues = parseCameraCues(svg?.getAttribute("data-camera") ?? null);
+    return cues.reduce((m, c) => Math.max(m, c.step), 0);
+  }
+
   // src/ts/shared/keyframes.ts
   var templates = /* @__PURE__ */ new Map();
   function parseOffsets(keyText) {
@@ -548,12 +880,22 @@
         const anim = ensureAnim(el, st);
         anim.pause();
         items.push({
-          anim,
+          seek: (timeMs) => {
+            anim.currentTime = timeMs;
+          },
           offsetMs: Math.max(0, st.cue.offset) * 1e3,
           spanMs: effectEndMs(st.cue)
         });
       }
     });
+    const camera2 = cameraRun(root, runStep);
+    if (camera2) {
+      items.push({
+        seek: camera2.seek,
+        offsetMs: 0,
+        spanMs: camera2.timeline.totalMs
+      });
+    }
     const totalMs = items.reduce(
       (m, it) => Math.max(m, it.offsetMs + it.spanMs),
       0
@@ -563,10 +905,7 @@
   function seekStepRun(run, value) {
     const runTimeMs = value * run.totalMs;
     for (const it of run.items) {
-      it.anim.currentTime = Math.min(
-        Math.max(runTimeMs - it.offsetMs, 0),
-        it.spanMs
-      );
+      it.seek(Math.min(Math.max(runTimeMs - it.offsetMs, 0), it.spanMs));
     }
   }
   function applyCodeHighlights(root, step) {
@@ -590,7 +929,7 @@
     return rootStep.get(root) ?? 0;
   }
   function maxStep(root) {
-    let m = 0;
+    let m = maxCameraStep(root);
     root.querySelectorAll("[data-cues]").forEach((el) => {
       for (const c of parseCues(el)) if (c.step > m) m = c.step;
     });
@@ -629,21 +968,9 @@
         else st.anim?.cancel();
       });
     });
+    applyCameraInstant(root, step);
     applyCodeHighlights(root, step);
     rootStep.set(root, step);
-  }
-
-  // src/ts/shared/viewbox.ts
-  var DEFAULT_VIEWBOX = "0 0 1920 1080";
-  function parseViewBox(attr, fallback = DEFAULT_VIEWBOX) {
-    const parts = (attr ?? "").trim().split(/[\s,]+/).map(Number);
-    const valid = parts.length === 4 && parts.every((n) => Number.isFinite(n)) && parts[2] > 0 && parts[3] > 0;
-    const [x, y, w, h] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
-    return { x, y, w, h };
-  }
-  function formatViewBox(vb) {
-    const round2 = (n) => Math.round(n * 1e3) / 1e3;
-    return `${round2(vb.x)} ${round2(vb.y)} ${round2(vb.w)} ${round2(vb.h)}`;
   }
 
   // src/ts/presenter/deck-url.ts
@@ -772,8 +1099,218 @@
     });
   }
 
-  // src/ts/presenter/status.ts
+  // src/ts/presenter/zoom.ts
   var stage = document.getElementById("stage");
+  var stageWrap = document.getElementById("stage-wrap");
+  var indicator = document.getElementById("zoom-indicator");
+  var LIMITS = { minScale: 1, maxScale: 8 };
+  var WHEEL_STEP = 1.0015;
+  var KEY_ZOOM_STEP = 1.4;
+  var KEY_ANIM_MS = 140;
+  var RESET_ANIM_MS = 240;
+  var NAV_RESET_MS = 150;
+  var EASE = cubicBezierEasing("cubic-bezier(0.22, 1, 0.36, 1)");
+  var baseViewBox = null;
+  var camera = null;
+  var navReset = null;
+  var beforeGesture = () => {
+  };
+  function setBeforeCameraGesture(fn) {
+    beforeGesture = fn;
+  }
+  var dragStartCamera = null;
+  var dragStartInverse = null;
+  var dragStartClientX = 0;
+  var dragStartClientY = 0;
+  function currentSvg() {
+    return stage?.querySelector("svg") ?? null;
+  }
+  function clientToUser(clientX, clientY, inverse) {
+    const inv = inverse ?? currentSvg()?.getScreenCTM()?.inverse();
+    if (!inv) return null;
+    const p = new DOMPoint(clientX, clientY).matrixTransform(inv);
+    return { ux: p.x, uy: p.y };
+  }
+  function ensureBase() {
+    if (camera && baseViewBox) return true;
+    const svg = currentSvg();
+    if (!svg) return false;
+    baseViewBox = parseViewBox(svg.getAttribute("viewBox"));
+    camera = { ...baseViewBox };
+    return true;
+  }
+  function renderIndicator() {
+    if (!indicator) return;
+    const factor = camera && baseViewBox ? scaleOf(camera, baseViewBox) : 1;
+    indicator.textContent = `${factor.toFixed(1)}\xD7`;
+    indicator.toggleAttribute("data-active", factor > 1.01);
+  }
+  function applyCamera() {
+    const svg = currentSvg();
+    if (!svg || !camera) return;
+    svg.setAttribute("viewBox", formatViewBox(camera));
+    renderIndicator();
+  }
+  var driver = new ProgressDriver();
+  var animController = null;
+  function cancelAnim() {
+    animController?.abort();
+    animController = null;
+  }
+  function animateCameraTo(target, ms, onDone) {
+    cancelAnim();
+    if (!camera) {
+      camera = { ...target };
+      applyCamera();
+      onDone?.();
+      return;
+    }
+    const start = { ...camera };
+    const controller2 = new AbortController();
+    animController = controller2;
+    driver.value = 0;
+    driver.animateTo(1, ms / 1e3, controller2.signal, (p) => {
+      camera = p >= 1 ? { ...target } : lerpViewBox(start, target, EASE(p));
+      applyCamera();
+    }).then(() => {
+      if (animController === controller2) animController = null;
+      if (!controller2.signal.aborted) onDone?.();
+    });
+  }
+  function endDrag() {
+    dragStartCamera = null;
+    dragStartInverse = null;
+    document.body.classList.remove("zoom-grabbing");
+  }
+  function resetCamera() {
+    cancelAnim();
+    const svg = currentSvg();
+    if (svg && baseViewBox) {
+      svg.setAttribute("viewBox", formatViewBox(baseViewBox));
+    }
+    baseViewBox = null;
+    camera = null;
+    endDrag();
+    renderIndicator();
+  }
+  function cameraIsZoomed() {
+    return !!camera && !!baseViewBox && isZoomedIn(camera, baseViewBox);
+  }
+  function runNavReset() {
+    const fn = navReset;
+    navReset = null;
+    fn?.();
+  }
+  function resetCameraThen(after) {
+    if (!cameraIsZoomed() || !baseViewBox) {
+      navReset = null;
+      after();
+      return;
+    }
+    navReset = after;
+    animateCameraTo({ ...baseViewBox }, NAV_RESET_MS, runNavReset);
+  }
+  function hasPendingNav() {
+    return navReset !== null;
+  }
+  function cancelPendingNav() {
+    navReset = null;
+  }
+  function takeCamera() {
+    if (navReset) runNavReset();
+    beforeGesture();
+  }
+  function smoothResetCamera() {
+    takeCamera();
+    if (!ensureBase() || !camera || !baseViewBox) return;
+    if (!isZoomedIn(camera, baseViewBox)) return;
+    animateCameraTo({ ...baseViewBox }, RESET_ANIM_MS);
+  }
+  function keyZoom(direction) {
+    takeCamera();
+    if (!ensureBase() || !camera || !baseViewBox) return;
+    const factor = direction === "in" ? KEY_ZOOM_STEP : 1 / KEY_ZOOM_STEP;
+    const target = zoomAt(
+      camera,
+      baseViewBox,
+      factor,
+      { ux: camera.x + camera.w / 2, uy: camera.y + camera.h / 2 },
+      LIMITS
+    );
+    animateCameraTo(target, KEY_ANIM_MS);
+  }
+  function overGrid(target) {
+    return Boolean(target?.closest?.("#overview"));
+  }
+  function isCameraGesture(e) {
+    return e.ctrlKey;
+  }
+  function setArmed(on) {
+    document.body.classList.toggle("camera-armed", on);
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Control") setArmed(true);
+  });
+  document.addEventListener("keyup", (e) => {
+    if (e.key === "Control") setArmed(false);
+  });
+  window.addEventListener("blur", () => setArmed(false));
+  if (stageWrap) {
+    const wrap = stageWrap;
+    wrap.addEventListener(
+      "wheel",
+      (e) => {
+        if (!isCameraGesture(e) || overGrid(e.target)) return;
+        e.preventDefault();
+        takeCamera();
+        cancelAnim();
+        if (!ensureBase() || !camera || !baseViewBox) return;
+        const focus = clientToUser(e.clientX, e.clientY);
+        if (!focus) return;
+        const factor = Math.min(Math.max(WHEEL_STEP ** -e.deltaY, 0.2), 5);
+        camera = zoomAt(camera, baseViewBox, factor, focus, LIMITS);
+        applyCamera();
+      },
+      { passive: false }
+    );
+    wrap.addEventListener("pointerdown", (e) => {
+      if (!isCameraGesture(e) || overGrid(e.target)) return;
+      takeCamera();
+      cancelAnim();
+      if (!ensureBase() || !camera) return;
+      const inverse = currentSvg()?.getScreenCTM()?.inverse();
+      if (!inverse) return;
+      wrap.setPointerCapture(e.pointerId);
+      dragStartCamera = { ...camera };
+      dragStartInverse = inverse;
+      dragStartClientX = e.clientX;
+      dragStartClientY = e.clientY;
+      document.body.classList.add("zoom-grabbing");
+    });
+    wrap.addEventListener("pointermove", (e) => {
+      if (!dragStartCamera || !dragStartInverse || !baseViewBox) return;
+      const from = clientToUser(
+        dragStartClientX,
+        dragStartClientY,
+        dragStartInverse
+      );
+      const to = clientToUser(e.clientX, e.clientY, dragStartInverse);
+      if (!from || !to) return;
+      camera = panBy(
+        dragStartCamera,
+        baseViewBox,
+        from.ux - to.ux,
+        from.uy - to.uy
+      );
+      applyCamera();
+    });
+    wrap.addEventListener("pointerup", endDrag);
+    wrap.addEventListener("pointercancel", endDrag);
+    wrap.addEventListener("dblclick", smoothResetCamera);
+  }
+
+  // src/ts/presenter/status.ts
+  var stage2 = document.getElementById("stage");
   var slideInfo = document.getElementById("slide-info");
   var stepInfo = document.getElementById("step-info");
   var mhudSlideInfo = document.getElementById("mhud-slide-info");
@@ -818,7 +1355,7 @@
         runDriver = null;
         runRun = null;
       }
-      applyStepInstant(stage, to);
+      applyStepInstant(stage2, to);
       updateStatus();
     });
   }
@@ -828,8 +1365,8 @@
     runController = null;
     runDriver = null;
     runRun = null;
-    applyStepInstant(stage, runTo);
-    syncVideos(stage, runTo);
+    applyStepInstant(stage2, runTo);
+    syncVideos(stage2, runTo);
   }
   function snapStepRun() {
     if (!runController) return;
@@ -844,8 +1381,8 @@
     runForward = !runForward;
     runTo = nextTo;
     state.step = runTo;
-    applyCodeHighlights(stage, runTo);
-    syncVideos(stage, runTo);
+    applyCodeHighlights(stage2, runTo);
+    syncVideos(stage2, runTo);
     updateStatus();
     driveRun();
     return true;
@@ -853,15 +1390,29 @@
   function settleStepRun() {
     landRun();
   }
+  setBeforeCameraGesture(snapStepRun);
   function applyCurrentStep() {
+    if (hasPendingNav()) return;
+    if (cameraIsZoomed()) {
+      resetCameraThen(() => {
+        resetCamera();
+        runCurrentStep();
+      });
+    } else {
+      cancelPendingNav();
+      resetCamera();
+      runCurrentStep();
+    }
+  }
+  function runCurrentStep() {
     landRun();
-    const from = appliedStep(stage);
+    const from = appliedStep(stage2);
     const to = state.step;
-    applyCodeHighlights(stage, to);
-    syncVideos(stage, to);
-    const run = buildStepRun(stage, from, to);
+    applyCodeHighlights(stage2, to);
+    syncVideos(stage2, to);
+    const run = buildStepRun(stage2, from, to);
     if (run.totalMs <= 0 || from === to) {
-      applyStepInstant(stage, to);
+      applyStepInstant(stage2, to);
       updateStatus();
       return;
     }
@@ -874,9 +1425,10 @@
     driveRun();
   }
   function applyCurrentStepInstant() {
+    resetCamera();
     landRun();
-    applyStepInstant(stage, state.step);
-    syncVideos(stage, state.step);
+    applyStepInstant(stage2, state.step);
+    syncVideos(stage2, state.step);
     updateStatus();
   }
   function syncURL() {
@@ -1013,8 +1565,12 @@
     renderEditButton();
   }
   function togglePv() {
-    document.body.classList.toggle("pv-open");
-    pvPanel.addEventListener("transitionend", _scalePvNext, { once: true });
+    const opening = document.body.classList.toggle("pv-open");
+    pvPanel.addEventListener(
+      "transitionend",
+      opening ? renderPvNext : _scalePvNext,
+      { once: true }
+    );
   }
   window.addEventListener("resize", _scalePvNext);
   function _onPvResizeMove(e) {
@@ -1037,71 +1593,6 @@
     pvResizeHandle.addEventListener("pointermove", _onPvResizeMove);
     pvResizeHandle.addEventListener("pointerup", _onPvResizeUp);
   });
-
-  // src/ts/shared/easing.ts
-  var NAMED_CURVES = {
-    linear: [0, 0, 1, 1],
-    ease: [0.25, 0.1, 0.25, 1],
-    "ease-in": [0.42, 0, 1, 1],
-    "ease-out": [0, 0, 0.58, 1],
-    "ease-in-out": [0.42, 0, 0.58, 1]
-  };
-  var CUBIC_BEZIER_PATTERN = /^cubic-bezier\(\s*([\d.+-]+)\s*,\s*([\d.+-]+)\s*,\s*([\d.+-]+)\s*,\s*([\d.+-]+)\s*\)$/;
-  function parseControlPoints(spec) {
-    if (!spec) return null;
-    const trimmed = spec.trim();
-    if (trimmed in NAMED_CURVES) return NAMED_CURVES[trimmed];
-    const match = CUBIC_BEZIER_PATTERN.exec(trimmed);
-    if (!match) return null;
-    const points = [match[1], match[2], match[3], match[4]].map(Number);
-    return points.every(Number.isFinite) ? points : null;
-  }
-  var identity = (progress) => progress;
-  function makeCubicBezier(points) {
-    const [x1, y1, x2, y2] = points;
-    const cx = 3 * x1;
-    const bx = 3 * (x2 - x1) - cx;
-    const ax = 1 - cx - bx;
-    const cy = 3 * y1;
-    const by = 3 * (y2 - y1) - cy;
-    const ay = 1 - cy - by;
-    const sampleX = (t) => ((ax * t + bx) * t + cx) * t;
-    const sampleY = (t) => ((ay * t + by) * t + cy) * t;
-    const sampleSlopeX = (t) => (3 * ax * t + 2 * bx) * t + cx;
-    const solveForT = (x) => {
-      let t = x;
-      for (let iteration = 0; iteration < 8; iteration++) {
-        const error = sampleX(t) - x;
-        if (Math.abs(error) < 1e-6) return t;
-        const slope = sampleSlopeX(t);
-        if (Math.abs(slope) < 1e-6) break;
-        t -= error / slope;
-      }
-      let lower = 0;
-      let upper = 1;
-      t = x;
-      while (lower < upper) {
-        const value = sampleX(t);
-        if (Math.abs(value - x) < 1e-6) return t;
-        if (x > value) lower = t;
-        else upper = t;
-        t = (lower + upper) / 2;
-      }
-      return t;
-    };
-    return (progress) => {
-      if (progress <= 0) return 0;
-      if (progress >= 1) return 1;
-      return sampleY(solveForT(progress));
-    };
-  }
-  function cubicBezierEasing(spec) {
-    const points = parseControlPoints(spec);
-    if (!points) return identity;
-    const [x1, y1, x2, y2] = points;
-    if (x1 === 0 && y1 === 0 && x2 === 1 && y2 === 1) return identity;
-    return makeCubicBezier(points);
-  }
 
   // src/ts/shared/morph-math.ts
   var INTERPOLATED_ATTRIBUTES = [
@@ -2314,254 +2805,6 @@
       removeGhosts(this.stage);
     }
   };
-
-  // src/ts/shared/zoom-camera.ts
-  function clamp(n, lo, hi) {
-    return Math.min(Math.max(n, lo), hi);
-  }
-  function scaleOf(vb, base) {
-    return base.w / vb.w;
-  }
-  function isZoomedIn(vb, base, epsilon = 1e-3) {
-    return scaleOf(vb, base) > 1 + epsilon;
-  }
-  function clampToBounds(vb, base) {
-    const w = Math.min(vb.w, base.w);
-    const h = Math.min(vb.h, base.h);
-    const x = w >= base.w ? base.x + (base.w - w) / 2 : clamp(vb.x, base.x, base.x + base.w - w);
-    const y = h >= base.h ? base.y + (base.h - h) / 2 : clamp(vb.y, base.y, base.y + base.h - h);
-    return { x, y, w, h };
-  }
-  function zoomAt(current, base, factor, focus, limits) {
-    const targetScale = clamp(
-      scaleOf(current, base) * factor,
-      limits.minScale,
-      limits.maxScale
-    );
-    const w = base.w / targetScale;
-    const h = base.h / targetScale;
-    const fx = (focus.ux - current.x) / current.w;
-    const fy = (focus.uy - current.y) / current.h;
-    return clampToBounds(
-      { x: focus.ux - fx * w, y: focus.uy - fy * h, w, h },
-      base
-    );
-  }
-  function panBy(current, base, dxUser, dyUser) {
-    return clampToBounds(
-      { ...current, x: current.x + dxUser, y: current.y + dyUser },
-      base
-    );
-  }
-  function lerpViewBox(a, b, t) {
-    return {
-      x: a.x + (b.x - a.x) * t,
-      y: a.y + (b.y - a.y) * t,
-      w: a.w + (b.w - a.w) * t,
-      h: a.h + (b.h - a.h) * t
-    };
-  }
-
-  // src/ts/presenter/zoom.ts
-  var stage2 = document.getElementById("stage");
-  var stageWrap = document.getElementById("stage-wrap");
-  var indicator = document.getElementById("zoom-indicator");
-  var LIMITS = { minScale: 1, maxScale: 8 };
-  var WHEEL_STEP = 1.0015;
-  var KEY_ZOOM_STEP = 1.4;
-  var KEY_ANIM_MS = 140;
-  var RESET_ANIM_MS = 240;
-  var NAV_RESET_MS = 150;
-  var EASE = cubicBezierEasing("cubic-bezier(0.22, 1, 0.36, 1)");
-  var baseViewBox = null;
-  var camera = null;
-  var navReset = null;
-  var dragStartCamera = null;
-  var dragStartInverse = null;
-  var dragStartClientX = 0;
-  var dragStartClientY = 0;
-  function currentSvg() {
-    return stage2?.querySelector("svg") ?? null;
-  }
-  function clientToUser(clientX, clientY, inverse) {
-    const inv = inverse ?? currentSvg()?.getScreenCTM()?.inverse();
-    if (!inv) return null;
-    const p = new DOMPoint(clientX, clientY).matrixTransform(inv);
-    return { ux: p.x, uy: p.y };
-  }
-  function ensureBase() {
-    if (camera && baseViewBox) return true;
-    const svg = currentSvg();
-    if (!svg) return false;
-    baseViewBox = parseViewBox(svg.getAttribute("viewBox"));
-    camera = { ...baseViewBox };
-    return true;
-  }
-  function renderIndicator() {
-    if (!indicator) return;
-    const factor = camera && baseViewBox ? scaleOf(camera, baseViewBox) : 1;
-    indicator.textContent = `${factor.toFixed(1)}\xD7`;
-    indicator.toggleAttribute("data-active", factor > 1.01);
-  }
-  function applyCamera() {
-    const svg = currentSvg();
-    if (!svg || !camera) return;
-    svg.setAttribute("viewBox", formatViewBox(camera));
-    renderIndicator();
-  }
-  var driver = new ProgressDriver();
-  var animController = null;
-  function cancelAnim() {
-    animController?.abort();
-    animController = null;
-  }
-  function animateCameraTo(target, ms, onDone) {
-    cancelAnim();
-    if (!camera) {
-      camera = { ...target };
-      applyCamera();
-      onDone?.();
-      return;
-    }
-    const start = { ...camera };
-    const controller2 = new AbortController();
-    animController = controller2;
-    driver.value = 0;
-    driver.animateTo(1, ms / 1e3, controller2.signal, (p) => {
-      camera = p >= 1 ? { ...target } : lerpViewBox(start, target, EASE(p));
-      applyCamera();
-    }).then(() => {
-      if (animController === controller2) animController = null;
-      if (!controller2.signal.aborted) onDone?.();
-    });
-  }
-  function endDrag() {
-    dragStartCamera = null;
-    dragStartInverse = null;
-    document.body.classList.remove("zoom-grabbing");
-  }
-  function resetCamera() {
-    cancelAnim();
-    const svg = currentSvg();
-    if (svg && baseViewBox) {
-      svg.setAttribute("viewBox", formatViewBox(baseViewBox));
-    }
-    baseViewBox = null;
-    camera = null;
-    endDrag();
-    renderIndicator();
-  }
-  function cameraIsZoomed() {
-    return !!camera && !!baseViewBox && isZoomedIn(camera, baseViewBox);
-  }
-  function runNavReset() {
-    const fn = navReset;
-    navReset = null;
-    fn?.();
-  }
-  function resetCameraThen(after) {
-    if (!cameraIsZoomed() || !baseViewBox) {
-      navReset = null;
-      after();
-      return;
-    }
-    navReset = after;
-    animateCameraTo({ ...baseViewBox }, NAV_RESET_MS, runNavReset);
-  }
-  function cancelPendingNav() {
-    navReset = null;
-  }
-  function flushPendingNav() {
-    if (navReset) runNavReset();
-  }
-  function smoothResetCamera() {
-    flushPendingNav();
-    if (!ensureBase() || !camera || !baseViewBox) return;
-    if (!isZoomedIn(camera, baseViewBox)) return;
-    animateCameraTo({ ...baseViewBox }, RESET_ANIM_MS);
-  }
-  function keyZoom(direction) {
-    flushPendingNav();
-    if (!ensureBase() || !camera || !baseViewBox) return;
-    const factor = direction === "in" ? KEY_ZOOM_STEP : 1 / KEY_ZOOM_STEP;
-    const target = zoomAt(
-      camera,
-      baseViewBox,
-      factor,
-      { ux: camera.x + camera.w / 2, uy: camera.y + camera.h / 2 },
-      LIMITS
-    );
-    animateCameraTo(target, KEY_ANIM_MS);
-  }
-  function overGrid(target) {
-    return Boolean(target?.closest?.("#overview"));
-  }
-  function isCameraGesture(e) {
-    return e.ctrlKey;
-  }
-  function setArmed(on) {
-    document.body.classList.toggle("camera-armed", on);
-  }
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Control") setArmed(true);
-  });
-  document.addEventListener("keyup", (e) => {
-    if (e.key === "Control") setArmed(false);
-  });
-  window.addEventListener("blur", () => setArmed(false));
-  if (stageWrap) {
-    const wrap = stageWrap;
-    wrap.addEventListener(
-      "wheel",
-      (e) => {
-        if (!isCameraGesture(e) || overGrid(e.target)) return;
-        e.preventDefault();
-        flushPendingNav();
-        cancelAnim();
-        if (!ensureBase() || !camera || !baseViewBox) return;
-        const focus = clientToUser(e.clientX, e.clientY);
-        if (!focus) return;
-        const factor = Math.min(Math.max(WHEEL_STEP ** -e.deltaY, 0.2), 5);
-        camera = zoomAt(camera, baseViewBox, factor, focus, LIMITS);
-        applyCamera();
-      },
-      { passive: false }
-    );
-    wrap.addEventListener("pointerdown", (e) => {
-      if (!isCameraGesture(e) || overGrid(e.target)) return;
-      flushPendingNav();
-      cancelAnim();
-      if (!ensureBase() || !camera) return;
-      const inverse = currentSvg()?.getScreenCTM()?.inverse();
-      if (!inverse) return;
-      wrap.setPointerCapture(e.pointerId);
-      dragStartCamera = { ...camera };
-      dragStartInverse = inverse;
-      dragStartClientX = e.clientX;
-      dragStartClientY = e.clientY;
-      document.body.classList.add("zoom-grabbing");
-    });
-    wrap.addEventListener("pointermove", (e) => {
-      if (!dragStartCamera || !dragStartInverse || !baseViewBox) return;
-      const from = clientToUser(
-        dragStartClientX,
-        dragStartClientY,
-        dragStartInverse
-      );
-      const to = clientToUser(e.clientX, e.clientY, dragStartInverse);
-      if (!from || !to) return;
-      camera = panBy(
-        dragStartCamera,
-        baseViewBox,
-        from.ux - to.ux,
-        from.uy - to.uy
-      );
-      applyCamera();
-    });
-    wrap.addEventListener("pointerup", endDrag);
-    wrap.addEventListener("pointercancel", endDrag);
-    wrap.addEventListener("dblclick", smoothResetCamera);
-  }
 
   // src/ts/presenter/transitions.ts
   var stage3 = document.getElementById("stage");

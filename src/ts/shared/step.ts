@@ -1,3 +1,4 @@
+import { applyCameraInstant, cameraRun, maxCameraStep } from "./camera-dom";
 import { buildKeyframes } from "./keyframes";
 
 // The step engine. Every animated element carries a `data-cues` JSON array (written by
@@ -8,7 +9,8 @@ import { buildKeyframes } from "./keyframes";
 // across that run (see status.ts). Because the whole run is one scalar, reverse is the value
 // gliding back and a snap is the value jumping to its end — exactly like the slide
 // transitions. At rest, the governing enter/exit cue owns visibility, so the held state
-// never depends on WAAPI composite order.
+// never depends on WAAPI composite order. A slide's camera cues (`data-camera`, see
+// camera.ts) join the same run as one more seekable item.
 
 interface CueOpts {
     duration: number; // seconds
@@ -119,11 +121,12 @@ export function restingActions(
 
 // ── Step run (animated, seek-driven) ────────────────────────────────────────────
 
-// One cue enlisted in a run: its animation plus its slot on the run timeline (ms).
+// One item enlisted in a run: how to paint it at a time within its own span, plus its slot
+// on the run timeline (ms). An element cue seeks its animation; the camera writes the view.
 interface RunItem {
-    anim: Animation;
-    offsetMs: number; // where the cue's slot begins within the run
-    spanMs: number; // the cue's own effect length (delay + duration·iterations)
+    seek(timeMs: number): void;
+    offsetMs: number; // where the item's slot begins within the run
+    spanMs: number; // the item's own length (a cue's delay + duration·iterations)
 }
 
 // A step's cues laid out as a single seekable timeline. `totalMs` is the run's length;
@@ -154,12 +157,22 @@ export function buildStepRun(
             anim.pause(); // a previously-held cue is finished/running — pause so a
             // sought currentTime holds instead of the effect advancing on its own.
             items.push({
-                anim,
+                seek: (timeMs) => {
+                    anim.currentTime = timeMs;
+                },
                 offsetMs: Math.max(0, st.cue.offset) * 1000,
                 spanMs: effectEndMs(st.cue),
             });
         }
     });
+    const camera = cameraRun(root, runStep);
+    if (camera) {
+        items.push({
+            seek: camera.seek,
+            offsetMs: 0,
+            spanMs: camera.timeline.totalMs,
+        });
+    }
     const totalMs = items.reduce(
         (m, it) => Math.max(m, it.offsetMs + it.spanMs),
         0,
@@ -175,10 +188,7 @@ export function buildStepRun(
 export function seekStepRun(run: StepRun, value: number): void {
     const runTimeMs = value * run.totalMs;
     for (const it of run.items) {
-        it.anim.currentTime = Math.min(
-            Math.max(runTimeMs - it.offsetMs, 0),
-            it.spanMs,
-        );
+        it.seek(Math.min(Math.max(runTimeMs - it.offsetMs, 0), it.spanMs));
     }
 }
 
@@ -211,11 +221,11 @@ export function appliedStep(root: Element): number {
     return rootStep.get(root) ?? 0;
 }
 
-// The highest step in a slide: the max across every element's cues, plus a video's
-// play-on-step and code-highlight stages. A pure function of the markup, so it works on a
+// The highest step in a slide: the max across every element's cues, plus camera cues, a
+// video's play-on-step and code-highlight stages. A pure function of the markup, so it works on a
 // detached scratch tree (status.ts computes it that way, off the slide data).
 export function maxStep(root: Element): number {
-    let m = 0;
+    let m = maxCameraStep(root);
     root.querySelectorAll("[data-cues]").forEach((el) => {
         for (const c of parseCues(el)) if (c.step > m) m = c.step;
     });
@@ -253,6 +263,7 @@ export function commitStepStyles(root: Element): void {
 // Land on `step`'s resting state with no visible playback: the governing enter/exit holds
 // its end, everything else asserts nothing, and code highlights switch. Used for load,
 // jumps, overview thumbnails, backward slide entry, and to settle the end of a run.
+// The camera lands on the step's resting view the same way.
 export function applyStepInstant(root: Element, step: number): void {
     root.querySelectorAll("[data-cues]").forEach((el) => {
         const states = cueStates(el);
@@ -265,6 +276,7 @@ export function applyStepInstant(root: Element, step: number): void {
             else st.anim?.cancel();
         });
     });
+    applyCameraInstant(root, step);
     applyCodeHighlights(root, step);
     rootStep.set(root, step);
 }

@@ -78,7 +78,13 @@ Hold <kbd>Ctrl</kbd> and scroll to zoom toward the pointer, or drag to pan.
 Zoom is local to the window.
 A second screen or a following window keeps its own view,
 so magnifying a detail on your laptop does not disturb the projector.
-Navigating while zoomed eases back to the full slide first.
+Navigating while zoomed eases back to the slide's view first.
+
+On a slide with [`Zoom` cues](../authoring/zoom.md),
+the step decides the view and zooming by hand works inside it:
+<kbd>0</kbd> returns to the step's frame rather than the whole slide.
+Unlike zooming by hand, those cues are part of the step,
+so every window follows them.
 
 !!! note
     This is the presenter's camera, unrelated to the

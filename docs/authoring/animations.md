@@ -93,6 +93,12 @@ Slide(
 
 It takes a trigger like any other cue.
 
+## Moving the camera
+
+`Zoom` is a cue that moves the slide's camera instead of an element,
+to frame one part of the slide on a step.
+[Zooming](zoom.md) covers it in full.
+
 ## Writing your own
 
 A custom animation is a dataclass and a `@keyframes` rule.

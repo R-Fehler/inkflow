@@ -144,6 +144,15 @@ describe("maxStep", () => {
         );
     });
 
+    test("counts the slide's camera cues", () => {
+        const root = buildSvg(
+            `<svg data-camera='[{"step":2},{"step":5}]'>
+               <rect data-cues='[{"step":3}]'></rect>
+             </svg>`,
+        );
+        expect(maxStep(root)).toBe(5);
+    });
+
     test("unions cue steps with a later video step", () => {
         const root = buildSvg(
             `<rect data-cues='[{"step":1}]'></rect>

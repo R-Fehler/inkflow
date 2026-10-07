@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080">
+  <rect width="1920" height="1080" fill="#222831"/>
+  <text x="960" y="480" font-family="sans-serif" font-size="72" fill="#eeeeee" text-anchor="middle">the detail is in the corner</text>
+  <text x="960" y="570" font-family="sans-serif" font-size="32" fill="#888888" text-anchor="middle">this slide dives in after it arrives, then reads two notes in one step</text>
+
+  <!-- A cluster tucked into the bottom-right corner: the frame touches the canvas edge,
+       so the view must stay inside the slide instead of centring past it. -->
+  <g id="corner" font-family="sans-serif">
+    <rect x="1640" y="900" width="280" height="180" fill="#393e46"/>
+    <rect id="note-a" x="1660" y="920" width="110" height="60" rx="8" fill="#00adb5"/>
+    <text x="1715" y="957" font-size="16" fill="#ffffff" text-anchor="middle">note a</text>
+    <rect id="note-b" x="1790" y="1000" width="110" height="60" rx="8" fill="#eeeeee"/>
+    <text x="1845" y="1037" font-size="16" fill="#222831" text-anchor="middle">note b</text>
+  </g>
+</svg>

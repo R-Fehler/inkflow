@@ -128,9 +128,15 @@ export function renderPv(): void {
     renderEditButton();
 }
 
+// Opening re-renders the next preview once the panel has its width: a preview rendered
+// while the panel was closed had no layout, so its camera framing could not be measured.
 export function togglePv(): void {
-    document.body.classList.toggle("pv-open");
-    pvPanel.addEventListener("transitionend", _scalePvNext, { once: true });
+    const opening = document.body.classList.toggle("pv-open");
+    pvPanel.addEventListener(
+        "transitionend",
+        opening ? renderPvNext : _scalePvNext,
+        { once: true },
+    );
 }
 
 window.addEventListener("resize", _scalePvNext);

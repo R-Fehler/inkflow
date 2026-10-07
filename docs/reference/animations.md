@@ -1,9 +1,9 @@
 # Animations reference
 
 Animation types live in the `inkflow.animations` namespace. Each takes the shared
-[`Cue`](#cue-base) params (`element`, `trigger`) plus the
-[`Animation`](#animation-base) timing/playback params (`duration`, `easing`, `delay`,
-`iterations`) and any of its own. `element` is the target's `id`; `trigger` is a
+[`Cue`](#cue-base) params (`element`, `trigger`), the [`TimedCue`](#timedcue-base)
+timing params (`duration`, `easing`, `delay`), the [`Animation`](#animation-base)
+`iterations` param, and any of its own. `element` is the target's `id`; `trigger` is a
 [`Trigger`](enums.md#inkflow.enums.Trigger) that decides the cue's step.
 `direction` fields use the [`Direction`](enums.md#inkflow.enums.Direction)
 enum and `easing` the [`Easing`](enums.md#inkflow.enums.Easing) type.
@@ -45,7 +45,9 @@ class Glow(animations.Emphasis):
 ```
 
 The `animations` namespace also holds [`PlayVideo`](#inkflow.animations.PlayVideo),
-a non-animating cue that starts a `Video` on a step.
+a non-animating cue that starts a `Video` on a step,
+and [`Zoom`](#inkflow.animations.Zoom), which moves the slide's camera
+to frame an element (see [Zooming](../authoring/zoom.md)).
 
 ::: inkflow.animations
     options:
@@ -55,6 +57,14 @@ a non-animating cue that starts a `Video` on a step.
 ## Cue (base) { #cue-base }
 
 ::: inkflow.manifest.Cue
+    options:
+      show_root_heading: false
+      show_root_toc_entry: false
+      heading_level: 3
+
+## TimedCue (base) { #timedcue-base }
+
+::: inkflow.animations.TimedCue
     options:
       show_root_heading: false
       show_root_toc_entry: false

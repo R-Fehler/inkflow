@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080">
+  <rect width="1920" height="1080" fill="#222831"/>
+  <circle id="dot" cx="400" cy="400" r="60" fill="#00adb5"/>
+  <rect id="card" x="250" y="520" width="300" height="160" rx="16" fill="#eeeeee"/>
+  <text x="960" y="900" font-family="sans-serif" font-size="40" fill="#888888" text-anchor="middle">zoomed left on arrival</text>
+  <rect id="frame-left" x="150" y="280" width="500" height="460" fill="none"/>
+</svg>

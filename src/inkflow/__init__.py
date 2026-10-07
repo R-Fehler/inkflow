@@ -11,6 +11,7 @@ from inkflow.enums import (
     Muted,
     Trigger,
     VAlign,
+    ZoomTarget,
 )
 from inkflow.manifest import (
     Content,
@@ -53,6 +54,7 @@ __all__ = [
     "VAlign",
     "Video",
     "ZoneContent",
+    "ZoomTarget",
     "animations",
     "transitions",
 ]

@@ -12,6 +12,14 @@ import { positionHref, readPosition } from "./deck-url";
 import { ProgressDriver } from "./progress-driver";
 import { state } from "./state";
 import { syncVideos } from "./video";
+import {
+    cameraIsZoomed,
+    cancelPendingNav,
+    hasPendingNav,
+    resetCamera,
+    resetCameraThen,
+    setBeforeCameraGesture,
+} from "./zoom";
 
 const stage = document.getElementById("stage")!;
 const slideInfo = document.getElementById("slide-info")!;
@@ -133,10 +141,30 @@ export function settleStepRun(): void {
     landRun();
 }
 
+// A manual camera gesture lands any in-flight run first, so the manual camera never starts
+// from a mid-flight authored view.
+setBeforeCameraGesture(snapStepRun);
+
 // Animate from the last applied step to state.step by seeking that step's run. Code
 // highlights and videos switch at the step change (the run's destination); the run itself
-// only drives the WAAPI cues. An empty run (no cues at the destination) lands instantly.
+// only drives the WAAPI cues and the camera. An empty run (no cues at the destination)
+// lands instantly. The step owns the camera, so a manual zoom first eases back to the
+// step's view, the same way a slide change does.
 export function applyCurrentStep(): void {
+    if (hasPendingNav()) return; // the parked slide load lands state.step when it runs
+    if (cameraIsZoomed()) {
+        resetCameraThen(() => {
+            resetCamera();
+            runCurrentStep();
+        });
+    } else {
+        cancelPendingNav();
+        resetCamera();
+        runCurrentStep();
+    }
+}
+
+function runCurrentStep(): void {
     landRun();
     const from = appliedStep(stage);
     const to = state.step;
@@ -163,6 +191,7 @@ export function applyCurrentStep(): void {
 // entering a slide from ahead so its build animations appear already complete
 // instead of replaying. See applyStepInstant.
 export function applyCurrentStepInstant(): void {
+    resetCamera();
     landRun();
     applyStepInstant(stage, state.step);
     syncVideos(stage, state.step);

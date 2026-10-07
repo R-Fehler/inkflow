@@ -47,17 +47,22 @@ src/
                                Slide params: src, id, md, zones, animations, transition,
                                overlays, extra_style, title, notes, visible, font_size
     enums.py          shared enums (Direction, Align, VAlign, MediaFit, MediaAlign,
-                               ColorMode, Muted, Trigger, AnimationKind); `_KebabStrEnum`
+                               ColorMode, Muted, Trigger, AnimationKind, ZoomTarget);
+                               `_KebabStrEnum`
                                base emits CSS token values (Muted is a plain Enum, resolved
                                in Python). `AnimationKind` (enter/exit/emphasis) is the
                                animation lifecycle role.
                                `Easing`/`Trigger` are str value objects with named presets
                                plus a constructor (`Easing.cubic_bezier(...)`, `Trigger.at(n)`)
-    animations.py     the `Animation` base (moved here from manifest) + the semantic bases
-                               `Enter`/`Exit`/`Emphasis` (they fix `kind`), the concrete types
-                               (FadeIn, FadeOut, Bounce, SlideIn/Out, ScaleIn/Out, Highlight)
-                               subclassing those, plus `PlayVideo` (subclasses `Cue`
-                               directly, no timing) — starts a `Video` on a step, not on load
+    animations.py     `Cue` → `TimedCue` (duration/easing/delay) → the `Animation` base +
+                               the semantic bases `Enter`/`Exit`/`Emphasis` (they fix `kind`),
+                               the concrete types (FadeIn, FadeOut, Bounce, SlideIn/Out,
+                               ScaleIn/Out, Highlight) subclassing those, plus `PlayVideo`
+                               (subclasses `Cue` directly, no timing) — starts a `Video` on a
+                               step, not on load — and `Zoom` (a `TimedCue`, not an
+                               `Animation`): the authored camera cue. Its target defaults to
+                               `ZoomTarget.FULL_SLIDE`, a StrEnum sentinel so `Cue.element`
+                               stays `str` and `trigger` stays positional
     transitions.py    concrete transition types (Cut, Crossfade, Morph, Push, Cover,
                                Zoom, Fade, Wipe) subclassing manifest.Transition
     pipeline.py       animation annotation + layout inlining
@@ -151,6 +156,9 @@ src/
   ts/                 TypeScript source
     globals.d.ts      ambient declarations for Python-injected globals (__SLIDES_JSON__ etc.)
     shared/           types, step engine (step.ts: WAAPI cue driver + elementActions),
+                      camera.ts (pure `Zoom` cue math: fitFrame, the van Wijk zoom-pan
+                      path, per-step timelines, restingCamera) + camera-dom.ts (target
+                      measurement, viewBox writes),
                       keyframes.ts (reads @keyframes + per-cue var substitution),
                       step-ring SVG builder, cubic-bezier easing
     presenter/        main presenter modules — navigation, transitions (progress-driven
@@ -197,6 +205,9 @@ Step advances within a slide must NOT re-render `stage.innerHTML` — that would
 `loadSlide()` sets innerHTML (enter-first elements start hidden via the `.anim-pending` guard).
 Subsequent `applyStep()` calls drive each element's per-cue WAAPI animations (play/hold/reverse/cancel) on the existing DOM. The step engine (`shared/step.ts`) reads each element's `data-cues`, creates one paused `Animation` per cue (keyframes from `keyframes.ts`), and per step lets the **governing** enter/exit (the last one reached) own visibility — held at its resting end — while every other enter/exit is cancelled, so the result never depends on WAAPI composite order across several held animations. A single step back across the governing boundary plays the outgoing cue in reverse (it lands on its start frame, which equals the new governing cue's resting value, and the next step cancels it). `applyStepInstant` lands the resting state with no playback (load, jumps, backward entry) and never fires emphasis. The pure `elementActions(cues, step, prev, instant)` is the testable decision at the core.
 Because the step state is held by live WAAPI animation objects (not classes/inline styles), it does not survive a DOM snapshot. So before a transition captures the outgoing slide (`stage.innerHTML` for the layer transitions, cloned nodes for morph), `loadSlide` calls `commitStepStyles(stage)` to bake the held values into inline styles — otherwise the outgoing slide reverts to its authored base (entered elements vanish, exited ones reappear) the instant the transition starts.
+
+**Authored camera (`animations.Zoom`) rides the step run.**
+A slide's `Zoom` cues (`data-camera` on the root) are one more `RunItem` in `buildStepRun`: run items are `{seek(ms), offsetMs, spanMs}`, so the camera reverses and snaps exactly like WAAPI cues. `camera.ts` is pure: a step's cues form a `cameraTimeline` from the previous step's resting view (each cue starts from wherever the camera is at its start time, along the van Wijk & Nuij zoom-pan path), and `restingCamera(step)` plays every step's timeline to its end. Step −1 (entry-play's pre-entry land) is the step-0 timeline at time 0, so a zero-length step-0 zoom is the arrival view and a timed one dives in after the transition. `camera-dom.ts` measures targets the way morph does (`getBBox()` through `getScreenCTM()`, relative to the root's screen matrix), lifting `display: none` on the target and its ancestors for the measurement only, since frames normally sit on a hidden Inkscape layer. A preview with no layout cannot be measured (the presenter panel re-renders its next preview when it opens for that reason). It fits them to the slide aspect (`refit()` sizes the box from the viewBox), and caches the authored viewBox per root in a `WeakMap`. `applyStepInstant` writes the resting view, so thumbnails and the next preview get it for free. The manual Ctrl camera (`zoom.ts`) reads the live viewBox as its base, so it works inside the step's frame; `applyCurrentStep` hands the camera back first (`resetCameraThen`, like `loadSlide`), and a gesture snaps an in-flight run via the `setBeforeCameraGesture` hook (status.ts registers it; a direct import would be a cycle). The outgoing slide keeps its step's viewBox when captured, so transitions leave from the zoomed view.
 
 **`deck.py` is a Python module, not YAML/TOML.**
 Loaded via `importlib.util.spec_from_file_location`. Must define a `main() -> Deck` function.
@@ -319,7 +330,7 @@ Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop +
 
 `pipeline.py` processes each slide as a single lxml tree: parsed once via the hardened parser in `svgio.py`, threaded through the pipeline, serialized once at the end. `SlideSvg` wraps the tree and each pipeline step is a method that mutates it in place (like `list.sort()`), delegating the DOM work to `content.py`/`svg.py` functions that take and return the root element. Key steps:
 1. `clean_inkscape_tree(src)` — parse with the hardened lxml parser, remove elements/attrs in `http://www.inkscape.org/namespaces/inkscape` and `http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd`, call `etree.cleanup_namespaces()`. (`clean_inkscape_svg` wraps this and serializes to a pretty-printed string for the CLI/pre-commit hook.)
-2. `annotate_svg(root, cues)` — `cues` are `(Cue, step)` pairs already resolved to concrete step numbers (see below). Finds elements by plain id (no leading `#`); `Animation` cues are **grouped per target element** (an element may carry several) and written as one `data-cues` JSON array (sorted by step) via `_cue_entry` — each entry is `{step, kind, name, opts, vars}`, where `opts` are the base `Animation` fields as element.animate() options (`duration`/`delay`/`easing`/`iterations`) and `vars` are ready strings (slide direction+distance → `from-x`/`from-y`, `scale`/`color`/custom fields) substituted for `var(--anim-<key>)` in the keyframes. Enter-first elements also get an `anim-pending` class (initial-hidden guard); two same-kind cues with no opposing kind between them warn. A `PlayVideo` cue still sets `data-play-on-step` on the target zone's `<video>`.
+2. `annotate_svg(root, cues)` — `cues` are `(Cue, step)` pairs already resolved to concrete step numbers (see below). Finds elements by plain id (no leading `#`); `Animation` cues are **grouped per target element** (an element may carry several) and written as one `data-cues` JSON array (sorted by step) via `_cue_entry` — each entry is `{step, kind, name, opts, vars}`, where `opts` are the base `Animation` fields as element.animate() options (`duration`/`delay`/`easing`/`iterations`) and `vars` are ready strings (slide direction+distance → `from-x`/`from-y`, `scale`/`color`/custom fields) substituted for `var(--anim-<key>)` in the keyframes. Enter-first elements also get an `anim-pending` class (initial-hidden guard); two same-kind cues with no opposing kind between them warn. A `PlayVideo` cue still sets `data-play-on-step` on the target zone's `<video>`. `Zoom` cues become one `data-camera` JSON array on the slide root (`{step, offset, target, margin, opts}`, the full slide as a null target).
 
 **Steps are inferred from triggers, never written by hand.** Every `Animation`/`PlayVideo` cue carries a `Trigger` (`ON_CLICK`, `WITH_PREVIOUS`, or a `Trigger.at(n)` pin). `steps.py`'s `StepResolver` walks a cue sequence in order and assigns concrete step numbers — `pipeline.resolve_steps` for the deck's `animations=[...]` list, the reveal counter in `zones.py` for markdown `::step::`/`::steps::` reveals. A slide's markdown reveals number first, then the `animations=[...]` list continues the count, so both form one timeline.
 
