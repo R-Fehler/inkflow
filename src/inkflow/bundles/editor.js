@@ -134,8 +134,8 @@
     });
     return cues.map((_, i) => i === gov ? "hold" : "cancel");
   }
-  function applyCodeHighlights(root, step) {
-    root.querySelectorAll(
+  function applyCodeHighlights(root2, step) {
+    root2.querySelectorAll(
       ".inkflow-codeblock[data-hl-spec][data-base-step]"
     ).forEach((block) => {
       const spec = JSON.parse(block.dataset.hlSpec);
@@ -151,16 +151,16 @@
       });
     });
   }
-  function maxStep(root) {
+  function maxStep(root2) {
     let m = 0;
-    root.querySelectorAll("[data-cues]").forEach((el) => {
+    root2.querySelectorAll("[data-cues]").forEach((el) => {
       for (const c of parseCues(el)) if (c.step > m) m = c.step;
     });
-    root.querySelectorAll("[data-play-on-step]").forEach((el) => {
+    root2.querySelectorAll("[data-play-on-step]").forEach((el) => {
       const s = +(el.getAttribute("data-play-on-step") ?? "0");
       if (s > m) m = s;
     });
-    root.querySelectorAll(
+    root2.querySelectorAll(
       ".inkflow-codeblock[data-hl-spec][data-base-step]"
     ).forEach((block) => {
       const spec = JSON.parse(block.dataset.hlSpec);
@@ -170,8 +170,8 @@
     });
     return m;
   }
-  function applyStepInstant(root, step) {
-    root.querySelectorAll("[data-cues]").forEach((el) => {
+  function applyStepInstant(root2, step) {
+    root2.querySelectorAll("[data-cues]").forEach((el) => {
       const states = cueStates(el);
       const actions = restingActions(
         states.map((s) => s.cue),
@@ -182,8 +182,8 @@
         else st.anim?.cancel();
       });
     });
-    applyCodeHighlights(root, step);
-    rootStep.set(root, step);
+    applyCodeHighlights(root2, step);
+    rootStep.set(root2, step);
   }
 
   // src/ts/shared/viewbox.ts
@@ -2358,6 +2358,205 @@
     await pasteText(text);
   }
 
+  // src/ts/editor/gallery.ts
+  var LABELS = {
+    numbered: ["Blank", "Background and slide number"],
+    title: ["Title only", "A title; draw the rest"],
+    content: ["Title and content", "The everyday text slide"],
+    "two-cols": ["Two columns", "Side by side under one title"],
+    "three-cols": ["Three columns", "Three short columns"],
+    comparison: ["Comparison", "Two headed columns"],
+    agenda: ["Agenda", "A numbered outline"],
+    quad: ["Four quadrants", "A two-by-two grid"],
+    "three-cards": ["Three cards", "An image over text, three times"],
+    "media-left": ["Media and text", "Image or video on the left"],
+    "media-right": ["Text and media", "Image or video on the right"],
+    "title-media": ["Title and media", "One large image or video"],
+    "full-media": ["Full-bleed media", "A photo or video edge to edge"],
+    cover: ["Cover", "The opening slide"],
+    section: ["Section header", "Divides the deck into parts"],
+    center: ["Centered", "One centered block"],
+    fact: ["Big number", "One number or claim"],
+    quote: ["Quote", "A pull quote with attribution"],
+    end: ["Closing", "The last slide"]
+  };
+  var root = document.getElementById("gallery");
+  var cache = null;
+  function layoutLabel(name) {
+    return LABELS[name]?.[0] ?? name;
+  }
+  async function previews() {
+    if (cache) return cache;
+    const result = await request({ action: "layout-previews" });
+    if (!result.ok) {
+      toast(result.error ?? "could not load the layouts", "error");
+      return [];
+    }
+    cache = result.layouts;
+    return cache;
+  }
+  function thumbnail(p) {
+    const box = h("div", { class: "gallery-thumb" });
+    box.innerHTML = p.svg;
+    const svg = box.querySelector("svg");
+    if (svg) {
+      const vb = parseViewBox(svg.getAttribute("viewBox"));
+      svg.setAttribute("width", "100%");
+      svg.setAttribute("height", "100%");
+      svg.querySelectorAll(".anim-pending").forEach((el) => {
+        el.classList.remove("anim-pending");
+      });
+      for (const z of p.emptyZones) {
+        if (z.zone === "slide-number" || z.zone === "slide-total") continue;
+        box.append(
+          h(
+            "div",
+            {
+              class: "gallery-media",
+              style: `left:${z.x / vb.w * 100}%;top:${z.y / vb.h * 100}%;width:${z.width / vb.w * 100}%;height:${z.height / vb.h * 100}%`
+            },
+            "Image or video"
+          )
+        );
+      }
+    }
+    return box;
+  }
+  function lostZones(p) {
+    const slide = currentSlide();
+    if (!slide) return [];
+    const used2 = /* @__PURE__ */ new Set([
+      ...Object.keys(slide.zoneOrigins ?? {}),
+      ...Object.keys(slide.zones)
+    ]);
+    return [...used2].filter((z) => !p.zones.includes(z));
+  }
+  function close() {
+    root.classList.remove("open");
+    clear(root);
+  }
+  async function openGallery(opts) {
+    if (!ed.model?.deckEditable) {
+      toast(
+        "deck.py builds its slide list in code; change it there",
+        "error"
+      );
+      return;
+    }
+    clear(root);
+    const grid = h(
+      "div",
+      { class: "gallery-grid" },
+      h("p", { class: "hint" }, "Rendering layouts\u2026")
+    );
+    const title = opts.mode === "insert" ? "New slide" : "Change layout";
+    root.append(
+      h(
+        "div",
+        { class: "gallery-box", role: "dialog", "aria-label": title },
+        h(
+          "div",
+          { class: "gallery-head" },
+          h("h2", {}, title),
+          h(
+            "span",
+            { class: "hint" },
+            opts.mode === "insert" ? "Every layout, in this deck's theme" : "The slide keeps its content; zones the new layout lacks are not shown"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: close,
+              title: "Close (Esc)"
+            },
+            "\xD7"
+          )
+        ),
+        grid
+      )
+    );
+    root.classList.add("open");
+    const layouts = await previews();
+    clear(grid);
+    for (const p of layouts) {
+      const [label2, description] = LABELS[p.name] ?? [p.name, ""];
+      const lost = opts.mode === "change" ? lostZones(p) : [];
+      const current = opts.mode === "change" && p.name === opts.current;
+      const card = h(
+        "button",
+        {
+          type: "button",
+          class: `gallery-card${current ? " current" : ""}`,
+          title: p.name,
+          onclick: () => void choose(p, opts, lost)
+        },
+        thumbnail(p),
+        h(
+          "div",
+          { class: "gallery-label" },
+          h("strong", {}, label2),
+          p.source === "local" && h("span", { class: "badge" }, "project")
+        ),
+        description && h("div", { class: "gallery-desc" }, description),
+        lost.length > 0 && h(
+          "div",
+          { class: "gallery-warn" },
+          `Hides: ${lost.join(", ")}`
+        )
+      );
+      grid.append(card);
+    }
+    (grid.querySelector(".current") ?? grid.querySelector("button"))?.scrollIntoView({
+      block: "nearest"
+    });
+    grid.querySelector(".current, button")?.focus();
+  }
+  async function choose(p, opts, lost) {
+    if (opts.mode === "insert") {
+      close();
+      await newSlide(p.name, opts.after);
+      return;
+    }
+    if (p.name === opts.current) {
+      close();
+      return;
+    }
+    if (lost.length && !window.confirm(
+      `${layoutLabel(p.name)} has no ${lost.join(", ")} zone; that content stays in your files but is not shown. Switch anyway?`
+    )) {
+      return;
+    }
+    close();
+    const slide = currentSlide();
+    if (!slide) return;
+    await edit({
+      action: "slide",
+      op: "layout",
+      slide: slide.deckIndex,
+      layout: p.name
+    });
+  }
+  function initGallery() {
+    on("model", () => {
+      cache = null;
+    });
+    root.addEventListener("pointerdown", (e) => {
+      if (e.target === root) close();
+    });
+    document.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key === "Escape" && root.classList.contains("open")) {
+          e.stopPropagation();
+          close();
+        }
+      },
+      true
+    );
+  }
+
   // src/ts/editor/sorter.ts
   var list = document.getElementById("sorter-list");
   var addBtn = document.getElementById("sorter-add");
@@ -2578,20 +2777,6 @@
       label2
     );
   }
-  function layoutMenu(x, y, after) {
-    clear(menu);
-    menu.append(h("div", { class: "menu-title" }, "New slide"));
-    menu.append(menuItem("Blank", () => void newSlide(null, after)));
-    for (const layout of ed.model?.layouts ?? []) {
-      menu.append(
-        menuItem(
-          `${layout.name}${layout.source === "local" ? "" : ` \xB7 ${layout.source}`}`,
-          () => void newSlide(layout.name, after)
-        )
-      );
-    }
-    showMenu(x, y);
-  }
   function openMenu(x, y, i) {
     const slide = ed.model?.slides[i];
     const editable = !!ed.model?.deckEditable;
@@ -2629,7 +2814,11 @@
       return;
     }
     menu.append(
-      menuItem("New slide after\u2026", () => layoutMenu(x, y, i), !editable)
+      menuItem(
+        "New slide after\u2026",
+        () => void openGallery({ mode: "insert", after: i }),
+        !editable
+      )
     );
     menu.append(menuItem("Duplicate", () => void duplicateSlide(i), !editable));
     menu.append(
@@ -2662,7 +2851,7 @@
     });
     on("slide", renderSorter);
     on("slide-selection", renderSorter);
-    addBtn.addEventListener("click", (e) => {
+    addBtn.addEventListener("click", () => {
       if (!ed.model?.deckEditable) {
         toast(
           "deck.py builds its slides in code; add slides there",
@@ -2670,8 +2859,7 @@
         );
         return;
       }
-      const r = e.currentTarget.getBoundingClientRect();
-      layoutMenu(r.left, r.bottom + 4, ed.current);
+      void openGallery({ mode: "insert", after: ed.current });
     });
     document.addEventListener("pointerdown", (e) => {
       if (!menu.contains(e.target)) closeMenu();
@@ -2937,16 +3125,9 @@
     if (!slide || !model) return;
     const editable = model.deckEditable;
     const di = slide.deckIndex;
-    const root = slideRoot();
-    const parent = root?.getAttribute("inkflow:parent") ?? null;
+    const root2 = slideRoot();
+    const parent = root2?.getAttribute("inkflow:parent") ?? null;
     const currentLayout = slide.srcShared ? slide.src.replace(/\.svg$/, "") : parent;
-    const layoutOptions = [
-      ...slide.srcShared ? [] : [{ value: "", label: "(none)" }],
-      ...model.layouts.map((l) => ({ value: l.name, label: l.name }))
-    ];
-    if (currentLayout && !layoutOptions.some((o) => o.value === currentLayout)) {
-      layoutOptions.unshift({ value: currentLayout, label: currentLayout });
-    }
     panel.append(
       section(
         "Slide",
@@ -2963,15 +3144,15 @@
         ),
         row(
           "Layout",
-          selectInput(layoutOptions, currentLayout ?? "", (v) => {
-            if (!v) return;
-            void edit({
-              action: "slide",
-              op: "layout",
-              slide: di,
-              layout: v
-            });
-          })
+          button(
+            `${currentLayout ? layoutLabel(currentLayout) : "None"} \u25BE`,
+            "Pick a layout from previews",
+            () => void openGallery({
+              mode: "change",
+              current: currentLayout
+            }),
+            "wide"
+          )
         ),
         row(
           "Font size",
@@ -4199,8 +4380,8 @@ ${area2.value.slice(pos)}`;
     window.open(`/#slide=${n}`, "inkflow-present");
   }
   function toggleTheme() {
-    const root = document.documentElement;
-    root.dataset.theme = root.dataset.theme === "light" ? "" : "light";
+    const root2 = document.documentElement;
+    root2.dataset.theme = root2.dataset.theme === "light" ? "" : "light";
     render();
   }
   function setLayoutMode(on2) {
@@ -4278,8 +4459,7 @@ ${area2.value.slice(pos)}`;
       void (e.shiftKey ? ungroupSelection() : groupSelection());
     } else if (mod && lower === "m") {
       handled();
-      const r = $("sorter-add").getBoundingClientRect();
-      layoutMenu(r.left, r.bottom + 4, ed.current);
+      void openGallery({ mode: "insert", after: ed.current });
     } else if (mod && key === "Enter") {
       handled();
       present();
@@ -4444,6 +4624,7 @@ ${area2.value.slice(pos)}`;
     initNotes();
     initToolbar();
     initContext();
+    initGallery();
     on("slide", () => {
       void finishTextEdit();
       render();

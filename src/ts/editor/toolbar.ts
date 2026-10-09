@@ -21,16 +21,11 @@ import {
 } from "./canvas";
 import { copy, copySlides, cut, cutSlides } from "./clipboard";
 import { toast } from "./dom";
+import { openGallery } from "./gallery";
 import { insertImage, setTool } from "./insert";
 import { edit } from "./net";
 import { alignSelection } from "./props";
-import {
-    deleteSlide,
-    deleteSlides,
-    duplicateSlide,
-    gotoSlide,
-    layoutMenu,
-} from "./sorter";
+import { deleteSlide, deleteSlides, duplicateSlide, gotoSlide } from "./sorter";
 import { currentSlide, ed, emit, on, type Tool } from "./state";
 import { isEditingText } from "./textedit";
 import type { SvgOp } from "./types";
@@ -248,8 +243,7 @@ function onKey(e: KeyboardEvent): void {
         void (e.shiftKey ? ungroupSelection() : groupSelection());
     } else if (mod && lower === "m") {
         handled();
-        const r = $("sorter-add").getBoundingClientRect();
-        layoutMenu(r.left, r.bottom + 4, ed.current);
+        void openGallery({ mode: "insert", after: ed.current });
     } else if (mod && key === "Enter") {
         handled();
         present();

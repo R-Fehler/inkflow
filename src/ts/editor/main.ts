@@ -11,6 +11,7 @@ import {
 } from "./canvas";
 import { initContext } from "./context";
 import { toast } from "./dom";
+import { initGallery } from "./gallery";
 import { afterRender, initInsert } from "./insert";
 import { connect } from "./net";
 import { initNotes } from "./notes";
@@ -103,6 +104,7 @@ function boot(): void {
     initNotes();
     initToolbar();
     initContext();
+    initGallery();
 
     on("slide", () => {
         void finishTextEdit();

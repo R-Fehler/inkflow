@@ -1283,3 +1283,20 @@ def test_pick_ports_skips_busy_ones() -> None:
         assert pick_ports("localhost", port, 9) == (port, 9)
         http, ws = pick_ports("localhost", port, None)
         assert http == port and ws != port
+
+
+def test_layout_previews_cover_every_layout(project: Path) -> None:
+    from inkflow.editor.previews import layout_previews
+
+    previews = layout_previews(_deck(project), project / "deck.py")
+    names = [p["name"] for p in previews]
+    # The project's own layout first, then the built-in ones in reading order.
+    assert names[0] == "two"
+    assert names[1:4] == ["numbered", "title", "content"]
+    assert {"three-cols", "comparison", "agenda", "full-media"} <= set(names)
+    cover = next(p for p in previews if p["name"] == "cover")
+    assert "Slide title" in str(cover["svg"])
+    assert [
+        z["zone"] for z in cast("list[dict[str, object]]", cover["emptyZones"])
+    ] == ["media"]
+    assert "inkflow-slide-1" not in str(cover["svg"])

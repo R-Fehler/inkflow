@@ -827,22 +827,29 @@ def _editable_files(
     return files
 
 
-def process_deck(
-    deck: Deck, project_dir: Path, deck_path: Path, *, editor: bool = False
-) -> list[SlideData]:
-    visible_slides = [s for s in deck.slides if s.visible]
-    assets = AssetRoots(project_dir, deck.theme.asset_dir())
-    ctx = DeckContext(
+def deck_context(
+    deck: Deck, project_dir: Path, total_slides: int, *, editor: bool = False
+) -> DeckContext:
+    """The per-build parameters every slide of ``deck`` is processed with."""
+    return DeckContext(
         project_dir=project_dir,
         theme=deck.theme,
-        assets=assets,
+        assets=AssetRoots(project_dir, deck.theme.asset_dir()),
         deck_style=load_style(deck.style, project_dir),
         font_size=deck.effective_font_size,
         overlays=deck.effective_overlays,
         mode=deck.effective_mode,
-        total_slides=len(visible_slides),
+        total_slides=total_slides,
         editor=editor,
     )
+
+
+def process_deck(
+    deck: Deck, project_dir: Path, deck_path: Path, *, editor: bool = False
+) -> list[SlideData]:
+    visible_slides = [s for s in deck.slides if s.visible]
+    ctx = deck_context(deck, project_dir, len(visible_slides), editor=editor)
+    assets = ctx.assets
     raw_ids = [_infer_slide_id(s) for s in visible_slides]
     slide_ids = _deduplicate_ids(raw_ids)
     results: list[SlideData] = []

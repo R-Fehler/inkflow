@@ -11,6 +11,7 @@ import {
     pasteFromClipboard,
 } from "./clipboard";
 import { clear, h, icon, toast } from "./dom";
+import { openGallery } from "./gallery";
 import { edit } from "./net";
 import { ed, emit, on } from "./state";
 import type { SlideModel } from "./types";
@@ -268,21 +269,6 @@ function menuItem(
     );
 }
 
-export function layoutMenu(x: number, y: number, after: number): void {
-    clear(menu);
-    menu.append(h("div", { class: "menu-title" }, "New slide"));
-    menu.append(menuItem("Blank", () => void newSlide(null, after)));
-    for (const layout of ed.model?.layouts ?? []) {
-        menu.append(
-            menuItem(
-                `${layout.name}${layout.source === "local" ? "" : ` · ${layout.source}`}`,
-                () => void newSlide(layout.name, after),
-            ),
-        );
-    }
-    showMenu(x, y);
-}
-
 function openMenu(x: number, y: number, i: number): void {
     const slide = ed.model?.slides[i];
     const editable = !!ed.model?.deckEditable;
@@ -320,7 +306,11 @@ function openMenu(x: number, y: number, i: number): void {
         return;
     }
     menu.append(
-        menuItem("New slide after…", () => layoutMenu(x, y, i), !editable),
+        menuItem(
+            "New slide after…",
+            () => void openGallery({ mode: "insert", after: i }),
+            !editable,
+        ),
     );
     menu.append(menuItem("Duplicate", () => void duplicateSlide(i), !editable));
     menu.append(
@@ -355,7 +345,7 @@ export function initSorter(): void {
     });
     on("slide", renderSorter);
     on("slide-selection", renderSorter);
-    addBtn.addEventListener("click", (e) => {
+    addBtn.addEventListener("click", () => {
         if (!ed.model?.deckEditable) {
             toast(
                 "deck.py builds its slides in code; add slides there",
@@ -363,8 +353,7 @@ export function initSorter(): void {
             );
             return;
         }
-        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        layoutMenu(r.left, r.bottom + 4, ed.current);
+        void openGallery({ mode: "insert", after: ed.current });
     });
     document.addEventListener("pointerdown", (e) => {
         if (!menu.contains(e.target as Node)) closeMenu();

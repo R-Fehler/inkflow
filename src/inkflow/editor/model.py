@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -312,6 +313,14 @@ def _zone_text(
             start, end = spans[name]
             out[name] = md_text[start:end]
     return out
+
+
+_MEDIA_ZONE = re.compile(r"media|image|img|picture|photo|figure|video|logo")
+
+
+def is_media_zone(name: str) -> bool:
+    """Whether a zone's name says it is meant for an image or video."""
+    return bool(_MEDIA_ZONE.search(name))
 
 
 def _mark_overlays(sources: list[SourceInfo]) -> None:

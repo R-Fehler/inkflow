@@ -25,6 +25,7 @@ from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
 from inkflow.editor.codegen import Code, coerce_fields
 from inkflow.editor.deckedit import DeckEditError, DeckSource
+from inkflow.editor.previews import layout_previews
 from inkflow.editor.svgops import (
     SvgFile,
     SvgOpError,
@@ -239,6 +240,8 @@ class EditorSession:
             return {"ok": True, "files": export_assets(self.project_dir, names)}
         if deck is None:
             raise EditError("the deck has not built yet")
+        if action == "layout-previews":
+            return {"ok": True, "layouts": layout_previews(deck, self.deck_path)}
         if action == "copy-slides":
             indices = msg.get("slides")
             if not isinstance(indices, list) or not all(

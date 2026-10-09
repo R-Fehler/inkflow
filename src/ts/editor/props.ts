@@ -18,6 +18,7 @@ import {
     zoneName,
 } from "./canvas";
 import { clear, h, icon, toast } from "./dom";
+import { layoutLabel, openGallery } from "./gallery";
 import {
     type Box,
     parseTransform,
@@ -213,17 +214,6 @@ function renderSlidePanel(): void {
     const currentLayout = slide.srcShared
         ? slide.src.replace(/\.svg$/, "")
         : parent;
-    const layoutOptions = [
-        ...(slide.srcShared ? [] : [{ value: "", label: "(none)" }]),
-        ...model.layouts.map((l) => ({ value: l.name, label: l.name })),
-    ];
-    if (
-        currentLayout &&
-        !layoutOptions.some((o) => o.value === currentLayout)
-    ) {
-        layoutOptions.unshift({ value: currentLayout, label: currentLayout });
-    }
-
     panel.append(
         section(
             "Slide",
@@ -240,15 +230,16 @@ function renderSlidePanel(): void {
             ),
             row(
                 "Layout",
-                selectInput(layoutOptions, currentLayout ?? "", (v) => {
-                    if (!v) return;
-                    void edit({
-                        action: "slide",
-                        op: "layout",
-                        slide: di,
-                        layout: v,
-                    });
-                }),
+                button(
+                    `${currentLayout ? layoutLabel(currentLayout) : "None"} ▾`,
+                    "Pick a layout from previews",
+                    () =>
+                        void openGallery({
+                            mode: "change",
+                            current: currentLayout,
+                        }),
+                    "wide",
+                ),
             ),
             row(
                 "Font size",
