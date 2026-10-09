@@ -21,7 +21,7 @@ import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import Protocol, cast
 
 from inkflow import animations as animations_module
 from inkflow import transitions as transitions_module
@@ -235,6 +235,33 @@ def _py(value: object) -> str:
     return Code().literal(value)
 
 
+class HtmlBuilder(Protocol):
+    def __call__(
+        self, deck_path: Path, out_dir: Path, inline_assets: bool = False
+    ) -> None: ...
+
+
+class PdfBuilder(Protocol):
+    def __call__(
+        self,
+        deck_path: Path,
+        output: Path,
+        chromium: str | None = None,
+        no_sandbox: bool = False,
+        size: tuple[int, int] | None = None,
+    ) -> None: ...
+
+
+@dataclass(frozen=True)
+class Exporters:
+    """``export.build_static_html`` and ``export.build_pdf``, handed in by the
+    caller: the export module builds on the server module, which owns this
+    session, so importing it here would be a cycle."""
+
+    html: HtmlBuilder
+    pdf: PdfBuilder
+
+
 class EditorSession:
     deck_path: Path
     project_dir: Path
@@ -245,8 +272,11 @@ class EditorSession:
     """Where the serving process listens, recorded in the editor context."""
     exports: dict[str, Path]
     """Files this session exported, by download token (served by the server)."""
+    exporters: Exporters | None
+    """The build functions behind the Export dialog (None: export unavailable)."""
 
-    def __init__(self, deck_path: Path) -> None:
+    def __init__(self, deck_path: Path, exporters: Exporters | None = None) -> None:
+        self.exporters = exporters
         self.deck_path = deck_path.resolve()
         self.project_dir = self.deck_path.parent
         self.history = History()
@@ -1294,8 +1324,10 @@ class EditorSession:
         default where the ``inkflow build`` / ``export`` commands put it, and a
         download token is handed back for the browser.
         """
-        from inkflow.export import build_pdf, build_static_html
-
+        if self.exporters is None:
+            raise EditError("export is not available here; use inkflow build / export")
+        build_static_html = self.exporters.html
+        build_pdf = self.exporters.pdf
         fmt = msg.get("format")
         raw = msg.get("output")
         stem = self.deck_path.stem

@@ -7,10 +7,14 @@ from pathlib import Path
 import click
 
 from inkflow.cli._common import deck_option, main, resolve_deck_path
+from inkflow.editor.session import Exporters
 from inkflow.export import build_pdf, build_static_html
 from inkflow.logging import Levels, report
 from inkflow.server import pick_ports
 from inkflow.server import serve as _serve
+
+# The editor's Export dialog runs the same builds as the commands below.
+EXPORTERS = Exporters(html=build_static_html, pdf=build_pdf)
 
 
 @main.command()
@@ -53,7 +57,7 @@ def serve(
     resolved = resolve_deck_path(deck_path)
     port, ws_port = pick_ports(host, port, ws_port)
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(_serve(resolved, host, port, ws_port, levels))
+        asyncio.run(_serve(resolved, host, port, ws_port, levels, exporters=EXPORTERS))
 
 
 @main.command()
@@ -108,7 +112,11 @@ def edit(
     open_path = None if no_open else "/edit"
     port, ws_port = pick_ports(host, port, ws_port)
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(_serve(resolved, host, port, ws_port, levels, open_path))
+        asyncio.run(
+            _serve(
+                resolved, host, port, ws_port, levels, open_path, exporters=EXPORTERS
+            )
+        )
 
 
 @main.command("build")

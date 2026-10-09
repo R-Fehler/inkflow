@@ -42,7 +42,7 @@ from inkflow.edit import (
 )
 from inkflow.editor.context import write_context
 from inkflow.editor.model import build_model
-from inkflow.editor.session import EditError, EditorSession
+from inkflow.editor.session import EditError, EditorSession, Exporters
 from inkflow.editor.svgops import file_hash
 from inkflow.enums import ColorMode
 from inkflow.fonts import embed_fonts_css
@@ -798,9 +798,11 @@ async def serve(
     ws_port: int,
     levels: Levels,
     open_path: str | None = None,
+    exporters: Exporters | None = None,
 ) -> None:
     """Run the server until quit. ``open_path`` (e.g. ``"/edit"``) opens a
-    browser on that page once the first build is done."""
+    browser on that page once the first build is done; ``exporters`` enable
+    the editor's Export dialog."""
     console = Console()
     rebuild_lock = asyncio.Lock()
     shutdown = asyncio.Event()
@@ -810,7 +812,7 @@ async def serve(
 
     try:
         edit_commands = resolve_edit_commands()
-        session = EditorSession(deck_path)
+        session = EditorSession(deck_path, exporters)
         session.server = {"host": host, "port": http_port, "wsPort": ws_port}
         _editor["session"] = session
         http_handler = make_http_handler(ws_port, deck_path.parent, edit_commands)

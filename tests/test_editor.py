@@ -1426,8 +1426,13 @@ def test_export_builds_and_offers_downloads(project: Path) -> None:
     import zipfile
 
     from inkflow import server
+    from inkflow.cli.present import EXPORTERS
 
-    session = EditorSession(project / "deck.py")
+    with pytest.raises(EditError, match="not available"):
+        EditorSession(project / "deck.py").apply(
+            {"action": "export", "format": "html"}, None
+        )
+    session = EditorSession(project / "deck.py", EXPORTERS)
     web = session.apply({"action": "export", "format": "html"}, None)
     assert web["rel"] == "build" and (project / "build" / "index.html").is_file()
     single = session.apply(
