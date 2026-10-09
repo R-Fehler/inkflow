@@ -13,6 +13,7 @@ import { initContext } from "./context";
 import { isCropped, setCropMode, startCrop } from "./crop";
 import { initDialog } from "./dialog";
 import { toast } from "./dom";
+import { initExport } from "./exportdlg";
 import { initFind } from "./find";
 import { initGallery } from "./gallery";
 import { afterRender, initInsert } from "./insert";
@@ -121,6 +122,7 @@ function boot(): void {
     initContext();
     initGallery();
     initDialog();
+    initExport();
     initFind();
     initTheme();
 

@@ -7,6 +7,7 @@ import errno
 import functools
 import importlib.resources
 import importlib.util
+import io
 import json
 import os
 import socket
@@ -14,6 +15,7 @@ import sys
 import time
 import traceback
 import webbrowser
+import zipfile
 from collections.abc import Awaitable, Callable, Sequence
 from html import escape as escape_html
 from pathlib import Path
@@ -550,6 +552,38 @@ def _resolve_asset(roots: AssetRoots, request_path: str) -> Path | None:
     return resolved
 
 
+def _read_export(path: Path) -> tuple[str, str, bytes]:
+    """An exported file, or an exported folder as a zip, for download."""
+    if path.is_dir():
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for f in sorted(path.rglob("*")):
+                if f.is_file():
+                    zf.write(f, f"{path.name}/{f.relative_to(path).as_posix()}")
+        return f"{path.name}.zip", "application/zip", buf.getvalue()
+    mime = {".pdf": "application/pdf", ".html": "text/html; charset=utf-8"}.get(
+        path.suffix.lower(), "application/octet-stream"
+    )
+    return path.name, mime, path.read_bytes()
+
+
+def _export_download(
+    request_path: str,
+) -> tuple[Callable[[Path], tuple[str, str, bytes]], Path] | None:
+    """``/_export/<token>/<name>``: a file the editor exported in this session.
+
+    Only paths the session recorded under a random token are served, so this
+    route cannot reach any other file."""
+    parts = request_path.split("?", 1)[0].split("/")
+    if len(parts) < 3 or parts[1] != "_export":
+        return None
+    session = _editor["session"]
+    path = session.exports.get(parts[2]) if session is not None else None
+    if path is None or not path.exists():
+        return None
+    return _read_export, path
+
+
 def make_http_handler(
     ws_port: int,
     project_dir: Path | None = None,
@@ -563,6 +597,23 @@ def make_http_handler(
             request_line = raw.split(b"\r\n", 1)[0].decode(errors="replace")
             parts = request_line.split(" ", 2)
             request_path = parts[1] if len(parts) >= 2 else "/"
+
+            download = _export_download(request_path)
+            if download is not None:
+                name, mime, body = await asyncio.to_thread(*download)
+                header = (
+                    b"HTTP/1.1 200 OK\r\n"
+                    + f"Content-Type: {mime}\r\n".encode()
+                    + f'Content-Disposition: attachment; filename="{name}"\r\n'.encode()
+                    + b"Cache-Control: no-store\r\n"
+                    + b"Connection: close\r\n"
+                    + b"Content-Length: "
+                    + str(len(body)).encode()
+                    + b"\r\n\r\n"
+                )
+                writer.write(header + body)
+                await writer.drain()
+                return
 
             if project_dir is not None and request_path != "/":
                 roots = AssetRoots(project_dir, _state["theme_dir"])
@@ -631,7 +682,8 @@ def make_http_handler(
 class _WatchFilter(DefaultFilter):
     """The default ignores, plus ``.inkflow/`` (editor context the server writes)."""
 
-    ignore_dirs: Sequence[str] = (*DefaultFilter.ignore_dirs, ".inkflow")
+    # build/ is where `inkflow build` and the editor's export write: never input.
+    ignore_dirs: Sequence[str] = (*DefaultFilter.ignore_dirs, ".inkflow", "build")
 
 
 async def _watch(

@@ -254,9 +254,9 @@
     code: '<path d="M5.5 4 2 8l3.5 4M10.5 4 14 8l-3.5 4"/>',
     fit: '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>'
   };
-  function icon(name, size = 16) {
+  function icon(name, size2 = 16) {
     const wrap2 = document.createElement("span");
-    wrap2.innerHTML = `<svg viewBox="0 0 16 16" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] ?? ""}</svg>`;
+    wrap2.innerHTML = `<svg viewBox="0 0 16 16" width="${size2}" height="${size2}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] ?? ""}</svg>`;
     return wrap2.firstElementChild;
   }
   var toastTimer = 0;
@@ -881,19 +881,19 @@
     return { dx: x.delta, dy: y.delta, guidesX: x.at, guidesY: y.at };
   }
   function distribute(boxes, axis) {
-    const size = axis === "x" ? "width" : "height";
+    const size2 = axis === "x" ? "width" : "height";
     const order2 = boxes.map((b, i) => ({ b, i })).sort((p, q) => p.b[axis] - q.b[axis]);
     const out = boxes.map((b) => b[axis]);
     if (order2.length < 3) return out;
     const first = order2[0].b;
     const last = order2[order2.length - 1].b;
-    const total = order2.reduce((s, o) => s + o.b[size], 0);
-    const span = last[axis] + last[size] - first[axis];
+    const total = order2.reduce((s, o) => s + o.b[size2], 0);
+    const span = last[axis] + last[size2] - first[axis];
     const gap = (span - total) / (order2.length - 1);
     let pos = first[axis];
     for (const o of order2) {
       out[o.i] = pos;
-      pos += o.b[size] + gap;
+      pos += o.b[size2] + gap;
     }
     return out;
   }
@@ -2384,13 +2384,13 @@
     const src = ownSource();
     const slide = currentSlide();
     if (!up || !src || !slide) return;
-    const size = await videoSize(up.rel);
+    const size2 = await videoSize(up.rel);
     const vb = slideRoot()?.viewBox.baseVal;
     const vw = vb?.width || 1920;
     const vh = vb?.height || 1080;
-    const k = Math.min(vw * 0.6 / size.w, vh * 0.6 / size.h);
-    const w = size.w * k;
-    const h2 = size.h * k;
+    const k = Math.min(vw * 0.6 / size2.w, vh * 0.6 / size2.h);
+    const w = size2.w * k;
+    const h2 = size2.h * k;
     const cx = Math.min(Math.max(at?.x ?? vw / 2, w / 2), vw - w / 2);
     const cy = Math.min(Math.max(at?.y ?? vh / 2, h2 / 2), vh - h2 / 2);
     const parent = insertParent();
@@ -2432,14 +2432,14 @@
     const up = await upload(file);
     const src = ownSource();
     if (!up || !src) return;
-    const size = await naturalSize(up.rel);
+    const size2 = await naturalSize(up.rel);
     const svg = slideRoot();
     const vb = svg?.viewBox.baseVal;
     const maxW = (vb?.width || 1920) * 0.5;
     const maxH = (vb?.height || 1080) * 0.5;
-    const k = Math.min(1, maxW / size.w, maxH / size.h);
-    const w = size.w * k;
-    const h2 = size.h * k;
+    const k = Math.min(1, maxW / size2.w, maxH / size2.h);
+    const w = size2.w * k;
+    const h2 = size2.h * k;
     const cx = at?.x ?? (vb?.width || 1920) / 2;
     const cy = at?.y ?? (vb?.height || 1080) / 2;
     const parent = insertParent().el;
@@ -3377,6 +3377,95 @@
     host2.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") e.stopPropagation();
     });
+  }
+
+  // src/ts/editor/exportdlg.ts
+  var FORMATS = [
+    {
+      format: "html",
+      title: "Web page",
+      text: "A folder with index.html and the deck's images and videos. Opens offline in any browser, or upload it to any web host.",
+      placeholder: () => "build"
+    },
+    {
+      format: "single",
+      title: "Single HTML file",
+      text: "Everything in one file, images included: easy to email or share. Larger than the folder.",
+      placeholder: (stem) => `${stem}.html`
+    },
+    {
+      format: "pdf",
+      title: "PDF",
+      text: "One page per slide, every build step shown. Needs Chromium or Chrome on this computer.",
+      placeholder: (stem) => `${stem}.pdf`
+    }
+  ];
+  function size(bytes) {
+    if (bytes > 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
+    return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+  }
+  function option(f, stem) {
+    const output = h("input", {
+      type: "text",
+      placeholder: f.placeholder(stem),
+      spellcheck: "false",
+      title: "Where to save it, relative to deck.py"
+    });
+    const status = h("div", { class: "export-status" });
+    const go = h("button", { type: "button", class: "pbtn primary" }, "Export");
+    go.addEventListener("click", async () => {
+      go.disabled = true;
+      status.textContent = f.format === "pdf" ? "Rendering pages\u2026" : "Building\u2026";
+      status.className = "export-status busy";
+      const result = await request({
+        action: "export",
+        format: f.format,
+        output: output.value.trim() || null
+      });
+      go.disabled = false;
+      if (!result.ok) {
+        status.className = "export-status error";
+        status.textContent = result.error ?? "export failed";
+        return;
+      }
+      const r = result;
+      status.className = "export-status done";
+      status.replaceChildren(
+        h("span", {}, `Saved to ${r.rel} \xB7 ${size(r.size)}`),
+        h(
+          "a",
+          { href: r.download, class: "pbtn", download: "" },
+          f.format === "html" ? "Download .zip" : "Download"
+        )
+      );
+    });
+    return h(
+      "div",
+      { class: "export-option" },
+      h(
+        "div",
+        { class: "export-text" },
+        h("strong", {}, f.title),
+        h("p", { class: "hint" }, f.text)
+      ),
+      h("div", { class: "export-row" }, output, go),
+      status
+    );
+  }
+  function openExport() {
+    const stem = ed.model?.deckPath.split(/[\\/]/).pop()?.replace(/\.py$/, "") ?? "deck";
+    openDialog(
+      "Export",
+      h(
+        "div",
+        { class: "export-body" },
+        ...FORMATS.map((f) => option(f, stem))
+      ),
+      { hint: "Saved next to deck.py; the paths can be changed" }
+    );
+  }
+  function initExport() {
+    document.getElementById("btn-export")?.addEventListener("click", openExport);
   }
 
   // src/ts/editor/find.ts
@@ -6452,16 +6541,16 @@ ${area2.value.slice(pos)}`;
       "change",
       () => void save2({ mode: mode.value || null }, "Colour mode")
     );
-    const size = h("input", {
+    const size2 = h("input", {
       type: "number",
       min: 8,
       max: 200,
       value: t.fontSize ?? "",
       placeholder: String(t.themeFontSize)
     });
-    size.disabled = !ed.model?.deckEditable;
-    size.addEventListener("change", () => {
-      const n = parseInt(size.value, 10);
+    size2.disabled = !ed.model?.deckEditable;
+    size2.addEventListener("change", () => {
+      const n = parseInt(size2.value, 10);
       void save2({ fontSize: Number.isFinite(n) ? n : null }, "Font size");
     });
     const list2 = h("datalist", { id: "theme-font-list" });
@@ -6473,7 +6562,7 @@ ${area2.value.slice(pos)}`;
         "div",
         { class: "theme-top" },
         h("label", {}, h("span", {}, "Colour mode"), mode),
-        h("label", {}, h("span", {}, "Base font size (px)"), size)
+        h("label", {}, h("span", {}, "Base font size (px)"), size2)
       ),
       h("h3", {}, "Fonts"),
       list2,
@@ -6902,6 +6991,7 @@ ${area2.value.slice(pos)}`;
     initContext();
     initGallery();
     initDialog();
+    initExport();
     initFind();
     initTheme();
     on("slide", () => {

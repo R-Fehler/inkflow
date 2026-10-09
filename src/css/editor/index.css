@@ -1692,3 +1692,62 @@ body.offline #offline-banner {
     font-size: 11px;
     color: var(--subtext);
 }
+
+/* ── Export ── */
+
+.export-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.export-option {
+    padding: 12px;
+    border: 1px solid var(--ui-line);
+    border-radius: 8px;
+}
+
+.export-text p {
+    margin: 4px 0 8px;
+}
+
+.export-row {
+    display: flex;
+    gap: 6px;
+}
+
+.export-row input {
+    flex: 1;
+}
+
+.pbtn.primary {
+    background: var(--sel);
+    border-color: var(--sel);
+    color: #fff;
+}
+
+.export-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--subtext);
+}
+
+.export-status:empty {
+    display: none;
+}
+
+.export-status.error {
+    color: #e5484d;
+}
+
+.export-status.done span {
+    flex: 1;
+}
+
+.export-status a {
+    text-decoration: none;
+    color: inherit;
+}

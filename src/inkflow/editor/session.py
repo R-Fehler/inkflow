@@ -14,7 +14,10 @@ import base64
 import dataclasses
 import os
 import re
+import secrets
+import shutil
 import sys
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -240,6 +243,8 @@ class EditorSession:
     """Hash of the deck.py the current build came from (set by the server)."""
     server: dict[str, object]
     """Where the serving process listens, recorded in the editor context."""
+    exports: dict[str, Path]
+    """Files this session exported, by download token (served by the server)."""
 
     def __init__(self, deck_path: Path) -> None:
         self.deck_path = deck_path.resolve()
@@ -247,6 +252,7 @@ class EditorSession:
         self.history = History()
         self.built_hash = None
         self.server = {}
+        self.exports = {}
 
     # ── Entry point ──
 
@@ -260,6 +266,8 @@ class EditorSession:
             return self._result(step)
         if action == "upload":
             return self._upload(msg)
+        if action == "export":
+            return self._export(msg)
         if action == "copy-assets":
             refs = msg.get("refs")
             names = (
@@ -1276,6 +1284,74 @@ class EditorSession:
         extra["ids"] = result.ids
         extra["structural"] = True
         return "Paste"
+
+    # ── Export ──
+
+    def _export(self, msg: dict[str, object]) -> dict[str, object]:
+        """Build the deck as a web page, a single HTML file or a PDF.
+
+        Not an edit (nothing to undo): the result is written where asked, by
+        default where the ``inkflow build`` / ``export`` commands put it, and a
+        download token is handed back for the browser.
+        """
+        from inkflow.export import build_pdf, build_static_html
+
+        fmt = msg.get("format")
+        raw = msg.get("output")
+        stem = self.deck_path.stem
+        defaults = {
+            "html": "build",
+            "single": f"{stem}.html",
+            "pdf": f"{stem}.pdf",
+        }
+        if fmt not in defaults:
+            raise EditError(f"unknown export format {fmt!r}")
+        fmt = cast("str", fmt)
+        out = Path(str(raw).strip()) if isinstance(raw, str) and raw.strip() else None
+        out = out if out is None or out.is_absolute() else self.project_dir / out
+        out = (out or self.project_dir / defaults[fmt]).resolve()
+        if (
+            out == self.project_dir.resolve()
+            or out in self.project_dir.resolve().parents
+        ):
+            raise EditError("pick an output inside the project, not the project itself")
+        try:
+            if fmt == "html":
+                build_static_html(self.deck_path, out)
+                result = out
+            elif fmt == "single":
+                if out.suffix.lower() != ".html":
+                    out = out.with_suffix(".html")
+                with tempfile.TemporaryDirectory() as tmp:
+                    build_static_html(self.deck_path, Path(tmp), inline_assets=True)
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(Path(tmp) / "index.html", out)
+                result = out
+            else:
+                if out.suffix.lower() != ".pdf":
+                    out = out.with_suffix(".pdf")
+                root = hasattr(os, "geteuid") and os.geteuid() == 0
+                build_pdf(self.deck_path, out, no_sandbox=root)
+                result = out
+        except (RuntimeError, ValueError, OSError) as exc:
+            raise EditError(str(exc)) from exc
+        token = secrets.token_urlsafe(12)
+        self.exports[token] = result
+        size = (
+            sum(p.stat().st_size for p in result.rglob("*") if p.is_file())
+            if result.is_dir()
+            else result.stat().st_size
+        )
+        return {
+            "ok": True,
+            "path": str(result),
+            "rel": self._deck_rel(result)
+            if result.is_relative_to(self.project_dir)
+            else str(result),
+            "download": f"/_export/{token}/{result.name}"
+            + (".zip" if result.is_dir() else ""),
+            "size": size,
+        }
 
     # ── Uploads ──
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import textwrap
 from pathlib import Path
@@ -1419,6 +1420,35 @@ def test_find_and_replace_across_svg_markdown_and_deck(project: Path) -> None:
         session.apply(
             {"action": "find", "query": "(", "regex": True, "files": []}, None
         )
+
+
+def test_export_builds_and_offers_downloads(project: Path) -> None:
+    import zipfile
+
+    from inkflow import server
+
+    session = EditorSession(project / "deck.py")
+    web = session.apply({"action": "export", "format": "html"}, None)
+    assert web["rel"] == "build" and (project / "build" / "index.html").is_file()
+    single = session.apply(
+        {"action": "export", "format": "single", "output": "out/talk"}, None
+    )
+    assert single["rel"] == "out/talk.html"
+    assert "<svg" in (project / "out" / "talk.html").read_text()
+    with pytest.raises(EditError):
+        session.apply({"action": "export", "format": "html", "output": ".."}, None)
+
+    server._editor["session"] = session  # pyright: ignore[reportPrivateUsage]
+    try:
+        found = server._export_download(str(web["download"]))  # pyright: ignore[reportPrivateUsage]
+        assert found is not None
+        name, mime, body = found[0](found[1])
+        assert name == "build.zip" and mime == "application/zip"
+        with zipfile.ZipFile(io.BytesIO(body)) as zf:
+            assert "build/index.html" in zf.namelist()
+        assert server._export_download("/_export/nope/x.pdf") is None  # pyright: ignore[reportPrivateUsage]
+    finally:
+        server._editor["session"] = None  # pyright: ignore[reportPrivateUsage]
 
 
 # ── Model ────────────────────────────────────────────────────────────────────
