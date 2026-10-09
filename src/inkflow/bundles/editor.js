@@ -1567,9 +1567,9 @@
     for (const { sel, ops } of plans) {
       const src = sourceOf(sel.key);
       if (!src) continue;
-      const list2 = out.get(src.path) ?? [];
-      list2.push(...ops);
-      out.set(src.path, list2);
+      const list3 = out.get(src.path) ?? [];
+      list3.push(...ops);
+      out.set(src.path, list3);
     }
     return out;
   }
@@ -2750,11 +2750,11 @@
   function lostZones(p) {
     const slide = currentSlide();
     if (!slide) return [];
-    const used2 = /* @__PURE__ */ new Set([
+    const used = /* @__PURE__ */ new Set([
       ...Object.keys(slide.zoneOrigins ?? {}),
       ...Object.keys(slide.zones)
     ]);
-    return [...used2].filter((z) => !p.zones.includes(z));
+    return [...used].filter((z) => !p.zones.includes(z));
   }
   function close() {
     root.classList.remove("open");
@@ -2887,7 +2887,7 @@
   var addBtn = document.getElementById("sorter-add");
   var menu = document.getElementById("context-menu");
   var dragFrom = null;
-  function pick2(i, e) {
+  function pickSlide(i, e) {
     ed.focus = "sorter";
     if (e.shiftKey) {
       const [a, b] = [Math.min(ed.current, i), Math.max(ed.current, i)];
@@ -2939,42 +2939,51 @@
     ed.scope = null;
     emit("slide");
   }
-  var thumbs = /* @__PURE__ */ new Map();
-  var used = /* @__PURE__ */ new Map();
-  function thumb(slide) {
-    const box = h("div", { class: "thumb" });
-    if (slide.visibleIndex == null) {
-      box.append(h("div", { class: "thumb-hidden" }, icon("eyeOff", 18)));
+  var Thumbs = class {
+    cache = /* @__PURE__ */ new Map();
+    used = /* @__PURE__ */ new Map();
+    begin() {
+      this.used = /* @__PURE__ */ new Map();
+    }
+    end() {
+      this.cache = this.used;
+    }
+    thumb(slide) {
+      const box = h("div", { class: "thumb" });
+      if (slide.visibleIndex == null) {
+        box.append(h("div", { class: "thumb-hidden" }, icon("eyeOff", 18)));
+        return box;
+      }
+      const data = ed.slides[slide.visibleIndex];
+      if (!data) return box;
+      const cached = this.cache.get(data.svg);
+      if (cached && !this.used.has(data.svg)) {
+        this.used.set(data.svg, cached);
+        return cached;
+      }
+      this.used.set(data.svg, box);
+      box.innerHTML = data.svg;
+      const svg = box.querySelector("svg");
+      if (svg) {
+        const vb = parseViewBox(svg.getAttribute("viewBox"));
+        svg.setAttribute("width", "100%");
+        svg.setAttribute("height", "100%");
+        svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+        svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
+        svg.querySelectorAll(".anim-pending").forEach((el2) => {
+          el2.classList.remove("anim-pending");
+        });
+        svg.querySelectorAll("video").forEach((v) => {
+          v.removeAttribute("autoplay");
+        });
+      }
       return box;
     }
-    const data = ed.slides[slide.visibleIndex];
-    if (!data) return box;
-    const cached = thumbs.get(data.svg);
-    if (cached && !used.has(data.svg)) {
-      used.set(data.svg, cached);
-      return cached;
-    }
-    used.set(data.svg, box);
-    box.innerHTML = data.svg;
-    const svg = box.querySelector("svg");
-    if (svg) {
-      const vb = parseViewBox(svg.getAttribute("viewBox"));
-      svg.setAttribute("width", "100%");
-      svg.setAttribute("height", "100%");
-      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-      svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
-      svg.querySelectorAll(".anim-pending").forEach((el2) => {
-        el2.classList.remove("anim-pending");
-      });
-      svg.querySelectorAll("video").forEach((v) => {
-        v.removeAttribute("autoplay");
-      });
-    }
-    return box;
-  }
+  };
+  var thumbs = new Thumbs();
   function renderSorter() {
     clear(list);
-    used = /* @__PURE__ */ new Map();
+    thumbs.begin();
     const slides = ed.model?.slides ?? [];
     slides.forEach((slide, i) => {
       const item = h(
@@ -2986,9 +2995,9 @@
           "data-index": i
         },
         h("span", { class: "sorter-num" }, String(i + 1)),
-        thumb(slide)
+        thumbs.thumb(slide)
       );
-      item.addEventListener("click", (e) => pick2(i, e));
+      item.addEventListener("click", (e) => pickSlide(i, e));
       item.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         ed.focus = "sorter";
@@ -2996,7 +3005,7 @@
           ed.slideSelection.clear();
           gotoSlide(i);
         }
-        openMenu(e.clientX, e.clientY, i);
+        openSlideMenu(e.clientX, e.clientY, i);
       });
       item.addEventListener("dragstart", (e) => {
         dragFrom = i;
@@ -3032,7 +3041,7 @@
       });
       list.append(item);
     });
-    thumbs = used;
+    thumbs.end();
     list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
   }
   async function moveSlide(from, to) {
@@ -3102,7 +3111,7 @@
       label3
     );
   }
-  function openMenu(x, y, i) {
+  function openSlideMenu(x, y, i) {
     const slide = ed.model?.slides[i];
     const editable = !!ed.model?.deckEditable;
     const many = ed.slideSelection.size > 1;
@@ -3530,9 +3539,9 @@
     return path.startsWith(root2) ? path.slice(root2.length + 1) : path;
   }
   function renderResults(error) {
-    const list2 = el(".find-results");
+    const list3 = el(".find-results");
     const status = el(".find-status");
-    clear(list2);
+    clear(list3);
     if (error) {
       status.textContent = error;
       return;
@@ -3550,7 +3559,7 @@
       const slide = first != null ? ed.model?.slides[first] : null;
       const group = slide != null ? `${first + 1} \xB7 ${slide.title ?? slide.id ?? ""}` : fileLabel(hit.file);
       if (group !== lastGroup) {
-        list2.append(h("div", { class: "find-group" }, group));
+        list3.append(h("div", { class: "find-group" }, group));
         lastGroup = group;
       }
       const where = hit.kind === "deck" ? "deck.py" : `${fileLabel(hit.file)}${on2.length > 1 ? ` \xB7 ${on2.length} slides` : ""}`;
@@ -3571,7 +3580,7 @@
         ),
         h("span", { class: "find-where" }, where)
       );
-      list2.append(row3);
+      list3.append(row3);
     });
   }
   function goTo(i) {
@@ -3753,6 +3762,186 @@
     on("model", () => {
       if (!panel.hidden && query()) schedule();
     });
+  }
+
+  // src/ts/editor/grid.ts
+  var view = document.getElementById("grid-view");
+  var list2 = document.getElementById("grid-list");
+  var sizeInput = document.getElementById("grid-size");
+  var thumbs2 = new Thumbs();
+  var dragFrom2 = null;
+  function toggleGrid(on2 = view.hidden === true) {
+    view.hidden = !on2;
+    document.body.classList.toggle("grid-mode", on2);
+    document.getElementById("btn-grid")?.classList.toggle("on", on2);
+    if (on2) {
+      ed.focus = "sorter";
+      renderGrid();
+      view.focus();
+    } else {
+      ed.focus = "canvas";
+      emit("slide");
+    }
+  }
+  function open(i) {
+    ed.slideSelection.clear();
+    toggleGrid(false);
+    gotoSlide(i);
+  }
+  function renderGrid() {
+    if (view.hidden) return;
+    clear(list2);
+    thumbs2.begin();
+    const slides = ed.model?.slides ?? [];
+    slides.forEach((slide, i) => {
+      const item = h(
+        "div",
+        {
+          class: `grid-item${i === ed.current ? " active" : ""}${ed.slideSelection.has(i) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
+          draggable: ed.model?.deckEditable ? "true" : null,
+          "data-index": i
+        },
+        thumbs2.thumb(slide),
+        h(
+          "div",
+          { class: "grid-caption" },
+          h("span", { class: "grid-num" }, String(i + 1)),
+          h(
+            "span",
+            { class: "grid-title" },
+            slide.title ?? slide.id ?? slide.src
+          ),
+          slide.animations.length ? h(
+            "span",
+            {
+              class: "grid-badge",
+              title: `${slide.animations.length} animation(s)`
+            },
+            "\u2726"
+          ) : null
+        )
+      );
+      item.addEventListener("click", (e) => {
+        pickSlide(i, e);
+        ed.focus = "sorter";
+      });
+      item.addEventListener("dblclick", () => open(i));
+      item.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (!ed.slideSelection.has(i)) {
+          ed.slideSelection.clear();
+          gotoSlide(i);
+        }
+        ed.focus = "sorter";
+        openSlideMenu(e.clientX, e.clientY, i);
+      });
+      item.addEventListener("dragstart", (e) => {
+        dragFrom2 = i;
+        e.dataTransfer?.setData("text/plain", String(i));
+        item.classList.add("dragging");
+      });
+      item.addEventListener("dragend", () => {
+        dragFrom2 = null;
+        list2.querySelectorAll(".drop-before, .drop-after").forEach((el2) => {
+          el2.classList.remove("drop-before", "drop-after");
+        });
+        item.classList.remove("dragging");
+      });
+      item.addEventListener("dragover", (e) => {
+        if (dragFrom2 == null) return;
+        e.preventDefault();
+        const r = item.getBoundingClientRect();
+        const after = e.clientX > r.left + r.width / 2;
+        item.classList.toggle("drop-after", after);
+        item.classList.toggle("drop-before", !after);
+      });
+      item.addEventListener("dragleave", () => {
+        item.classList.remove("drop-before", "drop-after");
+      });
+      item.addEventListener("drop", (e) => {
+        e.preventDefault();
+        if (dragFrom2 == null) return;
+        const r = item.getBoundingClientRect();
+        let to = e.clientX > r.left + r.width / 2 ? i + 1 : i;
+        if (dragFrom2 < to) to -= 1;
+        void moveSlide(dragFrom2, to);
+      });
+      list2.append(item);
+    });
+    thumbs2.end();
+    list2.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+  }
+  function columns() {
+    const items = [...list2.children];
+    if (items.length < 2) return 1;
+    const top = items[0].offsetTop;
+    const n = items.findIndex((el2) => el2.offsetTop !== top);
+    return n === -1 ? items.length : n;
+  }
+  function onKey(e) {
+    if (view.hidden) return;
+    const target = e.target;
+    if (target.closest("input, textarea, select, #dialog, #find-panel")) return;
+    const n = ed.model?.slides.length ?? 0;
+    const move = (to) => {
+      e.preventDefault();
+      e.stopPropagation();
+      ed.slideSelection.clear();
+      gotoSlide(Math.max(0, Math.min(n - 1, to)));
+    };
+    switch (e.key) {
+      case "ArrowLeft":
+        move(ed.current - 1);
+        break;
+      case "ArrowRight":
+        move(ed.current + 1);
+        break;
+      case "ArrowUp":
+        move(ed.current - columns());
+        break;
+      case "ArrowDown":
+        move(ed.current + columns());
+        break;
+      case "Home":
+        move(0);
+        break;
+      case "End":
+        move(n - 1);
+        break;
+      case "Enter":
+        e.preventDefault();
+        e.stopPropagation();
+        open(ed.current);
+        break;
+      case "Escape":
+        e.preventDefault();
+        e.stopPropagation();
+        toggleGrid(false);
+        break;
+    }
+  }
+  function setSize(px) {
+    view.style.setProperty("--grid-w", `${px}px`);
+    try {
+      localStorage.setItem("inkflow-editor-grid", String(px));
+    } catch {
+    }
+  }
+  function initGrid() {
+    document.getElementById("btn-grid")?.addEventListener("click", () => toggleGrid());
+    document.getElementById("grid-close")?.addEventListener("click", () => toggleGrid(false));
+    document.addEventListener("keydown", onKey, true);
+    let saved = 280;
+    try {
+      saved = Number(localStorage.getItem("inkflow-editor-grid")) || 280;
+    } catch {
+    }
+    sizeInput.value = String(saved);
+    setSize(saved);
+    sizeInput.addEventListener("input", () => setSize(Number(sizeInput.value)));
+    on("model", renderGrid);
+    on("slide", renderGrid);
+    on("slide-selection", renderGrid);
   }
 
   // src/ts/editor/notes.ts
@@ -3960,7 +4149,7 @@
     const writable = !!src?.writable && (canTransform(el2) || ed.layoutMode || isOwnObject(el2));
     const kids = children(el2);
     const group = kids.length > 0;
-    const open = group && !collapsed.has(loc);
+    const open2 = group && !collapsed.has(loc);
     const selected = ed.selection.some((s) => s.el === el2);
     const locked = el2.hasAttribute("data-ink-locked");
     const hidden = isHidden(el2);
@@ -3978,7 +4167,7 @@
         {
           type: "button",
           class: `obj-twisty${group ? "" : " none"}`,
-          title: open ? "Collapse" : "Expand",
+          title: open2 ? "Collapse" : "Expand",
           onclick: (e) => {
             e.stopPropagation();
             if (collapsed.has(loc)) collapsed.delete(loc);
@@ -3986,7 +4175,7 @@
             renderObjects();
           }
         },
-        group ? open ? "\u25BE" : "\u25B8" : ""
+        group ? open2 ? "\u25BE" : "\u25B8" : ""
       ),
       name,
       writable ? h(
@@ -4021,7 +4210,7 @@
     item.addEventListener("mouseenter", () => setHover(el2));
     item.addEventListener("mouseleave", () => setHover(null));
     out.push(item);
-    if (open) {
+    if (open2) {
       for (const k of [...kids].reverse()) out.push(...row(k, depth + 1));
     }
     return out;
@@ -4322,8 +4511,8 @@
     }
     return section(kind === "video" ? "Video" : "Image", ...rows);
   }
-  function typeInfo(list2, type) {
-    return list2.find((t) => t.type === type) ?? null;
+  function typeInfo(list3, type) {
+    return list3.find((t) => t.type === type) ?? null;
   }
   function renderSlidePanel() {
     const slide = currentSlide();
@@ -4465,9 +4654,9 @@
     return `step ${t}`;
   }
   function animationList(cues, editable, di) {
-    const list2 = h("div", { class: "anim-list" });
+    const list3 = h("div", { class: "anim-list" });
     if (!cues.length)
-      list2.append(h("p", { class: "hint" }, "No animations on this slide."));
+      list3.append(h("p", { class: "hint" }, "No animations on this slide."));
     cues.forEach((cue, i) => {
       const item = h(
         "div",
@@ -4519,10 +4708,10 @@
           });
         })
       );
-      list2.append(item);
+      list3.append(item);
     });
     if (!editable && cues.length) {
-      list2.append(
+      list3.append(
         h(
           "p",
           { class: "hint" },
@@ -4530,7 +4719,7 @@
         )
       );
     }
-    return section("Animation order", list2);
+    return section("Animation order", list3);
   }
   function selectById(id) {
     const svg = slideRoot();
@@ -4960,12 +5149,12 @@
     return s?.id ? `slide:${s.id}` : null;
   }
   function slideOptions() {
-    const list2 = h("datalist", { id: "slide-link-list" });
+    const list3 = h("datalist", { id: "slide-link-list" });
     for (const s of ed.model?.slides ?? []) {
       if (!s.id) continue;
-      list2.append(h("option", { value: `slide:${s.id}` }, s.title ?? s.id));
+      list3.append(h("option", { value: `slide:${s.id}` }, s.title ?? s.id));
     }
-    return list2;
+    return list3;
   }
   function detailsSection(sel) {
     const title = [...sel.el.children].find((c) => c.localName === "title")?.textContent ?? "";
@@ -5459,19 +5648,32 @@
     const line = (r) => `| ${r.join(" | ")} |`;
     return [line(cells[0]), line(rule), ...cells.slice(1).map(line)].join("\n");
   }
-  function listMarkdown(list2) {
-    const ordered = list2.localName === "ol";
-    let n = parseInt(list2.getAttribute("start") ?? "1", 10) || 1;
+  var TASK_LIST = "contains-task-list";
+  var TASK_ITEM = "task-list-item";
+  function isCheckbox(node) {
+    return node.nodeType === Node.ELEMENT_NODE && node.localName === "input" && node.type === "checkbox";
+  }
+  function listMarkdown(list3) {
+    const ordered = list3.localName === "ol";
+    const tasks = list3.classList.contains(TASK_LIST);
+    let n = parseInt(list3.getAttribute("start") ?? "1", 10) || 1;
     const lines = [];
-    for (const li of list2.children) {
+    for (const li of list3.children) {
       if (li.localName !== "li") throw new Unsupported(li.localName);
-      if (!plain(li)) throw new Unsupported("li with attributes");
-      const marker = ordered ? `${n++}. ` : "- ";
-      const pad = " ".repeat(marker.length);
+      const cls = li.getAttribute("class") ?? "";
+      if (!plain(li, cls === TASK_ITEM || !cls ? ["class"] : [])) {
+        throw new Unsupported("li with attributes");
+      }
+      const box = [...li.childNodes].find(isCheckbox);
+      const task = tasks || cls === TASK_ITEM || box !== void 0;
+      const bullet = ordered ? `${n++}. ` : "- ";
+      const marker = `${bullet}${task ? box?.checked ? "[x] " : "[ ] " : ""}`;
+      const pad = " ".repeat(bullet.length);
       const own = [];
       const nested = [];
       for (const c of li.childNodes) {
         const el2 = c;
+        if (isCheckbox(c)) continue;
         if (c.nodeType === Node.ELEMENT_NODE && /^[ou]l$/.test(el2.localName)) {
           nested.push(listMarkdown(el2));
         } else if (c.nodeType === Node.ELEMENT_NODE && (el2.localName === "p" || el2.localName === "div")) {
@@ -5480,7 +5682,7 @@
           own.push(inlineNode(c));
         }
       }
-      const text = own.join("").trim().replace(/\n/g, `
+      const text = own.join("").replace(/(\\\n\s*)+$/, "").trim().replace(/\n/g, `
 ${pad}`);
       lines.push(`${marker}${text}`);
       for (const sub of nested) {
@@ -5506,9 +5708,13 @@ ${pad}`);
         }
         return escapeLineStart(inline(el2).replace(/\\\n$/, "").trim());
       case "ul":
-      case "ol":
-        if (!plain(el2, ["start"])) throw new Unsupported(tag);
+      case "ol": {
+        const cls = el2.getAttribute("class");
+        if (cls && cls !== TASK_LIST)
+          throw new Unsupported(`${tag}.${cls}`);
+        if (!plain(el2, ["start", "class"])) throw new Unsupported(tag);
         return listMarkdown(el2);
+      }
       case "blockquote":
         if (!plain(el2)) throw new Unsupported(tag);
         return blocks(el2).split("\n").map((l) => l ? `> ${l}` : ">").join("\n");
@@ -5864,6 +6070,12 @@ ${area2.value.slice(pos)}`;
     fo.classList.add("rich-editing");
     fo.style.overflow = "visible";
     content2.contentEditable = "true";
+    for (const box of content2.querySelectorAll(
+      "input[type=checkbox]"
+    )) {
+      box.disabled = false;
+    }
+    content2.addEventListener("input", () => fixChecklists(content2));
     content2.spellcheck = true;
     document.execCommand("defaultParagraphSeparator", false, "p");
     content2.focus();
@@ -6194,6 +6406,57 @@ ${area2.value.slice(pos)}`;
       if (c) c.style.textAlign = align2;
     }
   }
+  function checkbox() {
+    const box = h("input", {
+      type: "checkbox",
+      class: "task-list-item-checkbox"
+    });
+    return box;
+  }
+  function fixChecklists(content2) {
+    for (const li of content2.querySelectorAll("ul.contains-task-list > li")) {
+      li.classList.add("task-list-item");
+      const first = li.firstChild;
+      if (!(first instanceof HTMLInputElement)) {
+        li.prepend(checkbox(), " ");
+      }
+    }
+  }
+  function toggleChecklist(content2) {
+    let li = caretElement(content2)?.closest("li");
+    if (!li || !content2.contains(li)) {
+      document.execCommand("insertUnorderedList");
+      li = caretElement(content2)?.closest("li");
+    }
+    const list3 = li?.parentElement;
+    if (list3?.localName !== "ul") return;
+    if (list3.classList.contains("contains-task-list")) {
+      list3.classList.remove("contains-task-list");
+      if (!list3.classList.length) list3.removeAttribute("class");
+      for (const item of list3.children) {
+        item.classList.remove("task-list-item");
+        if (!item.classList.length) item.removeAttribute("class");
+        item.querySelector(":scope > input[type=checkbox]")?.remove();
+      }
+    } else {
+      list3.classList.add("contains-task-list");
+      fixChecklists(content2);
+    }
+    changed(content2);
+  }
+  function insertReveal(content2) {
+    const block = caretElement(content2)?.closest(
+      "p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote"
+    );
+    const marker = h("p", {}, "::step::");
+    if (block && content2.contains(block)) {
+      block.before(marker);
+    } else {
+      content2.append(marker);
+    }
+    changed(content2);
+    toast("Saved when you finish: what follows appears one click later");
+  }
   function insertTable(content2) {
     const head = "<th>Header</th><th>Header</th><th>Header</th>";
     const row3 = "<td><br></td><td><br></td><td><br></td>";
@@ -6328,10 +6591,16 @@ ${area2.value.slice(pos)}`;
       h("span", { class: "fmt-sep" }),
       btn("\u2022", "Bullet list", exec("insertUnorderedList"), "fmt-ul"),
       btn("1.", "Numbered list", exec("insertOrderedList"), "fmt-ol"),
+      btn("\u2611", "Checklist", () => toggleChecklist(content2), "fmt-task"),
       btn("\u25A6", "Insert a table", () => insertTable(content2)),
       tableTools,
       h("span", { class: "fmt-sep" }),
       btn("Tx", "Clear formatting", exec("removeFormat")),
+      btn(
+        "\u23F5",
+        "Reveal on click: what follows appears one click later (a ::step:: marker; afterwards this text is edited as Markdown)",
+        () => insertReveal(content2)
+      ),
       btn("M\u2193", "Edit the Markdown source (math, code, reveals\u2026)", toSource),
       btn(
         h("span", {}, icon("select", 13), " Done"),
@@ -6360,6 +6629,7 @@ ${area2.value.slice(pos)}`;
     on2("fmt-link", !!el2?.closest("a"));
     on2("fmt-ul", !!el2?.closest("ul"));
     on2("fmt-ol", !!el2?.closest("ol"));
+    on2("fmt-task", !!el2?.closest("ul.contains-task-list"));
     const blockEl = el2?.closest("p, h1, h2, h3, h4, h5, h6, blockquote, li");
     const select2 = bar.querySelector(".fmt-block");
     if (select2 && blockEl) {
@@ -6553,9 +6823,9 @@ ${area2.value.slice(pos)}`;
       const n = parseInt(size2.value, 10);
       void save2({ fontSize: Number.isFinite(n) ? n : null }, "Font size");
     });
-    const list2 = h("datalist", { id: "theme-font-list" });
+    const list3 = h("datalist", { id: "theme-font-list" });
     for (const f of ["sans-serif", "serif", "monospace", ...t.fonts]) {
-      list2.append(h("option", { value: f }));
+      list3.append(h("option", { value: f }));
     }
     content.append(
       h(
@@ -6565,7 +6835,7 @@ ${area2.value.slice(pos)}`;
         h("label", {}, h("span", {}, "Base font size (px)"), size2)
       ),
       h("h3", {}, "Fonts"),
-      list2,
+      list3,
       ...FONTS.map(([n, l, g]) => fontRow(n, l, g)),
       h(
         "p",
@@ -6773,7 +7043,7 @@ ${area2.value.slice(pos)}`;
     l: "line",
     a: "arrow"
   };
-  function onKey(e) {
+  function onKey2(e) {
     const target = e.target;
     if (target.closest("input, textarea, select, [contenteditable]") || isEditingText()) {
       return;
@@ -6862,6 +7132,8 @@ ${area2.value.slice(pos)}`;
       setZoom(0);
     } else if (!mod && !e.altKey && lower in TOOL_KEYS) {
       setTool(TOOL_KEYS[lower]);
+    } else if (!mod && !e.altKey && lower === "g") {
+      toggleGrid();
     } else if (!mod && lower === "i") {
       void (e.shiftKey ? insertVideo() : insertImage());
     }
@@ -6890,7 +7162,7 @@ ${area2.value.slice(pos)}`;
       render();
       emit("step");
     });
-    document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey2);
     on("render", renderStepSelect);
     on("render", updateZoomLabel);
     on("zoom", updateZoomLabel);
@@ -6993,6 +7265,7 @@ ${area2.value.slice(pos)}`;
     initDialog();
     initExport();
     initFind();
+    initGrid();
     initTheme();
     on("slide", () => {
       void finishTextEdit();

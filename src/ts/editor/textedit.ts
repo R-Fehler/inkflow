@@ -371,6 +371,13 @@ function editZoneRich(
     fo.classList.add("rich-editing");
     fo.style.overflow = "visible";
     content.contentEditable = "true";
+    // Checklist boxes tick while editing (they are static on the slide).
+    for (const box of content.querySelectorAll<HTMLInputElement>(
+        "input[type=checkbox]",
+    )) {
+        box.disabled = false;
+    }
+    content.addEventListener("input", () => fixChecklists(content));
     content.spellcheck = true;
     document.execCommand("defaultParagraphSeparator", false, "p");
     content.focus();
@@ -757,6 +764,65 @@ function alignColumn(cell: HTMLTableCellElement, align: string): void {
     }
 }
 
+// ── Checklists and reveals ──
+
+function checkbox(): HTMLInputElement {
+    const box = h("input", {
+        type: "checkbox",
+        class: "task-list-item-checkbox",
+    });
+    return box;
+}
+
+// Every item of a checklist keeps its box (Enter makes items without one).
+function fixChecklists(content: HTMLElement): void {
+    for (const li of content.querySelectorAll("ul.contains-task-list > li")) {
+        li.classList.add("task-list-item");
+        const first = li.firstChild;
+        if (!(first instanceof HTMLInputElement)) {
+            li.prepend(checkbox(), " ");
+        }
+    }
+}
+
+function toggleChecklist(content: HTMLElement): void {
+    let li = caretElement(content)?.closest("li");
+    if (!li || !content.contains(li)) {
+        document.execCommand("insertUnorderedList");
+        li = caretElement(content)?.closest("li");
+    }
+    const list = li?.parentElement;
+    if (list?.localName !== "ul") return;
+    if (list.classList.contains("contains-task-list")) {
+        list.classList.remove("contains-task-list");
+        if (!list.classList.length) list.removeAttribute("class");
+        for (const item of list.children) {
+            item.classList.remove("task-list-item");
+            if (!item.classList.length) item.removeAttribute("class");
+            item.querySelector(":scope > input[type=checkbox]")?.remove();
+        }
+    } else {
+        list.classList.add("contains-task-list");
+        fixChecklists(content);
+    }
+    changed(content);
+}
+
+function insertReveal(content: HTMLElement): void {
+    const block = caretElement(content)?.closest(
+        "p, h1, h2, h3, h4, h5, h6, ul, ol, table, blockquote",
+    );
+    const marker = h("p", {}, "::step::");
+    if (block && content.contains(block)) {
+        // Before the block the caret is in: that block is what the click shows.
+        block.before(marker);
+    } else {
+        content.append(marker);
+    }
+    changed(content);
+    toast("Saved when you finish: what follows appears one click later");
+}
+
 function insertTable(content: HTMLElement): void {
     const head = "<th>Header</th><th>Header</th><th>Header</th>";
     const row = "<td><br></td><td><br></td><td><br></td>";
@@ -902,10 +968,16 @@ function richToolbar(content: HTMLElement, toSource: () => void): HTMLElement {
         h("span", { class: "fmt-sep" }),
         btn("•", "Bullet list", exec("insertUnorderedList"), "fmt-ul"),
         btn("1.", "Numbered list", exec("insertOrderedList"), "fmt-ol"),
+        btn("☑", "Checklist", () => toggleChecklist(content), "fmt-task"),
         btn("▦", "Insert a table", () => insertTable(content)),
         tableTools,
         h("span", { class: "fmt-sep" }),
         btn("Tx", "Clear formatting", exec("removeFormat")),
+        btn(
+            "⏵",
+            "Reveal on click: what follows appears one click later (a ::step:: marker; afterwards this text is edited as Markdown)",
+            () => insertReveal(content),
+        ),
         btn("M↓", "Edit the Markdown source (math, code, reveals…)", toSource),
         btn(
             h("span", {}, icon("select", 13), " Done"),
@@ -936,6 +1008,7 @@ function syncToolbar(bar: HTMLElement | null, content: HTMLElement): void {
     on("fmt-link", !!el?.closest("a"));
     on("fmt-ul", !!el?.closest("ul"));
     on("fmt-ol", !!el?.closest("ol"));
+    on("fmt-task", !!el?.closest("ul.contains-task-list"));
     const blockEl = el?.closest("p, h1, h2, h3, h4, h5, h6, blockquote, li");
     const select = bar.querySelector<HTMLSelectElement>(".fmt-block");
     if (select && blockEl) {

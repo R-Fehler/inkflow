@@ -545,9 +545,13 @@ def build_slide_content(
 
     for key, val in extra.items():
         if isinstance(val, str):
-            result[f"zone-{key}"] = TextBox(
-                text=deck_source.html(markdown_to_html(val))
+            # A zones={...} string is Markdown like a .md section, reveals
+            # included; its steps continue the slide's count.
+            html, base_step, zone_anims = chunks_to_html(
+                _split_steps(val), base_step, ids
             )
+            animations.extend(zone_anims)
+            result[f"zone-{key}"] = TextBox(text=deck_source.html(html))
         else:
             result[f"zone-{key}"] = _resolve_zone_assets(val, deck_source)
 

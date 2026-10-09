@@ -173,19 +173,40 @@ export function tableMarkdown(table: Element): string {
     return [line(cells[0]), line(rule), ...cells.slice(1).map(line)].join("\n");
 }
 
+const TASK_LIST = "contains-task-list";
+const TASK_ITEM = "task-list-item";
+
+function isCheckbox(node: Node): node is HTMLInputElement {
+    return (
+        node.nodeType === Node.ELEMENT_NODE &&
+        (node as Element).localName === "input" &&
+        (node as HTMLInputElement).type === "checkbox"
+    );
+}
+
 function listMarkdown(list: Element): string {
     const ordered = list.localName === "ol";
+    // A checklist (- [ ] / - [x]); an item added while editing may lack its
+    // class or its box, and is then an unticked task.
+    const tasks = list.classList.contains(TASK_LIST);
     let n = parseInt(list.getAttribute("start") ?? "1", 10) || 1;
     const lines: string[] = [];
     for (const li of list.children) {
         if (li.localName !== "li") throw new Unsupported(li.localName);
-        if (!plain(li)) throw new Unsupported("li with attributes");
-        const marker = ordered ? `${n++}. ` : "- ";
-        const pad = " ".repeat(marker.length);
+        const cls = li.getAttribute("class") ?? "";
+        if (!plain(li, cls === TASK_ITEM || !cls ? ["class"] : [])) {
+            throw new Unsupported("li with attributes");
+        }
+        const box = [...li.childNodes].find(isCheckbox);
+        const task = tasks || cls === TASK_ITEM || box !== undefined;
+        const bullet = ordered ? `${n++}. ` : "- ";
+        const marker = `${bullet}${task ? (box?.checked ? "[x] " : "[ ] ") : ""}`;
+        const pad = " ".repeat(bullet.length);
         const own: string[] = [];
         const nested: string[] = [];
         for (const c of li.childNodes) {
             const el = c as Element;
+            if (isCheckbox(c)) continue;
             if (
                 c.nodeType === Node.ELEMENT_NODE &&
                 /^[ou]l$/.test(el.localName)
@@ -200,7 +221,12 @@ function listMarkdown(list: Element): string {
                 own.push(inlineNode(c));
             }
         }
-        const text = own.join("").trim().replace(/\n/g, `\n${pad}`);
+        // contenteditable leaves a <br> at the end of an edited item.
+        const text = own
+            .join("")
+            .replace(/(\\\n\s*)+$/, "")
+            .trim()
+            .replace(/\n/g, `\n${pad}`);
         lines.push(`${marker}${text}`);
         for (const sub of nested) {
             lines.push(
@@ -230,9 +256,13 @@ function blockMarkdown(el: Element): string {
             }
             return escapeLineStart(inline(el).replace(/\\\n$/, "").trim());
         case "ul":
-        case "ol":
-            if (!plain(el, ["start"])) throw new Unsupported(tag);
+        case "ol": {
+            const cls = el.getAttribute("class");
+            if (cls && cls !== TASK_LIST)
+                throw new Unsupported(`${tag}.${cls}`);
+            if (!plain(el, ["start", "class"])) throw new Unsupported(tag);
             return listMarkdown(el);
+        }
         case "blockquote":
             if (!plain(el)) throw new Unsupported(tag);
             return blocks(el)

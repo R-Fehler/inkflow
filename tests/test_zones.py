@@ -697,3 +697,16 @@ class TestRerouteZones:
         # Without available_zones, no rerouting — no ValueError even without default
         result = build_slide_content(md.read_text(encoding="utf-8"), {})
         assert "zone-content" in result.content
+
+
+def test_deck_zone_strings_reveal_like_markdown_sections() -> None:
+    """A zones={...} string is Markdown like a .md section: ::step:: reveals,
+    numbered on after the slide's Markdown reveals (one timeline)."""
+    result = build_slide_content(
+        "# T\n\none\n\n::step::\n\ntwo\n",
+        {"text": "First\n\n::step::\n\nSecond"},
+    )
+    text = result.content["zone-text"]
+    assert isinstance(text, TextBox) and "::step::" not in (text.text or "")
+    assert _steps(result.animations) == [1, 2]
+    assert result.max_step == 2

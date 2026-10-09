@@ -24,6 +24,7 @@ import { setCropMode } from "./crop";
 import { toast } from "./dom";
 import { openFind } from "./find";
 import { openGallery } from "./gallery";
+import { toggleGrid } from "./grid";
 import { insertImage, insertVideo, setTool } from "./insert";
 import { edit } from "./net";
 import { alignSelection } from "./props";
@@ -313,6 +314,8 @@ function onKey(e: KeyboardEvent): void {
         setZoom(0);
     } else if (!mod && !e.altKey && lower in TOOL_KEYS) {
         setTool(TOOL_KEYS[lower]);
+    } else if (!mod && !e.altKey && lower === "g") {
+        toggleGrid();
     } else if (!mod && lower === "i") {
         void (e.shiftKey ? insertVideo() : insertImage());
     }

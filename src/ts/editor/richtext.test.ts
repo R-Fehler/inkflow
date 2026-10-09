@@ -39,6 +39,13 @@ describe("htmlToMarkdown", () => {
         ).toBe("[back](slide:intro)");
     });
 
+    it("writes checklists as task items", () => {
+        const out = md(
+            '<ul class="contains-task-list">\n<li class="task-list-item"><input class="task-list-item-checkbox" disabled="disabled" type="checkbox"> todo</li>\n<li class="task-list-item"><input class="task-list-item-checkbox" checked="checked" disabled="disabled" type="checkbox"> done</li>\n<li>added while editing<br></li>\n</ul>\n',
+        );
+        expect(out).toBe("- [ ] todo\n- [x] done\n- [ ] added while editing");
+    });
+
     it("writes headings, quotes and hard breaks", () => {
         expect(md("<h1>Title</h1>\n")).toBe("# Title");
         expect(md("<blockquote>\n<p>quoted\ntext</p>\n</blockquote>\n")).toBe(

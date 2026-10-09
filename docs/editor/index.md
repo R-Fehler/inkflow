@@ -76,6 +76,16 @@ dropped too, since the receiving deck's own overlays apply. And because the
 clipboard is shared with everything else on your computer, a paste only accepts
 a plain `Slide(...)` built from inkflow's own types, never arbitrary Python.
 
+## The grid view
+
+<kbd>G</kbd> (or the grid button in the toolbar) shows every slide as a large
+thumbnail, like the presenter's overview. It works like the slide list: click to
+pick (<kbd>Ctrl</kbd>/<kbd>Shift</kbd> for several), drag to reorder, right-click
+for the slide menu, <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> /
+<kbd>Delete</kbd> on the picked slides. The arrow keys move around the grid;
+double-click or <kbd>Enter</kbd> opens a slide, <kbd>Esc</kbd> goes back. The size
+slider sets how large the thumbnails are.
+
 ## The canvas
 
 - **Select** with a click; <kbd>Shift</kbd>+click adds to the selection; drag on
@@ -110,8 +120,10 @@ edit the text right where it is on the slide, with a formatting bar above it:
   mode;
 - links (<kbd>Ctrl</kbd>+<kbd>K</kbd>): a web address, or `slide:<id>` to jump to
   another slide;
-- bulleted and numbered lists (<kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd>
-  indent and outdent);
+- bulleted, numbered and checklists (<kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd>
+  indent and outdent); tick a checklist item by clicking its box;
+- **⏵ reveal on click**: what follows the caret appears one click later in the
+  presentation (it writes a `::step::` marker);
 - tables: insert one, then <kbd>Tab</kbd> moves from cell to cell (and adds a row
   at the end), and the bar gains buttons to add or delete rows and columns and to
   align a column.
@@ -274,6 +286,7 @@ Each result can also be downloaded straight from the dialog (the web page as a
 | <kbd>Enter</kbd> | Edit the selected text or zone (when cropping: done) |
 | Middle-click, <kbd>Alt</kbd>+click | Select the next object under the pointer |
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>H</kbd> | Find / replace |
+| <kbd>G</kbd> | Grid view of all slides |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> <kbd>I</kbd> <kbd>K</kbd> (in text) | Bold, italic, link |
 | <kbd>Tab</kbd> (in a table) | Next cell |
 | <kbd>PageUp</kbd> <kbd>PageDown</kbd> | Previous / next slide |

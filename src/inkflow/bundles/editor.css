@@ -1572,3 +1572,103 @@ body.offline #offline-banner {
   text-decoration: none;
   color: inherit;
 }
+#grid-view {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--ui-canvas);
+  outline: none;
+}
+#grid-view[hidden] {
+  display: none;
+}
+.grid-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--subtext);
+  border-bottom: 1px solid var(--ui-line);
+  background: var(--ui-panel);
+}
+#grid-view .grid-head > span {
+  flex: 1;
+}
+.grid-head label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#grid-list {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--grid-w, 280px), 1fr));
+  gap: 22px;
+  padding: 22px;
+  align-content: start;
+}
+.grid-item {
+  position: relative;
+  cursor: pointer;
+}
+#grid-list .grid-item .thumb {
+  border: 2px solid transparent;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.3);
+}
+#grid-list .grid-item.active .thumb {
+  border-color: var(--sel);
+}
+#grid-list .grid-item.picked .thumb {
+  border-color: var(--sel);
+  box-shadow: 0 0 0 4px var(--sel-soft);
+}
+#grid-list .grid-item.hidden-slide .thumb {
+  opacity: 0.4;
+}
+.grid-item.dragging {
+  opacity: 0.4;
+}
+.grid-item.drop-before::before,
+.grid-item.drop-after::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 24px;
+  width: 3px;
+  background: var(--sel);
+  border-radius: 2px;
+}
+.grid-item.drop-before::before {
+  left: -13px;
+}
+.grid-item.drop-after::after {
+  right: -13px;
+}
+.grid-caption {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 2px 0;
+  font-size: 12px;
+}
+.grid-num {
+  color: var(--subtext);
+  font-variant-numeric: tabular-nums;
+}
+.grid-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grid-badge {
+  color: var(--sel);
+}

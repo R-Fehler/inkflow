@@ -16,6 +16,7 @@ import { toast } from "./dom";
 import { initExport } from "./exportdlg";
 import { initFind } from "./find";
 import { initGallery } from "./gallery";
+import { initGrid } from "./grid";
 import { afterRender, initInsert } from "./insert";
 import { connect } from "./net";
 import { initNotes } from "./notes";
@@ -124,6 +125,7 @@ function boot(): void {
     initDialog();
     initExport();
     initFind();
+    initGrid();
     initTheme();
 
     on("slide", () => {

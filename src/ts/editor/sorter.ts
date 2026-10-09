@@ -24,7 +24,7 @@ let dragFrom: number | null = null;
 
 // Click picks one slide; Ctrl/Cmd adds or removes one, Shift a range (for
 // copying, cutting or deleting several at once).
-function pick(i: number, e: MouseEvent): void {
+export function pickSlide(i: number, e: MouseEvent): void {
     ed.focus = "sorter";
     if (e.shiftKey) {
         const [a, b] = [Math.min(ed.current, i), Math.max(ed.current, i)];
@@ -82,47 +82,62 @@ export function gotoSlide(deckIndex: number): void {
 }
 
 // Thumbnails keyed by their SVG: an edit re-renders only the slides it changed.
-let thumbs = new Map<string, HTMLElement>();
-let used = new Map<string, HTMLElement>();
+// Each view (the slide list, the grid) keeps its own cache, since a DOM node can
+// only be in one place.
+export class Thumbs {
+    private cache = new Map<string, HTMLElement>();
+    private used = new Map<string, HTMLElement>();
 
-function thumb(slide: SlideModel): HTMLElement {
-    const box = h("div", { class: "thumb" });
-    if (slide.visibleIndex == null) {
-        box.append(h("div", { class: "thumb-hidden" }, icon("eyeOff", 18)));
+    begin(): void {
+        this.used = new Map();
+    }
+
+    end(): void {
+        this.cache = this.used;
+    }
+
+    thumb(slide: SlideModel): HTMLElement {
+        const box = h("div", { class: "thumb" });
+        if (slide.visibleIndex == null) {
+            box.append(h("div", { class: "thumb-hidden" }, icon("eyeOff", 18)));
+            return box;
+        }
+        const data = ed.slides[slide.visibleIndex];
+        if (!data) return box;
+        const cached = this.cache.get(data.svg);
+        if (cached && !this.used.has(data.svg)) {
+            this.used.set(data.svg, cached);
+            return cached;
+        }
+        this.used.set(data.svg, box);
+        box.innerHTML = data.svg;
+        const svg = box.querySelector("svg");
+        if (svg) {
+            const vb = parseViewBox(svg.getAttribute("viewBox"));
+            svg.setAttribute("width", "100%");
+            svg.setAttribute("height", "100%");
+            svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+            svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
+            // Thumbnails show the slide's final state, not its first build step.
+            svg.querySelectorAll(".anim-pending").forEach((el) => {
+                el.classList.remove("anim-pending");
+            });
+            svg.querySelectorAll("video").forEach((v) => {
+                v.removeAttribute("autoplay");
+            });
+            // Ids inside thumbnails would shadow the canvas's own for url(#…)
+            // lookups only if they came first in the document; the canvas does
+            // (see editor.html).
+        }
         return box;
     }
-    const data = ed.slides[slide.visibleIndex];
-    if (!data) return box;
-    const cached = thumbs.get(data.svg);
-    if (cached && !used.has(data.svg)) {
-        used.set(data.svg, cached);
-        return cached;
-    }
-    used.set(data.svg, box);
-    box.innerHTML = data.svg;
-    const svg = box.querySelector("svg");
-    if (svg) {
-        const vb = parseViewBox(svg.getAttribute("viewBox"));
-        svg.setAttribute("width", "100%");
-        svg.setAttribute("height", "100%");
-        svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-        svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
-        // Thumbnails show the slide's final state, not its first build step.
-        svg.querySelectorAll(".anim-pending").forEach((el) => {
-            el.classList.remove("anim-pending");
-        });
-        svg.querySelectorAll("video").forEach((v) => {
-            v.removeAttribute("autoplay");
-        });
-        // Ids inside thumbnails would shadow the canvas's own for url(#…) lookups
-        // only if they came first in the document; the canvas does (see editor.html).
-    }
-    return box;
 }
+
+const thumbs = new Thumbs();
 
 export function renderSorter(): void {
     clear(list);
-    used = new Map();
+    thumbs.begin();
     const slides = ed.model?.slides ?? [];
     slides.forEach((slide, i) => {
         const item = h(
@@ -134,9 +149,9 @@ export function renderSorter(): void {
                 "data-index": i,
             },
             h("span", { class: "sorter-num" }, String(i + 1)),
-            thumb(slide),
+            thumbs.thumb(slide),
         );
-        item.addEventListener("click", (e) => pick(i, e));
+        item.addEventListener("click", (e) => pickSlide(i, e));
         item.addEventListener("contextmenu", (e) => {
             e.preventDefault();
             ed.focus = "sorter";
@@ -144,7 +159,7 @@ export function renderSorter(): void {
                 ed.slideSelection.clear();
                 gotoSlide(i);
             }
-            openMenu(e.clientX, e.clientY, i);
+            openSlideMenu(e.clientX, e.clientY, i);
         });
         item.addEventListener("dragstart", (e) => {
             dragFrom = i;
@@ -180,11 +195,11 @@ export function renderSorter(): void {
         });
         list.append(item);
     });
-    thumbs = used;
+    thumbs.end();
     list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
 }
 
-async function moveSlide(from: number, to: number): Promise<void> {
+export async function moveSlide(from: number, to: number): Promise<void> {
     if (from === to) return;
     const result = await edit({ action: "slide", op: "move", from, to });
     if (result.ok) {
@@ -269,7 +284,7 @@ function menuItem(
     );
 }
 
-function openMenu(x: number, y: number, i: number): void {
+export function openSlideMenu(x: number, y: number, i: number): void {
     const slide = ed.model?.slides[i];
     const editable = !!ed.model?.deckEditable;
     const many = ed.slideSelection.size > 1;
