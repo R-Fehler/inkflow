@@ -13,7 +13,7 @@ light/dark mode in the presenter to see both palette variants.
 
 ## The layouts
 
-The theme ships eleven layouts plus two building blocks,
+The theme ships eighteen layouts plus two building blocks,
 listed with their zones in [Layouts](../design/layouts.md#built-in-layouts).
 The showcase above walks through each one.
 

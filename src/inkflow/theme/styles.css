@@ -133,3 +133,91 @@
 .layout-quote #zone-attribution .inkflow-content p::before {
     content: "— ";
 }
+
+/* comparison --------------------------------------------------------------- */
+.layout-comparison #zone-left-title,
+.layout-comparison #zone-right-title {
+    --inkflow-valign: end;
+}
+
+.layout-comparison #zone-left-title .inkflow-content :is(h1, h2, h3, p),
+.layout-comparison #zone-right-title .inkflow-content :is(h1, h2, h3, p) {
+    color: var(--inkflow-accent);
+    font-size: 1.3em;
+    font-weight: 600;
+    margin: 0;
+}
+
+/* title-media -------------------------------------------------------------- */
+.layout-title-media #zone-caption {
+    --inkflow-align: center;
+    --inkflow-valign: center;
+}
+
+.layout-title-media #zone-caption .inkflow-content {
+    color: var(--inkflow-text-muted);
+    font-size: 0.85em;
+}
+
+/* full-media --------------------------------------------------------------- */
+/* Over a photo, under a dark fade: light text in either colour mode. */
+.layout-full-media #zone-title {
+    --inkflow-align: left;
+    --inkflow-valign: end;
+}
+.layout-full-media #zone-subtitle {
+    --inkflow-align: left;
+    --inkflow-valign: start;
+}
+
+.layout-full-media #zone-title .inkflow-content :is(h1, h2, p) {
+    color: #fff;
+    font-size: 2.4em;
+    font-weight: 700;
+    line-height: 1.1;
+    text-shadow: 0 2px 12px rgb(0 0 0 / 0.45);
+}
+.layout-full-media #zone-subtitle .inkflow-content,
+.layout-full-media #zone-subtitle .inkflow-content :is(h2, p) {
+    color: rgb(255 255 255 / 0.85);
+    font-size: 1.1em;
+}
+
+/* agenda ------------------------------------------------------------------- */
+.layout-agenda #zone-content .inkflow-content ol {
+    list-style: none;
+    counter-reset: agenda;
+    padding-left: 0;
+}
+
+.layout-agenda #zone-content .inkflow-content ol > li {
+    counter-increment: agenda;
+    display: flex;
+    align-items: baseline;
+    gap: 0.8em;
+    margin: 0.35em 0;
+    font-size: 1.25em;
+}
+
+.layout-agenda #zone-content .inkflow-content ol > li::before {
+    content: counter(agenda, decimal-leading-zero);
+    color: var(--inkflow-accent);
+    font-weight: 700;
+    min-width: 2.2em;
+}
+
+/* three-cards -------------------------------------------------------------- */
+.layout-three-cards #zone-card-1,
+.layout-three-cards #zone-card-2,
+.layout-three-cards #zone-card-3 {
+    --inkflow-padding: 36px;
+    --inkflow-valign: start;
+}
+
+.layout-three-cards
+    :is(#zone-card-1, #zone-card-2, #zone-card-3)
+    .inkflow-content
+    :is(h2, h3) {
+    color: var(--inkflow-accent);
+    margin-top: 0;
+}

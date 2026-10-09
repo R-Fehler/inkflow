@@ -154,7 +154,7 @@ It prints every layout and overlay with its parent chain and its zones.
 
 ## Built-in layouts
 
-The built-in theme ships eleven layouts, usable by bare name in any deck:
+The built-in theme ships eighteen layouts, usable by bare name in any deck:
 
 | Name | Zones | For |
 |---|---|---|
@@ -168,6 +168,13 @@ The built-in theme ships eleven layouts, usable by bare name in any deck:
 | `quote` | quote, attribution | A pull quote |
 | `media-left` | title, content, media | Text with an image or video on the left |
 | `media-right` | title, content, media | The same, media on the right |
+| `agenda` | title, content | A numbered outline (write a `1.` list) |
+| `three-cols` | title, left, middle, right | Three side-by-side columns |
+| `comparison` | title, left-title, left, right-title, right | Two headed columns: before/after, pros/cons |
+| `quad` | title, top-left, top-right, bottom-left, bottom-right | A two-by-two grid |
+| `three-cards` | title, media-1…3, card-1…3 | Three cards, each an image over text |
+| `title-media` | title, media, caption | One large image or video with a caption |
+| `full-media` | media, title, subtitle | A full-bleed photo or video, title over a fade |
 | `end` | title, subtitle | The closing slide |
 
 Two more exist as building blocks: `base` is the parentless background,
