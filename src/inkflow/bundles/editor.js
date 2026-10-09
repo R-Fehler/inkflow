@@ -848,15 +848,14 @@
   }
   function layoutPaper() {
     const svg = slideRoot();
-    if (!svg) return;
     const { w, h: h2 } = viewBoxSize();
     const s = scale();
     const pw = Math.round(w * s);
     const ph = Math.round(h2 * s);
     paper.style.width = `${pw}px`;
     paper.style.height = `${ph}px`;
-    svg.setAttribute("width", String(pw));
-    svg.setAttribute("height", String(ph));
+    svg?.setAttribute("width", String(pw));
+    svg?.setAttribute("height", String(ph));
     overlay.setAttribute("width", String(pw));
     overlay.setAttribute("height", String(ph));
     overlay.setAttribute("viewBox", `0 0 ${pw} ${ph}`);
@@ -876,6 +875,30 @@
     const scopeKey = ed.scope?.getAttribute("data-ink") ?? null;
     const data = currentRendered();
     host.innerHTML = data ? data.svg : "";
+    const hidden = currentSlide();
+    if (!data && hidden && !hidden.visible) {
+      host.append(
+        h(
+          "div",
+          { class: "hidden-note" },
+          h("p", {}, "This slide is hidden: the presentation skips it."),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => void edit({
+                action: "slide",
+                op: "hide",
+                slide: hidden.deckIndex,
+                hidden: false
+              })
+            },
+            "Show it again to edit"
+          )
+        )
+      );
+    }
     const svg = slideRoot();
     if (svg) {
       svg.removeAttribute("width");
@@ -1804,6 +1827,8 @@
     ed.scope = null;
     emit("slide");
   }
+  var thumbs = /* @__PURE__ */ new Map();
+  var used = /* @__PURE__ */ new Map();
   function thumb(slide) {
     const box = h("div", { class: "thumb" });
     if (slide.visibleIndex == null) {
@@ -1812,6 +1837,12 @@
     }
     const data = ed.slides[slide.visibleIndex];
     if (!data) return box;
+    const cached = thumbs.get(data.svg);
+    if (cached && !used.has(data.svg)) {
+      used.set(data.svg, cached);
+      return cached;
+    }
+    used.set(data.svg, box);
     box.innerHTML = data.svg;
     const svg = box.querySelector("svg");
     if (svg) {
@@ -1831,6 +1862,7 @@
   }
   function renderSorter() {
     clear(list);
+    used = /* @__PURE__ */ new Map();
     const slides = ed.model?.slides ?? [];
     slides.forEach((slide, i) => {
       const item = h(
@@ -1884,6 +1916,7 @@
       });
       list.append(item);
     });
+    thumbs = used;
     list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
   }
   async function moveSlide(from, to) {

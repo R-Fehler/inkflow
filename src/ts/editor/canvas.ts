@@ -9,7 +9,7 @@
 
 import { applyStepInstant } from "../shared/step";
 import { parseViewBox } from "../shared/viewbox";
-import { svgEl, toast } from "./dom";
+import { h, svgEl, toast } from "./dom";
 import {
     type AttrPlan,
     type Box,
@@ -72,15 +72,14 @@ export function scale(): number {
 
 export function layoutPaper(): void {
     const svg = slideRoot();
-    if (!svg) return;
     const { w, h } = viewBoxSize();
     const s = scale();
     const pw = Math.round(w * s);
     const ph = Math.round(h * s);
     paper.style.width = `${pw}px`;
     paper.style.height = `${ph}px`;
-    svg.setAttribute("width", String(pw));
-    svg.setAttribute("height", String(ph));
+    svg?.setAttribute("width", String(pw));
+    svg?.setAttribute("height", String(ph));
     overlay.setAttribute("width", String(pw));
     overlay.setAttribute("height", String(ph));
     overlay.setAttribute("viewBox", `0 0 ${pw} ${ph}`);
@@ -107,6 +106,32 @@ export function render(): void {
     const scopeKey = ed.scope?.getAttribute("data-ink") ?? null;
     const data = currentRendered();
     host.innerHTML = data ? data.svg : "";
+    const hidden = currentSlide();
+    if (!data && hidden && !hidden.visible) {
+        // Hidden slides are not built (the presenter skips them entirely).
+        host.append(
+            h(
+                "div",
+                { class: "hidden-note" },
+                h("p", {}, "This slide is hidden: the presentation skips it."),
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "pbtn",
+                        onclick: () =>
+                            void edit({
+                                action: "slide",
+                                op: "hide",
+                                slide: hidden.deckIndex,
+                                hidden: false,
+                            }),
+                    },
+                    "Show it again to edit",
+                ),
+            ),
+        );
+    }
     const svg = slideRoot();
     if (svg) {
         svg.removeAttribute("width");

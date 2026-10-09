@@ -26,6 +26,10 @@ export function gotoSlide(deckIndex: number): void {
     emit("slide");
 }
 
+// Thumbnails keyed by their SVG: an edit re-renders only the slides it changed.
+let thumbs = new Map<string, HTMLElement>();
+let used = new Map<string, HTMLElement>();
+
 function thumb(slide: SlideModel): HTMLElement {
     const box = h("div", { class: "thumb" });
     if (slide.visibleIndex == null) {
@@ -34,6 +38,12 @@ function thumb(slide: SlideModel): HTMLElement {
     }
     const data = ed.slides[slide.visibleIndex];
     if (!data) return box;
+    const cached = thumbs.get(data.svg);
+    if (cached && !used.has(data.svg)) {
+        used.set(data.svg, cached);
+        return cached;
+    }
+    used.set(data.svg, box);
     box.innerHTML = data.svg;
     const svg = box.querySelector("svg");
     if (svg) {
@@ -57,6 +67,7 @@ function thumb(slide: SlideModel): HTMLElement {
 
 export function renderSorter(): void {
     clear(list);
+    used = new Map();
     const slides = ed.model?.slides ?? [];
     slides.forEach((slide, i) => {
         const item = h(
@@ -110,6 +121,7 @@ export function renderSorter(): void {
         });
         list.append(item);
     });
+    thumbs = used;
     list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
 }
 

@@ -518,6 +518,15 @@ body.previewing #canvas::after {
 #canvas.zoomed #paper {
   margin: 0 auto;
 }
+.hidden-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 100%;
+  color: var(--subtext);
+}
 #notes {
   position: relative;
   grid-area: notes;
