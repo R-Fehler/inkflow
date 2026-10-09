@@ -1456,6 +1456,38 @@ def test_export_builds_and_offers_downloads(project: Path) -> None:
         server._editor["session"] = None  # pyright: ignore[reportPrivateUsage]
 
 
+def test_connector_attrs_and_renames() -> None:
+    svg = _svg(
+        DRAWING.replace(
+            '<rect id="box"',
+            '<path id="arrow" d="M0,0 L10,10" inkflow:connector="straight"'
+            + ' inkflow:connect-end="box:left" xmlns:inkflow="urn:inkflow"/>'
+            + '\n  <rect id="box"',
+        )
+    )
+    arrow = _loc(svg, "arrow")
+    apply_ops(
+        svg,
+        [
+            {
+                "kind": "attrs",
+                "loc": arrow,
+                "set": {"inkflow:connect-start": "label:right", "d": "M5,5 L9,9"},
+            }
+        ],
+    )
+    apply_ops(
+        svg, [{"kind": "id", "loc": _loc(svg, "box"), "id": "card", "from": "box"}]
+    )
+    data = svg.to_bytes().decode()
+    assert 'inkflow:connect-start="label:right"' in data
+    assert 'inkflow:connect-end="card:left"' in data
+    apply_ops(
+        svg, [{"kind": "attrs", "loc": arrow, "set": {"inkflow:connect-end": None}}]
+    )
+    assert "connect-end" not in svg.to_bytes().decode()
+
+
 # ── Model ────────────────────────────────────────────────────────────────────
 
 

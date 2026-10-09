@@ -6,15 +6,22 @@
 // so it looks the same), which is what makes "just draw on any slide" possible.
 
 import {
+    candidatesAt,
     clearSelection,
     clientToSlide,
     drawOverlay,
     hooks,
+    isConnector,
+    keyOf,
     mediaZoneAt,
+    newConnectorPath,
+    showSites,
+    siteAt,
     slideRoot,
     slideToPaper,
 } from "./canvas";
 import { pasteText } from "./clipboard";
+import type { End, Site } from "./connectors";
 import { svgEl, toast } from "./dom";
 import { fmt, invert, mat, multiply, relativePath, transformBox } from "./geom";
 import { edit, request } from "./net";
@@ -120,16 +127,21 @@ function toParent(
 }
 
 export async function insertXml(
-    xml: string,
+    xml: string | (() => string),
     base: string,
-    opts: { editText?: boolean; marker?: boolean } = {},
+    opts: {
+        editText?: boolean;
+        marker?: boolean;
+        before?: () => Record<string, unknown>[];
+    } = {},
 ): Promise<boolean> {
     if (!(await ensureOwnDrawing())) return false;
     const src = ownSource();
     if (!src) return false;
     const parent = insertParent();
-    const ops: Record<string, unknown>[] = [];
+    const ops: Record<string, unknown>[] = [...(opts.before?.() ?? [])];
     if (opts.marker) ops.push({ kind: "ensure-marker" });
+    if (typeof xml === "function") xml = xml();
     ops.push({ kind: "insert", parent: parent.loc, xml, base, key: "new" });
     const result = await edit({
         action: "svg",
@@ -168,12 +180,8 @@ function shapeXml(
     switch (tool) {
         case "rect":
             return `<rect x="${fmt(x)}" y="${fmt(y)}" width="${fmt(w)}" height="${fmt(h)}" rx="16" ${SHAPE_STYLE.rect}/>`;
-        case "ellipse":
-            return `<ellipse cx="${fmt(x + w / 2)}" cy="${fmt(y + h / 2)}" rx="${fmt(w / 2)}" ry="${fmt(h / 2)}" ${SHAPE_STYLE.ellipse}/>`;
-        case "arrow":
-            return `<line x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(b.x)}" y2="${fmt(b.y)}" ${SHAPE_STYLE.line} marker-end="url(#inkflow-arrow)"/>`;
         default:
-            return `<line x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(b.x)}" y2="${fmt(b.y)}" ${SHAPE_STYLE.line}/>`;
+            return `<ellipse cx="${fmt(x + w / 2)}" cy="${fmt(y + h / 2)}" rx="${fmt(w / 2)}" ry="${fmt(h / 2)}" ${SHAPE_STYLE.ellipse}/>`;
     }
 }
 
@@ -227,6 +235,72 @@ function drawDraft(
     overlay.append(draft);
 }
 
+// A line or arrow is a connector: a <path> whose ends attach to the shapes
+// they were drawn from and to (inkflow:connect-start/-end), so it follows
+// them when they move.
+async function insertConnector(
+    tool: string,
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    startHit: { el: Element; site: Site } | null,
+    endHit: { el: Element; site: Site } | null,
+): Promise<void> {
+    let a: End = startHit ? startHit.site : from;
+    let b: End = endHit ? endHit.site : to;
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 8) {
+        // A click: a default-length line from there.
+        a = { x: from.x - 150, y: from.y };
+        b = { x: from.x + 150, y: from.y };
+        startHit = null;
+        endHit = null;
+    }
+    const before: Record<string, unknown>[] = [];
+    const taken = new Set<string>();
+    const attach = (hit: { el: Element; site: Site } | null): string | null => {
+        if (!hit) return null;
+        let id = hit.el.getAttribute("id");
+        // A shape in the slide's own drawing gets an id if it has none; one in
+        // another file without an id cannot be attached to.
+        if (!id && keyOf(hit.el) === 0) {
+            const svg = slideRoot();
+            let n = 1;
+            const base = hit.el.localName;
+            while (
+                svg?.querySelector(`[id="${base}-${n}"]`) ||
+                taken.has(`${base}-${n}`)
+            )
+                n++;
+            id = `${base}-${n}`;
+            taken.add(id);
+            hit.el.setAttribute("id", id);
+            before.push({
+                kind: "id",
+                loc: hit.el.getAttribute("data-ink"),
+                id,
+            });
+        }
+        return id ? `${id}:${hit.site.name}` : null;
+    };
+    const startAt = attach(startHit);
+    const endAt = attach(endHit);
+    const attrs = [
+        'inkflow:connector="straight"',
+        startAt ? `inkflow:connect-start="${startAt}"` : "",
+        endAt ? `inkflow:connect-end="${endAt}"` : "",
+        tool === "arrow" ? 'marker-end="url(#inkflow-arrow)"' : "",
+    ]
+        .filter(Boolean)
+        .join(" ");
+    await insertXml(
+        // Routed into the insertion parent's space once it is known (a slide
+        // drawn from a layout gets its own SVG first).
+        () =>
+            `<path d="${newConnectorPath("straight", a, b, insertParent().el)}" ${SHAPE_STYLE.line} ${attrs}/>`,
+        tool,
+        { marker: tool === "arrow", before: () => before },
+    );
+}
+
 function onToolDown(e: PointerEvent, start: { x: number; y: number }): boolean {
     const tool = ed.tool;
     if (tool === "select") return false;
@@ -235,9 +309,37 @@ function onToolDown(e: PointerEvent, start: { x: number; y: number }): boolean {
     const paperEl = e.currentTarget as HTMLElement;
     paperEl.setPointerCapture(e.pointerId);
     ed.interacting = true;
+    const connecting = tool === "line" || tool === "arrow";
+    // Lines and arrows start and end on connection sites when near one.
+    const startHit = connecting && !e.altKey ? siteAt(start, null) : null;
+    if (startHit) start = { x: startHit.site.x, y: startHit.site.y };
+    let endHit: { el: Element; site: Site } | null = null;
     let end = start;
     const move = (ev: PointerEvent) => {
         end = clientToSlide(ev.clientX, ev.clientY);
+        if (connecting) {
+            endHit = ev.altKey ? null : siteAt(end, null);
+            if (endHit) end = { x: endHit.site.x, y: endHit.site.y };
+            const under = candidatesAt(ev.clientX, ev.clientY).find(
+                (el) => !isConnector(el),
+            );
+            showSites([
+                ...(under
+                    ? [
+                          {
+                              el: under as Element,
+                              active: endHit?.el === under ? endHit.site : null,
+                          },
+                      ]
+                    : []),
+                ...(endHit && endHit.el !== under
+                    ? [{ el: endHit.el, active: endHit.site }]
+                    : []),
+                ...(startHit
+                    ? [{ el: startHit.el, active: startHit.site }]
+                    : []),
+            ]);
+        }
         if (ev.shiftKey && (tool === "rect" || tool === "ellipse")) {
             const d = Math.max(
                 Math.abs(end.x - start.x),
@@ -258,6 +360,13 @@ function onToolDown(e: PointerEvent, start: { x: number; y: number }): boolean {
         ed.interacting = false;
         let a = start;
         let b = end;
+        if (connecting) {
+            showSites([]);
+            void insertConnector(tool, start, end, startHit, endHit);
+            setTool("select");
+            drawOverlay();
+            return;
+        }
         if (tool === "text") {
             void insertTextBox(start, end);
             setTool("select");
@@ -266,17 +375,15 @@ function onToolDown(e: PointerEvent, start: { x: number; y: number }): boolean {
         }
         if (Math.hypot(b.x - a.x, b.y - a.y) < 8) {
             // A click: a default-sized shape centred there.
-            const w = tool === "line" || tool === "arrow" ? 300 : 360;
-            const h = tool === "line" || tool === "arrow" ? 0 : 220;
+            const w = 360;
+            const h = 220;
             a = { x: start.x - w / 2, y: start.y - h / 2 };
             b = { x: start.x + w / 2, y: start.y + h / 2 };
         }
         const parent = insertParent().el;
         const pa = toParent(parent, a.x, a.y);
         const pb = toParent(parent, b.x, b.y);
-        void insertXml(shapeXml(tool, pa, pb), tool, {
-            marker: tool === "arrow",
-        });
+        void insertXml(shapeXml(tool, pa, pb), tool);
         setTool("select");
         if (ed.renderPending) emit("model");
         drawOverlay();

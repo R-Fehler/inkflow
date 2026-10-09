@@ -95,6 +95,10 @@ Paths are relative to `deck.py`; keep media files in `assets/`.
   `styles.css` (the editor's Theme dialog keeps them in one marked
   `/* inkflow:theme */` block; leave that block's markers intact).
 - `inkflow:locked="true"` on an object keeps the visual editor from selecting it.
+- An arrow attached to shapes is a `<path inkflow:connector="straight|elbow|curved"
+  inkflow:connect-start="<id>:right" inkflow:connect-end="<id>:left" d="…">` (sides:
+  top, right, bottom, left). Keep its `d` roughly right; the author's "Re-route all"
+  in the editor snaps it to the shapes. Rename an id and update `connect-*` too.
 
 ## Check your work
 

@@ -373,6 +373,9 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
                     raise SvgOpError("javascript: links are not allowed")
                 if name == "xlink:href":
                     name = _XLINK_HREF
+                elif name.startswith("inkflow:"):
+                    # Connector ends (inkflow:connect-start …) and the like.
+                    name = f"{{{ns.INKFLOW}}}{name.removeprefix('inkflow:')}"
                 if value is None:
                     _drop(el, name)
                 else:
@@ -400,7 +403,10 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
                 raise SvgOpError(f"invalid id {new_id!r}")
             if new_id != el.get("id") and new_id in all_ids(root):
                 raise SvgOpError(f"id {new_id!r} is already used in this file")
+            old_id = el.get("id")
             el.set("id", new_id)
+            if old_id:
+                _rename_connections(root, old_id, new_id)
         elif kind == "ensure-id":
             if not el.get("id"):
                 el.set("id", unique_id(root, str(op.get("base") or _local(el.tag))))
@@ -563,6 +569,20 @@ def _uncrop(frame: SvgElement) -> None:
         raise SvgOpError("the root element cannot be uncropped")
     image.tail = frame.tail
     parent.replace(frame, image)
+
+
+CONNECT_ENDS = (f"{{{ns.INKFLOW}}}connect-start", f"{{{ns.INKFLOW}}}connect-end")
+
+
+def _rename_connections(root: SvgElement, old: str, new: str) -> None:
+    """Keep connectors attached to an object whose id changed ("<id>:<site>")."""
+    for el in root.iter():
+        if not is_element(el):
+            continue
+        for attr in CONNECT_ENDS:
+            value = el.get(attr)
+            if value and value.rpartition(":")[0] == old:
+                el.set(attr, f"{new}:{value.rpartition(':')[2]}")
 
 
 def _outer(el: SvgElement) -> SvgElement:

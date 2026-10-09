@@ -8,7 +8,7 @@
       if (t === "from") return 0;
       if (t === "to") return 1;
       return Number.parseFloat(t) / 100;
-    }).filter((n) => Number.isFinite(n));
+    }).filter((n2) => Number.isFinite(n2));
   }
   function kebabToCamel(prop) {
     return prop.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
@@ -144,9 +144,9 @@
       const active3 = spec[specIdx];
       const hasHL = active3 !== null;
       block.querySelectorAll(".code-line").forEach((line) => {
-        const n = +(line.dataset.line ?? "0");
-        line.classList.toggle("hl-active", hasHL && active3.includes(n));
-        line.classList.toggle("hl-dim", hasHL && !active3.includes(n));
+        const n2 = +(line.dataset.line ?? "0");
+        line.classList.toggle("hl-active", hasHL && active3.includes(n2));
+        line.classList.toggle("hl-dim", hasHL && !active3.includes(n2));
         if (!hasHL) line.classList.remove("hl-active", "hl-dim");
       });
     });
@@ -190,9 +190,132 @@
   var DEFAULT_VIEWBOX = "0 0 1920 1080";
   function parseViewBox(attr, fallback = DEFAULT_VIEWBOX) {
     const parts = (attr ?? "").trim().split(/[\s,]+/).map(Number);
-    const valid = parts.length === 4 && parts.every((n) => Number.isFinite(n)) && parts[2] > 0 && parts[3] > 0;
+    const valid = parts.length === 4 && parts.every((n2) => Number.isFinite(n2)) && parts[2] > 0 && parts[3] > 0;
     const [x, y, w, h2] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
     return { x, y, w, h: h2 };
+  }
+
+  // src/ts/editor/connectors.ts
+  var SITE_NAMES = ["top", "right", "bottom", "left"];
+  function sitesFromCorners(c) {
+    const centre = {
+      x: (c[0].x + c[1].x + c[2].x + c[3].x) / 4,
+      y: (c[0].y + c[1].y + c[2].y + c[3].y) / 4
+    };
+    const edges = [
+      ["top", c[0], c[1]],
+      ["right", c[1], c[2]],
+      ["bottom", c[2], c[3]],
+      ["left", c[3], c[0]]
+    ];
+    return edges.map(([name, a, b]) => {
+      const x = (a.x + b.x) / 2;
+      const y = (a.y + b.y) / 2;
+      const len = Math.hypot(x - centre.x, y - centre.y) || 1;
+      return {
+        name,
+        x,
+        y,
+        dx: (x - centre.x) / len,
+        dy: (y - centre.y) / len
+      };
+    });
+  }
+  function nearestSite(sites, p, within) {
+    let best2 = null;
+    let bestD = within;
+    for (const s of sites) {
+      const d = Math.hypot(s.x - p.x, s.y - p.y);
+      if (d <= bestD) {
+        best2 = s;
+        bestD = d;
+      }
+    }
+    return best2;
+  }
+  function direction(end, other) {
+    if (end.dx !== void 0 && end.dy !== void 0) {
+      return { x: end.dx, y: end.dy };
+    }
+    const dx = other.x - end.x;
+    const dy = other.y - end.y;
+    return Math.abs(dx) >= Math.abs(dy) ? { x: Math.sign(dx) || 1, y: 0 } : { x: 0, y: Math.sign(dy) || 1 };
+  }
+  function horizontal(d) {
+    return Math.abs(d.x) >= Math.abs(d.y);
+  }
+  function route(style, a, b) {
+    if (style === "curved") {
+      const da2 = direction(a, b);
+      const db2 = direction(b, a);
+      const k = Math.max(30, Math.hypot(b.x - a.x, b.y - a.y) * 0.4);
+      return {
+        curve: true,
+        points: [
+          { x: a.x, y: a.y },
+          { x: a.x + da2.x * k, y: a.y + da2.y * k },
+          { x: b.x + db2.x * k, y: b.y + db2.y * k },
+          { x: b.x, y: b.y }
+        ]
+      };
+    }
+    if (style === "straight") {
+      return {
+        curve: false,
+        points: [a, b].map((p) => ({ x: p.x, y: p.y }))
+      };
+    }
+    const da = direction(a, b);
+    const db = direction(b, a);
+    const pts = [{ x: a.x, y: a.y }];
+    if (horizontal(da) && horizontal(db)) {
+      const mx = (a.x + b.x) / 2;
+      pts.push({ x: mx, y: a.y }, { x: mx, y: b.y });
+    } else if (!horizontal(da) && !horizontal(db)) {
+      const my = (a.y + b.y) / 2;
+      pts.push({ x: a.x, y: my }, { x: b.x, y: my });
+    } else if (horizontal(da)) {
+      pts.push({ x: b.x, y: a.y });
+    } else {
+      pts.push({ x: a.x, y: b.y });
+    }
+    pts.push({ x: b.x, y: b.y });
+    const out = pts.filter((p, i) => {
+      if (i === 0 || i === pts.length - 1) return true;
+      const prev = pts[i - 1];
+      const next = pts[i + 1];
+      const collinear = Math.abs(
+        (p.x - prev.x) * (next.y - p.y) - (p.y - prev.y) * (next.x - p.x)
+      ) < 1e-6;
+      return !collinear;
+    });
+    return { curve: false, points: out };
+  }
+  function n(v) {
+    return String(Math.round(v * 100) / 100);
+  }
+  function pathData(r) {
+    const [first, ...rest] = r.points;
+    const head = `M${n(first.x)},${n(first.y)}`;
+    if (r.curve) {
+      return `${head} C${rest.map((p) => `${n(p.x)},${n(p.y)}`).join(" ")}`;
+    }
+    return `${head} ${rest.map((p) => `L${n(p.x)},${n(p.y)}`).join(" ")}`;
+  }
+  function endpointsOf(d) {
+    const nums = (d.match(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi) ?? []).map(Number);
+    if (nums.length < 4 || nums.some((v) => !Number.isFinite(v))) return null;
+    return {
+      start: { x: nums[0], y: nums[1] },
+      end: { x: nums[nums.length - 2], y: nums[nums.length - 1] }
+    };
+  }
+  function parseConnection(value) {
+    if (!value) return null;
+    const i = value.lastIndexOf(":");
+    const site = value.slice(i + 1);
+    if (i <= 0 || !SITE_NAMES.includes(site)) return null;
+    return { id: value.slice(0, i), site };
   }
 
   // src/ts/editor/dom.ts
@@ -360,8 +483,8 @@
     const btm = Math.max(...boxes.map((b) => b.y + b.height));
     return { x, y, width: r - x, height: btm - y };
   }
-  function fmt(n) {
-    const r = Math.round(n * 1e3) / 1e3;
+  function fmt(n2) {
+    const r = Math.round(n2 * 1e3) / 1e3;
     return Object.is(r, -0) ? "0" : String(r);
   }
   function formatTransform(m) {
@@ -369,13 +492,13 @@
       if (Math.abs(m.e) < EPS && Math.abs(m.f) < EPS) return null;
       return `translate(${fmt(m.e)},${fmt(m.f)})`;
     }
-    const r = (n) => String(Math.round(n * 1e6) / 1e6);
+    const r = (n2) => String(Math.round(n2 * 1e6) / 1e6);
     return `matrix(${r(m.a)},${r(m.b)},${r(m.c)},${r(m.d)},${fmt(m.e)},${fmt(m.f)})`;
   }
   var BOX_TAGS = /* @__PURE__ */ new Set(["rect", "image", "foreignObject", "use", "svg"]);
   function num(v, fallback = 0) {
-    const n = parseFloat(v ?? "");
-    return Number.isFinite(n) ? n : fallback;
+    const n2 = parseFloat(v ?? "");
+    return Number.isFinite(n2) ? n2 : fallback;
   }
   function usesBoxAttrs(g) {
     return BOX_TAGS.has(g.sourceTag) && g.sourceTag !== "use" && g.attrs.width != null && g.attrs.height != null && isTranslateOnly(g.own);
@@ -528,7 +651,7 @@
   }
   function planCrop(g, from, to) {
     const vb = (g.attrs.viewBox ?? "").trim().split(/[\s,]+/).map(Number);
-    if (vb.length !== 4 || vb.some((n) => !Number.isFinite(n))) return null;
+    if (vb.length !== 4 || vb.some((n2) => !Number.isFinite(n2))) return null;
     if (!usesBoxAttrs(g)) return null;
     const frame = {
       x: num(g.attrs.x),
@@ -1015,8 +1138,8 @@
     const svg = slideRoot();
     if (!svg) return null;
     if (k.id) {
-      const byId = svg.querySelector(`[id="${CSS.escape(k.id)}"]`);
-      if (byId?.hasAttribute("data-ink")) return byId;
+      const byId2 = svg.querySelector(`[id="${CSS.escape(k.id)}"]`);
+      if (byId2?.hasAttribute("data-ink")) return byId2;
     }
     if (!trustLoc) return null;
     return svg.querySelector(
@@ -1119,7 +1242,11 @@
     "x2",
     "y2",
     "transform",
-    "viewBox"
+    "viewBox",
+    // A connector's route and its attachments.
+    "d",
+    "inkflow:connect-start",
+    "inkflow:connect-end"
   ];
   function elementGeom(el2) {
     const parent = el2.parentElement;
@@ -1208,13 +1335,16 @@
     }
     return pickByBox(svg, x, y);
   }
+  function isLineLike(el2) {
+    return el2.localName === "line" || isConnector(el2);
+  }
   function pickByBox(svg, x, y) {
     const pt = clientToSlide(x, y);
     const slide = slideSize();
     const pool = ed.scope ? [...ed.scope.children].filter((el2) => el2.hasAttribute("data-ink")) : [...svg.querySelectorAll("[data-ink-top]")];
     for (let i = pool.length - 1; i >= 0; i--) {
       const el2 = pool[i];
-      if (!selectable(el2)) continue;
+      if (!selectable(el2) || isLineLike(el2)) continue;
       const b = slideBox(el2);
       if (!b || b.width * b.height > slide.width * slide.height * 0.8)
         continue;
@@ -1250,6 +1380,7 @@
     const pt = clientToSlide(x, y);
     const pool = ed.scope ? [...ed.scope.children] : [...svg.querySelectorAll("[data-ink-top]")];
     for (let i = pool.length - 1; i >= 0; i--) {
+      if (isLineLike(pool[i])) continue;
       const b = slideBox(pool[i]);
       if (b && pt.x >= b.x && pt.x <= b.x + b.width && pt.y >= b.y && pt.y <= b.y + b.height) {
         add(pool[i]);
@@ -1383,6 +1514,8 @@
         return { x: b.x, y: cy };
       case "rot":
         return { x: cx, y: b.y - 28 };
+      default:
+        return { x: cx, y: cy };
     }
   }
   function drawOverlay() {
@@ -1410,8 +1543,28 @@
       }
     }
     if (ed.cropMode) drawCropGhost();
+    drawSiteHints();
     const transformable = ed.selection.filter((s) => canTransform(s.el));
-    const box = transformable.length === ed.selection.length ? selectionBox() : null;
+    const lone = ed.selection.length === 1 ? ed.selection[0].el : null;
+    const connector = lone && isConnector(lone) && canTransform(lone) ? lone : null;
+    const box = !connector && transformable.length === ed.selection.length ? selectionBox() : null;
+    if (connector && ed.step == null) {
+      const m = slideToPaper();
+      for (const which of ["start", "end"]) {
+        const end = connectorEnd(connector, which);
+        if (!end) continue;
+        const p = apply(m, end);
+        const attached = connector.hasAttribute(ENDS[which]);
+        const handle = svgEl("circle", {
+          cx: p.x,
+          cy: p.y,
+          r: 6,
+          class: `handle endpoint${attached ? " attached" : ""}`
+        });
+        handle.dataset.handle = `c-${which}`;
+        overlay.append(handle);
+      }
+    }
     if (box && ed.step == null) {
       const pb = toPaperBox(box);
       if (ed.selection.length > 1) {
@@ -1562,6 +1715,228 @@
       overlay.append(g);
     }
   }
+  var CONNECTOR = "inkflow:connector";
+  var ENDS = { start: "inkflow:connect-start", end: "inkflow:connect-end" };
+  var SNAP_SITE_PX = 14;
+  function isConnector(el2) {
+    return el2.hasAttribute(CONNECTOR);
+  }
+  function connectorStyle(el2) {
+    const v = el2.getAttribute(CONNECTOR);
+    return v === "elbow" || v === "curved" ? v : "straight";
+  }
+  function toSlideMat(el2) {
+    const ctm = el2.getScreenCTM?.();
+    return ctm ? multiply(invert(rootCTM()), mat(ctm)) : null;
+  }
+  function sitesOf(el2) {
+    try {
+      const m = measure(el2);
+      if (!m) return null;
+      const toSlide = multiply(invert(rootCTM()), mat(m.ctm));
+      const b = m.bbox;
+      if (b.width <= 0 && b.height <= 0) return null;
+      return sitesFromCorners(
+        [
+          { x: b.x, y: b.y },
+          { x: b.x + b.width, y: b.y },
+          { x: b.x + b.width, y: b.y + b.height },
+          { x: b.x, y: b.y + b.height }
+        ].map((p) => apply(toSlide, p))
+      );
+    } catch {
+      return null;
+    }
+  }
+  function byId(id) {
+    return slideRoot()?.querySelector(`[id="${CSS.escape(id)}"]`) ?? null;
+  }
+  function attachables(except) {
+    const svg = slideRoot();
+    if (!svg) return [];
+    const pool = ed.scope ? [...ed.scope.children] : [...svg.querySelectorAll("[data-ink-top]")];
+    const area2 = slideSize();
+    return pool.filter((el2) => {
+      if (el2 === except || isConnector(el2) || !el2.hasAttribute("data-ink"))
+        return false;
+      const b = slideBox(el2);
+      return !!b && b.width * b.height < area2.width * area2.height * 0.8;
+    });
+  }
+  function siteAt(p, except) {
+    const within = SNAP_SITE_PX / (scale() || 1);
+    let best2 = null;
+    let bestD = within;
+    for (const el2 of attachables(except)) {
+      const s = nearestSite(sitesOf(el2) ?? [], p, bestD);
+      if (s) {
+        best2 = { el: el2, site: s };
+        bestD = Math.hypot(s.x - p.x, s.y - p.y);
+      }
+    }
+    return best2;
+  }
+  var siteHints = [];
+  function showSites(hints) {
+    siteHints = hints;
+    drawOverlay();
+  }
+  function drawSiteHints() {
+    const m = slideToPaper();
+    for (const { el: el2, active: active3 } of siteHints) {
+      for (const s of sitesOf(el2) ?? []) {
+        const p = apply(m, s);
+        const on2 = active3?.name === s.name && Math.hypot(active3.x - s.x, active3.y - s.y) < 0.5;
+        overlay.append(
+          svgEl("circle", {
+            cx: p.x,
+            cy: p.y,
+            r: on2 ? 6 : 4,
+            class: `site${on2 ? " on" : ""}`
+          })
+        );
+      }
+    }
+  }
+  function connectorEnd(conn, which) {
+    const c = parseConnection(conn.getAttribute(ENDS[which]));
+    if (c) {
+      const target = byId(c.id);
+      const site = target ? sitesOf(target)?.find((s) => s.name === c.site) : null;
+      if (site) return site;
+    }
+    const pts = endpointsOf(conn.getAttribute("d") ?? "");
+    const m = toSlideMat(conn);
+    if (!pts || !m) return null;
+    return apply(m, which === "start" ? pts.start : pts.end);
+  }
+  function connectorPath(conn, ends = {}, style = connectorStyle(conn)) {
+    const a = ends.start ?? connectorEnd(conn, "start");
+    const b = ends.end ?? connectorEnd(conn, "end");
+    const toSlide = toSlideMat(conn);
+    if (!a || !b || !toSlide) return null;
+    const local = invert(toSlide);
+    const r = route(style, a, b);
+    return pathData({ ...r, points: r.points.map((p) => apply(local, p)) });
+  }
+  function newConnectorPath(style, a, b, parent) {
+    const svg = slideRoot();
+    const pm = parent?.getScreenCTM?.();
+    const local = pm && svg ? multiply(invert(mat(pm)), rootCTM()) : IDENTITY;
+    const r = route(style, a, b);
+    return pathData({ ...r, points: r.points.map((p) => apply(local, p)) });
+  }
+  var GEOMETRY = /* @__PURE__ */ new Set([...GEOM_ATTRS, "points"]);
+  function geometryChanged(ops) {
+    return ops.some(
+      (op) => op.kind === "attrs" && Object.keys(op.set ?? {}).some(
+        (k) => GEOMETRY.has(k)
+      )
+    );
+  }
+  function withConnectors(plans) {
+    const svg = slideRoot();
+    if (!svg) return plans;
+    const moved = plans.filter((p) => geometryChanged(p.ops)).map((p) => p.sel.el);
+    if (!moved.length) return plans;
+    for (const p of plans) {
+      for (const op of p.ops) {
+        if (op.kind === "attrs" && op.loc === p.sel.loc) {
+          applyPlanToDom(p.sel.el, op.set);
+        }
+      }
+    }
+    const touches = (conn) => ["start", "end"].some((w) => {
+      const c = parseConnection(conn.getAttribute(ENDS[w]));
+      const target = c ? byId(c.id) : null;
+      return !!target && moved.some((m) => m === target || m.contains(target));
+    });
+    const out = [...plans];
+    for (const conn of svg.querySelectorAll(`[${CSS.escape(CONNECTOR)}]`)) {
+      if (!conn.hasAttribute("data-ink") || !canTransform(conn) || !touches(conn))
+        continue;
+      const d = connectorPath(conn);
+      if (!d) continue;
+      applyPlanToDom(conn, { d });
+      const loc = conn.getAttribute("data-ink") ?? "";
+      const existing = out.find((p) => p.sel.el === conn);
+      const op = { kind: "attrs", loc, set: { d } };
+      if (existing) existing.ops = [...existing.ops, op];
+      else
+        out.push({
+          sel: toSelected(conn),
+          ops: [op]
+        });
+    }
+    return out;
+  }
+  var movingTogether = [];
+  function connectorMoveOps(sel, dx, dy) {
+    const conn = sel.el;
+    const set = {};
+    const ends = {};
+    for (const w of ["start", "end"]) {
+      const c = parseConnection(conn.getAttribute(ENDS[w]));
+      const target = c ? byId(c.id) : null;
+      const kept = !!target && movingTogether.some((m) => m === target || m.contains(target));
+      const here = connectorEnd(conn, w);
+      if (!kept) {
+        if (c) set[ENDS[w]] = null;
+        if (here) ends[w] = { x: here.x + dx, y: here.y + dy };
+      }
+    }
+    for (const [k, v] of Object.entries(set)) {
+      if (v === null) conn.removeAttribute(k);
+    }
+    const d = connectorPath(conn, ends);
+    if (d) set.d = d;
+    applyPlanToDom(conn, { d: set.d ?? null });
+    return [{ kind: "attrs", loc: sel.loc, set }];
+  }
+  function freshId(base2) {
+    const svg = slideRoot();
+    let n2 = 1;
+    while (svg?.querySelector(`[id="${base2}-${n2}"]`)) n2++;
+    return `${base2}-${n2}`;
+  }
+  function endpointPlans(drag, p, e) {
+    const sel = drag.snaps[0].sel;
+    const conn = sel.el;
+    const hit = e.altKey ? null : siteAt(p, conn);
+    const under = candidatesAt(e.clientX, e.clientY).find(
+      (el2) => el2 !== conn && !isConnector(el2)
+    );
+    siteHints = [
+      ...under ? [
+        {
+          el: under,
+          active: hit?.el === under ? hit.site : null
+        }
+      ] : [],
+      ...hit && hit.el !== under ? [{ el: hit.el, active: hit.site }] : []
+    ];
+    const ops = [];
+    let attach = null;
+    if (hit) {
+      let id = hit.el.getAttribute("id");
+      if (!id && keyOf(hit.el) === sel.key) {
+        id = freshId(hit.el.localName);
+        hit.el.setAttribute("id", id);
+        ops.push({ kind: "id", loc: hit.el.getAttribute("data-ink"), id });
+      }
+      if (id) attach = `${id}:${hit.site.name}`;
+    }
+    const end = attach && hit ? hit.site : p;
+    const d = connectorPath(conn, { [drag.which]: end });
+    if (!d) return [];
+    applyPlanToDom(conn, { d });
+    ops.push({
+      kind: "attrs",
+      loc: sel.loc,
+      set: { d, [ENDS[drag.which]]: attach }
+    });
+    return [{ sel, ops }];
+  }
   function opsByFile(plans) {
     const out = /* @__PURE__ */ new Map();
     for (const { sel, ops } of plans) {
@@ -1589,6 +1964,7 @@
     const slide = currentSlide();
     if (!slide) return false;
     let ok = true;
+    plans = withConnectors(plans);
     for (const [path, ops] of opsByFile(plans)) {
       const src = slide.sources?.find((s) => s.path === path);
       if (src && src.usedBy.length > 1 && ed.layoutMode) {
@@ -1621,6 +1997,9 @@
     );
   }
   function moveOps(sel, dx, dy) {
+    if (isConnector(sel.el) && sel.el.getAttribute("d")) {
+      return connectorMoveOps(sel, dx, dy);
+    }
     const kids = textChildren(sel.el);
     const plan = planMove(
       elementGeom(sel.el),
@@ -1644,7 +2023,12 @@
   async function nudge(dx, dy) {
     const sels = ed.selection.filter((s) => canTransform(s.el));
     if (!sels.length) return;
-    const plans = sels.map((sel) => ({ sel, ops: moveOps(sel, dx, dy) }));
+    movingTogether = sels.map((s) => s.el);
+    const ordered = [
+      ...sels.filter((s) => !isConnector(s.el)),
+      ...sels.filter((s) => isConnector(s.el))
+    ];
+    const plans = ordered.map((sel) => ({ sel, ops: moveOps(sel, dx, dy) }));
     drawOverlay();
     await sendSvgOps(plans, "Nudge", "nudge");
   }
@@ -1692,6 +2076,13 @@
     const snaps = sels.map(snapshot);
     const start = unionBoxes(snaps.map((s) => s.box));
     if (!start) return null;
+    if (handle === "c-start" || handle === "c-end") {
+      return {
+        kind: "endpoint",
+        which: handle === "c-start" ? "start" : "end",
+        snaps
+      };
+    }
     const targets = snapTargets(new Set(sels.map((s) => s.el)));
     if (handle === "rot") {
       return {
@@ -1784,10 +2175,14 @@
         guides = { xs: snap.guidesX, ys: snap.guidesY };
       }
       restore(drag.snaps);
-      lastPlans = drag.snaps.map((s) => ({
-        sel: s.sel,
-        ops: moveOps(s.sel, dx, dy)
-      }));
+      movingTogether = drag.snaps.map((s) => s.sel.el);
+      const ordered = [
+        ...drag.snaps.filter((s) => !isConnector(s.sel.el)),
+        ...drag.snaps.filter((s) => isConnector(s.sel.el))
+      ];
+      lastPlans = withConnectors(
+        ordered.map((s) => ({ sel: s.sel, ops: moveOps(s.sel, dx, dy) }))
+      );
     } else if (drag.kind === "resize") {
       if (!e.altKey) {
         const h2 = drag.handle;
@@ -1837,6 +2232,9 @@
           ops: [{ kind: "attrs", loc: s.sel.loc, set: plan }]
         };
       });
+    } else if (drag.kind === "endpoint") {
+      restore(drag.snaps);
+      lastPlans = endpointPlans(drag, p1, e);
     } else if (drag.kind === "marquee") {
       marquee = {
         x: Math.min(p0.x, p1.x),
@@ -1872,7 +2270,8 @@
     lastPlans = [];
     drawOverlay();
     if (!plans.length) return;
-    const label3 = drag.kind === "move" ? "Move" : drag.kind === "resize" ? ed.cropMode ? "Crop" : "Resize" : "Rotate";
+    if (siteHints.length) siteHints = [];
+    const label3 = drag.kind === "endpoint" ? "Connect" : drag.kind === "move" ? "Move" : drag.kind === "resize" ? ed.cropMode ? "Crop" : "Resize" : "Rotate";
     const ok = await sendSvgOps(plans, label3);
     if (!ok) restore(drag.snaps);
     drawOverlay();
@@ -1948,6 +2347,22 @@
           hoverEl = el2;
           drawOverlay();
         }
+      } else if ((ed.tool === "line" || ed.tool === "arrow") && e.buttons === 0) {
+        const p = clientToSlide(e.clientX, e.clientY);
+        const hit = e.altKey ? null : siteAt(p, null);
+        const under = candidatesAt(e.clientX, e.clientY).find(
+          (el2) => !isConnector(el2)
+        );
+        const hints = [
+          ...under ? [
+            {
+              el: under,
+              active: hit?.el === under ? hit.site : null
+            }
+          ] : [],
+          ...hit && hit.el !== under ? [{ el: hit.el, active: hit.site }] : []
+        ];
+        if (hints.length || siteHints.length) showSites(hints);
       }
       return;
     }
@@ -2026,6 +2441,7 @@
     paper.addEventListener("pointercancel", (e) => void onPointerUp(e));
     paper.addEventListener("dblclick", onDoubleClick);
     paper.addEventListener("pointerleave", () => {
+      if (siteHints.length) showSites([]);
       if (hoverEl) {
         hoverEl = null;
         drawOverlay();
@@ -2138,8 +2554,9 @@
     const src = ownSource();
     if (!src) return false;
     const parent = insertParent();
-    const ops = [];
+    const ops = [...opts2.before?.() ?? []];
     if (opts2.marker) ops.push({ kind: "ensure-marker" });
+    if (typeof xml === "function") xml = xml();
     ops.push({ kind: "insert", parent: parent.loc, xml, base: base2, key: "new" });
     const result = await edit({
       action: "svg",
@@ -2169,12 +2586,8 @@
     switch (tool) {
       case "rect":
         return `<rect x="${fmt(x)}" y="${fmt(y)}" width="${fmt(w)}" height="${fmt(h2)}" rx="16" ${SHAPE_STYLE.rect}/>`;
-      case "ellipse":
-        return `<ellipse cx="${fmt(x + w / 2)}" cy="${fmt(y + h2 / 2)}" rx="${fmt(w / 2)}" ry="${fmt(h2 / 2)}" ${SHAPE_STYLE.ellipse}/>`;
-      case "arrow":
-        return `<line x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(b.x)}" y2="${fmt(b.y)}" ${SHAPE_STYLE.line} marker-end="url(#inkflow-arrow)"/>`;
       default:
-        return `<line x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(b.x)}" y2="${fmt(b.y)}" ${SHAPE_STYLE.line}/>`;
+        return `<ellipse cx="${fmt(x + w / 2)}" cy="${fmt(y + h2 / 2)}" rx="${fmt(w / 2)}" ry="${fmt(h2 / 2)}" ${SHAPE_STYLE.ellipse}/>`;
     }
   }
   function textXml(p) {
@@ -2217,6 +2630,53 @@
     }
     overlay2.append(draft);
   }
+  async function insertConnector(tool, from, to, startHit, endHit) {
+    let a = startHit ? startHit.site : from;
+    let b = endHit ? endHit.site : to;
+    if (Math.hypot(b.x - a.x, b.y - a.y) < 8) {
+      a = { x: from.x - 150, y: from.y };
+      b = { x: from.x + 150, y: from.y };
+      startHit = null;
+      endHit = null;
+    }
+    const before = [];
+    const taken = /* @__PURE__ */ new Set();
+    const attach = (hit) => {
+      if (!hit) return null;
+      let id = hit.el.getAttribute("id");
+      if (!id && keyOf(hit.el) === 0) {
+        const svg = slideRoot();
+        let n2 = 1;
+        const base2 = hit.el.localName;
+        while (svg?.querySelector(`[id="${base2}-${n2}"]`) || taken.has(`${base2}-${n2}`))
+          n2++;
+        id = `${base2}-${n2}`;
+        taken.add(id);
+        hit.el.setAttribute("id", id);
+        before.push({
+          kind: "id",
+          loc: hit.el.getAttribute("data-ink"),
+          id
+        });
+      }
+      return id ? `${id}:${hit.site.name}` : null;
+    };
+    const startAt = attach(startHit);
+    const endAt = attach(endHit);
+    const attrs2 = [
+      'inkflow:connector="straight"',
+      startAt ? `inkflow:connect-start="${startAt}"` : "",
+      endAt ? `inkflow:connect-end="${endAt}"` : "",
+      tool === "arrow" ? 'marker-end="url(#inkflow-arrow)"' : ""
+    ].filter(Boolean).join(" ");
+    await insertXml(
+      // Routed into the insertion parent's space once it is known (a slide
+      // drawn from a layout gets its own SVG first).
+      () => `<path d="${newConnectorPath("straight", a, b, insertParent().el)}" ${SHAPE_STYLE.line} ${attrs2}/>`,
+      tool,
+      { marker: tool === "arrow", before: () => before }
+    );
+  }
   function onToolDown(e, start) {
     const tool = ed.tool;
     if (tool === "select") return false;
@@ -2225,9 +2685,30 @@
     const paperEl = e.currentTarget;
     paperEl.setPointerCapture(e.pointerId);
     ed.interacting = true;
+    const connecting = tool === "line" || tool === "arrow";
+    const startHit = connecting && !e.altKey ? siteAt(start, null) : null;
+    if (startHit) start = { x: startHit.site.x, y: startHit.site.y };
+    let endHit = null;
     let end = start;
     const move = (ev) => {
       end = clientToSlide(ev.clientX, ev.clientY);
+      if (connecting) {
+        endHit = ev.altKey ? null : siteAt(end, null);
+        if (endHit) end = { x: endHit.site.x, y: endHit.site.y };
+        const under = candidatesAt(ev.clientX, ev.clientY).find(
+          (el2) => !isConnector(el2)
+        );
+        showSites([
+          ...under ? [
+            {
+              el: under,
+              active: endHit?.el === under ? endHit.site : null
+            }
+          ] : [],
+          ...endHit && endHit.el !== under ? [{ el: endHit.el, active: endHit.site }] : [],
+          ...startHit ? [{ el: startHit.el, active: startHit.site }] : []
+        ]);
+      }
       if (ev.shiftKey && (tool === "rect" || tool === "ellipse")) {
         const d = Math.max(
           Math.abs(end.x - start.x),
@@ -2248,6 +2729,13 @@
       ed.interacting = false;
       let a = start;
       let b = end;
+      if (connecting) {
+        showSites([]);
+        void insertConnector(tool, start, end, startHit, endHit);
+        setTool("select");
+        drawOverlay();
+        return;
+      }
       if (tool === "text") {
         void insertTextBox(start, end);
         setTool("select");
@@ -2255,17 +2743,15 @@
         return;
       }
       if (Math.hypot(b.x - a.x, b.y - a.y) < 8) {
-        const w = tool === "line" || tool === "arrow" ? 300 : 360;
-        const h2 = tool === "line" || tool === "arrow" ? 0 : 220;
+        const w = 360;
+        const h2 = 220;
         a = { x: start.x - w / 2, y: start.y - h2 / 2 };
         b = { x: start.x + w / 2, y: start.y + h2 / 2 };
       }
       const parent = insertParent().el;
       const pa = toParent(parent, a.x, a.y);
       const pb = toParent(parent, b.x, b.y);
-      void insertXml(shapeXml(tool, pa, pb), tool, {
-        marker: tool === "arrow"
-      });
+      void insertXml(shapeXml(tool, pa, pb), tool);
       setTool("select");
       if (ed.renderPending) emit("model");
       drawOverlay();
@@ -2565,9 +3051,9 @@
     const bundle = result.bundle;
     await put(bundle);
     const dropped = bundle.dropped ?? [];
-    const n = indices.length;
+    const n2 = indices.length;
     toast(
-      `Copied ${n} slide${n > 1 ? "s" : ""}` + (dropped.length ? `; left out ${dropped.join(", ")}` : "")
+      `Copied ${n2} slide${n2 > 1 ? "s" : ""}` + (dropped.length ? `; left out ${dropped.join(", ")}` : "")
     );
     return true;
   }
@@ -2612,8 +3098,8 @@
       fragments,
       files: files2
     });
-    const n = sels.length;
-    toast(`${cut2 ? "Cut" : "Copied"} ${n} object${n > 1 ? "s" : ""}`);
+    const n2 = sels.length;
+    toast(`${cut2 ? "Cut" : "Copied"} ${n2} object${n2 > 1 ? "s" : ""}`);
     if (cut2) emit("delete");
     return true;
   }
@@ -2629,8 +3115,8 @@
     const after = ed.current;
     const result = await edit({ action: "paste-slides", after, bundle });
     if (!result.ok) return;
-    const n = result.pasted;
-    toast(`Pasted ${n} slide${n > 1 ? "s" : ""}`, "ok");
+    const n2 = result.pasted;
+    toast(`Pasted ${n2} slide${n2 > 1 ? "s" : ""}`, "ok");
     ed.slideSelection.clear();
     afterSlides = after + 1;
   }
@@ -2930,9 +3416,9 @@
     }
   }
   function gotoSlide(deckIndex) {
-    const n = ed.model?.slides.length ?? 0;
-    if (!n) return;
-    const i = Math.max(0, Math.min(n - 1, deckIndex));
+    const n2 = ed.model?.slides.length ?? 0;
+    if (!n2) return;
+    const i = Math.max(0, Math.min(n2 - 1, deckIndex));
     if (i === ed.current) return;
     ed.current = i;
     ed.selection = [];
@@ -3174,13 +3660,13 @@
   function initSorter() {
     on("model", () => {
       followPastedSlides();
-      const n = ed.model?.slides.length ?? 0;
-      if (pendingSelect != null && pendingSelect < n) {
+      const n2 = ed.model?.slides.length ?? 0;
+      if (pendingSelect != null && pendingSelect < n2) {
         ed.current = pendingSelect;
         pendingSelect = null;
         emit("slide");
       }
-      if (ed.current >= n) ed.current = Math.max(0, n - 1);
+      if (ed.current >= n2) ed.current = Math.max(0, n2 - 1);
       renderSorter();
     });
     on("slide", renderSorter);
@@ -3256,9 +3742,9 @@
     on("step", report);
     onCommand((msg) => {
       if (msg.command === "goto") {
-        const n = Number(msg.slide);
+        const n2 = Number(msg.slide);
         const slides = ed.model?.slides ?? [];
-        const target = slides.find((s) => s.visibleIndex === n - 1);
+        const target = slides.find((s) => s.visibleIndex === n2 - 1);
         if (target) gotoSlide(target.deckIndex);
       } else if (msg.command === "select") {
         const ids = msg.ids ?? [];
@@ -3610,9 +4096,9 @@
     const replacement = el(".replace-input").value;
     const hit = hits[active];
     if (all && hits.length > 1) {
-      const n = hits.length;
+      const n2 = hits.length;
       if (!window.confirm(
-        `Replace ${n} matches of \u201C${q}\u201D with \u201C${replacement}\u201D?`
+        `Replace ${n2} matches of \u201C${q}\u201D with \u201C${replacement}\u201D?`
       )) {
         return;
       }
@@ -3624,8 +4110,8 @@
       only: all ? void 0 : { file: hit.file, index: hit.index }
     });
     if (result.ok) {
-      const n = result.replaced;
-      toast(`Replaced ${n} match${n === 1 ? "" : "es"}`);
+      const n2 = result.replaced;
+      toast(`Replaced ${n2} match${n2 === 1 ? "" : "es"}`);
     }
   }
   function toggle(name, btn) {
@@ -3875,19 +4361,19 @@
     const items = [...list2.children];
     if (items.length < 2) return 1;
     const top = items[0].offsetTop;
-    const n = items.findIndex((el2) => el2.offsetTop !== top);
-    return n === -1 ? items.length : n;
+    const n2 = items.findIndex((el2) => el2.offsetTop !== top);
+    return n2 === -1 ? items.length : n2;
   }
   function onKey(e) {
     if (view.hidden) return;
     const target = e.target;
     if (target.closest("input, textarea, select, #dialog, #find-panel")) return;
-    const n = ed.model?.slides.length ?? 0;
+    const n2 = ed.model?.slides.length ?? 0;
     const move = (to) => {
       e.preventDefault();
       e.stopPropagation();
       ed.slideSelection.clear();
-      gotoSlide(Math.max(0, Math.min(n - 1, to)));
+      gotoSlide(Math.max(0, Math.min(n2 - 1, to)));
     };
     switch (e.key) {
       case "ArrowLeft":
@@ -3906,7 +4392,7 @@
         move(0);
         break;
       case "End":
-        move(n - 1);
+        move(n2 - 1);
         break;
       case "Enter":
         e.preventDefault();
@@ -4477,7 +4963,7 @@
             label3,
             numberInput(
               typeof v === "number" ? v : null,
-              (n) => commit(f.name, n),
+              (n2) => commit(f.name, n2),
               {
                 step: 0.1,
                 min: 0,
@@ -4605,6 +5091,24 @@
     addFile("Markdown", slide.md?.rel);
     addFile("Notes", slide.notes.rel);
     panel2.append(section("Files", files2));
+    const arrows = attachedConnectors();
+    if (arrows.length) {
+      panel2.append(
+        section(
+          "Arrows",
+          h(
+            "p",
+            { class: "hint" },
+            `${arrows.length} arrow${arrows.length === 1 ? " is" : "s are"} attached to shapes and follow them when they move here. After moving shapes in another editor, re-route them:`
+          ),
+          button(
+            "Re-route all",
+            "Re-attach every arrow to its shapes",
+            () => reroute(arrows)
+          )
+        )
+      );
+    }
     if (slide.srcShared) {
       panel2.append(
         h(
@@ -5061,6 +5565,9 @@
       );
       if (el2.localName === "text") panel2.append(textSection(sel));
     }
+    if (!zone && src?.writable && movable && isConnector(el2)) {
+      panel2.append(connectorSection(sel));
+    }
     if (!zone && src?.writable && pictureOf(el2)) {
       panel2.append(pictureSection(sel));
     }
@@ -5069,6 +5576,116 @@
     }
     if (movable) panel2.append(arrangeSection([sel]));
     if (id || zone || src?.writable) panel2.append(elementAnimations(sel));
+  }
+  var ARROW = "url(#inkflow-arrow)";
+  function attachedConnectors() {
+    const svg = slideRoot();
+    if (!svg) return [];
+    return [...svg.querySelectorAll("[data-ink]")].filter(
+      (el2) => isConnector(el2) && canTransform(el2) && (el2.hasAttribute("inkflow:connect-start") || el2.hasAttribute("inkflow:connect-end"))
+    ).map((el2) => ({
+      el: el2,
+      key: parseInt(
+        (el2.getAttribute("data-ink") ?? "").split(":")[0],
+        10
+      ),
+      loc: el2.getAttribute("data-ink") ?? ""
+    }));
+  }
+  function reroute(sels) {
+    const plans = sels.map((s) => ({ s, d: connectorPath(s.el) })).filter((x) => !!x.d).map(({ s, d }) => ({
+      sel: s,
+      ops: [{ kind: "attrs", loc: s.loc, set: { d } }]
+    }));
+    if (plans.length) void sendSvgOps(plans, "Re-route arrows");
+  }
+  function connectorSection(sel) {
+    const el2 = sel.el;
+    const has = (attr) => (el2.getAttribute(attr) ?? "").includes("inkflow-arrow");
+    const heads = has("marker-start") ? has("marker-end") ? "both" : "start" : has("marker-end") ? "end" : "none";
+    const send = (set, label3, marker = false) => void sendSvgOps(
+      [
+        {
+          sel,
+          ops: [
+            ...marker ? [{ kind: "ensure-marker" }] : [],
+            { kind: "attrs", loc: sel.loc, set }
+          ]
+        }
+      ],
+      label3
+    );
+    const describe = (which) => {
+      const c = parseConnection(el2.getAttribute(`inkflow:connect-${which}`));
+      return c ? `${c.id} (${c.site})` : "free";
+    };
+    return section(
+      "Connector",
+      row2(
+        "Route",
+        selectInput(
+          [
+            { value: "straight", label: "Straight" },
+            { value: "elbow", label: "Elbow" },
+            { value: "curved", label: "Curved" }
+          ],
+          connectorStyle(el2),
+          (v) => {
+            const style = v;
+            const d = connectorPath(el2, {}, style);
+            send(
+              { "inkflow:connector": v, ...d ? { d } : {} },
+              "Connector route"
+            );
+          }
+        )
+      ),
+      row2(
+        "Arrowheads",
+        selectInput(
+          [
+            { value: "none", label: "None" },
+            { value: "end", label: "At the end" },
+            { value: "start", label: "At the start" },
+            { value: "both", label: "Both ends" }
+          ],
+          heads,
+          (v) => send(
+            {
+              "marker-start": v === "start" || v === "both" ? ARROW : null,
+              "marker-end": v === "end" || v === "both" ? ARROW : null
+            },
+            "Arrowheads",
+            v !== "none"
+          )
+        )
+      ),
+      h(
+        "p",
+        { class: "hint" },
+        `Start: ${describe("start")} \xB7 End: ${describe("end")}. Drag an end onto a shape's dot to attach it; Alt while dragging keeps it free.`
+      ),
+      h(
+        "div",
+        { class: "btn-row" },
+        button(
+          "Re-route",
+          "Re-attach to the shapes where they are now",
+          () => reroute([sel])
+        ),
+        button(
+          "Detach",
+          "Free both ends",
+          () => send(
+            {
+              "inkflow:connect-start": null,
+              "inkflow:connect-end": null
+            },
+            "Detach"
+          )
+        )
+      )
+    );
   }
   var FITS = [
     { value: "contain", label: "Fit inside", par: "xMidYMid meet" },
@@ -5144,8 +5761,8 @@
     if (slide) return `slide:${slide}`;
     return a.getAttribute("href") ?? a.getAttribute("xlink:href") ?? "";
   }
-  function slideLinkByNumber(n) {
-    const s = ed.model?.slides[n - 1];
+  function slideLinkByNumber(n2) {
+    const s = ed.model?.slides[n2 - 1];
     return s?.id ? `slide:${s.id}` : null;
   }
   function slideOptions() {
@@ -5656,7 +6273,7 @@
   function listMarkdown(list3) {
     const ordered = list3.localName === "ol";
     const tasks = list3.classList.contains(TASK_LIST);
-    let n = parseInt(list3.getAttribute("start") ?? "1", 10) || 1;
+    let n2 = parseInt(list3.getAttribute("start") ?? "1", 10) || 1;
     const lines = [];
     for (const li of list3.children) {
       if (li.localName !== "li") throw new Unsupported(li.localName);
@@ -5666,7 +6283,7 @@
       }
       const box = [...li.childNodes].find(isCheckbox);
       const task = tasks || cls === TASK_ITEM || box !== void 0;
-      const bullet = ordered ? `${n++}. ` : "- ";
+      const bullet = ordered ? `${n2++}. ` : "- ";
       const marker = `${bullet}${task ? box?.checked ? "[x] " : "[ ] " : ""}`;
       const pad = " ".repeat(bullet.length);
       const own = [];
@@ -5799,7 +6416,7 @@ ${pad}`);
   function linesOf(el2) {
     const spans = [...el2.children].filter((c) => c.localName === "tspan");
     const loose = [...el2.childNodes].some(
-      (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim()
+      (n2) => n2.nodeType === Node.TEXT_NODE && (n2.textContent ?? "").trim()
     );
     if (!spans.length || loose) return [el2.textContent ?? ""];
     return spans.map((s) => s.textContent ?? "");
@@ -6686,7 +7303,7 @@ ${area2.value.slice(pos)}`;
     document.body.append(probe);
     const rgb = getComputedStyle(probe).color.match(/\d+/g) ?? ["0", "0", "0"];
     probe.remove();
-    return `#${rgb.slice(0, 3).map((n) => Number(n).toString(16).padStart(2, "0")).join("")}`;
+    return `#${rgb.slice(0, 3).map((n2) => Number(n2).toString(16).padStart(2, "0")).join("")}`;
   }
   async function save2(body2, label3) {
     await edit({ action: "theme-set", label: label3, ...body2 });
@@ -6820,8 +7437,8 @@ ${area2.value.slice(pos)}`;
     });
     size2.disabled = !ed.model?.deckEditable;
     size2.addEventListener("change", () => {
-      const n = parseInt(size2.value, 10);
-      void save2({ fontSize: Number.isFinite(n) ? n : null }, "Font size");
+      const n2 = parseInt(size2.value, 10);
+      void save2({ fontSize: Number.isFinite(n2) ? n2 : null }, "Font size");
     });
     const list3 = h("datalist", { id: "theme-font-list" });
     for (const f of ["sans-serif", "serif", "monospace", ...t.fonts]) {
@@ -6836,7 +7453,7 @@ ${area2.value.slice(pos)}`;
       ),
       h("h3", {}, "Fonts"),
       list3,
-      ...FONTS.map(([n, l, g]) => fontRow(n, l, g)),
+      ...FONTS.map(([n2, l, g]) => fontRow(n2, l, g)),
       h(
         "p",
         { class: "hint" },
@@ -6994,8 +7611,8 @@ ${area2.value.slice(pos)}`;
   }
   function present() {
     const slide = currentSlide();
-    const n = (slide?.visibleIndex ?? 0) + 1;
-    window.open(`/#slide=${n}`, "inkflow-present");
+    const n2 = (slide?.visibleIndex ?? 0) + 1;
+    window.open(`/#slide=${n2}`, "inkflow-present");
   }
   function toggleTheme() {
     const root2 = document.documentElement;
@@ -7208,8 +7825,8 @@ ${area2.value.slice(pos)}`;
   function readHash() {
     const m = location.hash.match(/slide=(\d+)/);
     if (!m || !ed.model) return;
-    const n = Number(m[1]);
-    const s = ed.model.slides.find((x) => x.visibleIndex === n - 1);
+    const n2 = Number(m[1]);
+    const s = ed.model.slides.find((x) => x.visibleIndex === n2 - 1);
     if (s) ed.current = s.deckIndex;
   }
   function writeHash() {

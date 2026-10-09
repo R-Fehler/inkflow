@@ -209,6 +209,25 @@ lock (`sodipodi:insensitive`), it survives the pre-commit cleanup, so a locked
 background stays locked for everyone working on the deck. Inkscape layer locks are
 honoured by the editor too.
 
+## Connectors
+
+A line drawn between two shapes in the visual editor is a `<path>` that names
+the shapes it is attached to:
+
+```xml
+<path d="M576,242 L912,242 L912,717 L1248,717"
+      inkflow:connector="elbow"
+      inkflow:connect-start="box-a:right"
+      inkflow:connect-end="box-b:left"
+      marker-end="url(#inkflow-arrow)"/>
+```
+
+`inkflow:connector` is the route (`straight`, `elbow` or `curved`), and each end is
+`<id>:<side>` (`top`, `right`, `bottom`, `left`). The `d` is ordinary path data, so
+the arrow renders anywhere, including in Inkscape. The editor rewrites it whenever
+one of the shapes moves there; if you move shapes in Inkscape, **Re-route all**
+in the editor's slide panel catches up.
+
 ## Keeping SVGs clean in git
 
 Inkscape stores viewport position, zoom level and window size inside the file,

@@ -30,6 +30,7 @@ the file watcher shows each one the others' changes within a moment.
 | An image or video zone's settings | Its `Image(...)` / `Video(...)` call in `deck.py` |
 | A new text box | A `zone-text` rect in the slide's SVG; its Markdown in the slide's `.md` file (or `zones={...}` when it has none) |
 | A crop | The picture's SVG: the `<image>` goes into a nested `<svg>` frame |
+| A line or arrow attached to shapes | A `<path>` with `inkflow:connector` and `inkflow:connect-start` / `-end`; re-routed in the same edit whenever an attached shape moves |
 | A link, alt text, hiding, locking | The object in the SVG: an `<a href>` around it, a `<title>`, `display:none`, `inkflow:locked` |
 | Theme colours and fonts | One marked block in the project's `styles.css` |
 | Colour mode, base font size | `Deck(mode=..., font_size=...)` in `deck.py` |
@@ -143,8 +144,8 @@ image or video, for zones named like `media`, `image` or `video`).
 
 ## Drawing
 
-The toolbar's rectangle, ellipse, line and arrow tools draw new objects. Click to
-drop one at a default size, or drag to size it. New shapes use the theme's colour
+The toolbar's rectangle and ellipse tools draw new shapes. Click to drop one at a
+default size, or drag to size it. New shapes use the theme's colour
 classes (`inkflow-fill-surface`, `inkflow-stroke-accent`, …), so they follow dark
 and light mode like everything else. Images can be picked from the toolbar,
 dropped onto the slide or pasted from the clipboard.
@@ -160,6 +161,26 @@ Many slides are drawn directly by a shared layout (`Slide("content", md=...)`).
 The first time you draw on one, the editor gives it its own SVG in `slides/`, built
 on that same layout, and points the slide at it. Nothing changes visually, and the
 layout itself is left alone.
+
+## Lines, arrows and connectors
+
+Lines and arrows connect shapes, as in PowerPoint. With the line or arrow tool,
+hovering a shape shows its four connection points (the middle of each edge,
+turning with the shape). Start or end the drag on one and that end attaches
+there. From then on the arrow follows the shape: move, resize, rotate or nudge it
+and the arrow is re-routed in the same undo step.
+
+Select an arrow to see its two ends as handles; a filled handle is attached. Drag
+an end onto another shape's point to re-attach it, or into empty space to free it
+(hold <kbd>Alt</kbd> to drop it near a shape without attaching). Moving the whole
+arrow detaches it, unless the shapes it connects move with it.
+
+The panel's **Connector** section sets the route (straight, elbow or curved) and
+the arrowheads (at the end, the start, both or none). **Detach** frees both ends.
+
+Arrows follow shapes moved in the editor. After moving shapes in Inkscape (or when
+an agent edits the SVG), **Re-route all** in the slide panel re-attaches every
+arrow to where its shapes now are.
 
 ## Pictures
 

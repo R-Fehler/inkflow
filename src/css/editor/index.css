@@ -1872,3 +1872,28 @@ body.offline #offline-banner {
 .grid-badge {
     color: var(--sel);
 }
+
+/* ── Connectors ── */
+
+#overlay .site {
+    fill: var(--ui-panel);
+    stroke: var(--sel);
+    stroke-width: 1.5;
+    pointer-events: none;
+}
+
+#overlay .site.on {
+    fill: var(--sel);
+}
+
+#overlay .handle.endpoint {
+    fill: #fff;
+    stroke: var(--sel);
+    stroke-width: 2;
+    cursor: move;
+}
+
+#overlay .handle.endpoint.attached {
+    fill: var(--sel);
+    stroke: #fff;
+}

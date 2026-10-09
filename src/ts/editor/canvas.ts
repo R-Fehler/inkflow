@@ -9,9 +9,21 @@
 
 import { applyStepInstant } from "../shared/step";
 import { parseViewBox } from "../shared/viewbox";
+import {
+    type ConnectorStyle,
+    type End,
+    endpointsOf,
+    nearestSite,
+    parseConnection,
+    pathData,
+    route,
+    type Site,
+    sitesFromCorners,
+} from "./connectors";
 import { h, svgEl, toast } from "./dom";
 import {
     type AttrPlan,
+    apply,
     type Box,
     type ElementGeom,
     IDENTITY,
@@ -297,6 +309,10 @@ const GEOM_ATTRS = [
     "y2",
     "transform",
     "viewBox",
+    // A connector's route and its attachments.
+    "d",
+    "inkflow:connect-start",
+    "inkflow:connect-end",
 ];
 
 export function elementGeom(el: SVGGraphicsElement): ElementGeom {
@@ -427,6 +443,12 @@ export function pick(x: number, y: number): SVGGraphicsElement | null {
     return pickByBox(svg, x, y);
 }
 
+// Lines and connectors are picked by their stroke only: their box (a long
+// diagonal, an elbow) covers empty slide that clicks must still reach.
+function isLineLike(el: Element): boolean {
+    return el.localName === "line" || isConnector(el);
+}
+
 // A click that lands in a gap of a shape (between a logo's strokes, inside an
 // unfilled outline) still selects it, as slide editors do: the topmost
 // selectable object whose box contains the point. Slide-sized boxes are left
@@ -443,7 +465,7 @@ function pickByBox(
         : [...svg.querySelectorAll("[data-ink-top]")];
     for (let i = pool.length - 1; i >= 0; i--) {
         const el = pool[i];
-        if (!selectable(el)) continue;
+        if (!selectable(el) || isLineLike(el)) continue;
         const b = slideBox(el);
         if (!b || b.width * b.height > slide.width * slide.height * 0.8)
             continue;
@@ -491,6 +513,7 @@ export function candidatesAt(x: number, y: number): SVGGraphicsElement[] {
         ? [...ed.scope.children]
         : [...svg.querySelectorAll("[data-ink-top]")];
     for (let i = pool.length - 1; i >= 0; i--) {
+        if (isLineLike(pool[i])) continue;
         const b = slideBox(pool[i]);
         if (
             b &&
@@ -639,7 +662,7 @@ export function selectionBox(): Box | null {
 }
 
 export const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
-type Handle = (typeof HANDLES)[number] | "rot";
+type Handle = (typeof HANDLES)[number] | "rot" | "c-start" | "c-end";
 
 function handlePoint(h: Handle, b: Box): { x: number; y: number } {
     const cx = b.x + b.width / 2;
@@ -665,6 +688,8 @@ function handlePoint(h: Handle, b: Box): { x: number; y: number } {
             return { x: b.x, y: cy };
         case "rot":
             return { x: cx, y: b.y - 28 };
+        default:
+            return { x: cx, y: cy };
     }
 }
 
@@ -695,9 +720,33 @@ export function drawOverlay(): void {
         }
     }
     if (ed.cropMode) drawCropGhost();
+    drawSiteHints();
     const transformable = ed.selection.filter((s) => canTransform(s.el));
+    const lone = ed.selection.length === 1 ? ed.selection[0].el : null;
+    // A connector is reshaped by its two ends, not by a box.
+    const connector =
+        lone && isConnector(lone) && canTransform(lone) ? lone : null;
     const box =
-        transformable.length === ed.selection.length ? selectionBox() : null;
+        !connector && transformable.length === ed.selection.length
+            ? selectionBox()
+            : null;
+    if (connector && ed.step == null) {
+        const m = slideToPaper();
+        for (const which of ["start", "end"] as const) {
+            const end = connectorEnd(connector, which);
+            if (!end) continue;
+            const p = apply(m, end);
+            const attached = connector.hasAttribute(ENDS[which]);
+            const handle = svgEl("circle", {
+                cx: p.x,
+                cy: p.y,
+                r: 6,
+                class: `handle endpoint${attached ? " attached" : ""}`,
+            });
+            handle.dataset.handle = `c-${which}`;
+            overlay.append(handle);
+        }
+    }
     if (box && ed.step == null) {
         const pb = toPaperBox(box);
         if (ed.selection.length > 1) {
@@ -867,6 +916,318 @@ function drawPlaceholders(): void {
     }
 }
 
+// ── Connectors ──
+//
+// Arrows that stay attached (see connectors.ts for the geometry): a connector
+// end names "<id>:<site>", and whenever an attached shape moves in the editor
+// the connector is re-routed in the same edit.
+
+const CONNECTOR = "inkflow:connector";
+const ENDS = { start: "inkflow:connect-start", end: "inkflow:connect-end" };
+const SNAP_SITE_PX = 14;
+
+export function isConnector(el: Element): boolean {
+    return el.hasAttribute(CONNECTOR);
+}
+
+export function connectorStyle(el: Element): ConnectorStyle {
+    const v = el.getAttribute(CONNECTOR);
+    return v === "elbow" || v === "curved" ? v : "straight";
+}
+
+function toSlideMat(el: Element): Mat | null {
+    const ctm = (el as SVGGraphicsElement).getScreenCTM?.();
+    return ctm ? multiply(invert(rootCTM()), mat(ctm)) : null;
+}
+
+/** An object's connection sites, in slide units. */
+export function sitesOf(el: Element): Site[] | null {
+    try {
+        const m = measure(el);
+        if (!m) return null;
+        const toSlide = multiply(invert(rootCTM()), mat(m.ctm));
+        const b = m.bbox;
+        if (b.width <= 0 && b.height <= 0) return null;
+        return sitesFromCorners(
+            [
+                { x: b.x, y: b.y },
+                { x: b.x + b.width, y: b.y },
+                { x: b.x + b.width, y: b.y + b.height },
+                { x: b.x, y: b.y + b.height },
+            ].map((p) => apply(toSlide, p)),
+        );
+    } catch {
+        return null;
+    }
+}
+
+function byId(id: string): Element | null {
+    return slideRoot()?.querySelector(`[id="${CSS.escape(id)}"]`) ?? null;
+}
+
+// What a connector end can attach to: objects on the slide (not connectors),
+// in the entered group when there is one.
+function attachables(except: Element | null): Element[] {
+    const svg = slideRoot();
+    if (!svg) return [];
+    const pool = ed.scope
+        ? [...ed.scope.children]
+        : [...svg.querySelectorAll("[data-ink-top]")];
+    const area = slideSize();
+    return pool.filter((el) => {
+        if (el === except || isConnector(el) || !el.hasAttribute("data-ink"))
+            return false;
+        const b = slideBox(el);
+        // Full-slide backgrounds are not something an arrow points at.
+        return !!b && b.width * b.height < area.width * area.height * 0.8;
+    });
+}
+
+/** The site nearest to a slide point (within a few screen pixels), if any. */
+export function siteAt(
+    p: { x: number; y: number },
+    except: Element | null,
+): { el: Element; site: Site } | null {
+    const within = SNAP_SITE_PX / (scale() || 1);
+    let best: { el: Element; site: Site } | null = null;
+    let bestD = within;
+    for (const el of attachables(except)) {
+        const s = nearestSite(sitesOf(el) ?? [], p, bestD);
+        if (s) {
+            best = { el, site: s };
+            bestD = Math.hypot(s.x - p.x, s.y - p.y);
+        }
+    }
+    return best;
+}
+
+// Sites drawn while connecting: of the object under the pointer and the one
+// being snapped to.
+let siteHints: { el: Element; active: Site | null }[] = [];
+
+export function showSites(hints: { el: Element; active: Site | null }[]): void {
+    siteHints = hints;
+    drawOverlay();
+}
+
+function drawSiteHints(): void {
+    const m = slideToPaper();
+    for (const { el, active } of siteHints) {
+        for (const s of sitesOf(el) ?? []) {
+            const p = apply(m, s);
+            const on =
+                active?.name === s.name &&
+                Math.hypot(active.x - s.x, active.y - s.y) < 0.5;
+            overlay.append(
+                svgEl("circle", {
+                    cx: p.x,
+                    cy: p.y,
+                    r: on ? 6 : 4,
+                    class: `site${on ? " on" : ""}`,
+                }),
+            );
+        }
+    }
+}
+
+/** A connector end in slide units: its site when attached, else its point. */
+function connectorEnd(conn: Element, which: "start" | "end"): End | null {
+    const c = parseConnection(conn.getAttribute(ENDS[which]));
+    if (c) {
+        const target = byId(c.id);
+        const site = target
+            ? sitesOf(target)?.find((s) => s.name === c.site)
+            : null;
+        if (site) return site;
+    }
+    const pts = endpointsOf(conn.getAttribute("d") ?? "");
+    const m = toSlideMat(conn);
+    if (!pts || !m) return null;
+    return apply(m, which === "start" ? pts.start : pts.end);
+}
+
+/** The path data for a connector in its own user space. */
+export function connectorPath(
+    conn: Element,
+    ends: { start?: End; end?: End } = {},
+    style: ConnectorStyle = connectorStyle(conn),
+): string | null {
+    const a = ends.start ?? connectorEnd(conn, "start");
+    const b = ends.end ?? connectorEnd(conn, "end");
+    const toSlide = toSlideMat(conn);
+    if (!a || !b || !toSlide) return null;
+    const local = invert(toSlide);
+    const r = route(style, a, b);
+    return pathData({ ...r, points: r.points.map((p) => apply(local, p)) });
+}
+
+/** Route a new connector between slide-unit ends into some element's space. */
+export function newConnectorPath(
+    style: ConnectorStyle,
+    a: End,
+    b: End,
+    parent: Element | null,
+): string {
+    const svg = slideRoot();
+    const pm = (parent as SVGGraphicsElement | null)?.getScreenCTM?.();
+    const local = pm && svg ? multiply(invert(mat(pm)), rootCTM()) : IDENTITY;
+    const r = route(style, a, b);
+    return pathData({ ...r, points: r.points.map((p) => apply(local, p)) });
+}
+
+const GEOMETRY = new Set([...GEOM_ATTRS, "points"]);
+
+function geometryChanged(ops: SvgOp[]): boolean {
+    return ops.some(
+        (op) =>
+            op.kind === "attrs" &&
+            Object.keys((op.set as Record<string, unknown>) ?? {}).some((k) =>
+                GEOMETRY.has(k),
+            ),
+    );
+}
+
+/**
+ * Add, to plans that move or reshape objects, the re-routing of every
+ * connector attached to them (and preview it on the slide).
+ */
+export function withConnectors(
+    plans: { sel: Selected; ops: SvgOp[] }[],
+): { sel: Selected; ops: SvgOp[] }[] {
+    const svg = slideRoot();
+    if (!svg) return plans;
+    const moved = plans
+        .filter((p) => geometryChanged(p.ops))
+        .map((p) => p.sel.el as Element);
+    if (!moved.length) return plans;
+    // The plans' attributes are on the slide already for a drag; for other
+    // edits (the geometry fields) put them there, so routing reads them.
+    for (const p of plans) {
+        for (const op of p.ops) {
+            if (op.kind === "attrs" && op.loc === p.sel.loc) {
+                applyPlanToDom(p.sel.el, op.set as AttrPlan);
+            }
+        }
+    }
+    const touches = (conn: Element) =>
+        (["start", "end"] as const).some((w) => {
+            const c = parseConnection(conn.getAttribute(ENDS[w]));
+            const target = c ? byId(c.id) : null;
+            return (
+                !!target &&
+                moved.some((m) => m === target || m.contains(target))
+            );
+        });
+    const out = [...plans];
+    for (const conn of svg.querySelectorAll(`[${CSS.escape(CONNECTOR)}]`)) {
+        if (
+            !conn.hasAttribute("data-ink") ||
+            !canTransform(conn) ||
+            !touches(conn)
+        )
+            continue;
+        const d = connectorPath(conn);
+        if (!d) continue;
+        applyPlanToDom(conn, { d });
+        const loc = conn.getAttribute("data-ink") ?? "";
+        const existing = out.find((p) => p.sel.el === conn);
+        const op: SvgOp = { kind: "attrs", loc, set: { d } };
+        if (existing) existing.ops = [...existing.ops, op];
+        else
+            out.push({
+                sel: toSelected(conn as SVGGraphicsElement),
+                ops: [op],
+            });
+    }
+    return out;
+}
+
+// Elements moving together in the current move (a connector keeps an end
+// attached only when the shape at that end moves with it).
+let movingTogether: Element[] = [];
+
+function connectorMoveOps(sel: Selected, dx: number, dy: number): SvgOp[] {
+    const conn = sel.el;
+    const set: AttrPlan = {};
+    const ends: { start?: End; end?: End } = {};
+    for (const w of ["start", "end"] as const) {
+        const c = parseConnection(conn.getAttribute(ENDS[w]));
+        const target = c ? byId(c.id) : null;
+        const kept =
+            !!target &&
+            movingTogether.some((m) => m === target || m.contains(target));
+        const here = connectorEnd(conn, w);
+        if (!kept) {
+            if (c) set[ENDS[w]] = null; // dragged away from its shape: detach
+            if (here) ends[w] = { x: here.x + dx, y: here.y + dy };
+        }
+    }
+    for (const [k, v] of Object.entries(set)) {
+        if (v === null) conn.removeAttribute(k);
+    }
+    const d = connectorPath(conn, ends);
+    if (d) set.d = d;
+    applyPlanToDom(conn, { d: set.d ?? null });
+    return [{ kind: "attrs", loc: sel.loc, set }];
+}
+
+function freshId(base: string): string {
+    const svg = slideRoot();
+    let n = 1;
+    while (svg?.querySelector(`[id="${base}-${n}"]`)) n++;
+    return `${base}-${n}`;
+}
+
+/**
+ * Drag one end of a connector: it snaps to the nearest connection site (and
+ * attaches there) or stays a free point where it is dropped.
+ */
+function endpointPlans(
+    drag: { which: "start" | "end"; snaps: Snapshot[] },
+    p: { x: number; y: number },
+    e: PointerEvent,
+): { sel: Selected; ops: SvgOp[] }[] {
+    const sel = drag.snaps[0].sel;
+    const conn = sel.el;
+    const hit = e.altKey ? null : siteAt(p, conn);
+    const under = candidatesAt(e.clientX, e.clientY).find(
+        (el) => el !== conn && !isConnector(el),
+    );
+    siteHints = [
+        ...(under
+            ? [
+                  {
+                      el: under as Element,
+                      active: hit?.el === under ? hit.site : null,
+                  },
+              ]
+            : []),
+        ...(hit && hit.el !== under ? [{ el: hit.el, active: hit.site }] : []),
+    ];
+    const ops: SvgOp[] = [];
+    let attach: string | null = null;
+    if (hit) {
+        let id = hit.el.getAttribute("id");
+        if (!id && keyOf(hit.el) === sel.key) {
+            // Give the shape an id to attach to (same file only).
+            id = freshId(hit.el.localName);
+            hit.el.setAttribute("id", id);
+            ops.push({ kind: "id", loc: hit.el.getAttribute("data-ink"), id });
+        }
+        if (id) attach = `${id}:${hit.site.name}`;
+    }
+    const end: End = attach && hit ? hit.site : p;
+    const d = connectorPath(conn, { [drag.which]: end });
+    if (!d) return [];
+    applyPlanToDom(conn, { d });
+    ops.push({
+        kind: "attrs",
+        loc: sel.loc,
+        set: { d, [ENDS[drag.which]]: attach },
+    });
+    return [{ sel, ops }];
+}
+
 // ── Sending plans ──
 
 function opsByFile(
@@ -911,6 +1272,7 @@ async function sendQueued(
     const slide = currentSlide();
     if (!slide) return false;
     let ok = true;
+    plans = withConnectors(plans);
     for (const [path, ops] of opsByFile(plans)) {
         const src = slide.sources?.find((s) => s.path === path);
         if (src && src.usedBy.length > 1 && ed.layoutMode) {
@@ -948,6 +1310,9 @@ function textChildren(el: Element): Element[] {
 
 // A move as attribute ops for one element (and its positioned tspans).
 export function moveOps(sel: Selected, dx: number, dy: number): SvgOp[] {
+    if (isConnector(sel.el) && sel.el.getAttribute("d")) {
+        return connectorMoveOps(sel, dx, dy);
+    }
     const kids = textChildren(sel.el);
     const plan = planMove(
         elementGeom(sel.el),
@@ -972,7 +1337,13 @@ export function moveOps(sel: Selected, dx: number, dy: number): SvgOp[] {
 export async function nudge(dx: number, dy: number): Promise<void> {
     const sels = ed.selection.filter((s) => canTransform(s.el));
     if (!sels.length) return;
-    const plans = sels.map((sel) => ({ sel, ops: moveOps(sel, dx, dy) }));
+    movingTogether = sels.map((s) => s.el);
+    // Shapes first, then connectors, which route to where the shapes went.
+    const ordered = [
+        ...sels.filter((s) => !isConnector(s.el)),
+        ...sels.filter((s) => isConnector(s.el)),
+    ];
+    const plans = ordered.map((sel) => ({ sel, ops: moveOps(sel, dx, dy) }));
     drawOverlay();
     await sendSvgOps(plans, "Nudge", "nudge");
 }
@@ -1037,6 +1408,7 @@ type Drag =
           targets: SnapTargets;
       }
     | { kind: "rotate"; snaps: Snapshot[]; center: { x: number; y: number } }
+    | { kind: "endpoint"; which: "start" | "end"; snaps: Snapshot[] }
     | { kind: "marquee"; additive: boolean };
 
 let pointer: {
@@ -1056,6 +1428,13 @@ function beginDrag(handle: Handle | null): Drag | null {
     const snaps = sels.map(snapshot);
     const start = unionBoxes(snaps.map((s) => s.box));
     if (!start) return null;
+    if (handle === "c-start" || handle === "c-end") {
+        return {
+            kind: "endpoint",
+            which: handle === "c-start" ? "start" : "end",
+            snaps,
+        };
+    }
     const targets = snapTargets(new Set(sels.map((s) => s.el)));
     if (handle === "rot") {
         return {
@@ -1160,10 +1539,14 @@ function updateDrag(drag: Drag, e: PointerEvent): void {
             guides = { xs: snap.guidesX, ys: snap.guidesY };
         }
         restore(drag.snaps);
-        lastPlans = drag.snaps.map((s) => ({
-            sel: s.sel,
-            ops: moveOps(s.sel, dx, dy),
-        }));
+        movingTogether = drag.snaps.map((s) => s.sel.el);
+        const ordered = [
+            ...drag.snaps.filter((s) => !isConnector(s.sel.el)),
+            ...drag.snaps.filter((s) => isConnector(s.sel.el)),
+        ];
+        lastPlans = withConnectors(
+            ordered.map((s) => ({ sel: s.sel, ops: moveOps(s.sel, dx, dy) })),
+        );
     } else if (drag.kind === "resize") {
         if (!e.altKey) {
             const h = drag.handle;
@@ -1215,6 +1598,9 @@ function updateDrag(drag: Drag, e: PointerEvent): void {
                 ops: [{ kind: "attrs", loc: s.sel.loc, set: plan }],
             };
         });
+    } else if (drag.kind === "endpoint") {
+        restore(drag.snaps);
+        lastPlans = endpointPlans(drag, p1, e);
     } else if (drag.kind === "marquee") {
         marquee = {
             x: Math.min(p0.x, p1.x),
@@ -1257,14 +1643,17 @@ async function endDrag(drag: Drag): Promise<void> {
     lastPlans = [];
     drawOverlay();
     if (!plans.length) return;
+    if (siteHints.length) siteHints = [];
     const label =
-        drag.kind === "move"
-            ? "Move"
-            : drag.kind === "resize"
-              ? ed.cropMode
-                  ? "Crop"
-                  : "Resize"
-              : "Rotate";
+        drag.kind === "endpoint"
+            ? "Connect"
+            : drag.kind === "move"
+              ? "Move"
+              : drag.kind === "resize"
+                ? ed.cropMode
+                    ? "Crop"
+                    : "Resize"
+                : "Rotate";
     const ok = await sendSvgOps(plans, label);
     if (!ok) restore(drag.snaps);
     drawOverlay();
@@ -1347,6 +1736,30 @@ function onPointerMove(e: PointerEvent): void {
                 hoverEl = el;
                 drawOverlay();
             }
+        } else if (
+            (ed.tool === "line" || ed.tool === "arrow") &&
+            e.buttons === 0
+        ) {
+            // The connection sites a line or arrow would attach to.
+            const p = clientToSlide(e.clientX, e.clientY);
+            const hit = e.altKey ? null : siteAt(p, null);
+            const under = candidatesAt(e.clientX, e.clientY).find(
+                (el) => !isConnector(el),
+            );
+            const hints = [
+                ...(under
+                    ? [
+                          {
+                              el: under as Element,
+                              active: hit?.el === under ? hit.site : null,
+                          },
+                      ]
+                    : []),
+                ...(hit && hit.el !== under
+                    ? [{ el: hit.el, active: hit.site }]
+                    : []),
+            ];
+            if (hints.length || siteHints.length) showSites(hints);
         }
         return;
     }
@@ -1441,6 +1854,7 @@ export function initCanvas(): void {
     paper.addEventListener("pointercancel", (e) => void onPointerUp(e));
     paper.addEventListener("dblclick", onDoubleClick);
     paper.addEventListener("pointerleave", () => {
+        if (siteHints.length) showSites([]);
         if (hoverEl) {
             hoverEl = null;
             drawOverlay();

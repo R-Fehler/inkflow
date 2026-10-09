@@ -5,8 +5,11 @@
 
 import {
     canTransform,
+    connectorPath,
+    connectorStyle,
     elementGeom,
     enterGroup,
+    isConnector,
     isZone,
     moveOps,
     select,
@@ -17,6 +20,7 @@ import {
     slideSize,
     zoneName,
 } from "./canvas";
+import { parseConnection } from "./connectors";
 import {
     isCropped,
     pictureOf,
@@ -446,6 +450,24 @@ function renderSlidePanel(): void {
     addFile("Markdown", slide.md?.rel);
     addFile("Notes", slide.notes.rel);
     panel.append(section("Files", files));
+    const arrows = attachedConnectors();
+    if (arrows.length) {
+        panel.append(
+            section(
+                "Arrows",
+                h(
+                    "p",
+                    { class: "hint" },
+                    `${arrows.length} arrow${arrows.length === 1 ? " is" : "s are"} attached to shapes and follow them when they move here. After moving shapes in another editor, re-route them:`,
+                ),
+                button(
+                    "Re-route all",
+                    "Re-attach every arrow to its shapes",
+                    () => reroute(arrows),
+                ),
+            ),
+        );
+    }
     if (slide.srcShared) {
         panel.append(
             h(
@@ -964,6 +986,9 @@ function renderObjectPanel(sel: Selected): void {
         );
         if (el.localName === "text") panel.append(textSection(sel));
     }
+    if (!zone && src?.writable && movable && isConnector(el)) {
+        panel.append(connectorSection(sel));
+    }
     if (!zone && src?.writable && pictureOf(el)) {
         panel.append(pictureSection(sel));
     }
@@ -973,6 +998,144 @@ function renderObjectPanel(sel: Selected): void {
 
     if (movable) panel.append(arrangeSection([sel]));
     if (id || zone || src?.writable) panel.append(elementAnimations(sel));
+}
+
+// ── Connectors ──
+
+const ARROW = "url(#inkflow-arrow)";
+
+function attachedConnectors(): Selected[] {
+    const svg = slideRoot();
+    if (!svg) return [];
+    return [...svg.querySelectorAll("[data-ink]")]
+        .filter(
+            (el) =>
+                isConnector(el) &&
+                canTransform(el) &&
+                (el.hasAttribute("inkflow:connect-start") ||
+                    el.hasAttribute("inkflow:connect-end")),
+        )
+        .map((el) => ({
+            el: el as SVGGraphicsElement,
+            key: parseInt(
+                (el.getAttribute("data-ink") ?? "").split(":")[0],
+                10,
+            ),
+            loc: el.getAttribute("data-ink") ?? "",
+        }));
+}
+
+function reroute(sels: Selected[]): void {
+    const plans = sels
+        .map((s) => ({ s, d: connectorPath(s.el) }))
+        .filter((x): x is { s: Selected; d: string } => !!x.d)
+        .map(({ s, d }) => ({
+            sel: s,
+            ops: [{ kind: "attrs", loc: s.loc, set: { d } }],
+        }));
+    if (plans.length) void sendSvgOps(plans, "Re-route arrows");
+}
+
+function connectorSection(sel: Selected): HTMLElement {
+    const el = sel.el;
+    const has = (attr: string) =>
+        (el.getAttribute(attr) ?? "").includes("inkflow-arrow");
+    const heads = has("marker-start")
+        ? has("marker-end")
+            ? "both"
+            : "start"
+        : has("marker-end")
+          ? "end"
+          : "none";
+    const send = (
+        set: Record<string, string | null>,
+        label: string,
+        marker = false,
+    ) =>
+        void sendSvgOps(
+            [
+                {
+                    sel,
+                    ops: [
+                        ...(marker ? [{ kind: "ensure-marker" }] : []),
+                        { kind: "attrs", loc: sel.loc, set },
+                    ],
+                },
+            ],
+            label,
+        );
+    const describe = (which: "start" | "end") => {
+        const c = parseConnection(el.getAttribute(`inkflow:connect-${which}`));
+        return c ? `${c.id} (${c.site})` : "free";
+    };
+    return section(
+        "Connector",
+        row(
+            "Route",
+            selectInput(
+                [
+                    { value: "straight", label: "Straight" },
+                    { value: "elbow", label: "Elbow" },
+                    { value: "curved", label: "Curved" },
+                ],
+                connectorStyle(el),
+                (v) => {
+                    const style = v as "straight" | "elbow" | "curved";
+                    const d = connectorPath(el, {}, style);
+                    send(
+                        { "inkflow:connector": v, ...(d ? { d } : {}) },
+                        "Connector route",
+                    );
+                },
+            ),
+        ),
+        row(
+            "Arrowheads",
+            selectInput(
+                [
+                    { value: "none", label: "None" },
+                    { value: "end", label: "At the end" },
+                    { value: "start", label: "At the start" },
+                    { value: "both", label: "Both ends" },
+                ],
+                heads,
+                (v) =>
+                    send(
+                        {
+                            "marker-start":
+                                v === "start" || v === "both" ? ARROW : null,
+                            "marker-end":
+                                v === "end" || v === "both" ? ARROW : null,
+                        },
+                        "Arrowheads",
+                        v !== "none",
+                    ),
+            ),
+        ),
+        h(
+            "p",
+            { class: "hint" },
+            `Start: ${describe("start")} · End: ${describe("end")}. Drag an end onto a shape's dot to attach it; Alt while dragging keeps it free.`,
+        ),
+        h(
+            "div",
+            { class: "btn-row" },
+            button(
+                "Re-route",
+                "Re-attach to the shapes where they are now",
+                () => reroute([sel]),
+            ),
+            button("Detach", "Free both ends", () =>
+                send(
+                    {
+                        "inkflow:connect-start": null,
+                        "inkflow:connect-end": null,
+                    },
+                    "Detach",
+                ),
+            ),
+        ),
+    );
 }
 
 // ── Pictures (free images on the slide) ──
