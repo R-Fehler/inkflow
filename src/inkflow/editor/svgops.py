@@ -203,6 +203,19 @@ def _set_text(el: SvgElement, lines: list[str], line_height: float | None) -> No
     if _local(el.tag) != "text":
         raise SvgOpError("only <text> elements hold editable text")
     tspans = [c for c in el if _local(c.tag) == "tspan"]
+    mixed = bool((el.text or "").strip()) or any(
+        (span.tail or "").strip() for span in tspans
+    )
+    if mixed:
+        # Text and inline spans on one line (a bold word in a sentence): the
+        # spans are not lines, so the edit replaces the run with plain text.
+        x = el.get("x")
+        first_x = tspans[0].get("x") if tspans else None
+        for child in list(el):
+            el.remove(child)
+        if first_x is not None and x is None:
+            el.set("x", first_x)
+        tspans = []
     if not tspans:
         for child in list(el):
             el.remove(child)
@@ -226,7 +239,7 @@ def _set_text(el: SvgElement, lines: list[str], line_height: float | None) -> No
     el.text = None
     for span in tspans:
         el.remove(span)
-    x = first.get("x")
+    x = first.get("x") or el.get("x", "0")
     y = first.get("y")
     step = line_height
     if step is None and len(tspans) > 1:
@@ -241,8 +254,7 @@ def _set_text(el: SvgElement, lines: list[str], line_height: float | None) -> No
         span.text = line
         span.tail = None
         if i > 0:
-            if x is not None:
-                span.set("x", x)
+            span.set("x", x)
             if y is not None and step is not None:
                 span.set("y", f"{float(y) + i * step:g}")
                 _drop(span, "dy")
@@ -378,6 +390,10 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
             new = _parse_fragment(str(op.get("xml", "")))
             if not new.get("id"):
                 new.set("id", str(op.get("base") or _local(new.tag)))
+            offset = op.get("offset")
+            if isinstance(offset, list) and len(cast("list[object]", offset)) == 2:
+                dx, dy = cast("list[float]", offset)
+                _translate(new, float(dx), float(dy))
             # Every id inside a pasted copy, not just its own, must stay unique.
             _renumber_ids(new, root)
             index = op.get("index")
@@ -392,7 +408,8 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
             _reorder(el, str(op.get("to")))
             result.structural = True
         elif kind == "ensure-marker":
-            ensure_arrow_marker(root)
+            if ensure_arrow_marker(root):
+                result.structural = True
         else:
             raise SvgOpError(f"unknown operation {kind!r}")
     return result
@@ -401,14 +418,14 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
 ARROW_MARKER = "inkflow-arrow"
 
 
-def ensure_arrow_marker(root: SvgElement) -> None:
+def ensure_arrow_marker(root: SvgElement) -> bool:
     """Add the arrowhead ``<marker>`` new arrows reference, once per file.
 
     ``context-stroke`` paints the head in the line's own stroke colour, so one
     marker serves every arrow whatever its colour or theme token.
     """
     if any(el.get("id") == ARROW_MARKER for el in root.iter(_SVG + "marker")):
-        return
+        return False
     defs = root.find(_SVG + "defs")
     if defs is None:
         defs = etree.Element(_SVG + "defs")
@@ -422,6 +439,7 @@ def ensure_arrow_marker(root: SvgElement) -> None:
         + "</marker>"
     )
     defs.append(marker)
+    return True
 
 
 def _fix_tail(parent: SvgElement, new: SvgElement) -> None:
@@ -497,13 +515,94 @@ def ungroup(svg: SvgFile, loc: str) -> None:
     parent = g.getparent()
     if parent is None:
         raise SvgOpError("not a group")
+    for attr in _UNSPLITTABLE:
+        if g.get(attr) or attr in _parse_style(g.get("style", "")):
+            raise SvgOpError(
+                f"this group has a {attr}, which applies to it as a whole; "
+                + "ungroup it in a vector editor"
+            )
     transform = g.get("transform")
+    group_style = _parse_style(g.get("style", ""))
+    group_opacity = group_style.pop("opacity", None) or g.get("opacity")
+    group_classes = g.get("class", "").split()
+    inherited = {
+        name: value for name in _INHERITED if (value := g.get(name)) is not None
+    }
     for child in list(g):
-        if is_element(child) and transform:
-            own = child.get("transform")
-            child.set("transform", f"{transform} {own}" if own else transform)
+        if is_element(child):
+            if transform:
+                own = child.get("transform")
+                child.set("transform", f"{transform} {own}" if own else transform)
+            _inherit(child, group_style, inherited, group_classes, group_opacity)
         g.addprevious(child)
     parent.remove(g)
+
+
+# Properties a child would otherwise inherit from the group it leaves. The
+# child's own value, where it has one, still wins.
+_INHERITED = (
+    "fill",
+    "fill-opacity",
+    "fill-rule",
+    "stroke",
+    "stroke-width",
+    "stroke-opacity",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-dasharray",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "text-anchor",
+    "color",
+    "visibility",
+)
+# Effects that apply to a group's composite, which no split across its
+# children reproduces.
+_UNSPLITTABLE = ("clip-path", "mask", "filter")
+
+
+def _inherit(
+    child: SvgElement,
+    group_style: dict[str, str],
+    inherited: dict[str, str],
+    group_classes: list[str],
+    group_opacity: str | None,
+) -> None:
+    own_style = _parse_style(child.get("style", ""))
+    additions: dict[str, str] = {}
+    for name, value in {**inherited, **group_style}.items():
+        if name not in own_style and child.get(name) is None:
+            additions[name] = value
+    if group_opacity is not None:
+        try:
+            own = float(own_style.get("opacity") or child.get("opacity") or 1)
+            additions["opacity"] = f"{own * float(group_opacity):g}"
+        except ValueError:
+            pass
+    if additions:
+        set_style(child, {k: v for k, v in additions.items()})
+    if group_classes:
+        own_classes = child.get("class", "").split()
+        own_props = {m.group(1) for c in own_classes if (m := _TOKEN_CLASS.match(c))}
+        # A group's theme colour reaches the child only where the child has
+        # no colour of its own.
+        extra = [
+            c
+            for c in group_classes
+            if c not in own_classes
+            and not (
+                (m := _TOKEN_CLASS.match(c))
+                and (
+                    m.group(1) in own_props
+                    or m.group(1) in own_style
+                    or child.get(m.group(1)) is not None
+                )
+            )
+        ]
+        if extra:
+            child.set("class", " ".join([*own_classes, *extra]))
 
 
 # ── Whole new files ────────────────────────────────────────────────────────────

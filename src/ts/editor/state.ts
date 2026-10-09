@@ -25,6 +25,9 @@ export const ed = {
     canRedo: false,
     clip: null as Clip | null,
     error: null as string | null,
+    // A structural edit was sent and its rebuild has not been rendered yet.
+    structuralPending: false,
+    rebuilt: false, // a model arrived since the last render
 };
 
 type Listener = () => void;

@@ -613,7 +613,11 @@
     canUndo: false,
     canRedo: false,
     clip: null,
-    error: null
+    error: null,
+    // A structural edit was sent and its rebuild has not been rendered yet.
+    structuralPending: false,
+    rebuilt: false
+    // a model arrived since the last render
   };
   var listeners = /* @__PURE__ */ new Map();
   function on(event, fn) {
@@ -684,6 +688,7 @@
             pendingSlides = null;
           }
           ed.model = msg.model;
+          ed.rebuilt = true;
           if (msg.history) {
             const h2 = msg.history;
             ed.canUndo = h2.canUndo;
@@ -723,6 +728,7 @@
       sock.send(JSON.stringify({ type: "edit-op", id, ...req }));
     });
   }
+  var pendingTimer = 0;
   var TRANSIENT = /since the last build|wait for the reload/;
   async function edit(req, opts = {}) {
     const result = await request(req);
@@ -732,7 +738,15 @@
     if (result.ok) {
       ed.canUndo = result.canUndo ?? ed.canUndo;
       ed.canRedo = result.canRedo ?? ed.canRedo;
-      updateHashes(result.hashes ?? {});
+      if (result.structural || req.action === "undo" || req.action === "redo") {
+        ed.structuralPending = true;
+        window.clearTimeout(pendingTimer);
+        pendingTimer = window.setTimeout(() => {
+          ed.structuralPending = false;
+        }, 4e3);
+      } else {
+        updateHashes(result.hashes ?? {});
+      }
       emit("history");
     }
     return result;
@@ -876,6 +890,9 @@
       id: s.el.getAttribute("id")
     }));
     const scopeKey = ed.scope?.getAttribute("data-ink") ?? null;
+    const trustLoc = !ed.structuralPending;
+    if (ed.rebuilt) ed.structuralPending = false;
+    ed.rebuilt = false;
     const data = currentRendered();
     host.innerHTML = data ? data.svg : "";
     const hidden = currentSlide();
@@ -912,20 +929,21 @@
     ed.scope = scopeKey ? host.querySelector(`[data-ink="${scopeKey}"]`) : null;
     ed.selection = [];
     for (const k of keep) {
-      const el = findElement(k);
+      const el = findElement(k, trustLoc);
       if (el) addToSelection(el, false);
     }
     layoutPaper();
     emit("render");
     emit("selection");
   }
-  function findElement(k) {
+  function findElement(k, trustLoc) {
     const svg = slideRoot();
     if (!svg) return null;
     if (k.id) {
       const byId = svg.querySelector(`[id="${CSS.escape(k.id)}"]`);
       if (byId?.hasAttribute("data-ink")) return byId;
     }
+    if (!trustLoc) return null;
     return svg.querySelector(
       `[data-ink="${k.loc}"]`
     );
@@ -1373,6 +1391,18 @@
     return out;
   }
   async function sendSvgOps(plans, label2, coalesce) {
+    const slide = currentSlide();
+    if (!slide) return false;
+    if (ed.structuralPending) {
+      toast("One moment: the last change is still being applied");
+      return false;
+    }
+    const run = queue.then(() => sendQueued(plans, label2, coalesce));
+    queue = run.catch(() => false);
+    return run;
+  }
+  var queue = Promise.resolve();
+  async function sendQueued(plans, label2, coalesce) {
     const slide = currentSlide();
     if (!slide) return false;
     let ok = true;
@@ -2484,7 +2514,8 @@
         return {
           kind: "insert",
           parent: parent.loc,
-          xml: sameFile ? offsetFragment(frag, 24) : frag,
+          xml: frag,
+          offset: sameFile ? [24, 24] : null,
           key: `paste${i}`
         };
       }),
@@ -2493,15 +2524,6 @@
     if (result.ok && result.ids) {
       afterRender.ids = Object.values(result.ids);
     }
-  }
-  function offsetFragment(xml, d) {
-    const m = xml.match(/^<(\w+)([^>]*)>/s) ?? xml.match(/^<(\w+)([^>]*)\/>/s);
-    if (!m) return xml;
-    const tagStart = `<${m[1]}`;
-    const attrs = m[2];
-    const t = attrs.match(/\stransform="([^"]*)"/);
-    const newAttrs = t ? attrs.replace(t[0], ` transform="translate(${d},${d}) ${t[1]}"`) : `${attrs} transform="translate(${d},${d})"`;
-    return tagStart + newAttrs + xml.slice(tagStart.length + attrs.length);
   }
   function initInsert() {
     hooks.toolDown = onToolDown;
@@ -3639,7 +3661,10 @@
   }
   function linesOf(el) {
     const spans = [...el.children].filter((c) => c.localName === "tspan");
-    if (!spans.length) return [el.textContent ?? ""];
+    const loose = [...el.childNodes].some(
+      (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim()
+    );
+    if (!spans.length || loose) return [el.textContent ?? ""];
     return spans.map((s) => s.textContent ?? "");
   }
   function editSvgText(el, sourcePath, hash, loc) {
@@ -3883,6 +3908,12 @@ ${area2.value.slice(pos)}`;
     for (const z of zones) {
       const name = zoneName(z.el);
       const value = slide.zones[name];
+      if (slide.zoneOrigins?.[name] === "md-file") {
+        toast(
+          "This zone shows the whole Markdown file: edit its text instead"
+        );
+        continue;
+      }
       if (value && (value.kind === "image" || value.kind === "video")) {
         await edit({
           action: "zone-media",

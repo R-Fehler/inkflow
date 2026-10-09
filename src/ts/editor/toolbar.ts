@@ -48,6 +48,12 @@ export async function deleteSelection(): Promise<void> {
     for (const z of zones) {
         const name = zoneName(z.el);
         const value = slide.zones[name];
+        if (slide.zoneOrigins?.[name] === "md-file") {
+            toast(
+                "This zone shows the whole Markdown file: edit its text instead",
+            );
+            continue;
+        }
         if (value && (value.kind === "image" || value.kind === "video")) {
             await edit({
                 action: "zone-media",

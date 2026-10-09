@@ -445,7 +445,8 @@ export async function pasteClip(): Promise<void> {
             return {
                 kind: "insert",
                 parent: parent.loc,
-                xml: sameFile ? offsetFragment(frag, 24) : frag,
+                xml: frag,
+                offset: sameFile ? [24, 24] : null,
                 key: `paste${i}`,
             };
         }),
@@ -454,19 +455,6 @@ export async function pasteClip(): Promise<void> {
     if (result.ok && result.ids) {
         afterRender.ids = Object.values(result.ids);
     }
-}
-
-function offsetFragment(xml: string, d: number): string {
-    // Prepend a translate to the element's own transform.
-    const m = xml.match(/^<(\w+)([^>]*)>/s) ?? xml.match(/^<(\w+)([^>]*)\/>/s);
-    if (!m) return xml;
-    const tagStart = `<${m[1]}`;
-    const attrs = m[2];
-    const t = attrs.match(/\stransform="([^"]*)"/);
-    const newAttrs = t
-        ? attrs.replace(t[0], ` transform="translate(${d},${d}) ${t[1]}"`)
-        : `${attrs} transform="translate(${d},${d})"`;
-    return tagStart + newAttrs + xml.slice(tagStart.length + attrs.length);
 }
 
 // ── Wiring ──

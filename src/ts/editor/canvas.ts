@@ -104,6 +104,10 @@ export function render(): void {
         id: s.el.getAttribute("id"),
     }));
     const scopeKey = ed.scope?.getAttribute("data-ink") ?? null;
+    // After a structural edit, positions shifted: re-select by id only.
+    const trustLoc = !ed.structuralPending;
+    if (ed.rebuilt) ed.structuralPending = false;
+    ed.rebuilt = false;
     const data = currentRendered();
     host.innerHTML = data ? data.svg : "";
     const hidden = currentSlide();
@@ -144,7 +148,7 @@ export function render(): void {
         : null;
     ed.selection = [];
     for (const k of keep) {
-        const el = findElement(k);
+        const el = findElement(k, trustLoc);
         if (el) addToSelection(el, false);
     }
     layoutPaper();
@@ -152,13 +156,14 @@ export function render(): void {
     emit("selection");
 }
 
-function findElement(k: SelKey): SVGGraphicsElement | null {
+function findElement(k: SelKey, trustLoc: boolean): SVGGraphicsElement | null {
     const svg = slideRoot();
     if (!svg) return null;
     if (k.id) {
         const byId = svg.querySelector(`[id="${CSS.escape(k.id)}"]`);
         if (byId?.hasAttribute("data-ink")) return byId as SVGGraphicsElement;
     }
+    if (!trustLoc) return null;
     return svg.querySelector(
         `[data-ink="${k.loc}"]`,
     ) as SVGGraphicsElement | null;
@@ -713,6 +718,26 @@ function opsByFile(
 }
 
 export async function sendSvgOps(
+    plans: { sel: Selected; ops: SvgOp[] }[],
+    label: string,
+    coalesce?: string,
+): Promise<boolean> {
+    const slide = currentSlide();
+    if (!slide) return false;
+    if (ed.structuralPending) {
+        toast("One moment: the last change is still being applied");
+        return false;
+    }
+    // One request at a time, each with the hash the previous one returned
+    // (held arrow keys send nudges faster than results come back).
+    const run = queue.then(() => sendQueued(plans, label, coalesce));
+    queue = run.catch(() => false);
+    return run;
+}
+
+let queue: Promise<unknown> = Promise.resolve();
+
+async function sendQueued(
     plans: { sel: Selected; ops: SvgOp[] }[],
     label: string,
     coalesce?: string,

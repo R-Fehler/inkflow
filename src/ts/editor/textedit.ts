@@ -46,7 +46,12 @@ function cancel(): void {
 
 function linesOf(el: Element): string[] {
     const spans = [...el.children].filter((c) => c.localName === "tspan");
-    if (!spans.length) return [el.textContent ?? ""];
+    // Text beside the spans means they are inline runs (a bold word), not
+    // lines: show it all as one line, as the server will write it.
+    const loose = [...el.childNodes].some(
+        (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim(),
+    );
+    if (!spans.length || loose) return [el.textContent ?? ""];
     return spans.map((s) => s.textContent ?? "");
 }
 

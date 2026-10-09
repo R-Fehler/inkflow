@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import os
 import re
 import sys
 from collections.abc import Callable
@@ -32,7 +33,7 @@ from inkflow.editor.svgops import (
     group,
     ungroup,
 )
-from inkflow.layout import create_slide, discover_layouts
+from inkflow.layout import create_slide, discover_layouts, resolve_parent_path
 from inkflow.manifest import Deck, Inline, Slide, TextBox
 from inkflow.pipeline import resolve_slide_src
 from inkflow.transitions import Transition
@@ -301,6 +302,7 @@ class EditorSession:
         if isinstance(expected, str) and expected and file_hash(data) != expected:
             raise EditError(f"{path.name} changed on disk; wait for the reload")
         svg = SvgFile.from_bytes(path, data)
+        untouched = svg.to_bytes()
         ops = cast("list[dict[str, object]]", msg.get("ops") or [])
         result_ids: dict[str, str] = {}
         structural = False
@@ -316,7 +318,12 @@ class EditorSession:
             result = apply_ops(svg, plain)
             result_ids.update(result.ids)
             structural = structural or result.structural
-        txn.write(path, svg.to_bytes())
+        out = svg.to_bytes()
+        if out != untouched:
+            # A batch that changes nothing leaves the file's own formatting alone.
+            txn.write(path, out)
+        # Locators only go stale if the file actually changed.
+        structural = structural and out != untouched
         renames = {
             str(op["from"]): str(op["id"])
             for op in plain
@@ -380,6 +387,11 @@ class EditorSession:
             md_path = self._md_path(slide)
             source_text = txn.read(md_path).decode("utf-8")
             if origin == "md-file":
+                if not text.strip():
+                    raise EditError(
+                        "this zone shows the whole Markdown file; "
+                        + "edit its text instead of clearing it"
+                    )
                 new = text.rstrip() + "\n"
             else:
                 new = replace_zone_text(source_text, zone, text)
@@ -605,15 +617,40 @@ class EditorSession:
         if slug in taken:
             slug = f"{slug}-slide"
         path = _unique_path(slides_dir, slug, ".svg")
-        # create_slide resolves the parent and injects the Inkscape preview layers.
+        if parent is not None:
+            parent = self._parent_ref(parent, slides_dir, deck)
+        # create_slide resolves the parent and injects the Inkscape preview
+        # layers; it writes to disk, so its file only becomes the transaction's.
         try:
             create_slide(parent, path, self.project_dir, deck.theme)
-        except ValueError as exc:
+            data = path.read_bytes()
+        except (ValueError, OSError) as exc:
             raise EditError(str(exc)) from exc
-        data = path.read_bytes()
-        path.unlink()
+        finally:
+            path.unlink(missing_ok=True)
         txn.write(path, data)
         return path.name
+
+    def _parent_ref(self, src: str, slides_dir: Path, deck: Deck) -> str:
+        """``src`` as an ``inkflow:parent`` written in a file in ``slides/``.
+
+        A Slide src is relative to deck.py, a parent to the file that names it;
+        a layout name or a ``builtin:``/``theme:`` reference means the same from
+        both, a path does not and is rewritten relative to ``slides/``.
+        """
+        target = resolve_slide_src(src, self.project_dir, deck.theme).resolve()
+        try:
+            same = (
+                resolve_parent_path(
+                    src, slides_dir, self.project_dir, deck.theme
+                ).resolve()
+                == target
+            )
+        except (ValueError, OSError):
+            same = False
+        if same:
+            return src
+        return Path(os.path.relpath(target, slides_dir)).as_posix()
 
     def _copy_files(self, slide: Slide, deck: Deck, txn: _Txn) -> dict[str, str | None]:
         """Copy the slide's own files so the duplicate can diverge from it."""

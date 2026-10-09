@@ -360,6 +360,60 @@ class TestSvgOps:
         assert dot is not None and dot.getparent() is svg.root
         assert dot.get("transform") == "rotate(10)"
 
+    def test_ungroup_keeps_the_group_style(self) -> None:
+        svg = _svg(
+            '<svg xmlns="http://www.w3.org/2000/svg">'
+            + '<g style="fill:#f00;opacity:.5" class="inkflow-stroke-accent" '
+            + 'transform="translate(10,0)">'
+            + '<rect width="1"/><rect width="2" style="fill:#00f"/></g></svg>'
+        )
+        ungroup(svg, "0:0")
+        first, second = list(svg.root)
+        assert first.get("style") == "fill:#f00;opacity:0.5"
+        assert first.get("class") == "inkflow-stroke-accent"
+        assert first.get("transform") == "translate(10,0)"
+        assert second.get("style") == "fill:#00f;opacity:0.5"
+
+    def test_ungroup_refuses_group_effects(self) -> None:
+        svg = _svg(
+            '<svg xmlns="http://www.w3.org/2000/svg">'
+            + '<g clip-path="url(#c)"><rect/></g></svg>'
+        )
+        with pytest.raises(SvgOpError, match="clip-path"):
+            ungroup(svg, "0:0")
+
+    def test_text_with_inline_spans_keeps_all_its_words(self) -> None:
+        svg = _svg(
+            '<svg xmlns="http://www.w3.org/2000/svg"><text x="5" y="9">Hello '
+            + '<tspan font-weight="bold">world</tspan></text></svg>'
+        )
+        apply_ops(svg, [{"kind": "text", "loc": "0:0", "lines": ["Hello world!"]}])
+        text = svg.root[0]
+        assert text.text == "Hello world!" and len(text) == 0
+
+    def test_new_lines_start_under_the_first(self) -> None:
+        svg = _svg(
+            '<svg xmlns="http://www.w3.org/2000/svg">'
+            + '<text x="100" y="200"><tspan>One</tspan></text></svg>'
+        )
+        apply_ops(svg, [{"kind": "text", "loc": "0:0", "lines": ["One", "Two"]}])
+        assert list(svg.root[0])[1].get("x") == "100"
+
+    def test_insert_with_offset(self) -> None:
+        svg = _svg('<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+        apply_ops(
+            svg,
+            [
+                {
+                    "kind": "insert",
+                    "parent": "0:",
+                    "xml": '<rect x="1" y="2"/>',
+                    "offset": [24, 24],
+                }
+            ],
+        )
+        assert svg.root[0].get("transform") == "translate(24,24)"
+
     def test_stale_locator_raises(self) -> None:
         svg = _svg()
         with pytest.raises(SvgOpError):
@@ -697,6 +751,55 @@ class TestSession:
         assert _deck(project).slides[0].visible is False
         session.apply({"action": "slide", "op": "delete", "slide": 0}, _deck(project))
         assert len(_deck(project).slides) == 4
+
+    def test_detach_rewrites_a_path_src_for_slides(self, project: Path) -> None:
+        deck_py = project / "deck.py"
+        deck_py.write_text(
+            deck_py.read_text().replace(
+                'Slide("two", md', 'Slide("layouts/two.svg", md'
+            )
+        )
+        session = EditorSession(deck_py)
+        session.apply(
+            {"action": "slide", "op": "detach", "slide": 1, "name": "text"},
+            _deck(project),
+        )
+        new = project / "slides" / "text.svg"
+        assert 'inkflow:parent="../layouts/two.svg"' in new.read_text()
+        assert _deck(project).slides[1].src == "text.svg"
+        assert sorted(p.name for p in (project / "slides").glob("*.svg")) == [
+            "drawing.svg",
+            "text.svg",
+        ]
+
+    def test_clearing_a_whole_file_zone_is_refused(self, project: Path) -> None:
+        session = EditorSession(project / "deck.py")
+        with pytest.raises(EditError, match="whole Markdown file"):
+            session.apply(
+                {
+                    "action": "zone-text",
+                    "slide": 1,
+                    "zone": "content",
+                    "text": "",
+                    "origin": "md-file",
+                },
+                _deck(project),
+            )
+        assert (project / "slides" / "text.md").read_text() == "# Title\n\nBody\n"
+
+    def test_a_no_op_reorder_is_not_structural(self, project: Path) -> None:
+        session = EditorSession(project / "deck.py")
+        svg_path = project / "slides" / "drawing.svg"
+        svg = _svg(svg_path.read_text())
+        result = session.apply(
+            {
+                "action": "svg",
+                "file": str(svg_path),
+                "ops": [{"kind": "order", "loc": _loc(svg, "layer1"), "to": "front"}],
+            },
+            _deck(project),
+        )
+        assert result["structural"] is False
 
     def test_detach_never_shadows_a_layout(self, project: Path) -> None:
         session = EditorSession(project / "deck.py")

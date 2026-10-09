@@ -57,6 +57,7 @@ export function connect(port: number): void {
                     pendingSlides = null;
                 }
                 ed.model = msg.model as EditorModel;
+                ed.rebuilt = true;
                 if (msg.history) {
                     const h = msg.history as {
                         canUndo: boolean;
@@ -103,6 +104,8 @@ export function request(req: EditRequest): Promise<EditResult> {
 }
 
 // A request whose failure is shown to the user; returns the result either way.
+let pendingTimer = 0;
+
 // Refusals that only mean "the last edit has not rebuilt yet".
 const TRANSIENT = /since the last build|wait for the reload/;
 
@@ -117,7 +120,23 @@ export async function edit(
     if (result.ok) {
         ed.canUndo = result.canUndo ?? ed.canUndo;
         ed.canRedo = result.canRedo ?? ed.canRedo;
-        updateHashes(result.hashes ?? {});
+        // After an edit that moved elements (or an undo, which may have), the
+        // locators on screen no longer match the file: keep the old hashes so
+        // the server refuses anything aimed at them until the rebuild lands.
+        if (
+            result.structural ||
+            req.action === "undo" ||
+            req.action === "redo"
+        ) {
+            ed.structuralPending = true;
+            // A rebuild that never comes (a build error) must not lock editing.
+            window.clearTimeout(pendingTimer);
+            pendingTimer = window.setTimeout(() => {
+                ed.structuralPending = false;
+            }, 4000);
+        } else {
+            updateHashes(result.hashes ?? {});
+        }
         emit("history");
     }
     return result;
