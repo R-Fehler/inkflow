@@ -22,6 +22,14 @@ export function connected(): boolean {
     return ws !== null && ws.readyState === WebSocket.OPEN;
 }
 
+// Callers waiting for the connection (the start page's first request).
+let waiting: (() => void)[] = [];
+
+export function whenConnected(): Promise<void> {
+    if (connected()) return Promise.resolve();
+    return new Promise((resolve) => waiting.push(resolve));
+}
+
 export function connect(port: number): void {
     const host = location.hostname || "localhost";
     const sock = new WebSocket(`ws://${host}:${port}`);
@@ -29,6 +37,8 @@ export function connect(port: number): void {
     sock.onopen = () => {
         sock.send(JSON.stringify({ type: "hello", role: "editor" }));
         document.body.classList.remove("offline");
+        for (const resolve of waiting) resolve();
+        waiting = [];
     };
     sock.onclose = () => {
         document.body.classList.add("offline");
@@ -54,12 +64,16 @@ export function connect(port: number): void {
                 emit("error");
                 break;
             case "editor-model":
-                // The server opened another deck: start the page afresh.
+                // The server opened another deck (or the first one, from
+                // the start page): start the page afresh.
                 if (
-                    ed.model &&
-                    (msg.model as EditorModel).deckPath !== ed.model.deckPath
+                    document.body.classList.contains("start-mode") ||
+                    (ed.model &&
+                        (msg.model as EditorModel).deckPath !==
+                            ed.model.deckPath)
                 ) {
-                    location.reload();
+                    // The start page may be at any path; the editor is /edit.
+                    location.assign("/edit");
                     return;
                 }
                 if (pendingSlides) {

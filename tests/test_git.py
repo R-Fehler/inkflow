@@ -356,3 +356,31 @@ def test_git_actions_that_rewrite_files_clear_the_undo_history(repo: Path) -> No
     assert out["historyCleared"] is True
     out = session.apply({"action": "git", "op": "status"}, None)
     assert "historyCleared" not in out
+
+
+def test_the_start_page_only_opens_or_creates_decks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    session = EditorSession(None)
+    info = session.apply({"action": "project-info"}, None)
+    assert info["parent"] == str(tmp_path) and info["name"] == "new-deck"
+    assert "current" not in {
+        t["id"] for t in cast("list[dict[str, str]]", info["themes"])
+    }
+    with pytest.raises(EditError, match="open or create a deck first"):
+        session.apply({"action": "undo"}, None)
+    with pytest.raises(EditError, match="this machine"):
+        session.apply({"action": "new-deck", "path": str(tmp_path / "t")}, None)
+    made = session.apply(
+        {
+            "action": "new-deck",
+            "path": str(tmp_path / "talk"),
+            "theme": "starter",
+            "git": False,
+            "_local": True,
+        },
+        None,
+    )
+    assert made["opening"] and session.switch_to == tmp_path / "talk" / "deck.py"
+    assert projects.recent() == [str(tmp_path / "talk" / "deck.py")]

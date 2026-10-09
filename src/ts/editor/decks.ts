@@ -5,7 +5,7 @@
 
 import { closeDialog, openDialog } from "./dialog";
 import { clear, h, toast } from "./dom";
-import { request } from "./net";
+import { request, whenConnected } from "./net";
 import { menuItem, showMenu } from "./sorter";
 import { ed, on } from "./state";
 
@@ -432,6 +432,71 @@ function openDeckDialog(data: DeckInfo): void {
         ),
         { wide: true },
     );
+}
+
+// ── Start page ──
+//
+// The editor without a deck (`inkflow edit --start`, the desktop launcher):
+// a new deck, another one from a folder, or a recent one. The server then
+// serves that deck and the page reloads into it (net.ts).
+
+export async function showStart(): Promise<void> {
+    document.body.classList.add("start-mode");
+    await whenConnected();
+    const data = await info();
+    const recent = h("div", { class: "start-recent" });
+    if (data?.recent.length) {
+        recent.append(h("h2", {}, "Recent decks"));
+        for (const path of data.recent) {
+            const dir = path.replace(/[\\/]deck\.py$/, "");
+            recent.append(
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "start-deck",
+                        title: dir,
+                        onclick: () => void openDeck(path),
+                    },
+                    h("span", { class: "start-deck-name" }, baseName(dir)),
+                    h("span", { class: "start-deck-path" }, dir),
+                ),
+            );
+        }
+    }
+    const action = (label: string, hint: string, fn: () => void) =>
+        h(
+            "button",
+            { type: "button", class: "start-action", onclick: fn },
+            h("span", { class: "start-action-label" }, label),
+            h("span", { class: "start-action-hint" }, hint),
+        );
+    const page = h(
+        "div",
+        { id: "start", class: "start" },
+        h(
+            "div",
+            { class: "start-card" },
+            h("div", { class: "start-logo" }, "ink", h("b", {}, "flow")),
+            h(
+                "p",
+                { class: "start-lead" },
+                "Slides you draw, write and version.",
+            ),
+            h(
+                "div",
+                { class: "start-actions" },
+                action("New deck…", "Start from one of four looks", () => {
+                    if (data) newDeckDialog(data);
+                }),
+                action("Open deck…", "A folder with a deck.py", () => {
+                    if (data) openDeckDialog(data);
+                }),
+            ),
+            recent,
+        ),
+    );
+    document.body.append(page);
 }
 
 export function initDecks(): void {

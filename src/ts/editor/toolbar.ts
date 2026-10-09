@@ -31,6 +31,7 @@ import { edit } from "./net";
 import { alignSelection } from "./props";
 import { deleteSlide, deleteSlides, duplicateSlide, gotoSlide } from "./sorter";
 import { currentSlide, ed, emit, on, type Tool } from "./state";
+import { copyStyle, pasteStyle } from "./stylecopy";
 import { isEditingText } from "./textedit";
 import type { SvgOp } from "./types";
 
@@ -186,6 +187,20 @@ function renderStepSelect(): void {
     sel.disabled = max === 0 && ed.step == null;
 }
 
+// The whole editor page, not the browser's own F11 full screen (which a
+// page cannot leave again).
+export function toggleFullscreen(): void {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void document.documentElement.requestFullscreen?.().catch(() => {});
+}
+
+function updateFullscreen(): void {
+    const on = !!document.fullscreenElement;
+    const b = $("btn-fullscreen");
+    b.classList.toggle("on", on);
+    b.title = on ? "Leave full screen (F)" : "Full screen (F)";
+}
+
 function updateZoomLabel(): void {
     $("zoom-label").textContent = `${Math.round(scale() * 100)}%`;
 }
@@ -236,6 +251,11 @@ function onKey(e: KeyboardEvent): void {
     } else if (mod && lower === "d") {
         handled();
         void duplicateSelection();
+    } else if (mod && e.altKey && (e.code === "KeyC" || e.code === "KeyV")) {
+        // Copy / paste an object's style (e.key is a symbol with Option).
+        handled();
+        if (e.code === "KeyC") copyStyle();
+        else void pasteStyle();
     } else if (mod && lower === "c") {
         handled();
         if (ed.focus === "sorter") void copySlides();
@@ -326,6 +346,9 @@ function onKey(e: KeyboardEvent): void {
         setTool(TOOL_KEYS[lower]);
     } else if (!mod && !e.altKey && lower === "g") {
         toggleGrid();
+    } else if (!mod && !e.altKey && lower === "f") {
+        handled();
+        toggleFullscreen();
     } else if (!mod && lower === "i") {
         void (e.shiftKey ? insertVideo() : insertImage());
     }
@@ -347,6 +370,8 @@ export function initToolbar(): void {
     );
     $("btn-theme").addEventListener("click", toggleTheme);
     $("btn-present").addEventListener("click", present);
+    $("btn-fullscreen").addEventListener("click", toggleFullscreen);
+    document.addEventListener("fullscreenchange", updateFullscreen);
     $("step-select").addEventListener("change", (e) => {
         const v = (e.target as HTMLSelectElement).value;
         ed.step = v === "" ? null : Number(v);

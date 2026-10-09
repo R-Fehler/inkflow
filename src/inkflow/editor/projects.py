@@ -132,11 +132,15 @@ def _empty(folder: Path) -> bool:
     )
 
 
-def new_deck_info(deck_path: Path, deck: Deck | None) -> dict[str, object]:
-    """Where a new deck goes by default, and which looks are on offer."""
-    project_dir = deck_path.parent
-    root = gitops.repo_root(project_dir)
-    if root is not None and project_dir.resolve() != root.resolve():
+def new_deck_info(deck_path: Path | None, deck: Deck | None) -> dict[str, object]:
+    """Where a new deck goes by default, and which looks are on offer.
+
+    Without a deck (the start page), a new deck goes in the home folder."""
+    project_dir = deck_path.parent if deck_path else Path.home()
+    root = gitops.repo_root(project_dir) if deck_path else None
+    if deck_path is None:
+        base = project_dir
+    elif root is not None and project_dir.resolve() != root.resolve():
         base = project_dir.parent  # next to this deck, in the same repository
     else:
         base = root or project_dir.parent
@@ -145,7 +149,7 @@ def new_deck_info(deck_path: Path, deck: Deck | None) -> dict[str, object]:
     while not _empty(base / name):
         name = f"new-deck-{n}"
         n += 1
-    can_reuse = deck is not None and _reusable(deck_path)
+    can_reuse = deck is not None and deck_path is not None and _reusable(deck_path)
     return {
         "repo": str(root) if root else None,
         "parent": str(base),

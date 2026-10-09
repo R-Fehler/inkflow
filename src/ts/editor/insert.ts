@@ -881,6 +881,9 @@ export function initInsert(): void {
     hooks.typeInto = (el) => void typeInto(el);
     hooks.zoneMedia = (zone) => void zoneMedia(zone);
     hooks.zoneText = (zone) => void zoneText(zone);
+    hooks.selectAfterRender = (ids) => {
+        afterRender.ids = ids;
+    };
     const canvas = document.getElementById("canvas")!;
     canvas.addEventListener("dragover", (e) => {
         if (e.dataTransfer?.types.includes("Files")) {

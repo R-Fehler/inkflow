@@ -26,6 +26,7 @@ import { openMenu as openWithMenu } from "./openwith";
 import { alignSelection } from "./props";
 import { deleteSlide, duplicateSlide, menuItem, showMenu } from "./sorter";
 import { currentSlide, ed, emit, sourceOf } from "./state";
+import { copyStyle, hasCopiedStyle, pasteStyle } from "./stylecopy";
 import {
     deleteSelection,
     duplicateSelection,
@@ -104,6 +105,13 @@ function objectMenu(): HTMLElement[] {
         menuItem("Paste", () => void pasteFromClipboard()),
         menuItem("Duplicate", () => void duplicateSelection(), !sels.length),
         menuItem("Delete", () => void deleteSelection()),
+        sep(),
+        menuItem("Copy style", () => copyStyle(), !one),
+        menuItem(
+            "Paste style",
+            () => void pasteStyle(),
+            !sels.length || !hasCopiedStyle(),
+        ),
         sep(),
         menuItem("Bring to front", () => void order("front"), !sels.length),
         menuItem("Bring forward", () => void order("forward"), !sels.length),

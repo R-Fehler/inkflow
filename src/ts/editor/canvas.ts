@@ -83,6 +83,8 @@ export const hooks = {
     typeInto: (_el: SVGGraphicsElement): void => {},
     zoneMedia: (_zone: string): void => {},
     zoneText: (_zone: string): void => {},
+    // Select these ids once the rebuild that holds them has rendered.
+    selectAfterRender: (_ids: string[]): void => {},
     toolDown: (_e: PointerEvent, _pt: { x: number; y: number }): boolean =>
         false,
 };
@@ -1276,7 +1278,7 @@ function freshId(base: string): string {
 function endpointPlans(
     drag: { which: "start" | "end"; snaps: Snapshot[] },
     p: { x: number; y: number },
-    e: PointerEvent,
+    e: DragInput,
 ): { sel: Selected; ops: SvgOp[] }[] {
     const sel = drag.snaps[0].sel;
     const conn = sel.el;
@@ -1369,6 +1371,7 @@ export async function sendSvgOps(
     plans: { sel: Selected; ops: SvgOp[] }[],
     label: string,
     coalesce?: string,
+    ids?: Record<string, string>,
 ): Promise<boolean> {
     const slide = currentSlide();
     if (!slide) return false;
@@ -1378,7 +1381,7 @@ export async function sendSvgOps(
     }
     // One request at a time, each with the hash the previous one returned
     // (held arrow keys send nudges faster than results come back).
-    const run = queue.then(() => sendQueued(plans, label, coalesce));
+    const run = queue.then(() => sendQueued(plans, label, coalesce, ids));
     queue = run.catch(() => false);
     return run;
 }
@@ -1389,6 +1392,7 @@ async function sendQueued(
     plans: { sel: Selected; ops: SvgOp[] }[],
     label: string,
     coalesce?: string,
+    ids?: Record<string, string>,
 ): Promise<boolean> {
     const slide = currentSlide();
     if (!slide) return false;
@@ -1412,6 +1416,7 @@ async function sendQueued(
             zoneSlide: ed.layoutMode ? undefined : slide.deckIndex,
         });
         ok = ok && result.ok;
+        if (ids && result.ids) Object.assign(ids, result.ids);
     }
     return ok;
 }
@@ -1541,6 +1546,7 @@ let pointer: {
     drag: Drag | null;
     clickTarget: SVGGraphicsElement | null;
     shift: boolean;
+    deselectOnClick: boolean;
 } | null = null;
 
 function beginDrag(handle: Handle | null): Drag | null {
@@ -1637,7 +1643,50 @@ function mapBox(b: Box, from: Box, to: Box): Box {
 
 let lastPlans: { sel: Selected; ops: SvgOp[] }[] = [];
 
-function updateDrag(drag: Drag, e: PointerEvent): void {
+// What a drag reads from its pointer event; a modifier key pressed or let go
+// mid-drag replays the last position with the new keys.
+type DragInput = Pick<
+    PointerEvent,
+    "clientX" | "clientY" | "shiftKey" | "altKey" | "ctrlKey" | "metaKey"
+>;
+let lastInput: DragInput | null = null;
+
+// Ctrl (Cmd on a Mac) held while moving copies instead: the originals stay
+// put (shown by stand-ins while dragging) and copies land where dropped.
+let copying = false;
+let ghosts: Element[] = [];
+
+function showGhosts(snaps: Snapshot[]): void {
+    if (ghosts.length) return;
+    for (const s of snaps) {
+        const ghost = s.sel.el.cloneNode(true) as Element;
+        for (const node of [ghost, ...ghost.querySelectorAll("*")]) {
+            for (const attr of [...node.attributes]) {
+                if (attr.name === "id" || attr.name.startsWith("data-ink")) {
+                    node.removeAttribute(attr.name);
+                }
+            }
+        }
+        ghost.setAttribute("pointer-events", "none");
+        // Below the original, which is what moves (and becomes the copy).
+        s.sel.el.before(ghost);
+        ghosts.push(ghost);
+    }
+}
+
+function dropGhosts(): void {
+    for (const g of ghosts) g.remove();
+    ghosts = [];
+}
+
+function setCopying(on: boolean): void {
+    copying = on;
+    document.body.classList.toggle("drag-copy", on);
+    if (!on) dropGhosts();
+}
+
+function updateDrag(drag: Drag, e: DragInput): void {
+    lastInput = e;
     if (!pointer) return;
     const p0 = clientToSlide(pointer.x, pointer.y);
     const p1 = clientToSlide(e.clientX, e.clientY);
@@ -1662,14 +1711,19 @@ function updateDrag(drag: Drag, e: PointerEvent): void {
             guides = { xs: snap.guidesX, ys: snap.guidesY };
         }
         restore(drag.snaps);
+        setCopying(e.ctrlKey || e.metaKey);
+        if (copying) showGhosts(drag.snaps);
         movingTogether = drag.snaps.map((s) => s.sel.el);
         const ordered = [
             ...drag.snaps.filter((s) => !isConnector(s.sel.el)),
             ...drag.snaps.filter((s) => isConnector(s.sel.el)),
         ];
-        lastPlans = withConnectors(
-            ordered.map((s) => ({ sel: s.sel, ops: moveOps(s.sel, dx, dy) })),
-        );
+        const plans = ordered.map((s) => ({
+            sel: s.sel,
+            ops: moveOps(s.sel, dx, dy),
+        }));
+        // Arrows attached to the originals stay with the originals.
+        lastPlans = copying ? plans : withConnectors(plans);
     } else if (drag.kind === "resize") {
         if (!e.altKey) {
             const h = drag.handle;
@@ -1767,6 +1821,13 @@ async function endDrag(drag: Drag): Promise<void> {
     }
     const plans = lastPlans;
     lastPlans = [];
+    if (drag.kind === "move" && copying) {
+        setCopying(false);
+        restore(drag.snaps);
+        drawOverlay();
+        await dropCopies(plans);
+        return;
+    }
     drawOverlay();
     if (!plans.length) return;
     if (siteHints.length) siteHints = [];
@@ -1785,6 +1846,41 @@ async function endDrag(drag: Drag): Promise<void> {
     const ok = await sendSvgOps(plans, label);
     if (!ok) restore(drag.snaps);
     drawOverlay();
+}
+
+// The moves a drag planned, sent as copies placed where the originals would
+// have gone: each copy takes the attributes the move set on its original.
+async function dropCopies(
+    plans: { sel: Selected; ops: SvgOp[] }[],
+): Promise<void> {
+    const keys: string[] = [];
+    const copies = plans.map((p, i) => {
+        const set: AttrPlan = {};
+        const kids: { loc: string; set: AttrPlan }[] = [];
+        for (const op of p.ops) {
+            if (op.kind !== "attrs") continue;
+            if (op.loc === p.sel.loc) Object.assign(set, op.set);
+            else kids.push({ loc: String(op.loc), set: op.set as AttrPlan });
+        }
+        keys.push(`copy${i}`);
+        return {
+            sel: p.sel,
+            ops: [
+                {
+                    kind: "duplicate",
+                    loc: p.sel.loc,
+                    key: `copy${i}`,
+                    set,
+                    kids,
+                },
+            ],
+        };
+    });
+    const ids: Record<string, string> = {};
+    if (await sendSvgOps(copies, "Duplicate", undefined, ids)) {
+        const made = keys.map((k) => ids[k]).filter(Boolean);
+        if (made.length) hooks.selectAfterRender(made);
+    }
 }
 
 function onPointerDown(e: PointerEvent): void {
@@ -1821,6 +1917,7 @@ function onPointerDown(e: PointerEvent): void {
     ed.interacting = true;
     let clickTarget: SVGGraphicsElement | null = null;
     let drag: Drag | null = null;
+    let deselectOnClick = false;
     if (handle) {
         drag = beginDrag(handle);
     } else {
@@ -1828,14 +1925,10 @@ function onPointerDown(e: PointerEvent): void {
         if (clickTarget) {
             const already = ed.selection.some((s) => s.el === clickTarget);
             if (e.shiftKey || e.metaKey || e.ctrlKey) {
-                if (already) {
-                    ed.selection = ed.selection.filter(
-                        (s) => s.el !== clickTarget,
-                    );
-                    drawOverlay();
-                    emit("selection");
-                    clickTarget = null;
-                } else addToSelection(clickTarget);
+                // Taken out of the selection on release, unless it was
+                // dragged (Ctrl+drag copies, Shift+drag keeps to one axis).
+                if (already) deselectOnClick = true;
+                else addToSelection(clickTarget);
             } else if (!already) select([clickTarget]);
         } else {
             if (!e.shiftKey) {
@@ -1853,6 +1946,7 @@ function onPointerDown(e: PointerEvent): void {
         drag,
         clickTarget,
         shift: e.shiftKey,
+        deselectOnClick,
     };
 }
 
@@ -1909,10 +2003,17 @@ async function onPointerUp(e: PointerEvent): Promise<void> {
     if (!pointer || e.pointerId !== pointer.id) return;
     const p = pointer;
     pointer = null;
+    lastInput = null;
     try {
         if (p.drag && p.started) await endDrag(p.drag);
         else if (p.drag?.kind === "marquee") marquee = null;
+        if (!p.started && p.deselectOnClick && p.clickTarget) {
+            ed.selection = ed.selection.filter((s) => s.el !== p.clickTarget);
+            drawOverlay();
+            emit("selection");
+        }
     } finally {
+        setCopying(false);
         ed.interacting = false;
         if (ed.renderPending) render();
         else drawOverlay();
@@ -1979,6 +2080,20 @@ export function initCanvas(): void {
         });
     }
     paper.addEventListener("pointermove", onPointerMove);
+    for (const type of ["keydown", "keyup"] as const) {
+        window.addEventListener(type, (e) => {
+            if (!["Control", "Meta", "Shift", "Alt"].includes(e.key)) return;
+            if (!pointer?.started || !pointer.drag || !lastInput) return;
+            updateDrag(pointer.drag, {
+                clientX: lastInput.clientX,
+                clientY: lastInput.clientY,
+                shiftKey: e.shiftKey,
+                altKey: e.altKey,
+                ctrlKey: e.ctrlKey,
+                metaKey: e.metaKey,
+            });
+        });
+    }
     paper.addEventListener("pointerup", (e) => void onPointerUp(e));
     paper.addEventListener("pointercancel", (e) => void onPointerUp(e));
     paper.addEventListener("dblclick", onDoubleClick);

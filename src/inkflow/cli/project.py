@@ -114,6 +114,42 @@ def completion_cmd(shell: str) -> None:
     click.echo(result.stdout, nl=False)
 
 
+@main.command("setup-desktop")
+@click.option(
+    "--remove",
+    "remove",
+    is_flag=True,
+    help="Remove the launcher instead.",
+)
+def setup_desktop(remove: bool) -> None:
+    """Add Inkflow to the desktop's application menu.
+
+    The launcher opens a terminal running `inkflow edit --start`: the editor
+    comes up in the browser on its start page (a new deck, open a deck, recent
+    decks), and closing the terminal stops it. It starts this installation of
+    inkflow (for example the one `uv tool install inkflow` made).
+
+    Linux: a `.desktop` entry and icon under `~/.local/share`. macOS:
+    `~/Applications/Inkflow.app`. Windows: a Start menu shortcut.
+    """
+    from inkflow import launcher
+
+    if remove:
+        removed = launcher.uninstall()
+        for path in removed:
+            report("Removed", str(path))
+        if not removed:
+            report("Nothing", "no launcher was installed", style="yellow")
+        return
+    try:
+        written = launcher.install()
+    except launcher.LauncherError as exc:
+        raise click.ClickException(str(exc)) from exc
+    for path in written:
+        report("Wrote", str(path))
+    report("Runs", " ".join(launcher.command()))
+
+
 @main.command("setup-git")
 def setup_git() -> None:
     """Configure git hooks and the SVG diff driver for the current repository.

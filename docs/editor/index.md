@@ -82,6 +82,28 @@ The **deck ▾** button next to the logo names the open deck and manages decks:
 Opening a deck switches the running server to it, on the same address: the
 editor page reloads with the new deck, and the presenter at `/` shows it too.
 
+### Starting without a deck
+
+`inkflow edit` in a folder without a `deck.py` (or `inkflow edit --start`
+anywhere) opens the editor on its start page instead: **New deck…**, **Open
+deck…** and the recent decks, the same choices as the deck menu. A new deck goes
+in your home folder unless you browse elsewhere. Pick one and the editor opens it.
+
+To have inkflow in your application menu, install it as a tool and add a
+launcher:
+
+```bash
+uv tool install inkflow     # the `inkflow` command, in its own environment
+inkflow setup-desktop       # Inkflow in the application menu
+```
+
+The launcher opens a terminal running `inkflow edit --start`, so the server's
+status is in view and closing that window stops it; the editor opens in your
+browser. It starts the installation that created it, so `uv tool upgrade inkflow`
+keeps it working. On Linux it is a `.desktop` entry with an icon under
+`~/.local/share`, on macOS `~/Applications/Inkflow.app`, on Windows a Start
+menu shortcut. `inkflow setup-desktop --remove` takes it away again.
+
 ## Version control
 
 When the deck is in a git repository, the toolbar's **git** button shows the
@@ -181,6 +203,20 @@ slider sets how large the thumbnails are.
 - **Move** by dragging or with the arrow keys (<kbd>Shift</kbd> moves 10 units).
   Smart guides snap to the slide's edges and centre and to other objects;
   hold <kbd>Alt</kbd> to drag freely, <kbd>Shift</kbd> to keep to one axis.
+- **Copy by dragging**: hold <kbd>Ctrl</kbd> (<kbd>Cmd</kbd> on a Mac) while you
+  drop, as in PowerPoint or draw.io. The originals stay where they are and the
+  copies land where you let go; add <kbd>Shift</kbd> to keep them in line with
+  the originals. Arrows copied together with the shapes they connect stay
+  attached to the copies. Ctrl+click without dragging still adds to or takes
+  from the selection.
+- **Copy a style** from one object onto others, like a format painter:
+  **Copy style** in the right-click menu (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>C</kbd>),
+  then select the others and **Paste style**
+  (<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>). Shapes take the fill and stroke
+  (theme colours stay theme colours), stroke width, dashes, opacity, shadow,
+  arrow heads and a rectangle's rounded corners; texts take the colour and font
+  settings; text boxes also their padding, alignment and drawn box. Pasting onto a
+  group restyles every shape in it.
 - **Resize** with the handles. Text, images and circles keep their proportions;
   <kbd>Shift</kbd> toggles that.
 - **Rotate** with the round handle above the selection; <kbd>Shift</kbd> snaps to
@@ -190,7 +226,8 @@ slider sets how large the thumbnails are.
 - **Edit text** by double-clicking it. Text inside a group is edited directly.
 - **Enter a group** by double-clicking it; <kbd>Esc</kbd> leaves it.
 - **Zoom** with <kbd>Ctrl</kbd>+scroll or <kbd>+</kbd> / <kbd>−</kbd>;
-  <kbd>0</kbd> fits the slide to the window.
+  <kbd>0</kbd> fits the slide to the window. <kbd>F</kbd> (or the toolbar's
+  full-screen button) gives the editor the whole screen.
 
 The editor shows every object by default. To see what the audience sees at a given
 click, pick a build step in the toolbar; editing pauses while you preview.
@@ -483,6 +520,9 @@ Each result can also be downloaded straight from the dialog (the web page as a
 | <kbd>Shift</kbd>+<kbd>I</kbd> | Insert a video |
 | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> | Undo / redo |
 | <kbd>Ctrl</kbd>+<kbd>C</kbd> <kbd>X</kbd> <kbd>V</kbd> <kbd>D</kbd> | Copy, cut, paste, duplicate (objects, or slides in the slide list) |
+| <kbd>Ctrl</kbd>+drag (+<kbd>Shift</kbd>) | Drop copies instead of moving (in line with the originals) |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>C</kbd> / <kbd>V</kbd> | Copy an object's style / paste it onto the selection |
+| <kbd>F</kbd> | Full screen |
 | <kbd>Delete</kbd> | Delete the selection (or clear a zone; in the slide list, the selected slides) |
 | <kbd>Ctrl</kbd>+<kbd>G</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> | Group / ungroup |
 | <kbd>Ctrl</kbd>+<kbd>↑</kbd> <kbd>↓</kbd> (+<kbd>Shift</kbd>) | Forward / backward (to front / back) |

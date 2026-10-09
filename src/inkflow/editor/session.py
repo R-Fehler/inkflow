@@ -88,6 +88,7 @@ from inkflow.transitions import Transition
 from inkflow.zones import remove_zone_section, replace_zone_text, zone_spans
 
 DECK_MODULE = "_inkflow_deck"
+_PROJECT_ACTIONS = ("project-info", "browse", "new-deck", "open-deck")
 _MEDIA_ACTIONS = frozenset(
     {
         "import-path",
@@ -294,16 +295,22 @@ class EditorSession:
     """The configured ``INKFLOW_EDIT_CMD*`` commands, offered first by "Open"."""
     switch_to: Path | None
     """A deck.py the editor asked to open instead (the server switches to it)."""
+    has_deck: bool
+    """False on the start page (no deck yet): only opening or creating a deck
+    works, and the home folder stands in for the project."""
     uploads: media.Uploads
     """Files arriving in chunks (no size limit)."""
     conversions: media.Conversions
     """ffmpeg conversions running in the background."""
 
-    def __init__(self, deck_path: Path, exporters: Exporters | None = None) -> None:
+    def __init__(
+        self, deck_path: Path | None, exporters: Exporters | None = None
+    ) -> None:
         self.exporters = exporters
         self.edit_commands = NO_EDIT_COMMANDS
         self.switch_to = None
-        self.deck_path = deck_path.resolve()
+        self.has_deck = deck_path is not None
+        self.deck_path = (deck_path or Path.home() / "deck.py").resolve()
         self.project_dir = self.deck_path.parent
         self.uploads = media.Uploads(self.project_dir)
         self.conversions = media.Conversions(self.project_dir)
@@ -316,6 +323,8 @@ class EditorSession:
 
     def apply(self, msg: dict[str, object], deck: Deck | None) -> dict[str, object]:
         action = msg.get("action")
+        if not self.has_deck and action not in _PROJECT_ACTIONS:
+            raise EditError("open or create a deck first")
         if action == "undo":
             step = self.history.undo()
             return self._result(step, undo=True)
@@ -340,7 +349,7 @@ class EditorSession:
             return self._media(msg)
         if action == "git":
             return self._git(msg)
-        if action in ("project-info", "browse", "new-deck", "open-deck"):
+        if action in _PROJECT_ACTIONS:
             return self._project(msg, deck)
         if action == "open-apps":
             path = self._openable(msg)
@@ -1124,7 +1133,9 @@ class EditorSession:
             if action == "project-info":
                 return {
                     "ok": True,
-                    **projects.new_deck_info(self.deck_path, deck),
+                    **projects.new_deck_info(
+                        self.deck_path if self.has_deck else None, deck
+                    ),
                     "recent": [
                         p for p in projects.recent() if p != str(self.deck_path)
                     ],
@@ -1150,7 +1161,7 @@ class EditorSession:
                     theme=str(msg.get("theme") or "starter"),
                     git=msg.get("git") is not False,
                     lfs=msg.get("lfs") is not False,
-                    current=self.deck_path,
+                    current=self.deck_path if self.has_deck else None,
                 )
             else:
                 deck_py = projects.deck_file(str(msg.get("path") or ""))

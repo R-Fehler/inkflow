@@ -47,6 +47,7 @@ commands:
       --port=: HTTP port
       --ws-port=: WebSocket port
       --no-open: Do not open the editor in a browser on start
+      --start: Open the start page (new deck, open, recent) instead of a deck
     completion:
       flag:
         deck: ["$files([\".py\"])"]
@@ -133,6 +134,11 @@ commands:
     completion:
       positional:
         - ["bash", "zsh", "fish", "carapace"]
+
+  - name: setup-desktop
+    description: Add Inkflow to the desktop's application menu.
+    flags:
+      --remove: Remove the launcher instead
 
   - name: setup-git
     description: Configure git hooks and SVG diff driver.

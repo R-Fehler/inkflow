@@ -87,6 +87,12 @@ def serve(
     is_flag=True,
     help="Do not open the editor in a browser on start.",
 )
+@click.option(
+    "--start",
+    "start",
+    is_flag=True,
+    help="Open the start page (new deck, open a deck, recent decks) instead of a deck.",
+)
 @click.pass_obj
 def edit(
     levels: Levels,
@@ -95,6 +101,7 @@ def edit(
     port: int | None,
     ws_port: int | None,
     no_open: bool,
+    start: bool,
 ) -> None:
     """Open the visual editor: click, drag and type on your slides.
 
@@ -106,10 +113,20 @@ def edit(
     side: each picks the next free ports, and slides copied in one editor paste
     into another.
 
+    Without a deck (`--start`, or no `deck.py` here and no `--deck`), the
+    editor opens on its start page: create a new deck, open one from a folder,
+    or pick a recent one. `inkflow setup-desktop` adds a launcher for that to
+    the desktop's application menu.
+
     Keyboard shortcuts in the terminal are those of `serve`, plus `e` to open the
     editor again.
     """
-    resolved = resolve_deck_path(deck_path)
+    resolved: Path | None
+    if start or (deck_path == Path("deck.py") and not deck_path.exists()):
+        resolved = None
+        report("Starting", "no deck here: the editor opens on its start page")
+    else:
+        resolved = resolve_deck_path(deck_path)
     open_path = None if no_open else "/edit"
     port, ws_port = pick_ports(host, port, ws_port)
     with contextlib.suppress(KeyboardInterrupt):

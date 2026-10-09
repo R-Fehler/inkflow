@@ -957,6 +957,11 @@
   function connected() {
     return ws !== null && ws.readyState === WebSocket.OPEN;
   }
+  var waiting = [];
+  function whenConnected() {
+    if (connected()) return Promise.resolve();
+    return new Promise((resolve) => waiting.push(resolve));
+  }
   function connect(port) {
     const host4 = location.hostname || "localhost";
     const sock = new WebSocket(`ws://${host4}:${port}`);
@@ -964,6 +969,8 @@
     sock.onopen = () => {
       sock.send(JSON.stringify({ type: "hello", role: "editor" }));
       document.body.classList.remove("offline");
+      for (const resolve of waiting) resolve();
+      waiting = [];
     };
     sock.onclose = () => {
       document.body.classList.add("offline");
@@ -988,8 +995,8 @@
           emit("error");
           break;
         case "editor-model":
-          if (ed.model && msg.model.deckPath !== ed.model.deckPath) {
-            location.reload();
+          if (document.body.classList.contains("start-mode") || ed.model && msg.model.deckPath !== ed.model.deckPath) {
+            location.assign("/edit");
             return;
           }
           if (pendingSlides) {
@@ -1082,11 +1089,11 @@
     }
     return { xs, ys };
   }
-  function best(edges, targets, threshold) {
+  function best(edges, targets2, threshold) {
     let delta = 0;
     let dist = threshold + 1;
     for (const e of edges) {
-      for (const t of targets) {
+      for (const t of targets2) {
         const d = Math.abs(t - e);
         if (d < dist - 1e-9) {
           dist = d;
@@ -1097,28 +1104,28 @@
     if (dist > threshold) return { delta: 0, at: [] };
     const at2 = /* @__PURE__ */ new Set();
     for (const e of edges) {
-      for (const t of targets) {
+      for (const t of targets2) {
         if (Math.abs(t - (e + delta)) < 1e-6) at2.add(t);
       }
     }
     return { delta, at: [...at2] };
   }
-  function snapBox(box, targets, threshold) {
+  function snapBox(box, targets2, threshold) {
     const x = best(
       [box.x, box.x + box.width / 2, box.x + box.width],
-      targets.xs,
+      targets2.xs,
       threshold
     );
     const y = best(
       [box.y, box.y + box.height / 2, box.y + box.height],
-      targets.ys,
+      targets2.ys,
       threshold
     );
     return { dx: x.delta, dy: y.delta, guidesX: x.at, guidesY: y.at };
   }
-  function snapEdges(edgesX, edgesY, targets, threshold) {
-    const x = best(edgesX, targets.xs, threshold);
-    const y = best(edgesY, targets.ys, threshold);
+  function snapEdges(edgesX, edgesY, targets2, threshold) {
+    const x = best(edgesX, targets2.xs, threshold);
+    const y = best(edgesY, targets2.ys, threshold);
     return { dx: x.delta, dy: y.delta, guidesX: x.at, guidesY: y.at };
   }
   function distribute(boxes, axis) {
@@ -1164,6 +1171,9 @@
     zoneMedia: (_zone) => {
     },
     zoneText: (_zone) => {
+    },
+    // Select these ids once the rebuild that holds them has rendered.
+    selectAfterRender: (_ids) => {
     },
     toolDown: (_e, _pt) => false
   };
@@ -2142,19 +2152,19 @@
     }
     return out;
   }
-  async function sendSvgOps(plans, label4, coalesce) {
+  async function sendSvgOps(plans, label4, coalesce, ids) {
     const slide = currentSlide();
     if (!slide) return false;
     if (ed.structuralPending) {
       toast("One moment: the last change is still being applied");
       return false;
     }
-    const run = queue.then(() => sendQueued(plans, label4, coalesce));
+    const run = queue.then(() => sendQueued(plans, label4, coalesce, ids));
     queue = run.catch(() => false);
     return run;
   }
   var queue = Promise.resolve();
-  async function sendQueued(plans, label4, coalesce) {
+  async function sendQueued(plans, label4, coalesce, ids) {
     const slide = currentSlide();
     if (!slide) return false;
     let ok = true;
@@ -2176,6 +2186,7 @@
         zoneSlide: ed.layoutMode ? void 0 : slide.deckIndex
       });
       ok = ok && result.ok;
+      if (ids && result.ids) Object.assign(ids, result.ids);
     }
     return ok;
   }
@@ -2278,7 +2289,7 @@
         snaps
       };
     }
-    const targets = snapTargets(new Set(sels.map((s) => s.el)));
+    const targets2 = snapTargets(new Set(sels.map((s) => s.el)));
     if (handle === "rot") {
       return {
         kind: "rotate",
@@ -2289,8 +2300,8 @@
         }
       };
     }
-    if (handle) return { kind: "resize", handle, snaps, start, targets };
-    return { kind: "move", snaps, start, targets };
+    if (handle) return { kind: "resize", handle, snaps, start, targets: targets2 };
+    return { kind: "move", snaps, start, targets: targets2 };
   }
   function resizedBox(start, handle, dx, dy, keepAspect) {
     let { x, y, width, height } = start;
@@ -2345,7 +2356,36 @@
     };
   }
   var lastPlans = [];
+  var lastInput = null;
+  var copying = false;
+  var ghosts = [];
+  function showGhosts(snaps) {
+    if (ghosts.length) return;
+    for (const s of snaps) {
+      const ghost = s.sel.el.cloneNode(true);
+      for (const node of [ghost, ...ghost.querySelectorAll("*")]) {
+        for (const attr of [...node.attributes]) {
+          if (attr.name === "id" || attr.name.startsWith("data-ink")) {
+            node.removeAttribute(attr.name);
+          }
+        }
+      }
+      ghost.setAttribute("pointer-events", "none");
+      s.sel.el.before(ghost);
+      ghosts.push(ghost);
+    }
+  }
+  function dropGhosts() {
+    for (const g of ghosts) g.remove();
+    ghosts = [];
+  }
+  function setCopying(on2) {
+    copying = on2;
+    document.body.classList.toggle("drag-copy", on2);
+    if (!on2) dropGhosts();
+  }
   function updateDrag(drag, e) {
+    lastInput = e;
     if (!pointer) return;
     const p0 = clientToSlide(pointer.x, pointer.y);
     const p1 = clientToSlide(e.clientX, e.clientY);
@@ -2370,14 +2410,18 @@
         guides = { xs: snap.guidesX, ys: snap.guidesY };
       }
       restore(drag.snaps);
+      setCopying(e.ctrlKey || e.metaKey);
+      if (copying) showGhosts(drag.snaps);
       movingTogether = drag.snaps.map((s) => s.sel.el);
       const ordered = [
         ...drag.snaps.filter((s) => !isConnector(s.sel.el)),
         ...drag.snaps.filter((s) => isConnector(s.sel.el))
       ];
-      lastPlans = withConnectors(
-        ordered.map((s) => ({ sel: s.sel, ops: moveOps(s.sel, dx, dy) }))
-      );
+      const plans = ordered.map((s) => ({
+        sel: s.sel,
+        ops: moveOps(s.sel, dx, dy)
+      }));
+      lastPlans = copying ? plans : withConnectors(plans);
     } else if (drag.kind === "resize") {
       if (!e.altKey) {
         const h2 = drag.handle;
@@ -2466,6 +2510,13 @@
     }
     const plans = lastPlans;
     lastPlans = [];
+    if (drag.kind === "move" && copying) {
+      setCopying(false);
+      restore(drag.snaps);
+      drawOverlay();
+      await dropCopies(plans);
+      return;
+    }
     drawOverlay();
     if (!plans.length) return;
     if (siteHints.length) siteHints = [];
@@ -2473,6 +2524,36 @@
     const ok = await sendSvgOps(plans, label4);
     if (!ok) restore(drag.snaps);
     drawOverlay();
+  }
+  async function dropCopies(plans) {
+    const keys = [];
+    const copies = plans.map((p, i) => {
+      const set = {};
+      const kids = [];
+      for (const op of p.ops) {
+        if (op.kind !== "attrs") continue;
+        if (op.loc === p.sel.loc) Object.assign(set, op.set);
+        else kids.push({ loc: String(op.loc), set: op.set });
+      }
+      keys.push(`copy${i}`);
+      return {
+        sel: p.sel,
+        ops: [
+          {
+            kind: "duplicate",
+            loc: p.sel.loc,
+            key: `copy${i}`,
+            set,
+            kids
+          }
+        ]
+      };
+    });
+    const ids = {};
+    if (await sendSvgOps(copies, "Duplicate", void 0, ids)) {
+      const made = keys.map((k) => ids[k]).filter(Boolean);
+      if (made.length) hooks.selectAfterRender(made);
+    }
   }
   function onPointerDown(e) {
     ed.focus = "canvas";
@@ -2503,6 +2584,7 @@
     ed.interacting = true;
     let clickTarget = null;
     let drag = null;
+    let deselectOnClick = false;
     if (handle) {
       drag = beginDrag(handle);
     } else {
@@ -2510,14 +2592,8 @@
       if (clickTarget) {
         const already = ed.selection.some((s) => s.el === clickTarget);
         if (e.shiftKey || e.metaKey || e.ctrlKey) {
-          if (already) {
-            ed.selection = ed.selection.filter(
-              (s) => s.el !== clickTarget
-            );
-            drawOverlay();
-            emit("selection");
-            clickTarget = null;
-          } else addToSelection(clickTarget);
+          if (already) deselectOnClick = true;
+          else addToSelection(clickTarget);
         } else if (!already) select([clickTarget]);
       } else {
         if (!e.shiftKey) {
@@ -2534,7 +2610,8 @@
       started: false,
       drag,
       clickTarget,
-      shift: e.shiftKey
+      shift: e.shiftKey,
+      deselectOnClick
     };
   }
   function onPointerMove(e) {
@@ -2581,10 +2658,17 @@
     if (!pointer || e.pointerId !== pointer.id) return;
     const p = pointer;
     pointer = null;
+    lastInput = null;
     try {
       if (p.drag && p.started) await endDrag(p.drag);
       else if (p.drag?.kind === "marquee") marquee = null;
+      if (!p.started && p.deselectOnClick && p.clickTarget) {
+        ed.selection = ed.selection.filter((s) => s.el !== p.clickTarget);
+        drawOverlay();
+        emit("selection");
+      }
     } finally {
+      setCopying(false);
       ed.interacting = false;
       if (ed.renderPending) render();
       else drawOverlay();
@@ -2639,6 +2723,20 @@
       });
     }
     paper.addEventListener("pointermove", onPointerMove);
+    for (const type of ["keydown", "keyup"]) {
+      window.addEventListener(type, (e) => {
+        if (!["Control", "Meta", "Shift", "Alt"].includes(e.key)) return;
+        if (!pointer?.started || !pointer.drag || !lastInput) return;
+        updateDrag(pointer.drag, {
+          clientX: lastInput.clientX,
+          clientY: lastInput.clientY,
+          shiftKey: e.shiftKey,
+          altKey: e.altKey,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey
+        });
+      });
+    }
     paper.addEventListener("pointerup", (e) => void onPointerUp(e));
     paper.addEventListener("pointercancel", (e) => void onPointerUp(e));
     paper.addEventListener("dblclick", onDoubleClick);
@@ -3600,6 +3698,63 @@ Decks: new, open, recent` : "Decks";
       ),
       { wide: true }
     );
+  }
+  async function showStart() {
+    document.body.classList.add("start-mode");
+    await whenConnected();
+    const data = await info();
+    const recent = h("div", { class: "start-recent" });
+    if (data?.recent.length) {
+      recent.append(h("h2", {}, "Recent decks"));
+      for (const path of data.recent) {
+        const dir = path.replace(/[\\/]deck\.py$/, "");
+        recent.append(
+          h(
+            "button",
+            {
+              type: "button",
+              class: "start-deck",
+              title: dir,
+              onclick: () => void openDeck(path)
+            },
+            h("span", { class: "start-deck-name" }, baseName(dir)),
+            h("span", { class: "start-deck-path" }, dir)
+          )
+        );
+      }
+    }
+    const action = (label4, hint, fn) => h(
+      "button",
+      { type: "button", class: "start-action", onclick: fn },
+      h("span", { class: "start-action-label" }, label4),
+      h("span", { class: "start-action-hint" }, hint)
+    );
+    const page = h(
+      "div",
+      { id: "start", class: "start" },
+      h(
+        "div",
+        { class: "start-card" },
+        h("div", { class: "start-logo" }, "ink", h("b", {}, "flow")),
+        h(
+          "p",
+          { class: "start-lead" },
+          "Slides you draw, write and version."
+        ),
+        h(
+          "div",
+          { class: "start-actions" },
+          action("New deck\u2026", "Start from one of four looks", () => {
+            if (data) newDeckDialog(data);
+          }),
+          action("Open deck\u2026", "A folder with a deck.py", () => {
+            if (data) openDeckDialog(data);
+          })
+        ),
+        recent
+      )
+    );
+    document.body.append(page);
   }
   function initDecks() {
     button.addEventListener("click", () => void openMenu());
@@ -4760,6 +4915,9 @@ Decks: new, open, recent` : "Decks";
     hooks.typeInto = (el2) => void typeInto(el2);
     hooks.zoneMedia = (zone) => void zoneMedia(zone);
     hooks.zoneText = (zone) => void zoneText(zone);
+    hooks.selectAfterRender = (ids) => {
+      afterRender.ids = ids;
+    };
     const canvas2 = document.getElementById("canvas");
     canvas2.addEventListener("dragover", (e) => {
       if (e.dataTransfer?.types.includes("Files")) {
@@ -6900,6 +7058,127 @@ Decks: new, open, recent` : "Decks";
     });
   }
 
+  // src/ts/editor/stylecopy.ts
+  var PAINT_CLASS = /^inkflow-(fill|stroke)-[\w-]+$/;
+  var COMMON = ["opacity", "filter"];
+  var PAINT = [
+    "fill",
+    "fill-opacity",
+    "stroke",
+    "stroke-width",
+    "stroke-opacity",
+    "stroke-dasharray",
+    "stroke-linecap",
+    "stroke-linejoin"
+  ];
+  var MARKERS = ["marker-start", "marker-mid", "marker-end"];
+  var FONT = [
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "text-decoration",
+    "letter-spacing"
+  ];
+  var BOX_VARS = ["--inkflow-padding", "--inkflow-align", "--inkflow-valign"];
+  var SHAPES = "rect, ellipse, circle, path, line, polyline, polygon, text";
+  var LINES = /* @__PURE__ */ new Set(["path", "line", "polyline"]);
+  var SHOW_SHAPE = "inkflow:show-shape";
+  var copied = null;
+  function kindOf(el2) {
+    if (el2.localName === "text") return "text";
+    if (isZone(el2)) return "box";
+    return "shape";
+  }
+  function read(el2, prop) {
+    const inline2 = el2.style?.getPropertyValue(prop).trim();
+    return inline2 || el2.getAttribute(prop);
+  }
+  function painted(el2) {
+    if (["g", "a", "svg"].includes(el2.localName)) {
+      return el2.querySelector(SHAPES);
+    }
+    return el2;
+  }
+  function targets(sel) {
+    if (!["g", "a", "svg"].includes(sel.el.localName)) return [sel];
+    return [...sel.el.querySelectorAll(SHAPES)].filter((el2) => el2.hasAttribute("data-ink")).map((el2) => ({ ...sel, el: el2, loc: el2.getAttribute("data-ink") ?? "" }));
+  }
+  function hasCopiedStyle() {
+    return copied !== null;
+  }
+  function copyStyle() {
+    const sel = ed.selection[0];
+    const el2 = sel ? painted(sel.el) : null;
+    if (!el2) {
+      toast("Select an object to copy its style from");
+      return;
+    }
+    const kind = kindOf(el2);
+    const names = [...COMMON, ...PAINT, ...MARKERS, ...FONT, ...BOX_VARS];
+    copied = {
+      kind,
+      tag: el2.localName,
+      classes: [...el2.classList].filter((c) => PAINT_CLASS.test(c)),
+      props: Object.fromEntries(names.map((n2) => [n2, read(el2, n2)])),
+      radius: { rx: el2.getAttribute("rx"), ry: el2.getAttribute("ry") },
+      showShape: el2.getAttribute(SHOW_SHAPE) === "true"
+    };
+    toast("Style copied: select objects and press Ctrl+Alt+V to apply it");
+  }
+  function propsFor(style, el2) {
+    const kind = kindOf(el2);
+    const props = [...COMMON];
+    const shapeLike = (k) => k === "shape" || k === "box";
+    if (kind === "text" && style.kind === "text") props.push(...PAINT, ...FONT);
+    else if (shapeLike(kind) && shapeLike(style.kind)) props.push(...PAINT);
+    if (LINES.has(el2.localName) && LINES.has(style.tag)) props.push(...MARKERS);
+    if (kind === "box" && style.kind === "box") props.push(...BOX_VARS);
+    return props;
+  }
+  function opsFor(style, sel) {
+    const el2 = sel.el;
+    const props = propsFor(style, el2);
+    const set = {};
+    for (const p of props) set[p] = style.props[p] ?? null;
+    const ops = [];
+    for (const prop of ["fill", "stroke"]) {
+      if (!props.includes(prop)) continue;
+      const token = style.classes.find((c) => c.startsWith(`inkflow-${prop}-`))?.slice(`inkflow-${prop}-`.length);
+      ops.push({ kind: "paint", loc: sel.loc, prop, token });
+      if (token) set[prop] = null;
+    }
+    const attrs2 = {};
+    if (el2.localName === "rect" && style.tag === "rect") {
+      attrs2.rx = style.radius.rx;
+      attrs2.ry = style.radius.ry;
+    }
+    if (kindOf(el2) === "box" && style.kind === "box") {
+      attrs2[SHOW_SHAPE] = style.showShape ? "true" : null;
+    }
+    if (Object.keys(attrs2).length) {
+      ops.push({ kind: "attrs", loc: sel.loc, set: attrs2 });
+    }
+    ops.push({ kind: "style", loc: sel.loc, set });
+    return ops;
+  }
+  async function pasteStyle() {
+    const style = copied;
+    if (!style) {
+      toast("Copy a style first: select an object and press Ctrl+Alt+C");
+      return;
+    }
+    const sels = ed.selection.filter((s) => canTransform(s.el)).flatMap(targets);
+    if (!sels.length) {
+      toast("Select the objects to apply the style to");
+      return;
+    }
+    await sendSvgOps(
+      sels.map((sel) => ({ sel, ops: opsFor(style, sel) })),
+      "Paste style"
+    );
+  }
+
   // src/ts/editor/find.ts
   var panel2 = document.getElementById("find-panel");
   var hits = [];
@@ -8830,6 +9109,17 @@ ${area2.value.slice(pos)}`;
     sel.value = ed.step == null ? "" : String(Math.min(ed.step, max));
     sel.disabled = max === 0 && ed.step == null;
   }
+  function toggleFullscreen() {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void document.documentElement.requestFullscreen?.().catch(() => {
+    });
+  }
+  function updateFullscreen() {
+    const on2 = !!document.fullscreenElement;
+    const b = $("btn-fullscreen");
+    b.classList.toggle("on", on2);
+    b.title = on2 ? "Leave full screen (F)" : "Full screen (F)";
+  }
   function updateZoomLabel() {
     $("zoom-label").textContent = `${Math.round(scale() * 100)}%`;
   }
@@ -8873,6 +9163,10 @@ ${area2.value.slice(pos)}`;
     } else if (mod && lower === "d") {
       handled();
       void duplicateSelection();
+    } else if (mod && e.altKey && (e.code === "KeyC" || e.code === "KeyV")) {
+      handled();
+      if (e.code === "KeyC") copyStyle();
+      else void pasteStyle();
     } else if (mod && lower === "c") {
       handled();
       if (ed.focus === "sorter") void copySlides();
@@ -8946,6 +9240,9 @@ ${area2.value.slice(pos)}`;
       setTool(TOOL_KEYS[lower]);
     } else if (!mod && !e.altKey && lower === "g") {
       toggleGrid();
+    } else if (!mod && !e.altKey && lower === "f") {
+      handled();
+      toggleFullscreen();
     } else if (!mod && lower === "i") {
       void (e.shiftKey ? insertVideo() : insertImage());
     }
@@ -8967,6 +9264,8 @@ ${area2.value.slice(pos)}`;
     );
     $("btn-theme").addEventListener("click", toggleTheme);
     $("btn-present").addEventListener("click", present);
+    $("btn-fullscreen").addEventListener("click", toggleFullscreen);
+    document.addEventListener("fullscreenchange", updateFullscreen);
     $("step-select").addEventListener("change", (e) => {
       const v = e.target.value;
       ed.step = v === "" ? null : Number(v);
@@ -9057,6 +9356,13 @@ ${area2.value.slice(pos)}`;
       menuItem("Paste", () => void pasteFromClipboard()),
       menuItem("Duplicate", () => void duplicateSelection(), !sels.length),
       menuItem("Delete", () => void deleteSelection()),
+      sep(),
+      menuItem("Copy style", () => copyStyle(), !one),
+      menuItem(
+        "Paste style",
+        () => void pasteStyle(),
+        !sels.length || !hasCopiedStyle()
+      ),
       sep(),
       menuItem("Bring to front", () => void order("front"), !sels.length),
       menuItem("Bring forward", () => void order("forward"), !sels.length),
@@ -10412,6 +10718,7 @@ Continue?`)) return null;
     render();
     writeHash();
     if (WS_PORT != null) connect(WS_PORT);
+    if (!ed.model && !ed.error) void showStart();
   }
   boot();
 })();

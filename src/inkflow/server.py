@@ -735,7 +735,10 @@ def make_http_handler(
                     await _send_file(writer, asset_path, _range_header(raw))
                     return
 
-            if _is_editor_path(request_path):
+            session = _editor["session"]
+            starting = session is not None and not session.has_deck
+            # The start page (no deck yet) is the editor's, at any path.
+            if _is_editor_path(request_path) or starting:
                 body = build_editor_html(_state, _editor, ws_port)
             else:
                 body = build_html(_state, ws_port, edit_commands)
@@ -818,7 +821,7 @@ def _open_browser(url: str) -> None:
 
 
 async def _read_keys(
-    deck_path: Path,
+    deck_path: Path | None,
     host: str,
     http_port: int,
     ui: LiveUI,
@@ -840,7 +843,7 @@ async def _read_keys(
                 _open_browser(f"http://{host}:{http_port}")
             elif ch == "e":
                 _open_browser(f"http://{host}:{http_port}/edit")
-            elif ch == "r":
+            elif ch == "r" and deck_path is not None:
                 async with lock:
                     await rebuild(deck_path, ui, levels)
             elif ch == "t":
@@ -893,7 +896,7 @@ def pick_ports(host: str, port: int | None, ws_port: int | None) -> tuple[int, i
 
 
 async def serve(
-    deck_path: Path,
+    deck_path: Path | None,
     host: str,
     http_port: int,
     ws_port: int,
@@ -903,7 +906,8 @@ async def serve(
 ) -> None:
     """Run the server until quit. ``open_path`` (e.g. ``"/edit"``) opens a
     browser on that page once the first build is done; ``exporters`` enable
-    the editor's Export dialog.
+    the editor's Export dialog. Without a deck (``None``) the editor shows its
+    start page: a new deck, another one, or a recent one.
 
     When the editor opens another deck (or creates one), the servers close and
     start again on the same ports for that deck; open pages reconnect to it."""
@@ -923,7 +927,7 @@ async def serve(
 
 
 async def _serve_deck(
-    deck_path: Path,
+    deck_path: Path | None,
     host: str,
     http_port: int,
     ws_port: int,
@@ -932,7 +936,8 @@ async def _serve_deck(
     exporters: Exporters | None,
 ) -> Path | None:
     """Serve one deck until quit (None) or until the editor opens another
-    (its deck.py)."""
+    (its deck.py). Without a deck, only the editor's start page is served:
+    nothing is built or watched, and no files are served."""
     console = Console()
     rebuild_lock = asyncio.Lock()
     shutdown = asyncio.Event()
@@ -948,8 +953,12 @@ async def _serve_deck(
         session.edit_commands = edit_commands
         session.server = {"host": host, "port": http_port, "wsPort": ws_port}
         _editor["session"] = session
-        projects.remember(deck_path)
-        http_handler = make_http_handler(ws_port, deck_path.parent, edit_commands)
+        project_dir = deck_path.parent if deck_path else None
+        if deck_path is not None:
+            projects.remember(deck_path)
+        else:
+            _state["title"] = "Inkflow"
+        http_handler = make_http_handler(ws_port, project_dir, edit_commands)
         # Bind before the Live UI so port conflicts fail fast with a clean message
         try:
             http_server = await asyncio.start_server(http_handler, host, http_port)
@@ -968,7 +977,7 @@ async def _serve_deck(
                 live,
                 host,
                 http_port,
-                deck_path.parent,
+                project_dir or Path.home(),
                 get_clients=lambda: len(_state["ws_clients"]),
             )
             try:
@@ -982,13 +991,20 @@ async def _serve_deck(
                         max_size=80 * 1024 * 1024,
                     ),
                 ):
-                    await rebuild(deck_path, ui, levels)
+                    if deck_path is not None:
+                        await rebuild(deck_path, ui, levels)
                     if open_path is not None:
                         _open_browser(f"http://{host}:{http_port}{open_path}")
                     tasks = [
                         asyncio.create_task(http_server.serve_forever()),
-                        asyncio.create_task(
-                            _watch(deck_path, ui, rebuild_lock, levels)
+                        *(
+                            [
+                                asyncio.create_task(
+                                    _watch(deck_path, ui, rebuild_lock, levels)
+                                )
+                            ]
+                            if deck_path is not None
+                            else []
                         ),
                         asyncio.create_task(
                             _read_keys(

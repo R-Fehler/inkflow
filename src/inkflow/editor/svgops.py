@@ -324,11 +324,51 @@ def _parse_fragment(xml: str) -> SvgElement:
     return el
 
 
-def _renumber_ids(el: SvgElement, root: SvgElement) -> None:
+def _renumber_ids(el: SvgElement, root: SvgElement) -> dict[str, str]:
+    """Give every id in ``el`` (a copy) a free one; returns old -> new."""
     taken = all_ids(root)
+    renamed: dict[str, str] = {}
     for node in el.iter():
         if is_element(node) and node.get("id"):
-            node.set("id", unique_id(root, node.get("id", ""), taken))
+            old = node.get("id", "")
+            renamed[old] = unique_id(root, old, taken)
+            node.set("id", renamed[old])
+    return renamed
+
+
+def _counterpart(
+    original: SvgElement, node: SvgElement, copy: SvgElement
+) -> SvgElement:
+    """The element in ``copy`` (a deep copy of ``original``) that is ``node``."""
+    path: list[int] = []
+    while node is not original:
+        parent = node.getparent()
+        if parent is None:
+            raise SvgOpError("not inside the copied object")
+        path.append(parent.index(node))
+        node = parent
+    for i in reversed(path):
+        copy = copy[i]
+    return copy
+
+
+def _set_attrs(el: SvgElement, values: object) -> None:
+    for name, value in cast("dict[str, object]", values or {}).items():
+        if name in ("id",) or name.lower().startswith("on"):
+            raise SvgOpError(f"attribute {name!r} cannot be set here")
+        if name in ("href", "xlink:href") and str(
+            value or ""
+        ).strip().lower().startswith("javascript:"):
+            raise SvgOpError("javascript: links are not allowed")
+        if name == "xlink:href":
+            name = _XLINK_HREF
+        elif name.startswith("inkflow:"):
+            # Connector ends (inkflow:connect-start …) and the like.
+            name = f"{{{ns.INKFLOW}}}{name.removeprefix('inkflow:')}"
+        if value is None:
+            _drop(el, name)
+        else:
+            el.set(name, str(value))
 
 
 def _translate(el: SvgElement, dx: float, dy: float) -> None:
@@ -345,8 +385,16 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
     result = OpResult()
     # Resolve every target first, so structural changes cannot shift them.
     targets: list[SvgElement | None] = []
-    for op in ops:
+    # A duplicate's own element (inside a link wrapper) and its positioned
+    # children, also resolved before anything moves.
+    placed: dict[int, list[tuple[SvgElement, object]]] = {}
+    for n, op in enumerate(ops):
         kind = op.get("kind")
+        if kind == "duplicate":
+            placed[n] = [(_resolve(root, op.get("loc")), op.get("set"))] + [
+                (_resolve(root, kid.get("loc")), kid.get("set"))
+                for kid in cast("list[dict[str, object]]", op.get("kids") or [])
+            ]
         if kind == "insert":
             parent_loc = op.get("parent")
             path = str(parent_loc).partition(":")[2] if parent_loc else ""
@@ -359,27 +407,13 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
         else:
             targets.append(_resolve(root, op.get("loc")))
 
-    for op, el in zip(ops, targets, strict=True):
+    copies: list[SvgElement] = []
+    copied: dict[str, str] = {}
+    for n, (op, el) in enumerate(zip(ops, targets, strict=True)):
         assert el is not None
         kind = op.get("kind")
         if kind == "attrs":
-            values = cast("dict[str, object]", op.get("set") or {})
-            for name, value in values.items():
-                if name in ("id",) or name.lower().startswith("on"):
-                    raise SvgOpError(f"attribute {name!r} cannot be set here")
-                if name in ("href", "xlink:href") and str(
-                    value or ""
-                ).strip().lower().startswith("javascript:"):
-                    raise SvgOpError("javascript: links are not allowed")
-                if name == "xlink:href":
-                    name = _XLINK_HREF
-                elif name.startswith("inkflow:"):
-                    # Connector ends (inkflow:connect-start …) and the like.
-                    name = f"{{{ns.INKFLOW}}}{name.removeprefix('inkflow:')}"
-                if value is None:
-                    _drop(el, name)
-                else:
-                    el.set(name, str(value))
+            _set_attrs(el, op.get("set"))
         elif kind == "style":
             values = cast("dict[str, object]", op.get("set") or {})
             set_style(el, {k: None if v is None else str(v) for k, v in values.items()})
@@ -418,9 +452,15 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
             result.structural = True
         elif kind == "duplicate":
             clone = copy.deepcopy(el)
-            _renumber_ids(clone, root)
+            copied.update(_renumber_ids(clone, root))
+            copies.append(clone)
             offset = cast("list[float]", op.get("offset") or [0, 0])
             _translate(clone, float(offset[0]), float(offset[1]))
+            # Or placed exactly: the attributes a move of the original would
+            # set (a copy dragged off with Ctrl), on the copy instead.
+            for node, values in placed[n]:
+                if values:
+                    _set_attrs(_counterpart(el, node, clone), values)
             el.addnext(clone)
             clone.tail = el.tail
             if clone.get("id"):
@@ -469,6 +509,16 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
                 result.structural = True
         else:
             raise SvgOpError(f"unknown operation {kind!r}")
+    # Arrows copied with the shapes they connect attach to those copies.
+    for clone in copies:
+        for node in clone.iter():
+            if not is_element(node):
+                continue
+            for attr in CONNECT_ENDS:
+                value = node.get(attr)
+                target = value.rpartition(":")[0] if value else ""
+                if value and target in copied:
+                    node.set(attr, f"{copied[target]}:{value.rpartition(':')[2]}")
     return result
 
 

@@ -262,6 +262,56 @@ class TestSvgOps:
         assert svg.root.find(".//*[@id='dot-2']") is not None
         assert result.structural
 
+    def test_a_copy_dragged_off_lands_where_it_was_dropped(self) -> None:
+        svg = _svg(
+            '<svg xmlns="http://www.w3.org/2000/svg"'
+            + ' xmlns:inkflow="urn:inkflow">'
+            + '<rect id="a" x="0" y="0" width="10" height="10"/>'
+            + '<rect id="b" x="50" y="0" width="10" height="10"/>'
+            + '<path id="arrow" d="M10 5L50 5" inkflow:connector="straight"'
+            + ' inkflow:connect-start="a:right" inkflow:connect-end="b:left"/>'
+            + '<text id="t" x="0" y="40"><tspan x="0" y="40">hi</tspan></text>'
+            + "</svg>"
+        )
+        a, arrow, t = _loc(svg, "a"), _loc(svg, "arrow"), _loc(svg, "t")
+        span = t + ".0"
+        result = apply_ops(
+            svg,
+            [
+                {"kind": "duplicate", "loc": a, "key": "c0", "set": {"y": "100"}},
+                {
+                    "kind": "duplicate",
+                    "loc": arrow,
+                    "key": "c1",
+                    "set": {"d": "M10 105L50 105", "inkflow:connect-end": None},
+                },
+                {
+                    "kind": "duplicate",
+                    "loc": t,
+                    "key": "c2",
+                    "set": {"y": "140"},
+                    "kids": [{"loc": span, "set": {"y": "140"}}],
+                },
+            ],
+        )
+        root = svg.root
+        orig = root.find(".//*[@id='a']")
+        copy_a = root.find(f".//*[@id='{result.ids['c0']}']")
+        assert orig is not None and orig.get("y") == "0"
+        assert copy_a is not None and copy_a.get("y") == "100"
+        out = svg.to_bytes().decode()
+        # The copied arrow follows the copied box, and lets go of the other.
+        new_arrow = root.find(f".//*[@id='{result.ids['c1']}']")
+        assert new_arrow is not None
+        ink = "{urn:inkflow}"
+        assert new_arrow.get(f"{ink}connect-start") == f"{result.ids['c0']}:right"
+        assert new_arrow.get(f"{ink}connect-end") is None
+        assert 'inkflow:connect-start="a:right"' in out  # the original keeps it
+        copy_t = root.find(f".//*[@id='{result.ids['c2']}']")
+        assert copy_t is not None and copy_t[0].get("y") == "140"
+        t_el = root.find(".//*[@id='t']")
+        assert t_el is not None and t_el[0].get("y") == "40"
+
     def test_insert_assigns_a_unique_id_and_sanitises(self) -> None:
         svg = _svg()
         result = apply_ops(

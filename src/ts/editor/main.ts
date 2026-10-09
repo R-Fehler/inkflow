@@ -12,7 +12,7 @@ import {
 import { initCanvasMenu } from "./canvasmenu";
 import { initContext } from "./context";
 import { isCropped, setCropMode, startCrop } from "./crop";
-import { initDecks } from "./decks";
+import { initDecks, showStart } from "./decks";
 import { initDialog } from "./dialog";
 import { toast } from "./dom";
 import { initExport } from "./exportdlg";
@@ -166,6 +166,8 @@ function boot(): void {
     render();
     writeHash();
     if (WS_PORT != null) connect(WS_PORT);
+    // No deck yet (the start page): pick or make one.
+    if (!ed.model && !ed.error) void showStart();
 }
 
 boot();

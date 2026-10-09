@@ -403,6 +403,9 @@ body:not([data-tool=select]) #paper {
 body[data-tool=text] #paper {
   cursor: text;
 }
+body.drag-copy #paper {
+  cursor: copy;
+}
 .sel-outline {
   fill: none;
   stroke: var(--sel);
@@ -2041,4 +2044,91 @@ foreignObject.rich-editing .math-chip.editing {
 }
 .video-estimate {
   margin: 0;
+}
+.start {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: auto;
+  background: var(--ui-canvas);
+}
+body.start-mode #toolbar,
+body.start-mode #workspace {
+  visibility: hidden;
+}
+.start-card {
+  width: min(560px, 100%);
+  padding: 36px 40px;
+  border: 1px solid var(--ui-line);
+  border-radius: 14px;
+  background: var(--ui-panel);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.35);
+}
+.start-logo {
+  font-size: 34px;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+}
+.start-logo b {
+  font-weight: 700;
+  color: var(--accent);
+}
+.start-lead {
+  margin: 4px 0 24px;
+  color: var(--subtext);
+}
+.start-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.start-action,
+.start-deck {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--ui-line);
+  border-radius: 10px;
+  background: var(--ui-bg);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.start-action:hover,
+.start-deck:hover {
+  border-color: var(--sel);
+}
+.start-action-label {
+  font-size: 15px;
+  font-weight: 600;
+}
+.start-action-hint,
+.start-deck-path {
+  overflow: hidden;
+  color: var(--subtext);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.start-recent h2 {
+  margin: 28px 0 8px;
+  color: var(--subtext);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.start-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.start-deck-name {
+  font-weight: 600;
 }
