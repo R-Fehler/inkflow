@@ -18,8 +18,8 @@ from inkflow.editor.model import build_model
 from inkflow.editor.provenance import INK, INK_TOP, is_element, locate, parse_locator
 from inkflow.editor.session import EditError, EditorSession
 from inkflow.editor.svgops import SvgFile, SvgOpError, apply_ops, group, ungroup
-from inkflow.enums import Direction, Easing, Trigger
-from inkflow.manifest import Deck
+from inkflow.enums import Direction, Easing, MediaFit, Muted, Trigger
+from inkflow.manifest import Deck, Image, Video
 from inkflow.pipeline import process_deck
 from inkflow.server import load_deck
 from inkflow.svgio import parse_svg, parse_svg_file
@@ -888,6 +888,163 @@ class TestSession:
         assert first["rel"] == second["rel"] == "assets/my-pic.png"
         with pytest.raises(EditError):
             session.apply({"action": "upload", "name": "x.exe", "data": data}, None)
+
+    def test_insert_video_adds_zone_and_deck_value(self, project: Path) -> None:
+        session = EditorSession(project / "deck.py")
+        (project / "assets").mkdir()
+        clip = project / "assets" / "clip.mp4"
+        clip.write_bytes(b"fake mp4")
+        drawing = project / "slides" / "drawing.svg"
+        result = session.apply(
+            {
+                "action": "insert-video",
+                "slide": 0,
+                "file": str(drawing),
+                "hash": _hash(drawing),
+                "src": str(clip),
+                "x": 100,
+                "y": 120,
+                "width": 640,
+                "height": 360,
+            },
+            _deck(project),
+        )
+        assert result["ids"] == {"new": "zone-video"}
+        assert 'id="zone-video" x="100" y="120"' in drawing.read_text()
+        slide = _deck(project).slides[0]
+        assert slide.zones["video"] == Video("assets/clip.mp4")
+        # One step undoes both files.
+        session.apply({"action": "undo"}, _deck(project))
+        assert "zone-video" not in drawing.read_text()
+        assert _deck(project).slides[0].zones == {}
+
+        # A second video gets a fresh zone name, and the build fills it.
+        for _ in range(2):
+            session.apply(
+                {
+                    "action": "insert-video",
+                    "slide": 0,
+                    "file": str(drawing),
+                    "hash": _hash(drawing),
+                    "src": str(clip),
+                    "x": 0,
+                    "y": 0,
+                    "width": 320,
+                    "height": 180,
+                },
+                _deck(project),
+            )
+        deck = _deck(project)
+        assert set(deck.slides[0].zones) == {"video", "video-2"}
+        html = process_deck(deck, project, project / "deck.py")[0]["svg"]
+        assert html.count("<video") == 2
+
+    def test_insert_video_refuses_shared_svg_and_non_video(self, project: Path) -> None:
+        session = EditorSession(project / "deck.py")
+        layout = project / "layouts" / "two.svg"
+        msg: dict[str, object] = {
+            "action": "insert-video",
+            "slide": 1,
+            "file": str(layout),
+            "hash": _hash(layout),
+            "src": str(project / "clip.mp4"),
+            "x": 0,
+            "y": 0,
+            "width": 10,
+            "height": 10,
+        }
+        with pytest.raises(EditError, match="own SVG"):
+            session.apply(msg, _deck(project))
+        with pytest.raises(EditError, match="not a video"):
+            session.apply({**msg, "src": str(project / "x.png")}, _deck(project))
+
+    def test_zone_media_replace_keeps_the_zone_settings(self, project: Path) -> None:
+        deck_py = project / "deck.py"
+        deck_py.write_text(
+            deck_py.read_text()
+            .replace(
+                'zones={"title": "Hello"}',
+                'zones={"title": "Hello", "content": Video("a.mp4", loop=True,'
+                + ' poster="a.png", start=2.0)}',
+            )
+            .replace("import Deck,", "import Deck, Video,"),
+        )
+        session = EditorSession(deck_py)
+        msg: dict[str, object] = {"action": "zone-media", "slide": 2, "zone": "content"}
+        session.apply(
+            {**msg, "src": str(project / "b.webm"), "fit": "cover"}, _deck(project)
+        )
+        assert _deck(project).slides[2].zones["content"] == Video("b.webm", loop=True)
+        # Another kind of file starts from that kind's defaults.
+        session.apply(
+            {**msg, "src": str(project / "c.png"), "fit": "cover"}, _deck(project)
+        )
+        assert _deck(project).slides[2].zones["content"] == Image(
+            "c.png", fit=MediaFit.COVER
+        )
+        session.apply({**msg, "src": None}, _deck(project))
+        assert "content" not in _deck(project).slides[2].zones
+
+    def test_media_props_rewrites_the_zone_value(self, project: Path) -> None:
+        deck_py = project / "deck.py"
+        deck_py.write_text(
+            deck_py.read_text()
+            .replace(
+                'zones={"title": "Hello"}',
+                'zones={"title": "Hello", "content": Video("clip.mp4")}',
+            )
+            .replace("import Deck,", "import Deck, Video,"),
+        )
+        session = EditorSession(deck_py)
+        session.apply(
+            {
+                "action": "media-props",
+                "slide": 2,
+                "zone": "content",
+                "fields": {
+                    "autoplay": True,
+                    "loop": True,
+                    "muted": "on",
+                    "fit": "cover",
+                    "start": 1.5,
+                    "end": "",
+                    "src": "evil.mp4",
+                },
+            },
+            _deck(project),
+        )
+        value = _deck(project).slides[2].zones["content"]
+        assert value == Video(
+            "clip.mp4",
+            fit=MediaFit.COVER,
+            autoplay=True,
+            loop=True,
+            muted=Muted.ON,
+            start=1.5,
+        )
+        assert (
+            'Video("clip.mp4", fit=MediaFit.COVER, autoplay=True, muted=Muted.ON'
+            in (deck_py.read_text())
+        )
+        schema = {f["name"]: f for f in field_schema(Video)}
+        assert schema["muted"]["choices"] == ["auto", "on", "off"]
+        assert schema["start"]["optional"] is True
+        assert schema["loop"]["optional"] is False
+        with pytest.raises(EditError):
+            session.apply(
+                {"action": "media-props", "slide": 2, "zone": "title", "fields": {}},
+                _deck(project),
+            )
+        with pytest.raises(EditError):
+            session.apply(
+                {
+                    "action": "media-props",
+                    "slide": 2,
+                    "zone": "content",
+                    "fields": {"muted": "loud"},
+                },
+                _deck(project),
+            )
 
 
 # ── Model ────────────────────────────────────────────────────────────────────

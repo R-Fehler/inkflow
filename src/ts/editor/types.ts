@@ -32,6 +32,8 @@ export interface ZoneValue {
     text?: string;
     src?: string;
     fit?: string;
+    // An image's or video's settings, by field name (see mediaTypes).
+    fields?: Record<string, FieldValue>;
 }
 
 export type FieldValue = string | number | boolean | null;
@@ -65,6 +67,8 @@ export interface FieldSchema {
         | "other";
     choices: string[];
     default: FieldValue;
+    // The field also accepts None (an emptied box sends null).
+    optional?: boolean;
 }
 
 export interface TypeInfo {
@@ -112,6 +116,7 @@ export interface EditorModel {
     slides: SlideModel[];
     animationTypes: TypeInfo[];
     transitionTypes: TypeInfo[];
+    mediaTypes: { image: FieldSchema[]; video: FieldSchema[] };
     defaultTransition: TransitionInfo;
     layouts: LayoutInfo[];
     colorTokens: string[];

@@ -25,14 +25,17 @@ from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
 from inkflow.editor.codegen import Code, coerce_fields
 from inkflow.editor.deckedit import DeckEditError, DeckSource
+from inkflow.editor.model import MEDIA_HIDDEN_FIELDS
 from inkflow.editor.previews import layout_previews
 from inkflow.editor.svgops import (
     SvgFile,
     SvgOpError,
+    all_ids,
     apply_ops,
     file_hash,
     group,
     ungroup,
+    unique_id,
 )
 from inkflow.editor.transfer import (
     TransferError,
@@ -42,15 +45,22 @@ from inkflow.editor.transfer import (
     plan_slide_paste,
     retarget_fragment,
 )
-from inkflow.layout import create_slide, discover_layouts, resolve_parent_path
-from inkflow.manifest import Deck, Inline, Slide, TextBox
+from inkflow.enums import MediaFit
+from inkflow.layout import (
+    create_slide,
+    discover_layouts,
+    resolve_chain,
+    resolve_parent_path,
+)
+from inkflow.manifest import Deck, Image, Inline, Slide, TextBox, Video
 from inkflow.pipeline import resolve_slide_src
 from inkflow.transitions import Transition
 from inkflow.zones import replace_zone_text
 
 DECK_MODULE = "_inkflow_deck"
 _MAX_UPLOAD = 50 * 1024 * 1024
-_UPLOAD_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".mp4", ".webm"}
+_VIDEO_SUFFIXES = {".mp4", ".webm", ".ogg", ".mov"}
+_UPLOAD_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", *_VIDEO_SUFFIXES}
 
 
 class EditError(Exception):
@@ -259,6 +269,8 @@ class EditorSession:
             "svg": self._svg,
             "zone-text": self._zone_text,
             "zone-media": self._zone_media,
+            "media-props": self._media_props,
+            "insert-video": self._insert_video,
             "md-text": self._md_text,
             "notes": self._notes,
             "slide": self._slide,
@@ -454,7 +466,7 @@ class EditorSession:
         self, msg: dict[str, object], deck: Deck, txn: _Txn, _extra: dict[str, object]
     ) -> str:
         """Put an image (or video) into a zone via ``zones={...}`` in deck.py."""
-        index, _ = self._deck_slide(deck, msg)
+        index, slide = self._deck_slide(deck, msg)
         zone = str(msg.get("zone"))
         src = msg.get("src")
         source = self._deck_source(txn)
@@ -463,17 +475,100 @@ class EditorSession:
             self._save_deck(txn, source, set())
             return f"Clear {zone}"
         rel = self._deck_rel(Path(str(src)))
-        kind = "Video" if Path(rel).suffix.lower() in (".mp4", ".webm") else "Image"
+        cls = Video if Path(rel).suffix.lower() in _VIDEO_SUFFIXES else Image
+        current = slide.zones.get(zone)
         fit = msg.get("fit")
-        args = [_py(rel)]
-        if isinstance(fit, str) and fit in ("cover", "contain"):
-            args.append(f"fit=MediaFit.{fit.upper()}")
-        source.set_zone(index, zone, f"{kind}({', '.join(args)})")
-        imports = {kind}
-        if len(args) > 1:
-            imports.add("MediaFit")
-        self._save_deck(txn, source, imports)
+        if type(current) is cls:
+            # Replacing the file keeps how the zone shows it (fit, anchor,
+            # playback) but not what belonged to the old file.
+            value = dataclasses.replace(current, src=rel, alt_src=None)
+            if isinstance(value, Video):
+                value = dataclasses.replace(value, poster=None, start=None, end=None)
+        else:
+            value = cls(rel)
+            if isinstance(fit, str):
+                value.fit = MediaFit(fit)
+        code = Code()
+        source.set_zone(index, zone, code.call(value))
+        self._save_deck(txn, source, code.imports)
         return f"Set {zone} media"
+
+    def _media_props(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, _extra: dict[str, object]
+    ) -> str:
+        """Change the settings of an image or video zone (fit, autoplay, loop...)."""
+        index, slide = self._deck_slide(deck, msg)
+        zone = str(msg.get("zone"))
+        current = slide.zones.get(zone)
+        if not isinstance(current, Image | Video):
+            raise EditError(f"zone {zone!r} holds no image or video set in deck.py")
+        raw = cast("dict[str, object]", msg.get("fields") or {})
+        # An emptied text or number box means "back to the default", which for
+        # the optional fields (poster, start, end) is None.
+        raw = {k: None if v == "" else v for k, v in raw.items()}
+        for hidden in MEDIA_HIDDEN_FIELDS:
+            raw.pop(hidden, None)
+        values = coerce_fields(type(current), raw)
+        if isinstance(values.get("poster"), str):
+            values["poster"] = self._deck_rel(Path(str(values["poster"])))
+        updated = dataclasses.replace(current, **values)
+        source = self._deck_source(txn)
+        code = Code()
+        source.set_zone(index, zone, code.call(updated))
+        self._save_deck(txn, source, code.imports)
+        return f"{'Video' if isinstance(current, Video) else 'Image'} settings"
+
+    def _insert_video(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """Place a video anywhere: a new zone rect in the slide's own SVG, filled
+        with ``Video(...)`` through ``zones={...}`` in deck.py, as one step."""
+        index, slide = self._deck_slide(deck, msg)
+        src = msg.get("src")
+        if not isinstance(src, str) or not src:
+            raise EditError("no video to insert")
+        rel = self._deck_rel(Path(src))
+        if Path(rel).suffix.lower() not in _VIDEO_SUFFIXES:
+            raise EditError("not a video file")
+        path = Path(cast("str", msg.get("file")))
+        own = resolve_slide_src(slide.src, self.project_dir, deck.theme)
+        if own.resolve() != path.resolve() or not self._is_own(own, deck):
+            raise EditError("the video goes into the slide's own SVG")
+        data = txn.read(path)
+        expected = msg.get("hash")
+        if isinstance(expected, str) and expected and file_hash(data) != expected:
+            raise EditError(f"{path.name} changed on disk; wait for the reload")
+        svg = SvgFile.from_bytes(path, data)
+        # The zone name must be free in the whole composition, not just this
+        # file: a layout's own zone-video would otherwise take the content.
+        taken = all_ids(svg.root) | {f"zone-{z}" for z in slide.zones}
+        try:
+            chain = resolve_chain(path, self.project_dir, deck.theme)
+        except ValueError:
+            chain = []
+        for ancestor in chain:
+            taken |= all_ids(SvgFile.from_bytes(ancestor, ancestor.read_bytes()).root)
+        zone_id = unique_id(svg.root, "zone-video", taken)
+        box = {
+            k: float(cast("float", msg.get(k))) for k in ("x", "y", "width", "height")
+        }
+        if box["width"] <= 0 or box["height"] <= 0:
+            raise EditError("the video needs a size")
+        xml = (
+            f'<rect id="{zone_id}" x="{box["x"]:g}" y="{box["y"]:g}" '
+            + f'width="{box["width"]:g}" height="{box["height"]:g}"/>'
+        )
+        parent = msg.get("parent") or "0:"
+        apply_ops(svg, [{"kind": "insert", "parent": parent, "xml": xml}])
+        txn.write(path, svg.to_bytes())
+        zone = zone_id.removeprefix("zone-")
+        source = self._deck_source(txn)
+        code = Code()
+        source.set_zone(index, zone, code.call(Video(rel)))
+        self._save_deck(txn, source, code.imports)
+        extra["ids"] = {"new": zone_id}
+        extra["structural"] = True
+        return "Insert video"
 
     def _deck_rel(self, path: Path) -> str:
         resolved = path if path.is_absolute() else self.project_dir / path

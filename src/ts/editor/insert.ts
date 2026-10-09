@@ -1,5 +1,5 @@
-// Creating things: the shape and text tools, images (picked, dropped or pasted),
-// and copy/paste of selected objects.
+// Creating things: the shape and text tools, images and videos (picked, dropped
+// or pasted), and copy/paste of selected objects.
 //
 // New objects are written into the slide's own SVG. A slide that is still drawn
 // straight from a shared layout gets its own SVG first (built on that layout,
@@ -10,6 +10,7 @@ import {
     clientToSlide,
     drawOverlay,
     hooks,
+    mediaZoneAt,
     slideRoot,
     slideToPaper,
 } from "./canvas";
@@ -299,7 +300,7 @@ function readBase64(file: File): Promise<string> {
     });
 }
 
-async function upload(
+export async function upload(
     file: File,
 ): Promise<{ path: string; rel: string } | null> {
     const data = await readBase64(file);
@@ -324,14 +325,105 @@ function naturalSize(rel: string): Promise<{ w: number; h: number }> {
     });
 }
 
+function videoSize(rel: string): Promise<{ w: number; h: number }> {
+    return new Promise((resolve) => {
+        const video = document.createElement("video");
+        const fallback = { w: 1280, h: 720 };
+        // A format the browser cannot decode never loads its metadata.
+        const timer = window.setTimeout(() => resolve(fallback), 3000);
+        video.preload = "metadata";
+        video.muted = true;
+        video.onloadedmetadata = () => {
+            window.clearTimeout(timer);
+            resolve(
+                video.videoWidth && video.videoHeight
+                    ? { w: video.videoWidth, h: video.videoHeight }
+                    : fallback,
+            );
+        };
+        video.onerror = () => {
+            window.clearTimeout(timer);
+            resolve(fallback);
+        };
+        video.src = `/${rel}`;
+    });
+}
+
+export function isVideo(file: File): boolean {
+    return (
+        file.type.startsWith("video/") ||
+        /\.(mp4|webm|ogg|mov)$/i.test(file.name)
+    );
+}
+
+// A video goes into a zone of its own: a new rect in the slide's SVG, filled
+// through zones={...} in deck.py, so it plays like any other Video (and its
+// settings show in the panel). Both files change in one undoable step.
+export async function insertVideoFile(
+    file: File,
+    at?: { x: number; y: number },
+): Promise<void> {
+    if (!(await ensureOwnDrawing())) return;
+    const up = await upload(file);
+    const src = ownSource();
+    const slide = currentSlide();
+    if (!up || !src || !slide) return;
+    const size = await videoSize(up.rel);
+    const vb = slideRoot()?.viewBox.baseVal;
+    const vw = vb?.width || 1920;
+    const vh = vb?.height || 1080;
+    const k = Math.min((vw * 0.6) / size.w, (vh * 0.6) / size.h);
+    const w = size.w * k;
+    const h = size.h * k;
+    // Centred on the drop point, but kept on the slide.
+    const cx = Math.min(Math.max(at?.x ?? vw / 2, w / 2), vw - w / 2);
+    const cy = Math.min(Math.max(at?.y ?? vh / 2, h / 2), vh - h / 2);
+    const parent = insertParent();
+    const a = toParent(parent.el, cx - w / 2, cy - h / 2);
+    const b = toParent(parent.el, cx + w / 2, cy + h / 2);
+    const result = await edit({
+        action: "insert-video",
+        slide: slide.deckIndex,
+        file: src.path,
+        hash: src.hash,
+        parent: parent.loc,
+        x: Math.round(Math.min(a.x, b.x)),
+        y: Math.round(Math.min(a.y, b.y)),
+        width: Math.round(Math.abs(b.x - a.x)),
+        height: Math.round(Math.abs(b.y - a.y)),
+        src: up.path,
+    });
+    const id = result.ids?.new;
+    if (result.ok && id) afterRender.ids = [id];
+}
+
+export async function insertVideo(): Promise<void> {
+    const file = await pickFile(
+        "video/mp4,video/webm,video/ogg,video/quicktime",
+    );
+    if (file) await insertVideoFile(file);
+}
+
+// A dropped or pasted file: into the media zone under it if there is one,
+// else onto the slide as a free image or video.
+export async function insertFile(
+    file: File,
+    at?: { x: number; y: number; clientX: number; clientY: number },
+): Promise<void> {
+    const zone = at ? mediaZoneAt(at.clientX, at.clientY) : null;
+    if (zone) {
+        await fillZone(zone, file);
+        return;
+    }
+    if (isVideo(file)) await insertVideoFile(file, at);
+    else if (file.type.startsWith("image/")) await insertImageFile(file, at);
+    else toast(`Cannot insert ${file.name}`, "error");
+}
+
 export async function insertImageFile(
     file: File,
     at?: { x: number; y: number },
 ) {
-    if (/^video\//.test(file.type)) {
-        toast("Drop a video onto a media zone, or add it in deck.py", "error");
-        return;
-    }
     if (!(await ensureOwnDrawing())) return;
     const up = await upload(file);
     const src = ownSource();
@@ -370,11 +462,11 @@ export async function insertImage(): Promise<void> {
     if (file) await insertImageFile(file);
 }
 
-async function zoneMedia(zone: string): Promise<void> {
+const MEDIA_ACCEPT = "image/*,video/mp4,video/webm,video/ogg,video/quicktime";
+
+async function fillZone(zone: string, file: File): Promise<void> {
     const slide = currentSlide();
     if (!slide) return;
-    const file = await pickFile("image/*,video/mp4,video/webm");
-    if (!file) return;
     const up = await upload(file);
     if (!up) return;
     await edit({
@@ -382,8 +474,13 @@ async function zoneMedia(zone: string): Promise<void> {
         slide: slide.deckIndex,
         zone,
         src: up.path,
-        fit: "cover",
+        fit: slide.zones[zone]?.fit ?? "cover",
     });
+}
+
+export async function zoneMedia(zone: string): Promise<void> {
+    const file = await pickFile(MEDIA_ACCEPT);
+    if (file) await fillZone(zone, file);
 }
 
 // ── Copy / paste ──
@@ -430,17 +527,21 @@ export function initInsert(): void {
         const file = e.dataTransfer?.files?.[0];
         if (!file) return;
         e.preventDefault();
-        void insertImageFile(file, clientToSlide(e.clientX, e.clientY));
+        void insertFile(file, {
+            ...clientToSlide(e.clientX, e.clientY),
+            clientX: e.clientX,
+            clientY: e.clientY,
+        });
     });
     document.addEventListener("paste", (e) => {
         const target = e.target as HTMLElement;
         if (target.closest("textarea, input")) return;
-        const file = [...(e.clipboardData?.files ?? [])].find((f) =>
-            f.type.startsWith("image/"),
+        const file = [...(e.clipboardData?.files ?? [])].find(
+            (f) => f.type.startsWith("image/") || isVideo(f),
         );
         if (file) {
             e.preventDefault();
-            void insertImageFile(file);
+            void insertFile(file);
             return;
         }
         e.preventDefault();

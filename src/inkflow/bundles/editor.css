@@ -623,6 +623,19 @@ body.previewing #canvas::after {
   font-size: 12px;
   margin: 6px 0 0;
 }
+.hint.media-src {
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+.media-poster {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--subtext);
+  font-size: 12px;
+}
 #props > .hint {
   padding: 0 14px;
 }

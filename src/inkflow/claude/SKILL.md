@@ -62,6 +62,26 @@ Slide(
 Steps are inferred from triggers; never number them by hand unless pinning
 with `Trigger.at(n)`. Morph pairs elements by `id` across consecutive slides.
 
+## Images and video (deck.py)
+
+A zone is a `<rect id="zone-NAME">` in an SVG; `zones={"NAME": ...}` fills it.
+To place a video anywhere, add such a rect to the slide's own SVG and fill it:
+
+```python
+from inkflow import Image, MediaFit, Muted, Slide, Video, animations
+
+Slide(
+    "demo.svg",  # contains <rect id="zone-video" x="200" y="200" width="960" height="540"/>
+    zones={
+        "video": Video("assets/clip.mp4", autoplay=True, loop=True, muted=Muted.ON),
+        "media": Image("assets/photo.jpg", fit=MediaFit.COVER),
+    },
+    animations=[animations.PlayVideo("video")],  # or: start it on a click
+)
+```
+
+Paths are relative to `deck.py`; keep media files in `assets/`.
+
 ## Check your work
 
 1. `inkflow verify` for authoring mistakes (missing ids, zones, layouts).

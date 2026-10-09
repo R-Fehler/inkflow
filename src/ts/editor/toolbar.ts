@@ -22,7 +22,7 @@ import {
 import { copy, copySlides, cut, cutSlides } from "./clipboard";
 import { toast } from "./dom";
 import { openGallery } from "./gallery";
-import { insertImage, setTool } from "./insert";
+import { insertImage, insertVideo, setTool } from "./insert";
 import { edit } from "./net";
 import { alignSelection } from "./props";
 import { deleteSlide, deleteSlides, duplicateSlide, gotoSlide } from "./sorter";
@@ -306,7 +306,7 @@ function onKey(e: KeyboardEvent): void {
     } else if (!mod && !e.altKey && lower in TOOL_KEYS) {
         setTool(TOOL_KEYS[lower]);
     } else if (!mod && lower === "i") {
-        void insertImage();
+        void (e.shiftKey ? insertVideo() : insertImage());
     }
 }
 
@@ -317,6 +317,7 @@ export function initToolbar(): void {
         b.addEventListener("click", () => setTool(b.dataset.tool as Tool));
     });
     $("btn-image").addEventListener("click", () => void insertImage());
+    $("btn-video").addEventListener("click", () => void insertVideo());
     $("zoom-in").addEventListener("click", () => setZoom(scale() * 1.25));
     $("zoom-out").addEventListener("click", () => setZoom(scale() / 1.25));
     $("zoom-fit").addEventListener("click", () => setZoom(0));

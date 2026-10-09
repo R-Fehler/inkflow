@@ -26,8 +26,8 @@ import {
     planRotate,
     rotationOf,
 } from "./geom";
-import { pickFile } from "./insert";
-import { edit, request } from "./net";
+import { pickFile, upload, zoneMedia } from "./insert";
+import { edit } from "./net";
 import { distribute } from "./snap";
 import { currentSlide, ed, emit, on, sourceOf } from "./state";
 import type {
@@ -35,9 +35,11 @@ import type {
     FieldSchema,
     FieldValue,
     Selected,
+    SlideModel,
     SvgOp,
     TransitionInfo,
     TypeInfo,
+    ZoneValue,
 } from "./types";
 
 const panel = document.getElementById("props")!;
@@ -65,7 +67,13 @@ function row(label: string, ...controls: Node[]): HTMLElement {
 function numberInput(
     value: number | null,
     commit: (v: number) => void,
-    opts: { step?: number; min?: number; placeholder?: string } = {},
+    opts: {
+        step?: number;
+        min?: number;
+        placeholder?: string;
+        // Called when the box is emptied (for fields that accept None).
+        onClear?: () => void;
+    } = {},
 ): HTMLInputElement {
     const input = h("input", {
         type: "number",
@@ -78,6 +86,7 @@ function numberInput(
     const fire = () => {
         const v = parseFloat(input.value);
         if (Number.isFinite(v)) commit(v);
+        else if (input.value.trim() === "") opts.onClear?.();
     };
     input.addEventListener("change", fire);
     input.addEventListener("keydown", (e) => {
@@ -170,7 +179,11 @@ function fieldControl(
             return numberInput(
                 typeof value === "number" ? value : null,
                 (v) => commit(f.kind === "int" ? Math.round(v) : v),
-                { step: f.kind === "int" ? 1 : 0.05 },
+                {
+                    step: f.kind === "int" ? 1 : 0.05,
+                    placeholder: f.optional ? "none" : "",
+                    onClear: f.optional ? () => commit(null) : undefined,
+                },
             );
         default:
             return textInput(value == null ? "" : String(value), commit);
@@ -195,6 +208,130 @@ function fieldsEditor(
         );
     }
     return box;
+}
+
+// Settings of an image or video zone (fit, alignment; for a video autoplay,
+// loop, sound, controls, trim and poster), written back as its Image(...) /
+// Video(...) call in deck.py.
+const MEDIA_LABELS: Record<string, string> = {
+    fit: "Fit",
+    align: "Anchor",
+    controls: "Controls",
+    autoplay: "Autoplay",
+    muted: "Mute",
+    loop: "Loop",
+    poster: "Poster",
+    start: "Trim start",
+    end: "Trim end",
+};
+
+function mediaSection(
+    slide: SlideModel,
+    zone: string,
+    media: ZoneValue,
+): HTMLElement {
+    const kind = media.kind === "video" ? "video" : "image";
+    const schema = ed.model?.mediaTypes?.[kind] ?? [];
+    const values = media.fields ?? {};
+    const commit = (name: string, v: FieldValue) =>
+        void edit({
+            action: "media-props",
+            slide: slide.deckIndex,
+            zone,
+            fields: { [name]: v },
+        });
+    const rows: Node[] = [];
+    for (const f of schema) {
+        const label = MEDIA_LABELS[f.name] ?? f.name.replace(/_/g, " ");
+        if (f.name === "poster") {
+            const poster = values.poster;
+            // A <div>, not row()'s <label>: a label would forward clicks on
+            // its text to the first button.
+            rows.push(
+                h(
+                    "div",
+                    { class: "prop-row" },
+                    h("span", { class: "prop-label" }, label),
+                    h(
+                        "span",
+                        { class: "media-poster" },
+                        poster ? String(poster).split("/").pop() : "None",
+                    ),
+                    button(
+                        poster ? "Change…" : "Pick…",
+                        poster
+                            ? `Poster: ${poster}`
+                            : "Still image shown before playback",
+                        async () => {
+                            const file = await pickFile("image/*");
+                            const up = file ? await upload(file) : null;
+                            if (up) commit("poster", up.path);
+                        },
+                    ),
+                    poster
+                        ? button("✕", "Remove the poster", () =>
+                              commit("poster", null),
+                          )
+                        : null,
+                ),
+            );
+            continue;
+        }
+        if (f.name === "muted") {
+            // Muted.AUTO mutes exactly when the video autoplays.
+            const opts = [
+                { value: "auto", label: "When autoplaying" },
+                { value: "on", label: "Always" },
+                { value: "off", label: "Never" },
+            ];
+            rows.push(
+                row(
+                    label,
+                    selectInput(opts, String(values.muted ?? "auto"), (v) =>
+                        commit("muted", v),
+                    ),
+                ),
+            );
+            continue;
+        }
+        if (f.name === "start" || f.name === "end") {
+            const v = values[f.name];
+            rows.push(
+                row(
+                    label,
+                    numberInput(
+                        typeof v === "number" ? v : null,
+                        (n) => commit(f.name, n),
+                        {
+                            step: 0.1,
+                            min: 0,
+                            placeholder: "seconds",
+                            onClear: () => commit(f.name, null),
+                        },
+                    ),
+                ),
+            );
+            continue;
+        }
+        rows.push(
+            row(
+                label,
+                fieldControl(f, values[f.name] ?? f.default, (v) =>
+                    commit(f.name, v),
+                ),
+            ),
+        );
+    }
+    if (kind === "video") {
+        rows.push(
+            h(
+                "p",
+                { class: "hint" },
+                "To start it on a click instead, add a Play video animation below.",
+            ),
+        );
+    }
+    return section(kind === "video" ? "Video" : "Image", ...rows);
 }
 
 function typeInfo(list: TypeInfo[], type: string): TypeInfo | null {
@@ -702,35 +839,11 @@ function renderObjectPanel(sel: Selected): void {
         ];
         if (media && (media.kind === "image" || media.kind === "video")) {
             body.push(
+                h("p", { class: "hint media-src" }, media.src ?? ""),
                 button(
                     "Replace media…",
                     "Pick another image or video",
-                    async () => {
-                        const file = await pickFile(
-                            "image/*,video/mp4,video/webm",
-                        );
-                        if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = async () => {
-                            const data =
-                                String(reader.result).split(",")[1] ?? "";
-                            const up = await request({
-                                action: "upload",
-                                name: file.name,
-                                data,
-                            });
-                            if (up.ok && up.path) {
-                                void edit({
-                                    action: "zone-media",
-                                    slide: slide.deckIndex,
-                                    zone: name,
-                                    src: up.path,
-                                    fit: media.fit,
-                                });
-                            }
-                        };
-                        reader.readAsDataURL(file);
-                    },
+                    () => void zoneMedia(name),
                 ),
                 button("Clear", "Empty this zone", () => {
                     void edit({
@@ -753,6 +866,9 @@ function renderObjectPanel(sel: Selected): void {
             );
         }
         panel.append(section("Content", ...body));
+        if (media && (media.kind === "image" || media.kind === "video")) {
+            panel.append(mediaSection(slide, name, media));
+        }
     }
 
     if (movable) panel.append(geometrySection([sel]));

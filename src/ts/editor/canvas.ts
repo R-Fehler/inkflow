@@ -175,6 +175,9 @@ function prepareForEditing(svg: SVGSVGElement): void {
     svg.querySelectorAll("video").forEach((v) => {
         v.pause();
         v.removeAttribute("autoplay");
+        // Show the frame a trimmed clip starts on, not its first one.
+        const start = parseFloat(v.dataset.start ?? "");
+        if (start > 0) v.currentTime = start;
     });
     if (ed.step == null) {
         svg.querySelectorAll(".anim-pending").forEach((el) => {
@@ -291,6 +294,33 @@ export function isZone(el: Element): boolean {
 
 export function zoneName(el: Element): string {
     return (el.getAttribute("id") ?? "").replace(/^zone-/, "");
+}
+
+// The media zone under a point, empty (its placeholder) or holding an image or
+// video already: where a dropped file fills the zone instead of floating free.
+export function mediaZoneAt(clientX: number, clientY: number): string | null {
+    const inside = (r: DOMRect) =>
+        clientX >= r.left &&
+        clientX <= r.right &&
+        clientY >= r.top &&
+        clientY <= r.bottom;
+    for (const el of overlay.querySelectorAll("[data-media-zone]")) {
+        if (inside(el.getBoundingClientRect()))
+            return el.getAttribute("data-media-zone");
+    }
+    const slide = currentSlide();
+    const svg = slideRoot();
+    if (!slide || !svg) return null;
+    for (const el of svg.querySelectorAll('[id^="zone-"]')) {
+        const name = zoneName(el);
+        const kind = slide.zones[name]?.kind;
+        if (
+            (kind === "image" || kind === "video") &&
+            inside(el.getBoundingClientRect())
+        )
+            return name;
+    }
+    return null;
 }
 
 export function keyOf(el: Element): number {
@@ -651,19 +681,19 @@ function drawPlaceholders(): void {
         // The dashed outline is only a hint and lets clicks through, so a zone
         // a drawing deliberately covers stays out of the way; the small label
         // in its corner is what adds content.
-        overlay.append(
-            svgEl("rect", {
-                x: pb.x,
-                y: pb.y,
-                width: pb.width,
-                height: pb.height,
-                rx: 4,
-                class: "placeholder-outline",
-            }),
-        );
         const media = MEDIA_ZONES.test(z.zone);
+        const outline = svgEl("rect", {
+            x: pb.x,
+            y: pb.y,
+            width: pb.width,
+            height: pb.height,
+            rx: 4,
+            class: "placeholder-outline",
+        });
+        if (media) outline.setAttribute("data-media-zone", z.zone);
+        overlay.append(outline);
         const g = svgEl("g", { class: "placeholder" });
-        const text = media ? `+ image · ${z.zone}` : `+ ${z.zone}`;
+        const text = media ? `+ media · ${z.zone}` : `+ ${z.zone}`;
         const w = 14 + text.length * 7.2;
         const tx = pb.x + 6;
         const ty = pb.y + 6;
@@ -677,7 +707,7 @@ function drawPlaceholders(): void {
         g.append(label);
         const title = svgEl("title");
         title.textContent = media
-            ? `Add an image to the ${z.zone} zone`
+            ? `Add an image or video to the ${z.zone} zone`
             : `Add ${z.zone} text (Markdown)`;
         g.append(title);
         g.addEventListener("pointerdown", (e) => {

@@ -98,7 +98,9 @@ src/
                                args, animations=[...], zones={...}, imports; keeps comments),
                                codegen.py (DSL object -> shortest constructor source; field
                                schemas for the property panels), session.py (one request ->
-                               one undoable whole-file step; EditorSession/History),
+                               one undoable whole-file step; EditorSession/History; a video
+                               inserted anywhere is a new zone-video rect + a Video(...)
+                               zones= entry in one step),
                                model.py (build_model: per-slide sources, zones, cues for the
                                editor), context.py (.inkflow/context.json for agents),
                                transfer.py (clipboard bundles: copy slides/objects with their

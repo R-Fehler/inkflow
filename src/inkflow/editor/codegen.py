@@ -115,6 +115,7 @@ class Code:
         cls = type(obj)
         args: list[str] = []
         defaults = _defaults(cls)
+        keyword = False  # once one argument is a keyword, the rest must be too
         for f in _fields(obj):
             if not f.init:
                 continue
@@ -125,13 +126,14 @@ class Code:
                 continue
             if f.name in defaults and _same(defaults[f.name], value):
                 continue
-            if f.name not in defaults and f.name not in ("trigger",):
-                # Required field without a default: always positional-safe as kw.
-                args.append(f"{f.name}={self.literal(value)}")
-                continue
-            if positional:
+            if f.name not in defaults and f.name != "trigger":
+                # A required field reads best positional, as an author writes
+                # it (``Video("clip.mp4")``), while nothing before it was a keyword.
+                positional = not keyword
+            if positional and not keyword:
                 args.append(self.literal(value))
             else:
+                keyword = True
                 args.append(f"{f.name}={self.literal(value)}")
         return f"{self.type_name(cls)}({', '.join(args)})"
 
@@ -178,7 +180,7 @@ def _field_kind(annotation: object) -> tuple[str, list[str]]:
         if issubclass(annotation, Easing):
             return "easing", list(_EASING_PRESETS)
         if issubclass(annotation, Enum):
-            return "enum", [str(cast("object", m.value)) for m in annotation]
+            return "enum", [_enum_token(m) for m in annotation]
         if issubclass(annotation, bool):
             return "bool", []
         if issubclass(annotation, int):
@@ -198,23 +200,34 @@ def field_schema(cls: type) -> list[dict[str, object]]:
     for f in _fields(cls):
         if not f.init or f.name == "element":
             continue
-        kind, choices = _field_kind(hints.get(f.name))
+        annotation = hints.get(f.name)
+        kind, choices = _field_kind(annotation)
         default = defaults.get(f.name)
+        union = typing.get_origin(annotation) in _UNION_TYPES
+        optional = union and type(None) in _args(annotation)
         schema.append(
             {
                 "name": f.name,
                 "kind": kind,
                 "choices": choices,
                 "default": to_json(default),
+                "optional": optional,
             }
         )
     return schema
 
 
+def _enum_token(member: Enum) -> str:
+    """How the browser names an enum member: its CSS token for the str enums,
+    the lowercase member name for a plain ``Enum`` such as ``Muted``."""
+    value = cast("object", member.value)
+    return value if isinstance(value, str) else member.name.lower()
+
+
 def to_json(value: object) -> object:
     """A JSON-safe view of a field value (enums and value objects as strings)."""
     if isinstance(value, Enum):
-        return cast("object", value.value)
+        return _enum_token(value)
     if isinstance(value, str | int | float | bool) or value is None:
         return value
     return str(value)
@@ -255,7 +268,10 @@ def _coerce(annotation: object, value: object) -> object:
     if issubclass(annotation, Easing):
         return Easing(str(value))
     if issubclass(annotation, Enum):
-        return annotation(value)
+        for member in annotation:
+            if _enum_token(member) == value:
+                return member
+        raise ValueError(f"not a {annotation.__name__}: {value!r}")
     if issubclass(annotation, bool):
         return bool(value)
     if issubclass(annotation, int):

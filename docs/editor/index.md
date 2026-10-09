@@ -26,6 +26,8 @@ the file watcher shows each one the others' changes within a moment.
 | Transition, animations, title, font size | That slide's `Slide(...)` call in `deck.py` |
 | Speaker notes | The slide's notes file (created on first edit if it has none) |
 | An inserted image | Copied into `assets/`, referenced relative to the SVG |
+| An inserted video | Copied into `assets/`; a `zone-video` rect in the slide's SVG plus `zones={"video": Video(...)}` in `deck.py`, as one undo step |
+| An image or video zone's settings | Its `Image(...)` / `Video(...)` call in `deck.py` |
 
 `deck.py` is edited structurally: comments and formatting are kept, and a comment
 written above a slide moves with it. If your slide list is built in code (a loop, a
@@ -95,8 +97,8 @@ A layout's zones show their content as on the slide. Double-click one and its
 Markdown opens in a pane under the slide, in place of the notes. The slide
 re-renders as you type, and the bar above the text has buttons for bold, italics,
 headings, lists, code, math and `::step::` reveals. Empty zones show a small
-**+ zone** label; click it to start writing (or to pick an image, for zones named
-like `media` or `image`).
+**+ zone** label; click it to start writing (or to pick an image or video, for
+zones named like `media`, `image` or `video`).
 
 ## Drawing
 
@@ -105,6 +107,25 @@ Click to drop one at a default size, or drag to size it. New shapes use the them
 colour classes (`inkflow-fill-surface`, `inkflow-stroke-accent`, …), so they follow
 dark and light mode like everything else. Images can be picked from the toolbar,
 dropped onto the slide or pasted from the clipboard.
+
+## Video
+
+Pick a video with the toolbar's **Video** button (<kbd>Shift</kbd>+<kbd>I</kbd>) or
+drop one onto the slide. It lands where you dropped it, sized to its own aspect
+ratio, and can be moved and resized like any shape. Under the hood it is an
+ordinary zone: the editor adds a `zone-video` rect to the slide's SVG and fills it
+from `deck.py` with `Video("assets/clip.mp4")`, so it plays in the presenter, the
+static build and the PDF exactly like a hand-written one.
+
+Dropping an image or video **onto a media zone** (an empty one, or one already
+showing media) fills that zone instead. Replacing a file keeps the zone's settings
+(fit, loop, autoplay…) and drops only what belonged to the old file: its poster,
+trim and light-mode alternative.
+
+Select a video zone and the panel shows its settings: fit and anchor, controls,
+autoplay, loop, when to mute, a poster image and trim start / end in seconds. An
+image zone gets fit and anchor. To start a clip on a click rather than when the
+slide appears, add a **PlayVideo** animation to it.
 
 Many slides are drawn directly by a shared layout (`Slide("content", md=...)`).
 The first time you draw on one, the editor gives it its own SVG in `slides/`, built
@@ -128,6 +149,7 @@ of your project and stay read-only.
   colours or any colour; stroke width, opacity, corner radius; font, size, weight
   and alignment for text; arrangement; and its animations, each with every setting
   its type has. Adding an animation to an object without an id gives it one.
+- **An image or video zone:** its file, plus the settings above.
 - **Several objects:** align, distribute, a common size and style, group.
 
 Renaming an object keeps the slide's animations pointing at it.
@@ -137,6 +159,7 @@ Renaming an object keeps the slide's animations pointing at it.
 | Key | Action |
 |---|---|
 | <kbd>V</kbd> <kbd>T</kbd> <kbd>R</kbd> <kbd>O</kbd> <kbd>L</kbd> <kbd>A</kbd> <kbd>I</kbd> | Select, text, rectangle, ellipse, line, arrow, image |
+| <kbd>Shift</kbd>+<kbd>I</kbd> | Insert a video |
 | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> | Undo / redo |
 | <kbd>Ctrl</kbd>+<kbd>C</kbd> <kbd>X</kbd> <kbd>V</kbd> <kbd>D</kbd> | Copy, cut, paste, duplicate (objects, or slides in the slide list) |
 | <kbd>Delete</kbd> | Delete the selection (or clear a zone; in the slide list, the selected slides) |

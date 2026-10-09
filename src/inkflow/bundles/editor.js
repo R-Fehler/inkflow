@@ -958,6 +958,8 @@
     svg.querySelectorAll("video").forEach((v) => {
       v.pause();
       v.removeAttribute("autoplay");
+      const start = parseFloat(v.dataset.start ?? "");
+      if (start > 0) v.currentTime = start;
     });
     if (ed.step == null) {
       svg.querySelectorAll(".anim-pending").forEach((el) => {
@@ -1055,6 +1057,23 @@
   }
   function zoneName(el) {
     return (el.getAttribute("id") ?? "").replace(/^zone-/, "");
+  }
+  function mediaZoneAt(clientX, clientY) {
+    const inside = (r) => clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+    for (const el of overlay.querySelectorAll("[data-media-zone]")) {
+      if (inside(el.getBoundingClientRect()))
+        return el.getAttribute("data-media-zone");
+    }
+    const slide = currentSlide();
+    const svg = slideRoot();
+    if (!slide || !svg) return null;
+    for (const el of svg.querySelectorAll('[id^="zone-"]')) {
+      const name = zoneName(el);
+      const kind = slide.zones[name]?.kind;
+      if ((kind === "image" || kind === "video") && inside(el.getBoundingClientRect()))
+        return name;
+    }
+    return null;
   }
   function keyOf(el) {
     const loc = el.getAttribute("data-ink") ?? "";
@@ -1338,19 +1357,19 @@
       const own = parseTransform(z.transform);
       const box = transformBox(own, z);
       const pb = toPaperBox(box);
-      overlay.append(
-        svgEl("rect", {
-          x: pb.x,
-          y: pb.y,
-          width: pb.width,
-          height: pb.height,
-          rx: 4,
-          class: "placeholder-outline"
-        })
-      );
       const media = MEDIA_ZONES.test(z.zone);
+      const outline = svgEl("rect", {
+        x: pb.x,
+        y: pb.y,
+        width: pb.width,
+        height: pb.height,
+        rx: 4,
+        class: "placeholder-outline"
+      });
+      if (media) outline.setAttribute("data-media-zone", z.zone);
+      overlay.append(outline);
       const g = svgEl("g", { class: "placeholder" });
-      const text = media ? `+ image \xB7 ${z.zone}` : `+ ${z.zone}`;
+      const text = media ? `+ media \xB7 ${z.zone}` : `+ ${z.zone}`;
       const w = 14 + text.length * 7.2;
       const tx = pb.x + 6;
       const ty = pb.y + 6;
@@ -1363,7 +1382,7 @@
       label2.textContent = text;
       g.append(label2);
       const title = svgEl("title");
-      title.textContent = media ? `Add an image to the ${z.zone} zone` : `Add ${z.zone} text (Markdown)`;
+      title.textContent = media ? `Add an image or video to the ${z.zone} zone` : `Add ${z.zone} text (Markdown)`;
       g.append(title);
       g.addEventListener("pointerdown", (e) => {
         e.stopPropagation();
@@ -2105,11 +2124,79 @@
       img.src = `/${rel}`;
     });
   }
-  async function insertImageFile(file, at) {
-    if (/^video\//.test(file.type)) {
-      toast("Drop a video onto a media zone, or add it in deck.py", "error");
+  function videoSize(rel) {
+    return new Promise((resolve) => {
+      const video = document.createElement("video");
+      const fallback = { w: 1280, h: 720 };
+      const timer3 = window.setTimeout(() => resolve(fallback), 3e3);
+      video.preload = "metadata";
+      video.muted = true;
+      video.onloadedmetadata = () => {
+        window.clearTimeout(timer3);
+        resolve(
+          video.videoWidth && video.videoHeight ? { w: video.videoWidth, h: video.videoHeight } : fallback
+        );
+      };
+      video.onerror = () => {
+        window.clearTimeout(timer3);
+        resolve(fallback);
+      };
+      video.src = `/${rel}`;
+    });
+  }
+  function isVideo(file) {
+    return file.type.startsWith("video/") || /\.(mp4|webm|ogg|mov)$/i.test(file.name);
+  }
+  async function insertVideoFile(file, at) {
+    if (!await ensureOwnDrawing()) return;
+    const up = await upload(file);
+    const src = ownSource();
+    const slide = currentSlide();
+    if (!up || !src || !slide) return;
+    const size = await videoSize(up.rel);
+    const vb = slideRoot()?.viewBox.baseVal;
+    const vw = vb?.width || 1920;
+    const vh = vb?.height || 1080;
+    const k = Math.min(vw * 0.6 / size.w, vh * 0.6 / size.h);
+    const w = size.w * k;
+    const h2 = size.h * k;
+    const cx = Math.min(Math.max(at?.x ?? vw / 2, w / 2), vw - w / 2);
+    const cy = Math.min(Math.max(at?.y ?? vh / 2, h2 / 2), vh - h2 / 2);
+    const parent = insertParent();
+    const a = toParent(parent.el, cx - w / 2, cy - h2 / 2);
+    const b = toParent(parent.el, cx + w / 2, cy + h2 / 2);
+    const result = await edit({
+      action: "insert-video",
+      slide: slide.deckIndex,
+      file: src.path,
+      hash: src.hash,
+      parent: parent.loc,
+      x: Math.round(Math.min(a.x, b.x)),
+      y: Math.round(Math.min(a.y, b.y)),
+      width: Math.round(Math.abs(b.x - a.x)),
+      height: Math.round(Math.abs(b.y - a.y)),
+      src: up.path
+    });
+    const id = result.ids?.new;
+    if (result.ok && id) afterRender.ids = [id];
+  }
+  async function insertVideo() {
+    const file = await pickFile(
+      "video/mp4,video/webm,video/ogg,video/quicktime"
+    );
+    if (file) await insertVideoFile(file);
+  }
+  async function insertFile(file, at) {
+    const zone = at ? mediaZoneAt(at.clientX, at.clientY) : null;
+    if (zone) {
+      await fillZone(zone, file);
       return;
     }
+    if (isVideo(file)) await insertVideoFile(file, at);
+    else if (file.type.startsWith("image/")) await insertImageFile(file, at);
+    else toast(`Cannot insert ${file.name}`, "error");
+  }
+  async function insertImageFile(file, at) {
     if (!await ensureOwnDrawing()) return;
     const up = await upload(file);
     const src = ownSource();
@@ -2145,11 +2232,10 @@
     const file = await pickFile("image/*");
     if (file) await insertImageFile(file);
   }
-  async function zoneMedia(zone) {
+  var MEDIA_ACCEPT = "image/*,video/mp4,video/webm,video/ogg,video/quicktime";
+  async function fillZone(zone, file) {
     const slide = currentSlide();
     if (!slide) return;
-    const file = await pickFile("image/*,video/mp4,video/webm");
-    if (!file) return;
     const up = await upload(file);
     if (!up) return;
     await edit({
@@ -2157,8 +2243,12 @@
       slide: slide.deckIndex,
       zone,
       src: up.path,
-      fit: "cover"
+      fit: slide.zones[zone]?.fit ?? "cover"
     });
+  }
+  async function zoneMedia(zone) {
+    const file = await pickFile(MEDIA_ACCEPT);
+    if (file) await fillZone(zone, file);
   }
   function cleanForPaste(el) {
     const copy2 = el.cloneNode(true);
@@ -2197,17 +2287,21 @@
       const file = e.dataTransfer?.files?.[0];
       if (!file) return;
       e.preventDefault();
-      void insertImageFile(file, clientToSlide(e.clientX, e.clientY));
+      void insertFile(file, {
+        ...clientToSlide(e.clientX, e.clientY),
+        clientX: e.clientX,
+        clientY: e.clientY
+      });
     });
     document.addEventListener("paste", (e) => {
       const target = e.target;
       if (target.closest("textarea, input")) return;
       const file = [...e.clipboardData?.files ?? []].find(
-        (f) => f.type.startsWith("image/")
+        (f) => f.type.startsWith("image/") || isVideo(f)
       );
       if (file) {
         e.preventDefault();
-        void insertImageFile(file);
+        void insertFile(file);
         return;
       }
       e.preventDefault();
@@ -3024,6 +3118,7 @@
     const fire = () => {
       const v = parseFloat(input.value);
       if (Number.isFinite(v)) commit(v);
+      else if (input.value.trim() === "") opts.onClear?.();
     };
     input.addEventListener("change", fire);
     input.addEventListener("keydown", (e) => {
@@ -3093,7 +3188,11 @@
         return numberInput(
           typeof value === "number" ? value : null,
           (v) => commit(f.kind === "int" ? Math.round(v) : v),
-          { step: f.kind === "int" ? 1 : 0.05 }
+          {
+            step: f.kind === "int" ? 1 : 0.05,
+            placeholder: f.optional ? "none" : "",
+            onClear: f.optional ? () => commit(null) : void 0
+          }
         );
       default:
         return textInput(value == null ? "" : String(value), commit);
@@ -3115,6 +3214,119 @@
       );
     }
     return box;
+  }
+  var MEDIA_LABELS = {
+    fit: "Fit",
+    align: "Anchor",
+    controls: "Controls",
+    autoplay: "Autoplay",
+    muted: "Mute",
+    loop: "Loop",
+    poster: "Poster",
+    start: "Trim start",
+    end: "Trim end"
+  };
+  function mediaSection(slide, zone, media) {
+    const kind = media.kind === "video" ? "video" : "image";
+    const schema = ed.model?.mediaTypes?.[kind] ?? [];
+    const values = media.fields ?? {};
+    const commit = (name, v) => void edit({
+      action: "media-props",
+      slide: slide.deckIndex,
+      zone,
+      fields: { [name]: v }
+    });
+    const rows = [];
+    for (const f of schema) {
+      const label2 = MEDIA_LABELS[f.name] ?? f.name.replace(/_/g, " ");
+      if (f.name === "poster") {
+        const poster = values.poster;
+        rows.push(
+          h(
+            "div",
+            { class: "prop-row" },
+            h("span", { class: "prop-label" }, label2),
+            h(
+              "span",
+              { class: "media-poster" },
+              poster ? String(poster).split("/").pop() : "None"
+            ),
+            button(
+              poster ? "Change\u2026" : "Pick\u2026",
+              poster ? `Poster: ${poster}` : "Still image shown before playback",
+              async () => {
+                const file = await pickFile("image/*");
+                const up = file ? await upload(file) : null;
+                if (up) commit("poster", up.path);
+              }
+            ),
+            poster ? button(
+              "\u2715",
+              "Remove the poster",
+              () => commit("poster", null)
+            ) : null
+          )
+        );
+        continue;
+      }
+      if (f.name === "muted") {
+        const opts = [
+          { value: "auto", label: "When autoplaying" },
+          { value: "on", label: "Always" },
+          { value: "off", label: "Never" }
+        ];
+        rows.push(
+          row(
+            label2,
+            selectInput(
+              opts,
+              String(values.muted ?? "auto"),
+              (v) => commit("muted", v)
+            )
+          )
+        );
+        continue;
+      }
+      if (f.name === "start" || f.name === "end") {
+        const v = values[f.name];
+        rows.push(
+          row(
+            label2,
+            numberInput(
+              typeof v === "number" ? v : null,
+              (n) => commit(f.name, n),
+              {
+                step: 0.1,
+                min: 0,
+                placeholder: "seconds",
+                onClear: () => commit(f.name, null)
+              }
+            )
+          )
+        );
+        continue;
+      }
+      rows.push(
+        row(
+          label2,
+          fieldControl(
+            f,
+            values[f.name] ?? f.default,
+            (v) => commit(f.name, v)
+          )
+        )
+      );
+    }
+    if (kind === "video") {
+      rows.push(
+        h(
+          "p",
+          { class: "hint" },
+          "To start it on a click instead, add a Play video animation below."
+        )
+      );
+    }
+    return section(kind === "video" ? "Video" : "Image", ...rows);
   }
   function typeInfo(list2, type) {
     return list2.find((t) => t.type === type) ?? null;
@@ -3554,34 +3766,11 @@
       ];
       if (media && (media.kind === "image" || media.kind === "video")) {
         body.push(
+          h("p", { class: "hint media-src" }, media.src ?? ""),
           button(
             "Replace media\u2026",
             "Pick another image or video",
-            async () => {
-              const file = await pickFile(
-                "image/*,video/mp4,video/webm"
-              );
-              if (!file) return;
-              const reader = new FileReader();
-              reader.onload = async () => {
-                const data = String(reader.result).split(",")[1] ?? "";
-                const up = await request({
-                  action: "upload",
-                  name: file.name,
-                  data
-                });
-                if (up.ok && up.path) {
-                  void edit({
-                    action: "zone-media",
-                    slide: slide.deckIndex,
-                    zone: name,
-                    src: up.path,
-                    fit: media.fit
-                  });
-                }
-              };
-              reader.readAsDataURL(file);
-            }
+            () => void zoneMedia(name)
           ),
           button("Clear", "Empty this zone", () => {
             void edit({
@@ -3604,6 +3793,9 @@
         );
       }
       panel.append(section("Content", ...body));
+      if (media && (media.kind === "image" || media.kind === "video")) {
+        panel.append(mediaSection(slide, name, media));
+      }
     }
     if (movable) panel.append(geometrySection([sel]));
     if (!zone && src?.writable && (movable || ed.layoutMode)) {
@@ -4509,7 +4701,7 @@ ${area2.value.slice(pos)}`;
     } else if (!mod && !e.altKey && lower in TOOL_KEYS) {
       setTool(TOOL_KEYS[lower]);
     } else if (!mod && lower === "i") {
-      void insertImage();
+      void (e.shiftKey ? insertVideo() : insertImage());
     }
   }
   function initToolbar() {
@@ -4519,6 +4711,7 @@ ${area2.value.slice(pos)}`;
       b.addEventListener("click", () => setTool(b.dataset.tool));
     });
     $("btn-image").addEventListener("click", () => void insertImage());
+    $("btn-video").addEventListener("click", () => void insertVideo());
     $("zoom-in").addEventListener("click", () => setZoom(scale() * 1.25));
     $("zoom-out").addEventListener("click", () => setZoom(scale() / 1.25));
     $("zoom-fit").addEventListener("click", () => setZoom(0));

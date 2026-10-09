@@ -133,8 +133,24 @@ def _zone_json(value: object) -> dict[str, object]:
             "kind": "video" if isinstance(value, Video) else "image",
             "src": value.src,
             "fit": str(value.fit),
+            "fields": {
+                f["name"]: to_json(
+                    cast("object", getattr(value, cast("str", f["name"])))
+                )
+                for f in media_schema(type(value))
+            },
         }
     return {"kind": "other"}
+
+
+MEDIA_HIDDEN_FIELDS = ("src", "alt_src", "x", "y")
+"""Media fields the settings panel leaves to deck.py: the file itself is picked
+with "Replace media…", and the pixel offsets are what dragging the zone is for."""
+
+
+def media_schema(cls: type) -> list[dict[str, object]]:
+    """The editable settings of an `Image` or `Video` zone value."""
+    return [f for f in field_schema(cls) if f["name"] not in MEDIA_HIDDEN_FIELDS]
 
 
 def _notes_json(slide: Slide, project_dir: Path) -> dict[str, object]:
@@ -286,6 +302,7 @@ def build_model(
             ],
         ],
         "transitionTypes": _type_catalog(Transition, transitions_module, deck_module),
+        "mediaTypes": {"image": media_schema(Image), "video": media_schema(Video)},
         "defaultTransition": _transition_json(deck.effective_transition, deck_module),
         "layouts": _layouts(project_dir, deck),
         "colorTokens": list(SVG_TOKENS),
