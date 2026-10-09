@@ -137,6 +137,7 @@ export interface EditResult {
     canRedo?: boolean;
     path?: string;
     rel?: string;
+    theme?: unknown;
 }
 
 // One selected object on the canvas.

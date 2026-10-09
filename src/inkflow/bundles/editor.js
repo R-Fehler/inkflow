@@ -638,6 +638,16 @@
     return [...up, ...to.slice(i)].join("/");
   }
 
+  // src/ts/shared/deck-styles.ts
+  function applyDeckStyles(msg) {
+    if (msg.styles !== void 0) {
+      const el = document.getElementById("deck-styles");
+      if (el) el.textContent = msg.styles;
+    }
+    if (msg.mode !== void 0)
+      document.documentElement.dataset.theme = msg.mode;
+  }
+
   // src/ts/editor/state.ts
   var ed = {
     model: null,
@@ -711,8 +721,8 @@
     commandHandler = fn;
   }
   function connect(port) {
-    const host3 = location.hostname || "localhost";
-    const sock = new WebSocket(`ws://${host3}:${port}`);
+    const host4 = location.hostname || "localhost";
+    const sock = new WebSocket(`ws://${host4}:${port}`);
     ws = sock;
     sock.onopen = () => {
       sock.send(JSON.stringify({ type: "hello", role: "editor" }));
@@ -736,6 +746,7 @@
       switch (msg.type) {
         case "update":
           pendingSlides = msg.slides;
+          applyDeckStyles(msg);
           ed.error = null;
           emit("error");
           break;
@@ -3306,6 +3317,68 @@
     );
   }
 
+  // src/ts/editor/dialog.ts
+  var host2 = document.getElementById("dialog");
+  var onClose = null;
+  function openDialog(title, body2, opts = {}) {
+    closeDialog();
+    onClose = opts.onClose ?? null;
+    const box = h(
+      "div",
+      { class: `dialog-box${opts.wide ? " wide" : ""}`, role: "dialog" },
+      h(
+        "div",
+        { class: "dialog-head" },
+        h("h2", {}, title),
+        opts.hint ? h("span", { class: "hint" }, opts.hint) : null,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "dialog-close",
+            title: "Close (Esc)",
+            onclick: () => closeDialog()
+          },
+          "\xD7"
+        )
+      ),
+      h("div", { class: "dialog-body" }, body2)
+    );
+    host2.append(box);
+    host2.classList.add("open");
+    return box;
+  }
+  function closeDialog() {
+    if (!host2.classList.contains("open")) return;
+    host2.classList.remove("open");
+    clear(host2);
+    const fn = onClose;
+    onClose = null;
+    fn?.();
+  }
+  function dialogOpen() {
+    return host2.classList.contains("open");
+  }
+  function initDialog() {
+    host2.addEventListener("pointerdown", (e) => {
+      if (e.target === host2) closeDialog();
+    });
+    document.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key === "Escape" && dialogOpen()) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeDialog();
+        }
+      },
+      true
+    );
+    host2.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") e.stopPropagation();
+    });
+  }
+
   // src/ts/editor/notes.ts
   var area = document.getElementById("notes-input");
   var label = document.getElementById("notes-file");
@@ -3361,7 +3434,7 @@
   }
 
   // src/ts/editor/objects.ts
-  var host2 = document.getElementById("objects");
+  var host3 = document.getElementById("objects");
   var body = document.getElementById("props-body");
   var tabs = document.getElementById("panel-tabs");
   var NAMES = {
@@ -3457,11 +3530,11 @@
     input.focus();
     input.select();
     let done = false;
-    const finish = (save2) => {
+    const finish = (save3) => {
       if (done) return;
       done = true;
       const v = input.value.trim();
-      if (save2 && v && v !== id) {
+      if (save3 && v && v !== id) {
         void edit({
           action: "svg",
           file: src.path,
@@ -3582,8 +3655,8 @@
     return !!src && src.role === "slide" && src.writable;
   }
   function renderObjects() {
-    if (host2.hidden) return;
-    clear(host2);
+    if (host3.hidden) return;
+    clear(host3);
     const svg = slideRoot();
     if (!svg) return;
     const top = [...svg.querySelectorAll("[data-ink-top], [data-ink-layer]")].filter((el) => {
@@ -3593,24 +3666,24 @@
       return !parent || !svg.contains(parent);
     }).reverse();
     if (!top.length) {
-      host2.append(h("p", { class: "hint" }, "No objects on this slide."));
+      host3.append(h("p", { class: "hint" }, "No objects on this slide."));
       return;
     }
-    host2.append(
+    host3.append(
       h(
         "p",
         { class: "hint" },
         "Top of the stack first. Middle-click (or Alt+click) on the slide steps through overlapping objects."
       )
     );
-    for (const el of top) host2.append(...row(el, 0));
+    for (const el of top) host3.append(...row(el, 0));
   }
   function showTab(tab) {
     for (const b of tabs.querySelectorAll("[data-tab]")) {
       b.classList.toggle("on", b.dataset.tab === tab);
       b.setAttribute("aria-selected", String(b.dataset.tab === tab));
     }
-    host2.hidden = tab !== "objects";
+    host3.hidden = tab !== "objects";
     body.hidden = tab === "objects";
     try {
       localStorage.setItem("inkflow-editor-tab", tab);
@@ -3996,11 +4069,11 @@
       )
     ];
     if (current) {
-      const info = typeInfo(types, current.type);
-      if (info) {
+      const info2 = typeInfo(types, current.type);
+      if (info2) {
         body2.push(
           fieldsEditor(
-            info.fields,
+            info2.fields,
             current.fields,
             (fields) => send({ type: current.type, fields })
           )
@@ -4102,7 +4175,7 @@
     slide.animations.forEach((cue, index) => {
       if (!elementName || cue.element !== (cue.kind === "video" ? zoneName(sel.el) : id))
         return;
-      const info = typeInfo(model.animationTypes, cue.type);
+      const info2 = typeInfo(model.animationTypes, cue.type);
       const send = (type, fields) => void edit({
         action: "anim",
         slide: di,
@@ -4138,8 +4211,8 @@
           "div",
           { class: "anim-card" },
           header,
-          info && editable ? fieldsEditor(
-            info.fields,
+          info2 && editable ? fieldsEditor(
+            info2.fields,
             cue.fields,
             (f) => send(cue.type, f)
           ) : null
@@ -5350,15 +5423,15 @@ ${area2.value.slice(pos)}`;
   ];
   function editZoneRich(zone, el, opts) {
     const slide = currentSlide();
-    const content = el.querySelector(".inkflow-content");
-    if (!slide || !content || ed.step != null) return false;
+    const content2 = el.querySelector(".inkflow-content");
+    if (!slide || !content2 || ed.step != null) return false;
     const origin = slide.zoneOrigins?.[zone];
     if (!ed.model?.deckEditable && (origin === "deck" || !slide.md)) {
       return false;
     }
     let start;
     try {
-      start = htmlToMarkdown(content);
+      start = htmlToMarkdown(content2);
     } catch {
       return false;
     }
@@ -5366,35 +5439,35 @@ ${area2.value.slice(pos)}`;
     const fo = el;
     const deckIndex = slide.deckIndex;
     ed.richEditing = true;
-    richHost = content;
+    richHost = content2;
     fo.classList.add("rich-editing");
     fo.style.overflow = "visible";
-    content.contentEditable = "true";
-    content.spellcheck = true;
+    content2.contentEditable = "true";
+    content2.spellcheck = true;
     document.execCommand("defaultParagraphSeparator", false, "p");
-    content.focus();
-    placeCaret(content, opts);
-    const bar = richToolbar(content, () => {
+    content2.focus();
+    placeCaret(content2, opts);
+    const bar = richToolbar(content2, () => {
       void finishTextEdit().then(() => editZoneText(zone));
     });
     layer.append(bar);
     positionBar(bar, fo);
     const cleanup = () => {
       richHost = null;
-      content.contentEditable = "false";
+      content2.contentEditable = "false";
       fo.classList.remove("rich-editing");
       fo.style.overflow = "";
       bar.remove();
       document.removeEventListener("selectionchange", onSelection);
     };
-    const onSelection = () => syncToolbar(bar, content);
+    const onSelection = () => syncToolbar(bar, content2);
     document.addEventListener("selectionchange", onSelection);
-    syncToolbar(bar, content);
+    syncToolbar(bar, content2);
     active = {
       commit: async () => {
         let md;
         try {
-          md = htmlToMarkdown(content);
+          md = htmlToMarkdown(content2);
         } catch (err) {
           cleanup();
           ed.richEditing = false;
@@ -5405,7 +5478,7 @@ ${area2.value.slice(pos)}`;
           );
           return;
         }
-        const grow = growOp(fo, content);
+        const grow = growOp(fo, content2);
         cleanup();
         ed.richEditing = false;
         if (md === start && !grow) {
@@ -5429,7 +5502,7 @@ ${area2.value.slice(pos)}`;
         emit("rerender");
       }
     };
-    content.addEventListener("keydown", (e) => {
+    content2.addEventListener("keydown", (e) => {
       e.stopPropagation();
       const mod = e.ctrlKey || e.metaKey;
       if (e.key === "Escape") {
@@ -5440,40 +5513,40 @@ ${area2.value.slice(pos)}`;
         void finishTextEdit();
       } else if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        editLink(content);
+        editLink(content2);
       } else if (e.key === "Tab") {
         e.preventDefault();
-        const cell = caretElement(content)?.closest("td, th");
+        const cell = caretElement(content2)?.closest("td, th");
         if (cell) moveCell(cell, e.shiftKey ? -1 : 1);
-        else if (caretElement(content)?.closest("li")) {
+        else if (caretElement(content2)?.closest("li")) {
           document.execCommand(e.shiftKey ? "outdent" : "indent");
         }
       }
     });
-    content.addEventListener("paste", (e) => {
+    content2.addEventListener("paste", (e) => {
       e.preventDefault();
       const text = e.clipboardData?.getData("text/plain") ?? "";
       document.execCommand("insertText", false, text);
     });
-    content.addEventListener("focusout", (e) => {
+    content2.addEventListener("focusout", (e) => {
       const next = e.relatedTarget;
-      if (next && (bar.contains(next) || content.contains(next))) return;
+      if (next && (bar.contains(next) || content2.contains(next))) return;
       if (bar.matches(":hover")) return;
       void finishTextEdit();
     });
     return true;
   }
-  function placeCaret(content, opts) {
+  function placeCaret(content2, opts) {
     const sel = window.getSelection();
     if (!sel) return;
     let range = null;
     if (opts.at && !opts.selectAll) {
       range = document.caretRangeFromPoint?.(opts.at.x, opts.at.y) ?? null;
-      if (range && !content.contains(range.startContainer)) range = null;
+      if (range && !content2.contains(range.startContainer)) range = null;
     }
     if (!range) {
       range = document.createRange();
-      range.selectNodeContents(content);
+      range.selectNodeContents(content2);
       if (!opts.selectAll) range.collapse(false);
     }
     sel.removeAllRanges();
@@ -5501,14 +5574,14 @@ ${area2.value.slice(pos)}`;
     });
     return true;
   }
-  function growOp(fo, content) {
+  function growOp(fo, content2) {
     const slide = currentSlide();
     const loc = fo.getAttribute("data-ink");
     if (!slide || !loc || fo.getAttribute("data-ink-tag") !== "rect") return;
     const src = slide.sources?.[parseInt(loc.split(":")[0] ?? "", 10)];
     if (!src?.writable || src.role === "slide" && slide.srcShared) return;
     if (src.role !== "slide" && !ed.layoutMode) return;
-    const wrapper = content.parentElement;
+    const wrapper = content2.parentElement;
     const have = parseFloat(fo.getAttribute("height") ?? "0");
     const need = wrapper ? wrapper.scrollHeight : 0;
     if (!have || need <= have + 2) return;
@@ -5518,26 +5591,26 @@ ${area2.value.slice(pos)}`;
       ops: [{ kind: "attrs", loc, set: { height: String(Math.ceil(need)) } }]
     };
   }
-  function caretElement(content) {
+  function caretElement(content2) {
     const sel = window.getSelection();
     const node = sel?.anchorNode ?? null;
-    if (!node || !content.contains(node)) return null;
+    if (!node || !content2.contains(node)) return null;
     return node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
   }
-  function changed(content) {
-    content.dispatchEvent(new Event("input", { bubbles: true }));
+  function changed(content2) {
+    content2.dispatchEvent(new Event("input", { bubbles: true }));
   }
-  function selectionRange(content) {
+  function selectionRange(content2) {
     const sel = window.getSelection();
     if (!sel?.rangeCount) return null;
     const range = sel.getRangeAt(0);
-    return content.contains(range.commonAncestorContainer) ? range : null;
+    return content2.contains(range.commonAncestorContainer) ? range : null;
   }
   function unwrap(el) {
     el.replaceWith(...el.childNodes);
   }
-  function wrapRange(content, make, same) {
-    const range = selectionRange(content);
+  function wrapRange(content2, make, same) {
+    const range = selectionRange(content2);
     if (!range || range.collapsed) return;
     const frag = range.extractContents();
     frag.querySelectorAll(same).forEach(unwrap);
@@ -5558,30 +5631,30 @@ ${area2.value.slice(pos)}`;
     }
     sel?.removeAllRanges();
     sel?.addRange(range);
-    content.querySelectorAll(same).forEach((el) => {
+    content2.querySelectorAll(same).forEach((el) => {
       if (!el.textContent) el.remove();
     });
-    changed(content);
+    changed(content2);
   }
-  function setColor(content, token) {
+  function setColor(content2, token) {
     wrapRange(
-      content,
+      content2,
       token ? () => h("span", { class: `inkflow-color-${token}` }) : null,
       'span[class^="inkflow-color-"]'
     );
   }
-  function toggleCode(content) {
-    const inCode = caretElement(content)?.closest("code");
-    if (inCode && content.contains(inCode)) {
+  function toggleCode(content2) {
+    const inCode = caretElement(content2)?.closest("code");
+    if (inCode && content2.contains(inCode)) {
       unwrap(inCode);
-      changed(content);
+      changed(content2);
       return;
     }
-    wrapRange(content, () => h("code", {}), "code");
+    wrapRange(content2, () => h("code", {}), "code");
   }
-  function editLink(content) {
-    const a = caretElement(content)?.closest("a");
-    const range = selectionRange(content);
+  function editLink(content2) {
+    const a = caretElement(content2)?.closest("a");
+    const range = selectionRange(content2);
     const current = a?.getAttribute("href") ?? "";
     const url = window.prompt(
       a ? "Link address (empty removes the link)" : "Link address",
@@ -5606,11 +5679,11 @@ ${area2.value.slice(pos)}`;
         `<a href="${encodeURI(url.trim())}">${url.trim().replace(/</g, "&lt;")}</a>`
       );
     }
-    changed(content);
+    changed(content2);
   }
-  function cellOf(content) {
-    const cell = caretElement(content)?.closest("td, th");
-    return cell && content.contains(cell) ? cell : null;
+  function cellOf(content2) {
+    const cell = caretElement(content2)?.closest("td, th");
+    return cell && content2.contains(cell) ? cell : null;
   }
   function focusCell(cell) {
     const range = document.createRange();
@@ -5700,7 +5773,7 @@ ${area2.value.slice(pos)}`;
       if (c) c.style.textAlign = align2;
     }
   }
-  function insertTable(content) {
+  function insertTable(content2) {
     const head = "<th>Header</th><th>Header</th><th>Header</th>";
     const row3 = "<td><br></td><td><br></td><td><br></td>";
     document.execCommand(
@@ -5708,7 +5781,7 @@ ${area2.value.slice(pos)}`;
       false,
       `<table><thead><tr>${head}</tr></thead><tbody><tr>${row3}</tr><tr>${row3}</tr></tbody></table><p><br></p>`
     );
-    const after = caretElement(content)?.closest("p");
+    const after = caretElement(content2)?.closest("p");
     const table = after?.previousElementSibling;
     const first = table?.localName === "table" ? table.querySelector("th") : null;
     if (first) {
@@ -5718,16 +5791,16 @@ ${area2.value.slice(pos)}`;
       sel?.removeAllRanges();
       sel?.addRange(range);
     }
-    changed(content);
+    changed(content2);
   }
-  function tableCommand(content, fn) {
-    const cell = cellOf(content);
+  function tableCommand(content2, fn) {
+    const cell = cellOf(content2);
     if (!cell) return;
     fn(cell);
-    changed(content);
-    syncToolbar(document.querySelector(".rich-bar"), content);
+    changed(content2);
+    syncToolbar(document.querySelector(".rich-bar"), content2);
   }
-  function richToolbar(content, toSource) {
+  function richToolbar(content2, toSource) {
     const btn = (label3, title, fn, cls = "") => h(
       "button",
       {
@@ -5737,14 +5810,14 @@ ${area2.value.slice(pos)}`;
         onmousedown: (e) => {
           e.preventDefault();
           fn();
-          syncToolbar(bar, content);
+          syncToolbar(bar, content2);
         }
       },
       label3
     );
     const exec = (cmd, value) => () => {
       document.execCommand(cmd, false, value);
-      changed(content);
+      changed(content2);
     };
     const block = h("select", { class: "fmt-block", title: "Paragraph style" });
     for (const [v, l] of [
@@ -5758,23 +5831,23 @@ ${area2.value.slice(pos)}`;
     }
     block.addEventListener("mousedown", (e) => e.stopPropagation());
     block.addEventListener("change", () => {
-      content.focus();
+      content2.focus();
       document.execCommand("formatBlock", false, `<${block.value}>`);
-      changed(content);
+      changed(content2);
     });
     const swatches = h("div", { class: "fmt-colors" });
-    const host3 = content.closest("svg");
-    const css = host3 ? getComputedStyle(host3) : null;
+    const host4 = content2.closest("svg");
+    const css = host4 ? getComputedStyle(host4) : null;
     swatches.append(
       btn(
         "A",
         "Default colour",
-        () => setColor(content, null),
+        () => setColor(content2, null),
         "swatch none"
       )
     );
     for (const t of COLORS) {
-      const b = btn("", t, () => setColor(content, t), "swatch");
+      const b = btn("", t, () => setColor(content2, t), "swatch");
       b.style.background = css?.getPropertyValue(`--inkflow-${t}`).trim() || "currentColor";
       swatches.append(b);
     }
@@ -5787,32 +5860,32 @@ ${area2.value.slice(pos)}`;
       "span",
       { class: "fmt-table" },
       h("span", { class: "fmt-sep" }),
-      btn("+row", "Add a row below", () => tableCommand(content, addRow)),
+      btn("+row", "Add a row below", () => tableCommand(content2, addRow)),
       btn(
         "+col",
         "Add a column to the right",
-        () => tableCommand(content, addColumn)
+        () => tableCommand(content2, addColumn)
       ),
-      btn("\u2212row", "Delete this row", () => tableCommand(content, deleteRow)),
+      btn("\u2212row", "Delete this row", () => tableCommand(content2, deleteRow)),
       btn(
         "\u2212col",
         "Delete this column",
-        () => tableCommand(content, deleteColumn)
+        () => tableCommand(content2, deleteColumn)
       ),
       btn(
         "\u21E4",
         "Align column left",
-        () => tableCommand(content, (c) => alignColumn(c, "left"))
+        () => tableCommand(content2, (c) => alignColumn(c, "left"))
       ),
       btn(
         "\u21D4",
         "Centre column",
-        () => tableCommand(content, (c) => alignColumn(c, "center"))
+        () => tableCommand(content2, (c) => alignColumn(c, "center"))
       ),
       btn(
         "\u21E5",
         "Align column right",
-        () => tableCommand(content, (c) => alignColumn(c, "right"))
+        () => tableCommand(content2, (c) => alignColumn(c, "right"))
       )
     );
     const bar = h(
@@ -5828,13 +5901,13 @@ ${area2.value.slice(pos)}`;
         exec("strikeThrough"),
         "fmt-strike"
       ),
-      btn("</>", "Inline code", () => toggleCode(content), "fmt-code"),
+      btn("</>", "Inline code", () => toggleCode(content2), "fmt-code"),
       h("span", { class: "fmt-color-wrap" }, colorBtn, swatches),
-      btn("\u{1F517}", "Link (Ctrl+K)", () => editLink(content), "fmt-link"),
+      btn("\u{1F517}", "Link (Ctrl+K)", () => editLink(content2), "fmt-link"),
       h("span", { class: "fmt-sep" }),
       btn("\u2022", "Bullet list", exec("insertUnorderedList"), "fmt-ul"),
       btn("1.", "Numbered list", exec("insertOrderedList"), "fmt-ol"),
-      btn("\u25A6", "Insert a table", () => insertTable(content)),
+      btn("\u25A6", "Insert a table", () => insertTable(content2)),
       tableTools,
       h("span", { class: "fmt-sep" }),
       btn("Tx", "Clear formatting", exec("removeFormat")),
@@ -5848,9 +5921,9 @@ ${area2.value.slice(pos)}`;
     );
     return bar;
   }
-  function syncToolbar(bar, content) {
+  function syncToolbar(bar, content2) {
     if (!bar) return;
-    const el = caretElement(content);
+    const el = caretElement(content2);
     const state = (cmd) => {
       try {
         return document.queryCommandState(cmd);
@@ -5876,6 +5949,246 @@ ${area2.value.slice(pos)}`;
       "show",
       !!el?.closest("td, th")
     );
+  }
+
+  // src/ts/editor/theme.ts
+  var SEMANTIC = [
+    ["bg", "Background"],
+    ["surface", "Surface (cards)"],
+    ["border", "Border"],
+    ["text", "Text"],
+    ["text_muted", "Muted text"],
+    ["heading", "Headings"],
+    ["accent", "Accent"],
+    ["accent_fg", "Text on accent"],
+    ["link", "Links"],
+    ["code_bg", "Code background"],
+    ["code_text", "Code text"],
+    ["blockquote", "Quote bar"]
+  ];
+  var NAMED = [
+    "red",
+    "orange",
+    "yellow",
+    "green",
+    "teal",
+    "blue",
+    "purple",
+    "pink",
+    "grey"
+  ];
+  var FONTS = [
+    ["body_font", "Body", "sans-serif"],
+    ["heading_font", "Headings", "sans-serif"],
+    ["mono_font", "Code", "monospace"]
+  ];
+  var info = null;
+  var content = null;
+  var cssVar = (name) => `--inkflow-${name.replace(/_/g, "-")}`;
+  function toHex(value) {
+    if (/^#[0-9a-f]{6}$/i.test(value)) return value.toLowerCase();
+    if (/^#[0-9a-f]{3}$/i.test(value)) {
+      return `#${[...value.slice(1)].map((c) => c + c).join("")}`.toLowerCase();
+    }
+    const probe = h("span", {});
+    probe.style.color = value;
+    document.body.append(probe);
+    const rgb = getComputedStyle(probe).color.match(/\d+/g) ?? ["0", "0", "0"];
+    probe.remove();
+    return `#${rgb.slice(0, 3).map((n) => Number(n).toString(16).padStart(2, "0")).join("")}`;
+  }
+  async function save2(body2, label3) {
+    await edit({ action: "theme-set", label: label3, ...body2 });
+  }
+  function setToken(group, name, value) {
+    void save2({ changes: { [group]: { [name]: value } } }, "Theme");
+  }
+  function colorCell(mode, name) {
+    const t = info;
+    const own = t.overrides[mode][name];
+    const value = own ?? t.values[mode][name] ?? "#000000";
+    const input = h("input", {
+      type: "color",
+      value: toHex(value),
+      title: `${cssVar(name)} (${mode})${own ? " \xB7 changed" : ""}`
+    });
+    input.addEventListener("input", () => {
+      const showing = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+      if (showing === mode) {
+        document.documentElement.style.setProperty(
+          cssVar(name),
+          input.value
+        );
+      }
+    });
+    input.addEventListener("change", () => setToken(mode, name, input.value));
+    return h(
+      "span",
+      { class: `theme-color${own ? " changed" : ""}` },
+      input,
+      own ? h(
+        "button",
+        {
+          type: "button",
+          class: "theme-reset",
+          title: "Back to the theme's colour",
+          onclick: () => setToken(mode, name, null)
+        },
+        "\u21BA"
+      ) : null
+    );
+  }
+  function colorsTable() {
+    const rows = [
+      h(
+        "div",
+        { class: "theme-row head" },
+        h("span", {}, ""),
+        h("span", {}, "Dark"),
+        h("span", {}, "Light")
+      )
+    ];
+    const add = (name, label3) => rows.push(
+      h(
+        "div",
+        { class: "theme-row" },
+        h("span", { class: "theme-label" }, label3),
+        colorCell("dark", name),
+        colorCell("light", name)
+      )
+    );
+    for (const [name, label3] of SEMANTIC) add(name, label3);
+    rows.push(h("div", { class: "theme-sub" }, "Named colours"));
+    for (const name of NAMED) add(name, name[0].toUpperCase() + name.slice(1));
+    return h("div", { class: "theme-colors" }, ...rows);
+  }
+  function fontRow(name, label3, generic) {
+    const t = info;
+    const own = t.overrides.typography[name];
+    const value = own ?? t.values.typography[name] ?? generic;
+    const input = h("input", {
+      type: "text",
+      list: "theme-font-list",
+      value,
+      placeholder: generic,
+      spellcheck: "false"
+    });
+    input.addEventListener("change", () => {
+      const v = input.value.trim();
+      if (!v) {
+        setToken("typography", name, null);
+        return;
+      }
+      const withFallback = v.includes(",") || v === generic ? v : `${v}, ${generic}`;
+      setToken("typography", name, withFallback);
+    });
+    const sample = h("span", { class: "theme-font-sample" }, "Aa Bb 123");
+    sample.style.fontFamily = value;
+    return h(
+      "div",
+      { class: "theme-font" },
+      h("span", { class: "theme-label" }, label3),
+      input,
+      sample,
+      own ? h(
+        "button",
+        {
+          type: "button",
+          class: "theme-reset",
+          title: "Back to the theme's font",
+          onclick: () => setToken("typography", name, null)
+        },
+        "\u21BA"
+      ) : null
+    );
+  }
+  function render2() {
+    if (!content || !info) return;
+    const t = info;
+    clear(content);
+    const mode = h("select", {});
+    for (const [v, l] of [
+      ["", `Theme default (${t.themeMode})`],
+      ["dark", "Dark"],
+      ["light", "Light"]
+    ]) {
+      mode.append(h("option", { value: v }, l));
+    }
+    mode.value = t.deckMode ?? "";
+    mode.disabled = !ed.model?.deckEditable;
+    mode.addEventListener(
+      "change",
+      () => void save2({ mode: mode.value || null }, "Colour mode")
+    );
+    const size = h("input", {
+      type: "number",
+      min: 8,
+      max: 200,
+      value: t.fontSize ?? "",
+      placeholder: String(t.themeFontSize)
+    });
+    size.disabled = !ed.model?.deckEditable;
+    size.addEventListener("change", () => {
+      const n = parseInt(size.value, 10);
+      void save2({ fontSize: Number.isFinite(n) ? n : null }, "Font size");
+    });
+    const list2 = h("datalist", { id: "theme-font-list" });
+    for (const f of ["sans-serif", "serif", "monospace", ...t.fonts]) {
+      list2.append(h("option", { value: f }));
+    }
+    content.append(
+      h(
+        "div",
+        { class: "theme-top" },
+        h("label", {}, h("span", {}, "Colour mode"), mode),
+        h("label", {}, h("span", {}, "Base font size (px)"), size)
+      ),
+      h("h3", {}, "Fonts"),
+      list2,
+      ...FONTS.map(([n, l, g]) => fontRow(n, l, g)),
+      h(
+        "p",
+        { class: "hint" },
+        "Fonts found in fonts/, the theme or this computer are embedded in the deck."
+      ),
+      h("h3", {}, "Colours"),
+      colorsTable(),
+      h(
+        "p",
+        { class: "hint" },
+        "Changes are written to styles.css (one marked block) and deck.py; \u21BA goes back to the theme."
+      )
+    );
+  }
+  async function refresh() {
+    const result = await request({ action: "theme-get" });
+    if (!result.ok) return;
+    info = result.theme;
+    render2();
+  }
+  async function openTheme() {
+    content = h(
+      "div",
+      { class: "theme-body" },
+      h("p", { class: "hint" }, "Loading\u2026")
+    );
+    openDialog("Theme", content, {
+      hint: "Colours, fonts and size for the whole deck",
+      onClose: () => {
+        content = null;
+        document.documentElement.removeAttribute("style");
+      }
+    });
+    await refresh();
+  }
+  function initTheme() {
+    document.getElementById("btn-theme-panel")?.addEventListener("click", () => {
+      void openTheme();
+    });
+    on("model", () => {
+      document.documentElement.removeAttribute("style");
+      if (content) void refresh();
+    });
   }
 
   // src/ts/editor/toolbar.ts
@@ -6253,6 +6566,8 @@ ${area2.value.slice(pos)}`;
     initToolbar();
     initContext();
     initGallery();
+    initDialog();
+    initTheme();
     on("slide", () => {
       void finishTextEdit();
       render();

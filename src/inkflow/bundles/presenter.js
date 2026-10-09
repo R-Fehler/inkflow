@@ -1038,6 +1038,16 @@
     pvResizeHandle.addEventListener("pointerup", _onPvResizeUp);
   });
 
+  // src/ts/shared/deck-styles.ts
+  function applyDeckStyles(msg) {
+    if (msg.styles !== void 0) {
+      const el = document.getElementById("deck-styles");
+      if (el) el.textContent = msg.styles;
+    }
+    if (msg.mode !== void 0)
+      document.documentElement.dataset.theme = msg.mode;
+  }
+
   // src/ts/shared/easing.ts
   var NAMED_CURVES = {
     linear: [0, 0, 1, 1],
@@ -3034,6 +3044,7 @@
         return;
       }
       if (msg.type === "update") {
+        applyDeckStyles(msg);
         state.slides = msg.slides;
         state.transitions = msg.transitions;
         hideError();

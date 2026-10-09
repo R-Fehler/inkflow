@@ -73,6 +73,10 @@ export type WsMessage =
           slides: SlideData[];
           transitions: TransitionData[];
           logs: LogEntry[];
+          // Sent only when they changed (a theme edit): the deck's stylesheet
+          // and its colour mode ("" dark, "light").
+          styles?: string;
+          mode?: string;
       }
     | { type: "error"; message: string }
     | { type: "notify"; message: string; style: NotifyStyle }

@@ -1,3 +1,4 @@
+import { applyDeckStyles } from "../shared/deck-styles";
 import type {
     NavMessage,
     SyncMode,
@@ -193,6 +194,7 @@ export function connectWS(wsPort: number | null, authoritative: boolean): void {
             return;
         }
         if (msg.type === "update") {
+            applyDeckStyles(msg);
             state.slides = msg.slides;
             state.transitions = msg.transitions;
             hideError();

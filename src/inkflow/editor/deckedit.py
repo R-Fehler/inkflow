@@ -353,6 +353,16 @@ class DeckSource:
         seq.insert(index + 1, cst.Element(copy))
         self._replace(slides, seq.build())
 
+    # ── The Deck(...) call's own arguments ──
+
+    def set_deck_arg(self, name: str, code: str | None) -> None:
+        """Set (``code``) or remove (``None``) one keyword of ``Deck(...)``."""
+        finder = self._find()
+        if len(finder.deck_calls) != 1:
+            raise DeckEditError("deck.py has no single Deck(slides=...) call")
+        call = finder.deck_calls[0]
+        self._replace(call, _set_arg(call, name, code))
+
     # ── One slide's arguments ──
 
     def slide_call(self, index: int) -> cst.Call:

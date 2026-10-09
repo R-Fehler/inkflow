@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>__TITLE__</title>
   <link rel="icon" type="image/svg+xml" href="__FAVICON__">
-  <style>/* __STYLES__ */</style>
+  <style id="deck-styles">/* __STYLES__ */</style>
   <style>/* __CSS__ */</style>
 </head>
 <body data-tool="select">
@@ -34,6 +34,7 @@
     <div class="tb-group">
       <select id="step-select" title="Preview a build step (editing is paused while previewing)"></select>
       <button type="button" class="tb-btn text" id="btn-layout" title="Edit the shared layouts this slide is built on">Edit layout</button>
+      <button type="button" class="tb-btn text" id="btn-theme-panel" title="Theme: the deck's colours, fonts and size">Theme</button>
     </div>
     <span class="tb-spacer"></span>
     <div class="tb-group">
@@ -72,6 +73,7 @@
   <div id="text-layer"></div>
   <div id="context-menu" role="menu"></div>
   <div id="gallery"></div>
+  <div id="dialog"></div>
   <div id="toast" role="status"></div>
   <pre id="build-error"></pre>
   <div id="offline-banner">Reconnecting to the inkflow server…</div>

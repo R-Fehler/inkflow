@@ -2,6 +2,7 @@
 // plus the pushes every page gets (update, error) and the editor-only ones
 // (editor-model, editor-command).
 
+import { applyDeckStyles } from "../shared/deck-styles";
 import type { SlideData } from "../shared/types";
 import { toast } from "./dom";
 import { ed, emit } from "./state";
@@ -48,6 +49,7 @@ export function connect(port: number): void {
             case "update":
                 // Rendered slides; the model that matches them follows at once.
                 pendingSlides = msg.slides as SlideData[];
+                applyDeckStyles(msg as { styles?: string; mode?: string });
                 ed.error = null;
                 emit("error");
                 break;

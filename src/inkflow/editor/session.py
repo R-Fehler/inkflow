@@ -38,6 +38,13 @@ from inkflow.editor.svgops import (
     ungroup,
     unique_id,
 )
+from inkflow.editor.themeedit import (
+    ThemeEditError,
+    merge,
+    read_overrides,
+    theme_values,
+    write_overrides,
+)
 from inkflow.editor.transfer import (
     TransferError,
     export_assets,
@@ -46,7 +53,8 @@ from inkflow.editor.transfer import (
     plan_slide_paste,
     retarget_fragment,
 )
-from inkflow.enums import MediaFit
+from inkflow.enums import ColorMode, MediaFit
+from inkflow.fonts import font_index
 from inkflow.layout import (
     create_slide,
     discover_layouts,
@@ -251,6 +259,8 @@ class EditorSession:
             return {"ok": True, "files": export_assets(self.project_dir, names)}
         if deck is None:
             raise EditError("the deck has not built yet")
+        if action == "theme-get":
+            return {"ok": True, "theme": self._theme_info(deck)}
         if action == "layout-previews":
             return {"ok": True, "layouts": layout_previews(deck, self.deck_path)}
         if action == "copy-slides":
@@ -273,6 +283,7 @@ class EditorSession:
             "media-props": self._media_props,
             "insert-video": self._insert_video,
             "insert-textbox": self._insert_textbox,
+            "theme-set": self._theme_set,
             "md-text": self._md_text,
             "notes": self._notes,
             "slide": self._slide,
@@ -625,6 +636,71 @@ class EditorSession:
         extra["zone"] = zone
         extra["structural"] = True
         return "Insert text box"
+
+    # ── Theme panel ──
+
+    def _theme_info(self, deck: Deck) -> dict[str, object]:
+        styles = self.project_dir / "styles.css"
+        css = styles.read_text(encoding="utf-8") if styles.is_file() else ""
+        theme = deck.theme
+        try:
+            families = sorted(
+                {r[0].family for r in font_index(self.project_dir, theme.fonts_dir)},
+                key=str.lower,
+            )
+        except Exception:
+            families = []
+        return {
+            "name": theme.name,
+            "mode": "light" if deck.effective_mode == ColorMode.LIGHT else "dark",
+            "deckMode": deck.mode.value if deck.mode is not None else None,
+            "themeMode": theme.mode.value,
+            "fontSize": deck.font_size,
+            "themeFontSize": theme.font_size,
+            "values": theme_values(theme),
+            "overrides": read_overrides(css),
+            "fonts": families,
+        }
+
+    def _theme_set(
+        self, msg: dict[str, object], _deck: Deck, txn: _Txn, _extra: dict[str, object]
+    ) -> str:
+        """Theme panel changes: token overrides in styles.css, the deck's colour
+        mode and base font size in deck.py, as one step."""
+        changes = msg.get("changes")
+        if isinstance(changes, dict):
+            styles = self.project_dir / "styles.css"
+            css = txn.read(styles).decode("utf-8") if styles.is_file() else ""
+            try:
+                merged = merge(
+                    read_overrides(css),
+                    cast("dict[str, dict[str, str | None]]", changes),
+                )
+                txn.write(styles, write_overrides(css, merged).encode("utf-8"))
+            except ThemeEditError as exc:
+                raise EditError(str(exc)) from exc
+        source: DeckSource | None = None
+        imports: set[str] = set()
+        if "mode" in msg:
+            mode = msg.get("mode")
+            source = self._deck_source(txn)
+            if mode in ("dark", "light"):
+                source.set_deck_arg("mode", f"ColorMode.{str(mode).upper()}")
+                imports.add("ColorMode")
+            else:
+                source.set_deck_arg("mode", None)
+        if "fontSize" in msg:
+            size = msg.get("fontSize")
+            source = source or self._deck_source(txn)
+            if isinstance(size, int | float) and not isinstance(size, bool):
+                if not 8 <= size <= 200:
+                    raise EditError("font size must be between 8 and 200 px")
+                source.set_deck_arg("font_size", str(int(size)))
+            else:
+                source.set_deck_arg("font_size", None)
+        if source is not None:
+            self._save_deck(txn, source, imports)
+        return str(msg.get("label") or "Theme")
 
     # ── Zone content that follows its zone ──
 

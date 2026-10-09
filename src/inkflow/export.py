@@ -44,7 +44,9 @@ def build_static_html(
     transitions = resolve_transitions(deck)
     styles_css = load_deck_styles(deck, project_dir)
     if deck.embed_fonts:
-        font_css = embed_fonts_css_subsetted(slides, project_dir, deck.theme.fonts_dir)
+        font_css = embed_fonts_css_subsetted(
+            slides, project_dir, deck.theme.fonts_dir, styles_css=styles_css
+        )
         if font_css:
             styles_css = (font_css + "\n" + styles_css).strip()
     scripts_js = load_deck_scripts(deck, project_dir)
@@ -220,7 +222,9 @@ def build_pdf(
         raise RuntimeError("Cannot export a PDF: the deck has no visible slides.")
     styles_css = load_deck_styles(deck, project_dir)
     if deck.embed_fonts:
-        font_css = embed_fonts_css_subsetted(slides, project_dir, deck.theme.fonts_dir)
+        font_css = embed_fonts_css_subsetted(
+            slides, project_dir, deck.theme.fonts_dir, styles_css=styles_css
+        )
         if font_css:
             styles_css = (font_css + "\n" + styles_css).strip()
 
@@ -398,7 +402,9 @@ def render_png(
             raise ValueError(f"no slide {n}: the deck has {len(slides)} slides")
     styles_css = load_deck_styles(deck, project_dir)
     if deck.embed_fonts:
-        font_css = embed_fonts_css_subsetted(slides, project_dir, deck.theme.fonts_dir)
+        font_css = embed_fonts_css_subsetted(
+            slides, project_dir, deck.theme.fonts_dir, styles_css=styles_css
+        )
         if font_css:
             styles_css = (font_css + "\n" + styles_css).strip()
 

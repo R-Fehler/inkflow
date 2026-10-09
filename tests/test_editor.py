@@ -18,7 +18,7 @@ from inkflow.editor.model import build_model
 from inkflow.editor.provenance import INK, INK_TOP, is_element, locate, parse_locator
 from inkflow.editor.session import EditError, EditorSession
 from inkflow.editor.svgops import SvgFile, SvgOpError, apply_ops, group, ungroup
-from inkflow.enums import Direction, Easing, MediaFit, Muted, Trigger
+from inkflow.enums import ColorMode, Direction, Easing, MediaFit, Muted, Trigger
 from inkflow.manifest import Deck, Image, Video
 from inkflow.pipeline import process_deck
 from inkflow.server import load_deck
@@ -1248,6 +1248,68 @@ def test_lock_op_writes_inkflow_locked_and_stamps_it() -> None:
     assert box is not None and box.get(INK_LOCKED) == "" and box.get(INK_TOP) == ""
     apply_ops(svg, [{"kind": "lock", "loc": loc, "locked": False}])
     assert "locked" not in svg.to_bytes().decode()
+
+
+def test_theme_panel_writes_a_styles_block_and_deck_args(project: Path) -> None:
+    styles = project / "styles.css"
+    styles.write_text("/* mine */\n.x { color: red; }\n", encoding="utf-8")
+    session = EditorSession(project / "deck.py")
+    info = cast(
+        "dict[str, object]",
+        session.apply({"action": "theme-get"}, _deck(project))["theme"],
+    )
+    assert info["name"] == "inkflow" and info["mode"] == "dark"
+    values = cast("dict[str, dict[str, str]]", info["values"])
+    assert values["dark"]["accent"].startswith("#")
+    session.apply(
+        {
+            "action": "theme-set",
+            "changes": {
+                "dark": {"accent": "#ff8800"},
+                "light": {"accent": "#cc5500"},
+                "typography": {"body_font": "Inter, sans-serif"},
+            },
+            "mode": "light",
+            "fontSize": 40,
+        },
+        _deck(project),
+    )
+    css = styles.read_text()
+    assert css.startswith("/* mine */\n.x { color: red; }\n\n/* inkflow:theme")
+    assert "--inkflow-accent: #ff8800;" in css
+    assert ':root[data-theme="light"] {\n    --inkflow-accent: #cc5500;' in css
+    assert "--inkflow-body-font: Inter, sans-serif;" in css
+    deck = _deck(project)
+    assert deck.mode == ColorMode.LIGHT and deck.font_size == 40
+    info = cast(
+        "dict[str, object]", session.apply({"action": "theme-get"}, deck)["theme"]
+    )
+    assert info["overrides"] == {
+        "dark": {"accent": "#ff8800"},
+        "light": {"accent": "#cc5500"},
+        "typography": {"body_font": "Inter, sans-serif"},
+    }
+    # Resetting every token removes the block; invalid values are refused.
+    session.apply(
+        {
+            "action": "theme-set",
+            "changes": {
+                "dark": {"accent": None},
+                "light": {"accent": None},
+                "typography": {"body_font": None},
+            },
+            "mode": None,
+            "fontSize": None,
+        },
+        deck,
+    )
+    assert styles.read_text() == "/* mine */\n.x { color: red; }\n\n"
+    assert _deck(project).mode is None
+    with pytest.raises(EditError, match="not a valid value"):
+        session.apply(
+            {"action": "theme-set", "changes": {"dark": {"accent": "red; } body {"}}},
+            _deck(project),
+        )
 
 
 # ── Model ────────────────────────────────────────────────────────────────────

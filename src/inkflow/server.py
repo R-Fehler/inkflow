@@ -161,7 +161,10 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
             styles_css = await asyncio.to_thread(load_deck_styles, deck, project_dir)
             if deck.embed_fonts:
                 font_css = await asyncio.to_thread(
-                    embed_fonts_css, slides, project_dir, deck.theme.fonts_dir
+                    functools.partial(embed_fonts_css, styles_css=styles_css),
+                    slides,
+                    project_dir,
+                    deck.theme.fonts_dir,
                 )
             else:
                 font_css = ""
@@ -174,6 +177,13 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
             for e in entries
             if e.levelno >= levels.browser
         ]
+        # Styles and colour mode change rarely (a theme edit) and can be large
+        # (embedded fonts): they ride along only when they changed.
+        changed: dict[str, object] = {}
+        if styles_css != _state["styles_css"]:
+            changed["styles"] = styles_css
+        if deck.effective_mode != _state["mode"]:
+            changed["mode"] = "" if deck.effective_mode == ColorMode.DARK else "light"
         _state["slides"] = slides
         _state["transitions"] = transitions
         _state["styles_css"] = styles_css
@@ -201,6 +211,7 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
                     "slides": slides,
                     "transitions": transitions,
                     "logs": browser_logs,
+                    **changed,
                 }
             )
         )

@@ -11,6 +11,7 @@ import {
 } from "./canvas";
 import { initContext } from "./context";
 import { isCropped, setCropMode, startCrop } from "./crop";
+import { initDialog } from "./dialog";
 import { toast } from "./dom";
 import { initGallery } from "./gallery";
 import { afterRender, initInsert } from "./insert";
@@ -21,6 +22,7 @@ import { initProps } from "./props";
 import { initSorter, renderSorter } from "./sorter";
 import { currentSlide, ed, emit, on } from "./state";
 import { editingHost, editSvgText, editZone, finishTextEdit } from "./textedit";
+import { initTheme } from "./theme";
 import { initToolbar } from "./toolbar";
 
 const INITIAL_MODEL = __MODEL_JSON__;
@@ -117,6 +119,8 @@ function boot(): void {
     initToolbar();
     initContext();
     initGallery();
+    initDialog();
+    initTheme();
 
     on("slide", () => {
         void finishTextEdit();
