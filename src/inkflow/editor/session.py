@@ -28,7 +28,7 @@ from inkflow import instances
 from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
 from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, open_with
-from inkflow.editor import gitops, media, projects
+from inkflow.editor import gitops, media, nativedialog, places, projects
 from inkflow.editor.codegen import Code, coerce_fields
 from inkflow.editor.deckedit import DeckEditError, DeckSource
 from inkflow.editor.findreplace import (
@@ -89,7 +89,15 @@ from inkflow.transitions import Transition
 from inkflow.zones import remove_zone_section, replace_zone_text, zone_spans
 
 DECK_MODULE = "_inkflow_deck"
-_PROJECT_ACTIONS = ("project-info", "browse", "new-deck", "open-deck", "quit")
+_PROJECT_ACTIONS = (
+    "project-info",
+    "browse",
+    "new-deck",
+    "open-deck",
+    "quit",
+    "places-set",
+    "system-pick",
+)
 _MEDIA_ACTIONS = frozenset(
     {
         "import-path",
@@ -1140,6 +1148,7 @@ class EditorSession:
                     **projects.new_deck_info(
                         self.deck_path if self.has_deck else None, deck
                     ),
+                    "places": places.load(),
                     "recent": [
                         p for p in projects.recent() if p != str(self.deck_path)
                     ],
@@ -1149,6 +1158,8 @@ class EditorSession:
                 self.quit_requested = True
                 return {"ok": True}
             self._local_only(msg, "open or create decks")
+            kinds = {"video": media.video_suffixes(), "media": media.MEDIA_SUFFIXES}
+            suffixes = kinds.get(str(msg.get("files")), frozenset())
             if action == "browse":
                 path = msg.get("path")
                 return {
@@ -1156,12 +1167,29 @@ class EditorSession:
                     **projects.browse(
                         path if isinstance(path, str) else None,
                         self.project_dir,
-                        {
-                            "video": media.video_suffixes(),
-                            "media": media.MEDIA_SUFFIXES,
-                        }.get(str(msg.get("files")), frozenset()),
+                        suffixes,
+                    ),
+                    "places": places.load(),
+                    "systemPicker": nativedialog.available(),
+                }
+            if action == "places-set":
+                path = msg.get("path")
+                return {
+                    "ok": True,
+                    "places": places.change(
+                        str(msg.get("op")), path if isinstance(path, str) else None
                     ),
                 }
+            if action == "system-pick":
+                start = msg.get("path")
+                # Blocks this request (not the server) until the dialog closes.
+                chosen = nativedialog.pick(
+                    files=bool(suffixes),
+                    start=Path(start) if isinstance(start, str) and start else None,
+                    title=str(msg.get("title") or "Choose a folder"),
+                    suffixes=suffixes,
+                )
+                return {"ok": True, "path": chosen}
             if action == "new-deck":
                 deck_py = projects.create_deck(
                     Path(str(msg.get("path") or "")),
@@ -1186,7 +1214,7 @@ class EditorSession:
                         "opening": False,
                         "redirect": other.url("/edit"),
                     }
-        except (projects.ProjectError, OSError) as exc:
+        except (projects.ProjectError, places.PlacesError, OSError) as exc:
             raise EditError(str(exc)) from exc
         if msg.get("open") is not False:
             self.switch_to = deck_py

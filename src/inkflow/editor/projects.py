@@ -33,7 +33,7 @@ import platformdirs
 from inkflow import init, sync
 from inkflow import lfs as lfs_rules
 from inkflow.assets import REFERENCE_PATTERNS, is_local_ref
-from inkflow.editor import gitops
+from inkflow.editor import gitops, places
 from inkflow.editor.codegen import Code
 from inkflow.editor.deckedit import DeckEditError, DeckSource
 from inkflow.enums import ColorMode
@@ -138,10 +138,13 @@ def new_deck_info(deck_path: Path | None, deck: Deck | None) -> dict[str, object
     Without a deck (the start page), a new deck goes in the home folder."""
     project_dir = deck_path.parent if deck_path else Path.home()
     root = gitops.repo_root(project_dir) if deck_path else None
-    if deck_path is None:
-        base = project_dir
-    elif root is not None and project_dir.resolve() != root.resolve():
+    default = places.load()["default"]
+    if root is not None and project_dir.resolve() != root.resolve():
         base = project_dir.parent  # next to this deck, in the same repository
+    elif default is not None:
+        base = Path(default)  # the default location the person saved
+    elif deck_path is None:
+        base = project_dir
     else:
         base = root or project_dir.parent
     name = "new-deck"

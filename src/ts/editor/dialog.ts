@@ -9,13 +9,21 @@ let onClose: (() => void) | null = null;
 export function openDialog(
     title: string,
     body: Node,
-    opts: { wide?: boolean; onClose?: () => void; hint?: string } = {},
+    opts: {
+        wide?: boolean;
+        large?: boolean;
+        onClose?: () => void;
+        hint?: string;
+    } = {},
 ): HTMLElement {
     closeDialog();
     onClose = opts.onClose ?? null;
     const box = h(
         "div",
-        { class: `dialog-box${opts.wide ? " wide" : ""}`, role: "dialog" },
+        {
+            class: `dialog-box${opts.large ? " large" : opts.wide ? " wide" : ""}`,
+            role: "dialog",
+        },
         h(
             "div",
             { class: "dialog-head" },
@@ -59,7 +67,11 @@ export function initDialog(): void {
     document.addEventListener(
         "keydown",
         (e) => {
-            if (e.key === "Escape" && dialogOpen()) {
+            // A field may claim Escape first (the folder picker's filter).
+            const own = (e.target as Element | null)?.closest?.(
+                "[data-own-escape]",
+            );
+            if (e.key === "Escape" && dialogOpen() && !own) {
                 e.preventDefault();
                 e.stopPropagation();
                 closeDialog();

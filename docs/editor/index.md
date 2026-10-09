@@ -77,6 +77,23 @@ The **deck ▾** button next to the logo names the open deck and manages decks:
     gives it its own repository with a `.gitignore` and the SVG hooks of
     `inkflow setup-git`. The deck opens once it is made.
 - **Open deck…** browses to any folder with a `deck.py` in it.
+
+Both use the same folder picker:
+
+- Type a path; <kbd>Tab</kbd> completes a folder name (as far as the folders
+  starting with what you typed agree), <kbd>Enter</kbd> opens it.
+- Typing narrows the list to the folders whose names start with what you typed,
+  in the path line and in the list alike. <kbd>↓</kbd> / <kbd>↑</kbd> move
+  through the list, <kbd>Enter</kbd> opens a folder, <kbd>Backspace</kbd> goes
+  up, and <kbd>Esc</kbd> clears what you typed.
+- **Browse…** opens your system's own folder chooser instead (zenity or kdialog
+  on Linux, the Finder's on macOS, the Windows one). It shows on the computer
+  running inkflow, possibly behind the browser.
+- **☆** adds the folder to your favourites, shown as buttons above the list.
+  **Make this the default location** is where new decks go and where Open deck
+  starts. Unless the open deck's git repository says otherwise, a new deck then
+  goes next to it in that repository. Both are saved for your user, so every
+  editor offers them.
 - **Recent decks** reopens one of the last ten.
 
 Opening a deck switches the running server to it, on the same address: the

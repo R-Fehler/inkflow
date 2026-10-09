@@ -1324,6 +1324,10 @@ body.offline #offline-banner {
 .dialog-box.wide {
   width: min(860px, 94vw);
 }
+.dialog-box.large {
+  width: min(1100px, 96vw);
+  max-height: 92vh;
+}
 .dialog-head {
   display: flex;
   align-items: baseline;
@@ -1875,7 +1879,8 @@ foreignObject.rich-editing .math-chip.editing {
 .folder-list {
   display: flex;
   flex-direction: column;
-  height: 170px;
+  height: min(46vh, 520px);
+  min-height: 180px;
   overflow-y: auto;
   padding: 4px;
   background: var(--ui-bg);
@@ -2145,4 +2150,54 @@ body.start-mode #workspace {
 .start-quit:hover {
   color: var(--text);
   text-decoration: underline;
+}
+.folder:focus-visible {
+  outline: 2px solid var(--sel);
+  outline-offset: -2px;
+}
+.folder-star.on {
+  color: var(--yellow);
+}
+.folder-places {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.place {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--ui-line);
+  border-radius: 999px;
+  background: var(--ui-bg);
+}
+.place-go,
+.place-remove,
+.place-default {
+  padding: 3px 10px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.place-remove {
+  padding: 3px 8px 3px 0;
+  color: var(--subtext);
+}
+.place-go:hover,
+.place-remove:hover {
+  color: var(--sel);
+}
+.place-default {
+  margin-left: auto;
+  color: var(--subtext);
+}
+.place-default:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+.folder-empty {
+  margin: 8px;
 }

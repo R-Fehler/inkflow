@@ -2784,7 +2784,10 @@
     onClose = opts2.onClose ?? null;
     const box = h(
       "div",
-      { class: `dialog-box${opts2.wide ? " wide" : ""}`, role: "dialog" },
+      {
+        class: `dialog-box${opts2.large ? " large" : opts2.wide ? " wide" : ""}`,
+        role: "dialog"
+      },
       h(
         "div",
         { class: "dialog-head" },
@@ -2825,7 +2828,10 @@
     document.addEventListener(
       "keydown",
       (e) => {
-        if (e.key === "Escape" && dialogOpen()) {
+        const own = e.target?.closest?.(
+          "[data-own-escape]"
+        );
+        if (e.key === "Escape" && dialogOpen() && !own) {
           e.preventDefault();
           e.stopPropagation();
           closeDialog();
@@ -2836,6 +2842,377 @@
     host2.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") e.stopPropagation();
     });
+  }
+
+  // src/ts/editor/pathtext.ts
+  function sepOf(path) {
+    return path.includes("\\") && !path.includes("/") ? "\\" : "/";
+  }
+  function withSep(dir) {
+    const sep2 = sepOf(dir);
+    return dir.endsWith(sep2) ? dir : dir + sep2;
+  }
+  function joinPath(dir, name2) {
+    return withSep(dir) + name2;
+  }
+  function baseName(path) {
+    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+  }
+  function samePath(a, b) {
+    const norm = (p) => p.replace(/(.)[\\/]+$/, "$1");
+    return norm(a) === norm(b);
+  }
+  function commonPrefix(names) {
+    if (!names.length) return "";
+    let prefix = names[0];
+    for (const name2 of names.slice(1)) {
+      let i = 0;
+      while (i < prefix.length && i < name2.length && prefix[i].toLowerCase() === name2[i].toLowerCase()) {
+        i++;
+      }
+      prefix = prefix.slice(0, i);
+    }
+    return prefix;
+  }
+  function startingWith(names, typed) {
+    const t = typed.toLowerCase();
+    return names.filter((n2) => n2.toLowerCase().startsWith(t));
+  }
+  function splitTyped(value) {
+    const i = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+    if (i < 0) return { dir: "", prefix: value };
+    return { dir: value.slice(0, i + 1), prefix: value.slice(i + 1) };
+  }
+
+  // src/ts/editor/folderpicker.ts
+  function megabytes(bytes) {
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+    if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+  function folderPicker(start, onChange, files2) {
+    let folder = null;
+    let places = { favorites: [], default: null };
+    let filter = "";
+    let typing = 0;
+    const path = h("input", {
+      type: "text",
+      class: "folder-path",
+      spellcheck: "false",
+      autocomplete: "off",
+      title: "Type a path: Tab completes, Enter opens, \u2193 goes to the list"
+    });
+    const list3 = h("div", { class: "folder-list", role: "listbox" });
+    const where = h("div", { class: "hint folder-where" });
+    const placesRow = h("div", { class: "folder-places" });
+    const star = h("button", {
+      type: "button",
+      class: "pbtn folder-star"
+    });
+    const system = h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn",
+        hidden: true,
+        title: "Choose with this computer's own dialog"
+      },
+      "Browse\u2026"
+    );
+    const entries = () => [...list3.querySelectorAll("button.folder")].filter(
+      (b) => !b.hidden
+    );
+    async function go(target, opts2 = {}) {
+      const res = await request({
+        action: "browse",
+        path: target,
+        files: files2?.kind
+      });
+      if (!res.ok) {
+        if (!opts2.quiet) {
+          where.textContent = res.error ?? "Cannot open that folder";
+        }
+        return false;
+      }
+      folder = res;
+      places = folder.places ?? places;
+      system.hidden = !folder.systemPicker;
+      path.value = withSep(folder.path);
+      filter = "";
+      renderList();
+      renderPlaces();
+      where.textContent = folder.repo ? `In the git repository at ${folder.repo}` : "Not in a git repository";
+      onChange(folder);
+      if (opts2.focus === "list") (entries()[0] ?? path).focus();
+      else if (opts2.focus === "path") path.focus();
+      return true;
+    }
+    function entry(label4, kind, onOpen, extra) {
+      const b = h(
+        "button",
+        {
+          type: "button",
+          class: `folder ${kind === "file" ? "file" : kind === "up" ? "up" : ""}`,
+          role: "option",
+          onclick: onOpen
+        },
+        label4,
+        extra ?? null
+      );
+      return b;
+    }
+    function renderList() {
+      clear(list3);
+      const f = folder;
+      if (!f) return;
+      if (f.parent && !filter) {
+        list3.append(
+          entry("\u2191 ..", "up", () => {
+            if (f.parent) void go(f.parent, { focus: "list" });
+          })
+        );
+      }
+      const dirs = startingWith(f.dirs, filter);
+      for (const name2 of dirs) {
+        list3.append(
+          entry(`\u{1F4C1} ${name2}`, "dir", () => {
+            void go(joinPath(f.path, name2), { focus: "list" });
+          })
+        );
+      }
+      const shown = startingWith(
+        (f.files ?? []).map((x) => x.name),
+        filter
+      );
+      for (const file of f.files ?? []) {
+        if (!shown.includes(file.name)) continue;
+        list3.append(
+          entry(
+            `\u{1F39E} ${file.name}`,
+            "file",
+            () => files2?.onFile(joinPath(f.path, file.name)),
+            h(
+              "span",
+              { class: "hint file-size" },
+              megabytes(file.size)
+            )
+          )
+        );
+      }
+      if (!dirs.length && !shown.length) {
+        list3.append(
+          h(
+            "p",
+            { class: "hint folder-empty" },
+            filter ? `Nothing here starts with \u201C${filter}\u201D.` : "No folders here."
+          )
+        );
+      }
+      path.toggleAttribute("data-own-escape", !!filter);
+    }
+    async function setPlaces(op, target) {
+      const res = await request({ action: "places-set", op, path: target });
+      if (!res.ok) {
+        toast(res.error ?? "Cannot save that", "error");
+        return;
+      }
+      places = res.places;
+      renderPlaces();
+    }
+    function chip(label4, target, remove) {
+      return h(
+        "span",
+        { class: "place" },
+        h(
+          "button",
+          {
+            type: "button",
+            class: "place-go",
+            title: target,
+            onclick: () => void go(target, { focus: "list" })
+          },
+          label4
+        ),
+        remove ? h(
+          "button",
+          {
+            type: "button",
+            class: "place-remove",
+            title: "Remove from favourites",
+            onclick: remove
+          },
+          "\xD7"
+        ) : null
+      );
+    }
+    function renderPlaces() {
+      clear(placesRow);
+      const here = folder?.path ?? "";
+      const isFavorite = places.favorites.some((p) => samePath(p, here));
+      star.textContent = isFavorite ? "\u2605" : "\u2606";
+      star.title = isFavorite ? "Remove this folder from your favourites" : "Add this folder to your favourites";
+      star.classList.toggle("on", isFavorite);
+      if (places.default) {
+        placesRow.append(
+          chip(`\u2302 ${baseName(places.default)} (default)`, places.default)
+        );
+      }
+      for (const p of places.favorites) {
+        placesRow.append(
+          chip(`\u2605 ${baseName(p)}`, p, () => void setPlaces("remove", p))
+        );
+      }
+      const isDefault = !!places.default && samePath(places.default, here);
+      placesRow.append(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "place-default",
+            title: isDefault ? "New decks go here and Open deck starts here; click to forget it" : "New decks go here and Open deck starts here",
+            onclick: () => void setPlaces("default", isDefault ? null : here)
+          },
+          isDefault ? "\u2713 Default location" : "Make this the default location"
+        )
+      );
+    }
+    path.addEventListener("input", () => {
+      window.clearTimeout(typing);
+      const { dir, prefix } = splitTyped(path.value);
+      if (folder && samePath(dir, folder.path)) {
+        filter = prefix;
+        renderList();
+      } else if (dir && !prefix) {
+        typing = window.setTimeout(
+          () => void go(dir, { quiet: true }),
+          250
+        );
+      }
+    });
+    async function complete() {
+      const { dir, prefix } = splitTyped(path.value);
+      if (!folder || !samePath(dir, folder.path)) {
+        if (!dir || !await go(dir, { quiet: true })) return;
+        path.value = withSep(folder.path) + prefix;
+      }
+      const f = folder;
+      const matches = startingWith(f.dirs, prefix);
+      if (matches.length === 1) {
+        await go(joinPath(f.path, matches[0]));
+        return;
+      }
+      const common = commonPrefix(matches);
+      filter = common.length > prefix.length ? common : prefix;
+      path.value = withSep(f.path) + filter;
+      renderList();
+    }
+    path.addEventListener("keydown", (e) => {
+      if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        void complete();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const { dir, prefix } = splitTyped(path.value);
+        const f = folder;
+        if (f && prefix && samePath(dir, f.path)) {
+          const exact = f.dirs.find(
+            (d) => d.toLowerCase() === prefix.toLowerCase()
+          );
+          const only = startingWith(f.dirs, prefix);
+          const into = exact ?? (only.length === 1 ? only[0] : null);
+          if (into) {
+            void go(joinPath(f.path, into));
+            return;
+          }
+        }
+        void go(path.value);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        entries()[0]?.focus();
+      } else if (e.key === "Escape" && filter && folder) {
+        e.preventDefault();
+        path.value = withSep(folder.path);
+        filter = "";
+        renderList();
+      }
+    });
+    list3.addEventListener("keydown", (e) => {
+      const items = entries();
+      const at2 = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const next = at2 + (e.key === "ArrowDown" ? 1 : -1);
+        if (next < 0) path.focus();
+        else items[Math.min(next, items.length - 1)]?.focus();
+      } else if (e.key === "Backspace") {
+        e.preventDefault();
+        if (filter) {
+          path.focus();
+          path.value = path.value.slice(0, -1);
+          path.dispatchEvent(new Event("input"));
+        } else if (folder?.parent) {
+          void go(folder.parent, { focus: "list" });
+        }
+      } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && e.key !== " ") {
+        e.preventDefault();
+        path.focus();
+        path.value += e.key;
+        path.dispatchEvent(new Event("input"));
+      }
+    });
+    star.addEventListener("click", () => {
+      const here = folder?.path;
+      if (!here) return;
+      const isFavorite = places.favorites.some((p) => samePath(p, here));
+      void setPlaces(isFavorite ? "remove" : "add", here);
+    });
+    system.addEventListener("click", async () => {
+      system.disabled = true;
+      const before = where.textContent;
+      where.textContent = "A dialog is open on this computer (it may be behind the browser)\u2026";
+      const res = await request({
+        action: "system-pick",
+        path: folder?.path ?? start,
+        files: files2?.kind,
+        title: files2 ? "Choose a video" : "Choose a folder"
+      });
+      system.disabled = false;
+      where.textContent = before;
+      if (!res.ok) {
+        toast(res.error ?? "No dialog could be shown", "error");
+        return;
+      }
+      const chosen = typeof res.path === "string" ? res.path : null;
+      if (!chosen) return;
+      if (files2) files2.onFile(chosen);
+      else void go(chosen);
+    });
+    const el2 = h(
+      "div",
+      { class: "folder-picker" },
+      h(
+        "div",
+        { class: "folder-bar" },
+        path,
+        system,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            title: "Your home folder",
+            onclick: () => void go(folder?.home ?? "~", { focus: "list" })
+          },
+          "Home"
+        ),
+        star
+      ),
+      placesRow,
+      list3,
+      where
+    );
+    void go(start);
+    return { el: el2, current: () => folder, focus: () => path.focus() };
   }
 
   // src/ts/editor/gallery.ts
@@ -3358,464 +3735,8 @@
     });
   }
 
-  // src/ts/editor/decks.ts
-  var menu2 = document.getElementById("context-menu");
-  var button = document.getElementById("btn-deck");
-  function megabytes(bytes) {
-    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-    if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
-    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  }
-  function baseName(path) {
-    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
-  }
-  function join(dir, name2) {
-    return `${dir.replace(/[\\/]+$/, "")}/${name2}`;
-  }
-  function slug(text) {
-    return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "my-deck";
-  }
-  function renderButton() {
-    const dir = ed.model?.projectDir;
-    button.textContent = `${dir ? baseName(dir) : "deck"} \u25BE`;
-    button.title = dir ? `${dir}
-Decks: new, open, recent` : "Decks";
-  }
-  async function info() {
-    const res = await request({ action: "project-info" });
-    if (!res.ok) {
-      toast(res.error ?? "Cannot read the deck's folder", "error");
-      return null;
-    }
-    return res;
-  }
-  async function openMenu() {
-    const data = await info();
-    if (!data) return;
-    clear(menu2);
-    menu2.append(
-      menuItem("New deck\u2026", () => newDeckDialog(data)),
-      menuItem("Open deck\u2026", () => openDeckDialog(data))
-    );
-    if (data.recent.length) {
-      menu2.append(h("div", { class: "menu-title" }, "Recent decks"));
-      for (const path of data.recent) {
-        const dir = path.replace(/[\\/]deck\.py$/, "");
-        const item = menuItem(baseName(dir), () => void openDeck(path));
-        item.title = dir;
-        menu2.append(item);
-      }
-    }
-    menu2.append(
-      h("div", { class: "menu-sep" }),
-      menuItem("Quit Inkflow", () => void quit())
-    );
-    const r = button.getBoundingClientRect();
-    showMenu(r.left, r.bottom + 4);
-  }
-  async function openDeck(path) {
-    const res = await request({ action: "open-deck", path });
-    if (!res.ok) {
-      toast(res.error ?? "Cannot open that deck", "error");
-      return false;
-    }
-    closeDialog();
-    if (res.redirect) {
-      toast("That deck is already open: switching to it\u2026");
-      location.assign(String(res.redirect));
-      return true;
-    }
-    if (!res.opening) {
-      toast("That deck is the one open here");
-      return true;
-    }
-    toast(
-      `Opening ${baseName(String(res.deck ?? path).replace(/[\\/]deck\.py$/, ""))}\u2026`
-    );
-    return true;
-  }
-  function folderPicker(start, onChange, files2) {
-    let folder = null;
-    const path = h("input", {
-      type: "text",
-      class: "folder-path",
-      spellcheck: "false"
-    });
-    const list3 = h("div", { class: "folder-list" });
-    const where = h("div", { class: "hint folder-where" });
-    const go = async (target) => {
-      const res = await request({
-        action: "browse",
-        path: target,
-        files: files2?.kind
-      });
-      if (!res.ok) {
-        where.textContent = res.error ?? "Cannot open that folder";
-        return;
-      }
-      folder = res;
-      path.value = folder.path;
-      clear(list3);
-      if (folder.parent) {
-        list3.append(
-          h(
-            "button",
-            {
-              type: "button",
-              class: "folder up",
-              onclick: () => void go(folder?.parent ?? "")
-            },
-            "\u2191 .."
-          )
-        );
-      }
-      for (const name2 of folder.dirs) {
-        list3.append(
-          h(
-            "button",
-            {
-              type: "button",
-              class: "folder",
-              onclick: () => void go(join(folder?.path ?? "", name2))
-            },
-            `\u{1F4C1} ${name2}`
-          )
-        );
-      }
-      for (const f of folder.files ?? []) {
-        list3.append(
-          h(
-            "button",
-            {
-              type: "button",
-              class: "folder file",
-              onclick: () => files2?.onFile(join(folder?.path ?? "", f.name))
-            },
-            `\u{1F39E} ${f.name}`,
-            h("span", { class: "hint file-size" }, megabytes(f.size))
-          )
-        );
-      }
-      if (!folder.dirs.length && !folder.parent && !folder.files?.length) {
-        list3.append(h("p", { class: "hint" }, "No folders here."));
-      }
-      where.textContent = folder.repo ? `In the git repository at ${folder.repo}` : "Not in a git repository";
-      onChange(folder);
-    };
-    path.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        void go(path.value);
-      }
-    });
-    const el2 = h(
-      "div",
-      { class: "folder-picker" },
-      h(
-        "div",
-        { class: "folder-bar" },
-        path,
-        h(
-          "button",
-          {
-            type: "button",
-            class: "pbtn",
-            title: "Your home folder",
-            onclick: () => void go(folder?.home ?? "~")
-          },
-          "Home"
-        )
-      ),
-      list3,
-      where
-    );
-    void go(start);
-    return { el: el2, current: () => folder };
-  }
-  function newDeckDialog(data) {
-    const title2 = h("input", {
-      type: "text",
-      value: "My presentation"
-    });
-    const name2 = h("input", {
-      type: "text",
-      value: data.name
-    });
-    let nameEdited = false;
-    name2.addEventListener("input", () => {
-      nameEdited = true;
-      update();
-    });
-    title2.addEventListener("input", () => {
-      if (!nameEdited) name2.value = slug(title2.value);
-      update();
-    });
-    let look = data.themes.some((t) => t.id === "current") ? "current" : "starter";
-    const looks = h(
-      "div",
-      { class: "look-list" },
-      ...data.themes.map((t) => {
-        const radio = h("input", {
-          type: "radio",
-          name: "deck-look",
-          value: t.id
-        });
-        radio.checked = t.id === look;
-        radio.addEventListener("change", () => {
-          look = t.id;
-        });
-        return h(
-          "label",
-          { class: "look" },
-          radio,
-          h(
-            "span",
-            { class: "look-text" },
-            h("strong", {}, t.label),
-            h("span", { class: "hint" }, t.description)
-          )
-        );
-      })
-    );
-    const git2 = h("input", { type: "checkbox" });
-    git2.checked = true;
-    git2.addEventListener("change", () => update());
-    const gitRow = h(
-      "label",
-      { class: "check-row" },
-      git2,
-      "Create a git repository for this deck"
-    );
-    const gitNote = h("p", { class: "hint" });
-    const lfs = h("input", { type: "checkbox" });
-    lfs.checked = data.lfs;
-    const lfsRow = h(
-      "label",
-      { class: "check-row" },
-      lfs,
-      "Store videos, images and fonts with Git LFS"
-    );
-    const lfsNote = h(
-      "p",
-      { class: "hint" },
-      data.lfs ? "Untick for git only: media is kept in git itself, fine for a small repository." : "git-lfs is not installed, so this deck uses git only (its .gitattributes says so; install git-lfs to switch later)."
-    );
-    const full = h("p", { class: "hint full-path" });
-    const picker = folderPicker(data.parent, () => update());
-    function update() {
-      const folder = picker.current();
-      const parent = folder?.path ?? data.parent;
-      full.textContent = `New deck: ${join(parent, name2.value || "\u2026")}`;
-      const inRepo = !!folder?.repo;
-      gitRow.hidden = inRepo || !data.git;
-      lfsRow.hidden = !data.git || !inRepo && !git2.checked;
-      lfsNote.hidden = lfsRow.hidden;
-      gitNote.textContent = inRepo ? `It becomes a new folder of the git repository at ${folder?.repo}, versioned with it.` : data.git ? "" : "git is not installed, so the deck gets no repository.";
-    }
-    const create = h(
-      "button",
-      { type: "button", class: "pbtn primary" },
-      "Create and open"
-    );
-    create.addEventListener("click", async () => {
-      const folder = picker.current();
-      if (!folder || !name2.value.trim()) {
-        toast("Choose a folder and a name for the deck", "error");
-        return;
-      }
-      create.disabled = true;
-      create.textContent = "Creating\u2026";
-      const res = await request({
-        action: "new-deck",
-        path: join(folder.path, name2.value.trim()),
-        title: title2.value,
-        theme: look,
-        git: !folder.repo && git2.checked,
-        lfs: lfs.checked
-      });
-      create.disabled = false;
-      create.textContent = "Create and open";
-      if (!res.ok) {
-        toast(res.error ?? "Could not create the deck", "error");
-        return;
-      }
-      closeDialog();
-      toast(`Created ${name2.value.trim()}; opening it\u2026`, "ok");
-    });
-    openDialog(
-      "New deck",
-      h(
-        "div",
-        { class: "deck-form" },
-        h(
-          "label",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Title"),
-          title2
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Look"),
-          looks
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Where"),
-          h(
-            "div",
-            {},
-            picker.el,
-            h(
-              "label",
-              { class: "field inline" },
-              h("span", { class: "field-label" }, "Folder name"),
-              name2
-            ),
-            full,
-            gitRow,
-            gitNote,
-            lfsRow,
-            lfsNote
-          )
-        ),
-        h("div", { class: "btn-row end" }, create)
-      ),
-      { wide: true }
-    );
-    update();
-    title2.select();
-  }
-  function openDeckDialog(data) {
-    const open3 = h(
-      "button",
-      { type: "button", class: "pbtn primary", disabled: true },
-      "Open this deck"
-    );
-    const picker = folderPicker(
-      data.current.replace(/[\\/][^\\/]*$/, ""),
-      (f) => {
-        open3.disabled = !f.isDeck;
-        open3.textContent = f.isDeck ? `Open ${baseName(f.path)}` : "No deck.py in this folder";
-      }
-    );
-    open3.addEventListener("click", () => {
-      const f = picker.current();
-      if (f?.isDeck) void openDeck(join(f.path, "deck.py"));
-    });
-    openDialog(
-      "Open deck",
-      h(
-        "div",
-        { class: "deck-form" },
-        h("p", { class: "hint" }, "Go to a folder with a deck.py in it."),
-        picker.el,
-        h("div", { class: "btn-row end" }, open3)
-      ),
-      { wide: true }
-    );
-  }
-  async function quit() {
-    const res = await request({ action: "quit" });
-    if (!res.ok) {
-      toast(res.error ?? "Cannot stop inkflow from here", "error");
-      return;
-    }
-    stopReconnecting();
-    document.getElementById("start")?.remove();
-    document.body.classList.add("start-mode");
-    document.body.append(
-      h(
-        "div",
-        { id: "start", class: "start" },
-        h(
-          "div",
-          { class: "start-card" },
-          h("div", { class: "start-logo" }, "ink", h("b", {}, "flow")),
-          h(
-            "p",
-            { class: "start-lead" },
-            "Inkflow has stopped. Everything was saved as you went; you can close this tab."
-          )
-        )
-      )
-    );
-  }
-  async function showStart() {
-    document.body.classList.add("start-mode");
-    await whenConnected();
-    const data = await info();
-    const recent = h("div", { class: "start-recent" });
-    if (data?.recent.length) {
-      recent.append(h("h2", {}, "Recent decks"));
-      for (const path of data.recent) {
-        const dir = path.replace(/[\\/]deck\.py$/, "");
-        recent.append(
-          h(
-            "button",
-            {
-              type: "button",
-              class: "start-deck",
-              title: dir,
-              onclick: () => void openDeck(path)
-            },
-            h("span", { class: "start-deck-name" }, baseName(dir)),
-            h("span", { class: "start-deck-path" }, dir)
-          )
-        );
-      }
-    }
-    const action = (label4, hint, fn) => h(
-      "button",
-      { type: "button", class: "start-action", onclick: fn },
-      h("span", { class: "start-action-label" }, label4),
-      h("span", { class: "start-action-hint" }, hint)
-    );
-    const page = h(
-      "div",
-      { id: "start", class: "start" },
-      h(
-        "div",
-        { class: "start-card" },
-        h("div", { class: "start-logo" }, "ink", h("b", {}, "flow")),
-        h(
-          "p",
-          { class: "start-lead" },
-          "Slides you draw, write and version."
-        ),
-        h(
-          "div",
-          { class: "start-actions" },
-          action("New deck\u2026", "Start from one of four looks", () => {
-            if (data) newDeckDialog(data);
-          }),
-          action("Open deck\u2026", "A folder with a deck.py", () => {
-            if (data) openDeckDialog(data);
-          })
-        ),
-        recent,
-        h(
-          "button",
-          {
-            type: "button",
-            class: "start-quit",
-            onclick: () => void quit()
-          },
-          "Quit Inkflow"
-        )
-      )
-    );
-    document.body.append(page);
-  }
-  function initDecks() {
-    button.addEventListener("click", () => void openMenu());
-    on("model", renderButton);
-    renderButton();
-  }
-
   // src/ts/editor/openwith.ts
-  var menu3 = document.getElementById("context-menu");
+  var menu2 = document.getElementById("context-menu");
   function fileName(path) {
     return path.split(/[\\/]/).pop() ?? path;
   }
@@ -3824,19 +3745,19 @@ Decks: new, open, recent` : "Decks";
     if (!path.startsWith("/")) return !path.split("/").includes("..");
     return !!root2 && path.startsWith(`${root2}/`);
   }
-  async function openMenu2(path, x, y) {
+  async function openMenu(path, x, y) {
     const res = await request({ action: "open-apps", path });
     if (!res.ok) {
       toast(res.error ?? "Cannot open this file", "error");
       return;
     }
     const apps = res.apps ?? [];
-    clear(menu3);
-    menu3.append(h("div", { class: "menu-title" }, `Open ${fileName(path)} in`));
+    clear(menu2);
+    menu2.append(h("div", { class: "menu-title" }, `Open ${fileName(path)} in`));
     for (const app of apps) {
-      menu3.append(menuItem(app.label, () => void open(path, app)));
+      menu2.append(menuItem(app.label, () => void open(path, app)));
     }
-    menu3.append(
+    menu2.append(
       menuItem("Copy path", () => {
         const root2 = ed.model?.projectDir ?? "";
         const full = path.startsWith("/") ? path : `${root2}/${path}`;
@@ -3863,7 +3784,7 @@ Decks: new, open, recent` : "Decks";
         title: `Open ${fileName(path)} in another program`,
         onclick: (e) => {
           const r = e.currentTarget.getBoundingClientRect();
-          void openMenu2(path, r.left, r.bottom + 4);
+          void openMenu(path, r.left, r.bottom + 4);
         }
       },
       `${label4} \u25BE`
@@ -3938,7 +3859,7 @@ Decks: new, open, recent` : "Decks";
     );
     editors.addEventListener("click", () => {
       const r = editors.getBoundingClientRect();
-      void openMenu2(ctx.path, r.left, r.bottom + 4);
+      void openMenu(ctx.path, r.left, r.bottom + 4);
     });
     openDialog(
       "Video check",
@@ -4308,8 +4229,9 @@ Decks: new, open, recent` : "Decks";
           ),
           picker.el
         ),
-        { wide: true, onClose: () => resolve(chosen) }
+        { large: true, onClose: () => resolve(chosen) }
       );
+      picker.focus();
     });
   }
 
@@ -5578,7 +5500,7 @@ Decks: new, open, recent` : "Decks";
     sel.addEventListener("change", () => commit(sel.value));
     return sel;
   }
-  function button2(label4, title2, fn, cls = "") {
+  function button(label4, title2, fn, cls = "") {
     return h(
       "button",
       { type: "button", class: `pbtn ${cls}`, title: title2, onclick: fn },
@@ -5683,7 +5605,7 @@ Decks: new, open, recent` : "Decks";
               { class: "media-poster" },
               poster ? String(poster).split("/").pop() : "None"
             ),
-            button2(
+            button(
               poster ? "Change\u2026" : "Pick\u2026",
               poster ? `Poster: ${poster}` : "Still image shown before playback",
               async () => {
@@ -5692,7 +5614,7 @@ Decks: new, open, recent` : "Decks";
                 if (up) commit("poster", up.path);
               }
             ),
-            poster ? button2(
+            poster ? button(
               "\u2715",
               "Remove the poster",
               () => commit("poster", null)
@@ -5788,7 +5710,7 @@ Decks: new, open, recent` : "Decks";
         ),
         row2(
           "Layout",
-          button2(
+          button(
             `${currentLayout ? layoutLabel(currentLayout) : "None"} \u25BE`,
             "Pick a layout from previews",
             () => void openGallery({
@@ -5859,7 +5781,7 @@ Decks: new, open, recent` : "Decks";
     const textInDeck = slide.md?.kind !== "file" && (slide.md?.kind === "inline" || Object.values(slide.zones).some((z) => z.kind === "text"));
     if (textInDeck && editable)
       files2.append(
-        button2(
+        button(
           "Move text to Markdown",
           "Move this slide's text out of deck.py into its own .md file",
           () => void edit({ action: "to-markdown", slide: di })
@@ -5876,7 +5798,7 @@ Decks: new, open, recent` : "Decks";
             { class: "hint" },
             `${arrows.length} arrow${arrows.length === 1 ? " is" : "s are"} attached to shapes and follow them when they move here. After moving shapes in another editor, re-route them:`
           ),
-          button2(
+          button(
             "Re-route all",
             "Re-attach every arrow to its shapes",
             () => reroute(arrows)
@@ -5957,7 +5879,7 @@ Decks: new, open, recent` : "Decks";
           { class: "anim-trigger" },
           triggerLabel(cue.fields.trigger ?? null)
         ),
-        editable && button2(icon("up", 12), "Earlier", () => {
+        editable && button(icon("up", 12), "Earlier", () => {
           if (i > 0)
             void edit({
               action: "anim",
@@ -5967,7 +5889,7 @@ Decks: new, open, recent` : "Decks";
               to: i - 1
             });
         }),
-        editable && button2(icon("down", 12), "Later", () => {
+        editable && button(icon("down", 12), "Later", () => {
           if (i < cues.length - 1) {
             void edit({
               action: "anim",
@@ -5978,7 +5900,7 @@ Decks: new, open, recent` : "Decks";
             });
           }
         }),
-        editable && button2(icon("trash", 12), "Remove", () => {
+        editable && button(icon("trash", 12), "Remove", () => {
           void edit({
             action: "anim",
             slide: di,
@@ -6041,7 +5963,7 @@ Decks: new, open, recent` : "Decks";
             trigger: cue.fields.trigger ?? "on-click"
           })
         ) : h("span", {}, cue.type),
-        editable && button2(icon("trash", 12), "Remove", () => {
+        editable && button(icon("trash", 12), "Remove", () => {
           void edit({
             action: "anim",
             slide: di,
@@ -6177,7 +6099,7 @@ Decks: new, open, recent` : "Decks";
     custom.addEventListener("change", () => send({ color: custom.value }));
     swatches.append(custom);
     swatches.append(
-      button2("\u2205", "None", () => send({ color: "none" }), "none-btn")
+      button("\u2205", "None", () => send({ color: "none" }), "none-btn")
     );
     return row2(prop === "fill" ? "Fill" : "Stroke", swatches);
   }
@@ -6260,12 +6182,12 @@ Decks: new, open, recent` : "Decks";
             h("p", { class: "hint media-src" }, media.src ?? ""),
             openButton(projectFile(media.src))
           ),
-          button2(
+          button(
             "Replace media\u2026",
             "Pick another image or video",
             () => void zoneMedia(name2)
           ),
-          button2("Clear", "Empty this zone", () => {
+          button("Clear", "Empty this zone", () => {
             void edit({
               action: "zone-media",
               slide: slide.deckIndex,
@@ -6275,11 +6197,11 @@ Decks: new, open, recent` : "Decks";
           })
         );
         const video = media.kind === "video" ? videoOf(el2) : null;
-        if (video) body2.push(previewButton(video, button2));
+        if (video) body2.push(previewButton(video, button));
         if (media.kind === "video" && media.src) {
           const src2 = media.src;
           body2.push(
-            button2(
+            button(
               "Check & convert\u2026",
               "Can every browser play it? Convert it to MP4 or WebM, smaller or at another resolution",
               () => void openVideoCheck({
@@ -6292,7 +6214,7 @@ Decks: new, open, recent` : "Decks";
         }
       } else {
         body2.push(
-          button2(
+          button(
             "Edit text",
             "Edit this zone's Markdown (double-click)",
             () => {
@@ -6308,7 +6230,7 @@ Decks: new, open, recent` : "Decks";
     }
     const innerVideo = zone ? null : videoOf(el2);
     if (innerVideo) {
-      panel.append(section("Video", previewButton(innerVideo, button2)));
+      panel.append(section("Video", previewButton(innerVideo, button)));
     }
     if (movable) panel.append(geometrySection([sel]));
     const textZone = zone && el2.localName === "foreignObject" && !!el2.querySelector(".inkflow-content");
@@ -6504,12 +6426,12 @@ Decks: new, open, recent` : "Decks";
       h(
         "div",
         { class: "btn-row" },
-        button2(
+        button(
           "Re-route",
           "Re-attach to the shapes where they are now",
           () => reroute([sel])
         ),
-        el2.hasAttribute("inkflow:bend") && button2(
+        el2.hasAttribute("inkflow:bend") && button(
           "Reset bend",
           "Put the elbow's middle segment back where it goes by default",
           () => {
@@ -6520,7 +6442,7 @@ Decks: new, open, recent` : "Decks";
             );
           }
         ),
-        button2(
+        button(
           "Detach",
           "Free both ends",
           () => send(
@@ -6682,7 +6604,7 @@ Decks: new, open, recent` : "Decks";
       h(
         "div",
         { class: "btn-row" },
-        button2(
+        button(
           "Replace\u2026",
           "Pick another picture; it keeps this size and place",
           async () => {
@@ -6698,17 +6620,17 @@ Decks: new, open, recent` : "Decks";
             );
           }
         ),
-        ed.cropMode ? button2(
+        ed.cropMode ? button(
           "Done cropping",
           "Enter",
           () => setCropMode(false),
           "on"
-        ) : button2(
+        ) : button(
           "Crop",
           "Crop (double-click the picture)",
           () => void startCrop(sel)
         ),
-        cropped ? button2(
+        cropped ? button(
           "Reset crop",
           "Show the whole picture again",
           () => void resetCrop(sel)
@@ -6835,13 +6757,13 @@ Decks: new, open, recent` : "Decks";
       h(
         "div",
         { class: "btn-row" },
-        button2(
+        button(
           h("b", {}, "B"),
           "Bold",
           () => setAll({ "font-weight": bold ? null : "bold" }, "Bold"),
           bold ? "on" : ""
         ),
-        button2(
+        button(
           h("i", {}, "I"),
           "Italic",
           () => setAll(
@@ -6850,25 +6772,25 @@ Decks: new, open, recent` : "Decks";
           ),
           italic ? "on" : ""
         ),
-        button2(
+        button(
           "\u27F8",
           "Align start",
           () => setAll({ "text-anchor": null }, "Align"),
           anchor === "start" ? "on" : ""
         ),
-        button2(
+        button(
           "\u21D4",
           "Align middle",
           () => setAll({ "text-anchor": "middle" }, "Align"),
           anchor === "middle" ? "on" : ""
         ),
-        button2(
+        button(
           "\u27F9",
           "Align end",
           () => setAll({ "text-anchor": "end" }, "Align"),
           anchor === "end" ? "on" : ""
         ),
-        button2("Edit", "Edit text (double-click)", () => emit("edit-text"))
+        button("Edit", "Edit text (double-click)", () => emit("edit-text"))
       )
     );
   }
@@ -6975,26 +6897,26 @@ Decks: new, open, recent` : "Decks";
       h(
         "div",
         { class: "btn-row" },
-        button2("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
-        button2("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
-        button2("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
-        button2("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
-        button2(
+        button("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
+        button("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
+        button("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
+        button("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
+        button(
           icon("copy", 14),
           "Duplicate (Ctrl+D)",
           () => emit("duplicate")
         ),
-        sels.length > 1 && button2(
+        sels.length > 1 && button(
           icon("group", 14),
           "Group (Ctrl+G)",
           () => emit("group")
         ),
-        isGroup && button2(
+        isGroup && button(
           "Ungroup",
           "Ungroup (Ctrl+Shift+G)",
           () => emit("ungroup")
         ),
-        button2(
+        button(
           icon("trash", 14),
           "Delete (Del)",
           () => emit("delete"),
@@ -7047,7 +6969,7 @@ Decks: new, open, recent` : "Decks";
     const movable = sels.every((s) => canTransform(s.el));
     panel.append(section(`${sels.length} objects`));
     if (movable) {
-      const a = (label4, title2, how) => button2(label4, title2, () => alignSelection(how));
+      const a = (label4, title2, how) => button(label4, title2, () => alignSelection(how));
       panel.append(
         section(
           "Align",
@@ -9344,7 +9266,7 @@ ${area2.value.slice(pos)}`;
   }
 
   // src/ts/editor/canvasmenu.ts
-  var menu4 = document.getElementById("context-menu");
+  var menu3 = document.getElementById("context-menu");
   var at = { x: 0, y: 0 };
   function sep() {
     return h("div", { class: "menu-sep" });
@@ -9458,7 +9380,7 @@ ${area2.value.slice(pos)}`;
         const name2 = src.rel.split("/").pop() ?? src.rel;
         items.push(
           menuItem(`Open ${name2} in\u2026`, () => {
-            void openMenu2(src.path, at.x, at.y);
+            void openMenu(src.path, at.x, at.y);
           })
         );
       }
@@ -9527,8 +9449,8 @@ ${area2.value.slice(pos)}`;
     } else {
       clearSelection();
     }
-    clear(menu4);
-    menu4.append(...hit ? objectMenu() : slideMenu());
+    clear(menu3);
+    menu3.append(...hit ? objectMenu() : slideMenu());
     showMenu(e.clientX, e.clientY);
   }
   function initCanvasMenu() {
@@ -9604,6 +9526,368 @@ ${area2.value.slice(pos)}`;
         emit("flash");
       }
     });
+  }
+
+  // src/ts/editor/decks.ts
+  var menu4 = document.getElementById("context-menu");
+  var button2 = document.getElementById("btn-deck");
+  function baseName2(path) {
+    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
+  }
+  function join(dir, name2) {
+    return `${dir.replace(/[\\/]+$/, "")}/${name2}`;
+  }
+  function slug(text) {
+    return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "my-deck";
+  }
+  function renderButton() {
+    const dir = ed.model?.projectDir;
+    button2.textContent = `${dir ? baseName2(dir) : "deck"} \u25BE`;
+    button2.title = dir ? `${dir}
+Decks: new, open, recent` : "Decks";
+  }
+  async function info() {
+    const res = await request({ action: "project-info" });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot read the deck's folder", "error");
+      return null;
+    }
+    return res;
+  }
+  async function openMenu2() {
+    const data = await info();
+    if (!data) return;
+    clear(menu4);
+    menu4.append(
+      menuItem("New deck\u2026", () => newDeckDialog(data)),
+      menuItem("Open deck\u2026", () => openDeckDialog(data))
+    );
+    if (data.recent.length) {
+      menu4.append(h("div", { class: "menu-title" }, "Recent decks"));
+      for (const path of data.recent) {
+        const dir = path.replace(/[\\/]deck\.py$/, "");
+        const item = menuItem(baseName2(dir), () => void openDeck(path));
+        item.title = dir;
+        menu4.append(item);
+      }
+    }
+    menu4.append(
+      h("div", { class: "menu-sep" }),
+      menuItem("Quit Inkflow", () => void quit())
+    );
+    const r = button2.getBoundingClientRect();
+    showMenu(r.left, r.bottom + 4);
+  }
+  async function openDeck(path) {
+    const res = await request({ action: "open-deck", path });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot open that deck", "error");
+      return false;
+    }
+    closeDialog();
+    if (res.redirect) {
+      toast("That deck is already open: switching to it\u2026");
+      location.assign(String(res.redirect));
+      return true;
+    }
+    if (!res.opening) {
+      toast("That deck is the one open here");
+      return true;
+    }
+    toast(
+      `Opening ${baseName2(String(res.deck ?? path).replace(/[\\/]deck\.py$/, ""))}\u2026`
+    );
+    return true;
+  }
+  function newDeckDialog(data) {
+    const title2 = h("input", {
+      type: "text",
+      value: "My presentation"
+    });
+    const name2 = h("input", {
+      type: "text",
+      value: data.name
+    });
+    let nameEdited = false;
+    name2.addEventListener("input", () => {
+      nameEdited = true;
+      update();
+    });
+    title2.addEventListener("input", () => {
+      if (!nameEdited) name2.value = slug(title2.value);
+      update();
+    });
+    let look = data.themes.some((t) => t.id === "current") ? "current" : "starter";
+    const looks = h(
+      "div",
+      { class: "look-list" },
+      ...data.themes.map((t) => {
+        const radio = h("input", {
+          type: "radio",
+          name: "deck-look",
+          value: t.id
+        });
+        radio.checked = t.id === look;
+        radio.addEventListener("change", () => {
+          look = t.id;
+        });
+        return h(
+          "label",
+          { class: "look" },
+          radio,
+          h(
+            "span",
+            { class: "look-text" },
+            h("strong", {}, t.label),
+            h("span", { class: "hint" }, t.description)
+          )
+        );
+      })
+    );
+    const git2 = h("input", { type: "checkbox" });
+    git2.checked = true;
+    git2.addEventListener("change", () => update());
+    const gitRow = h(
+      "label",
+      { class: "check-row" },
+      git2,
+      "Create a git repository for this deck"
+    );
+    const gitNote = h("p", { class: "hint" });
+    const lfs = h("input", { type: "checkbox" });
+    lfs.checked = data.lfs;
+    const lfsRow = h(
+      "label",
+      { class: "check-row" },
+      lfs,
+      "Store videos, images and fonts with Git LFS"
+    );
+    const lfsNote = h(
+      "p",
+      { class: "hint" },
+      data.lfs ? "Untick for git only: media is kept in git itself, fine for a small repository." : "git-lfs is not installed, so this deck uses git only (its .gitattributes says so; install git-lfs to switch later)."
+    );
+    const full = h("p", { class: "hint full-path" });
+    const picker = folderPicker(data.parent, () => update());
+    function update() {
+      const folder = picker.current();
+      const parent = folder?.path ?? data.parent;
+      full.textContent = `New deck: ${join(parent, name2.value || "\u2026")}`;
+      const inRepo = !!folder?.repo;
+      gitRow.hidden = inRepo || !data.git;
+      lfsRow.hidden = !data.git || !inRepo && !git2.checked;
+      lfsNote.hidden = lfsRow.hidden;
+      gitNote.textContent = inRepo ? `It becomes a new folder of the git repository at ${folder?.repo}, versioned with it.` : data.git ? "" : "git is not installed, so the deck gets no repository.";
+    }
+    const create = h(
+      "button",
+      { type: "button", class: "pbtn primary" },
+      "Create and open"
+    );
+    create.addEventListener("click", async () => {
+      const folder = picker.current();
+      if (!folder || !name2.value.trim()) {
+        toast("Choose a folder and a name for the deck", "error");
+        return;
+      }
+      create.disabled = true;
+      create.textContent = "Creating\u2026";
+      const res = await request({
+        action: "new-deck",
+        path: join(folder.path, name2.value.trim()),
+        title: title2.value,
+        theme: look,
+        git: !folder.repo && git2.checked,
+        lfs: lfs.checked
+      });
+      create.disabled = false;
+      create.textContent = "Create and open";
+      if (!res.ok) {
+        toast(res.error ?? "Could not create the deck", "error");
+        return;
+      }
+      closeDialog();
+      toast(`Created ${name2.value.trim()}; opening it\u2026`, "ok");
+    });
+    openDialog(
+      "New deck",
+      h(
+        "div",
+        { class: "deck-form" },
+        h(
+          "label",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Title"),
+          title2
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Look"),
+          looks
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Where"),
+          h(
+            "div",
+            {},
+            picker.el,
+            h(
+              "label",
+              { class: "field inline" },
+              h("span", { class: "field-label" }, "Folder name"),
+              name2
+            ),
+            full,
+            gitRow,
+            gitNote,
+            lfsRow,
+            lfsNote
+          )
+        ),
+        h("div", { class: "btn-row end" }, create)
+      ),
+      { large: true }
+    );
+    update();
+    title2.select();
+  }
+  function openDeckDialog(data) {
+    const open3 = h(
+      "button",
+      { type: "button", class: "pbtn primary", disabled: true },
+      "Open this deck"
+    );
+    const picker = folderPicker(
+      data.places?.default ?? data.current.replace(/[\\/][^\\/]*$/, ""),
+      (f) => {
+        open3.disabled = !f.isDeck;
+        open3.textContent = f.isDeck ? `Open ${baseName2(f.path)}` : "No deck.py in this folder";
+      }
+    );
+    open3.addEventListener("click", () => {
+      const f = picker.current();
+      if (f?.isDeck) void openDeck(join(f.path, "deck.py"));
+    });
+    openDialog(
+      "Open deck",
+      h(
+        "div",
+        { class: "deck-form" },
+        h("p", { class: "hint" }, "Go to a folder with a deck.py in it."),
+        picker.el,
+        h("div", { class: "btn-row end" }, open3)
+      ),
+      { large: true }
+    );
+    picker.focus();
+  }
+  async function quit() {
+    const res = await request({ action: "quit" });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot stop inkflow from here", "error");
+      return;
+    }
+    stopReconnecting();
+    document.getElementById("start")?.remove();
+    document.body.classList.add("start-mode");
+    document.body.append(
+      h(
+        "div",
+        { id: "start", class: "start" },
+        h(
+          "div",
+          { class: "start-card" },
+          h("div", { class: "start-logo" }, "ink", h("b", {}, "flow")),
+          h(
+            "p",
+            { class: "start-lead" },
+            "Inkflow has stopped. Everything was saved as you went; you can close this tab."
+          )
+        )
+      )
+    );
+  }
+  async function showStart() {
+    document.body.classList.add("start-mode");
+    await whenConnected();
+    const data = await info();
+    const recent = h("div", { class: "start-recent" });
+    if (data?.recent.length) {
+      recent.append(h("h2", {}, "Recent decks"));
+      for (const path of data.recent) {
+        const dir = path.replace(/[\\/]deck\.py$/, "");
+        recent.append(
+          h(
+            "button",
+            {
+              type: "button",
+              class: "start-deck",
+              title: dir,
+              onclick: () => void openDeck(path)
+            },
+            h("span", { class: "start-deck-name" }, baseName2(dir)),
+            h("span", { class: "start-deck-path" }, dir)
+          )
+        );
+      }
+    }
+    const action = (label4, hint, fn) => h(
+      "button",
+      { type: "button", class: "start-action", onclick: fn },
+      h("span", { class: "start-action-label" }, label4),
+      h("span", { class: "start-action-hint" }, hint)
+    );
+    const page = h(
+      "div",
+      { id: "start", class: "start" },
+      h(
+        "div",
+        { class: "start-card" },
+        h("div", { class: "start-logo" }, "ink", h("b", {}, "flow")),
+        h(
+          "p",
+          { class: "start-lead" },
+          "Slides you draw, write and version."
+        ),
+        h(
+          "div",
+          { class: "start-actions" },
+          // Asked afresh each time: a default location saved in the
+          // picker since counts.
+          action(
+            "New deck\u2026",
+            "Start from one of four looks",
+            async () => {
+              const fresh = await info();
+              if (fresh) newDeckDialog(fresh);
+            }
+          ),
+          action("Open deck\u2026", "A folder with a deck.py", async () => {
+            const fresh = await info();
+            if (fresh) openDeckDialog(fresh);
+          })
+        ),
+        recent,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "start-quit",
+            onclick: () => void quit()
+          },
+          "Quit Inkflow"
+        )
+      )
+    );
+    document.body.append(page);
+  }
+  function initDecks() {
+    button2.addEventListener("click", () => void openMenu2());
+    on("model", renderButton);
+    renderButton();
   }
 
   // src/ts/editor/exportdlg.ts

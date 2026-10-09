@@ -10,7 +10,7 @@ from typing import cast
 import pytest
 
 from inkflow import instances, lfs
-from inkflow.editor import gitops, projects
+from inkflow.editor import gitops, nativedialog, places, projects
 from inkflow.editor.session import EditError, EditorSession
 
 pytestmark = pytest.mark.skipif(not gitops.available(), reason="needs git")
@@ -26,6 +26,7 @@ def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(f"GIT_{who}_EMAIL", "test@example.com")
     monkeypatch.setattr(projects, "_recent_file", lambda: tmp_path / "recent.json")
     monkeypatch.setattr(instances, "_dir", lambda: tmp_path / "servers")
+    monkeypatch.setattr(places, "_file", lambda: tmp_path / "places.json")
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -389,3 +390,77 @@ def test_the_start_page_only_opens_or_creates_decks(
     )
     assert made["opening"] and session.switch_to == tmp_path / "talk" / "deck.py"
     assert projects.recent() == [str(tmp_path / "talk" / "deck.py")]
+
+
+def test_favourites_and_the_default_location(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    talks = tmp_path / "talks"
+    talks.mkdir()
+    session = EditorSession(None)
+    with pytest.raises(EditError, match="this machine"):
+        session.apply({"action": "places-set", "op": "add", "path": str(talks)}, None)
+    local = {"action": "places-set", "_local": True}
+    out = session.apply({**local, "op": "add", "path": str(talks)}, None)
+    assert out["places"] == {"favorites": [str(talks)], "default": None}
+    with pytest.raises(EditError, match="not a folder"):
+        session.apply({**local, "op": "add", "path": str(tmp_path / "nope")}, None)
+    session.apply({**local, "op": "default", "path": str(talks)}, None)
+    # New decks go to the default location; Open deck starts there.
+    info = session.apply({"action": "project-info"}, None)
+    assert info["parent"] == str(talks)
+    assert cast("dict[str, object]", info["places"])["default"] == str(talks)
+    listing = session.apply(
+        {"action": "browse", "path": str(tmp_path), "_local": True}, None
+    )
+    assert cast("dict[str, object]", listing["places"])["favorites"] == [str(talks)]
+    assert "systemPicker" in listing
+    session.apply({**local, "op": "remove", "path": str(talks)}, None)
+    session.apply({**local, "op": "default", "path": None}, None)
+    assert places.load() == {"favorites": [], "default": None}
+
+
+def test_the_system_dialog_answers_through_the_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked: dict[str, object] = {}
+
+    def pick(**kwargs: object) -> str | None:
+        asked.update(kwargs)
+        return str(tmp_path)
+
+    monkeypatch.setattr(nativedialog, "pick", pick)
+    session = EditorSession(None)
+    with pytest.raises(EditError, match="this machine"):
+        session.apply({"action": "system-pick"}, None)
+    out = session.apply(
+        {"action": "system-pick", "path": str(tmp_path), "_local": True}, None
+    )
+    assert out == {"ok": True, "path": str(tmp_path)}
+    assert asked["files"] is False and asked["start"] == tmp_path
+    session.apply({"action": "system-pick", "files": "video", "_local": True}, None)
+    assert asked["files"] is True
+
+
+def test_native_dialog_commands(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import sys
+
+    if sys.platform in ("darwin", "win32"):
+        pytest.skip("the Linux choosers")
+    monkeypatch.setenv("DISPLAY", ":0")
+
+    def which(name: str) -> str | None:
+        return f"/usr/bin/{name}" if name == "zenity" else None
+
+    monkeypatch.setattr("inkflow.editor.nativedialog.shutil.which", which)
+    assert nativedialog.available()
+    folder = nativedialog._command(False, tmp_path, "Pick", frozenset())  # pyright: ignore[reportPrivateUsage]
+    assert folder[:2] == ["zenity", "--file-selection"] and "--directory" in folder
+    video = nativedialog._command(True, tmp_path, "Pick", frozenset({".mkv"}))  # pyright: ignore[reportPrivateUsage]
+    assert "--directory" not in video and "--file-filter=Videos | *.mkv" in video
+    monkeypatch.delenv("DISPLAY")
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    assert not nativedialog.available()

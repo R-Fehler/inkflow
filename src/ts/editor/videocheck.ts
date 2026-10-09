@@ -6,9 +6,9 @@
 // resolution, a quality slider, a rough size and the ffmpeg command to copy,
 // or run on the spot.
 
-import { folderPicker, megabytes } from "./decks";
 import { closeDialog, openDialog } from "./dialog";
 import { h, toast } from "./dom";
+import { folderPicker, megabytes } from "./folderpicker";
 import { edit, request } from "./net";
 import { openMenu as openWithMenu } from "./openwith";
 
@@ -549,7 +549,8 @@ export function pickVideoFromDisk(start: string): Promise<string | null> {
                 ),
                 picker.el,
             ),
-            { wide: true, onClose: () => resolve(chosen) },
+            { large: true, onClose: () => resolve(chosen) },
         );
+        picker.focus();
     });
 }

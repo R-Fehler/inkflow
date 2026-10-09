@@ -125,7 +125,11 @@ src/
                                view/revert/restore a commit, `lfs_status` = media
                                no LFS rule covers or committed as full copies, `lfs_track`
                                / `lfs_off`; shells out to git with GIT_TERMINAL_PROMPT=0), projects.py (new deck in one of four
-                               looks, folder browsing, recent decks), media.py (files of any
+                               looks, folder browsing, recent decks), places.py (favourite
+                               folders + the default deck location, user config dir),
+                               nativedialog.py (the OS folder/file chooser shown by the
+                               server: zenity/kdialog, osascript, PowerShell; `system-pick`,
+                               local only), media.py (files of any
                                size: by path (`import_path`, local only) or in chunks
                                (`Uploads`), staged in .inkflow/incoming/ and moved into
                                assets/ in one rename; both return an `Arrival`, which
@@ -245,7 +249,11 @@ src/
                       tab: hide/lock), gallery.ts, grid.ts (grid view of all slides;
                       shares sorter.ts's Thumbs cache class and slide menu), theme.ts,
                       find.ts, exportdlg.ts, openwith.ts ("Open ▾" in other programs),
-                      decks.ts ("deck ▾": new/open/recent decks), git.ts (Git menu),
+                      decks.ts ("deck ▾": new/open/recent decks, start page),
+                      folderpicker.ts (the folder picker those and the video picker
+                      share: Tab completion, type-to-filter, keyboard list, places,
+                      Browse… = system dialog; its pure path maths in pathtext.ts),
+                      git.ts (Git menu),
                       canvasmenu.ts (right-click menu on the canvas; text fields and
                       Shift+right-click keep the browser's), videopreview.ts (canvas
                       videos lose controls + pointer events so they select and drag;
