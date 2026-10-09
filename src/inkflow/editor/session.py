@@ -25,6 +25,17 @@ from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
 from inkflow.editor.codegen import Code, coerce_fields
 from inkflow.editor.deckedit import DeckEditError, DeckSource
+from inkflow.editor.findreplace import (
+    MAX_HITS,
+    DeckStrings,
+    FindError,
+    Options,
+    Segment,
+    iter_hits,
+    pattern,
+    replace_in,
+    svg_segments,
+)
 from inkflow.editor.model import MEDIA_HIDDEN_FIELDS
 from inkflow.editor.previews import layout_previews
 from inkflow.editor.svgops import (
@@ -257,6 +268,8 @@ class EditorSession:
                 else []
             )
             return {"ok": True, "files": export_assets(self.project_dir, names)}
+        if action == "find":
+            return {"ok": True, "hits": self._find(msg)}
         if deck is None:
             raise EditError("the deck has not built yet")
         if action == "theme-get":
@@ -284,6 +297,7 @@ class EditorSession:
             "insert-video": self._insert_video,
             "insert-textbox": self._insert_textbox,
             "theme-set": self._theme_set,
+            "replace": self._replace,
             "md-text": self._md_text,
             "notes": self._notes,
             "slide": self._slide,
@@ -636,6 +650,114 @@ class EditorSession:
         extra["zone"] = zone
         extra["structural"] = True
         return "Insert text box"
+
+    # ── Find and replace ──
+
+    def _find_files(self, msg: dict[str, object]) -> list[tuple[Path, str]]:
+        """The files to search: those the browser names, plus deck.py."""
+        raw = msg.get("files")
+        names = (
+            [str(f) for f in cast("list[object]", raw)] if isinstance(raw, list) else []
+        )
+        out: list[tuple[Path, str]] = []
+        seen: set[Path] = set()
+        for name in names:
+            path = Path(name)
+            path = (path if path.is_absolute() else self.project_dir / path).resolve()
+            if path in seen or not path.is_file():
+                continue
+            if not path.is_relative_to(self.project_dir.resolve()):
+                continue  # theme files are not the deck's to change
+            kind = {".svg": "svg", ".md": "md"}.get(path.suffix.lower())
+            if kind:
+                seen.add(path)
+                out.append((path, kind))
+        out.append((self.deck_path, "deck"))
+        return out
+
+    def _find_options(self, msg: dict[str, object]) -> tuple[re.Pattern[str], Options]:
+        opts = Options(
+            match_case=bool(msg.get("matchCase")),
+            whole_word=bool(msg.get("wholeWord")),
+            regex=bool(msg.get("regex")),
+        )
+        try:
+            return pattern(str(msg.get("query") or ""), opts), opts
+        except FindError as exc:
+            raise EditError(str(exc)) from exc
+
+    def _segments(
+        self, path: Path, kind: str, data: bytes
+    ) -> tuple[list[Segment], Callable[[], bytes]]:
+        """A file's searchable segments, and how to serialize it after edits."""
+        if kind == "svg":
+            svg = SvgFile.from_bytes(path, data)
+            return svg_segments(svg), svg.to_bytes
+        if kind == "deck":
+            strings = DeckStrings(data.decode("utf-8"))
+            return strings.segments(), lambda: strings.code.encode("utf-8")
+        text = [data.decode("utf-8")]
+
+        def set_md(v: str) -> None:
+            text[0] = v
+
+        return [Segment(text[0], set_md)], lambda: text[0].encode("utf-8")
+
+    def _find(self, msg: dict[str, object]) -> list[dict[str, object]]:
+        pat, _ = self._find_options(msg)
+        hits: list[dict[str, object]] = []
+        for path, kind in self._find_files(msg):
+            try:
+                segments, _ = self._segments(path, kind, path.read_bytes())
+            except Exception:
+                continue  # an unparsable file has nothing to offer
+            for hit in iter_hits(path, kind, segments, pat):
+                hits.append(hit.to_json())
+                if len(hits) >= MAX_HITS:
+                    return hits
+        return hits
+
+    def _replace(
+        self, msg: dict[str, object], _deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        pat, opts = self._find_options(msg)
+        replacement = str(msg.get("replacement") or "")
+        only = msg.get("only")
+        target: tuple[Path, int] | None = None
+        if isinstance(only, dict):
+            spec = cast("dict[str, object]", only)
+            target = (
+                Path(str(spec.get("file"))).resolve(),
+                int(cast("int", spec.get("index"))),
+            )
+        total = 0
+        for path, kind in self._find_files(msg):
+            if target is not None and path != target[0]:
+                continue
+            data = txn.read(path)
+            segments, serialize = self._segments(path, kind, data)
+            count = replace_in(
+                segments,
+                pat,
+                replacement,
+                target[1] if target is not None else None,
+                opts.regex,
+            )
+            if count:
+                if kind == "deck":
+                    self._check_deck(serialize())
+                txn.write(path, serialize())
+                total += count
+        if not total:
+            raise EditError("nothing to replace")
+        extra["replaced"] = total
+        return "Replace" if total == 1 else f"Replace {total}"
+
+    def _check_deck(self, code: bytes) -> None:
+        try:
+            compile(code, str(self.deck_path), "exec")
+        except SyntaxError as exc:
+            raise EditError(f"the replacement would break deck.py: {exc}") from exc
 
     # ── Theme panel ──
 

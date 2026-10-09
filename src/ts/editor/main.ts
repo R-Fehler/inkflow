@@ -13,6 +13,7 @@ import { initContext } from "./context";
 import { isCropped, setCropMode, startCrop } from "./crop";
 import { initDialog } from "./dialog";
 import { toast } from "./dom";
+import { initFind } from "./find";
 import { initGallery } from "./gallery";
 import { afterRender, initInsert } from "./insert";
 import { connect } from "./net";
@@ -120,6 +121,7 @@ function boot(): void {
     initContext();
     initGallery();
     initDialog();
+    initFind();
     initTheme();
 
     on("slide", () => {

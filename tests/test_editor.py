@@ -19,7 +19,7 @@ from inkflow.editor.provenance import INK, INK_TOP, is_element, locate, parse_lo
 from inkflow.editor.session import EditError, EditorSession
 from inkflow.editor.svgops import SvgFile, SvgOpError, apply_ops, group, ungroup
 from inkflow.enums import ColorMode, Direction, Easing, MediaFit, Muted, Trigger
-from inkflow.manifest import Deck, Image, Video
+from inkflow.manifest import Deck, Image, TextBox, Video
 from inkflow.pipeline import process_deck
 from inkflow.server import load_deck
 from inkflow.svgio import parse_svg, parse_svg_file
@@ -1353,6 +1353,72 @@ def test_link_op_wraps_unwraps_and_stays_transparent(project: Path) -> None:
     html = process_deck(_deck(project), project, project / "deck.py")[0]["svg"]
     assert 'data-inkflow-slide="two"' in html and "slide:two" not in html
     assert 'href="https://x.y" target="_blank"' in html
+
+
+def test_find_and_replace_across_svg_markdown_and_deck(project: Path) -> None:
+    deck_py = project / "deck.py"
+    deck_py.write_text(
+        deck_py.read_text()
+        .replace(
+            'zones={"title": "Hello"}',
+            'title="Hello deck", '
+            + 'zones={"title": "Hello", "content": TextBox("hello there")}',
+        )
+        .replace("import Deck,", "import Deck, TextBox,")
+    )
+    session = EditorSession(deck_py)
+    drawing = project / "slides" / "drawing.svg"
+    md = project / "slides" / "text.md"
+    md.write_text("# Hello\n\nSay hello.\n", encoding="utf-8")
+    files = [str(drawing), str(md), "/etc/passwd"]
+    found = cast(
+        "list[dict[str, object]]",
+        session.apply({"action": "find", "query": "hello", "files": files}, None)[
+            "hits"
+        ],
+    )
+    kinds = [(h["kind"], h["match"]) for h in found]
+    assert kinds == [
+        ("svg", "Hello"),
+        ("md", "Hello"),
+        ("md", "hello"),
+        ("deck", "Hello"),
+        ("deck", "Hello"),
+        ("deck", "hello"),
+    ]
+    assert found[0]["id"] == "label" and found[0]["loc"]
+    whole = session.apply(
+        {"action": "find", "query": "hello", "files": files, "matchCase": True}, None
+    )["hits"]
+    assert len(cast("list[object]", whole)) == 2
+    # Replace one hit, then the rest: each is one undo step.
+    session.apply(
+        {
+            "action": "replace",
+            "query": "hello",
+            "replacement": "Hi",
+            "files": files,
+            "only": {"file": str(md), "index": 1},
+        },
+        _deck(project),
+    )
+    assert md.read_text() == "# Hello\n\nSay Hi.\n"
+    result = session.apply(
+        {"action": "replace", "query": "hello", "replacement": "Hi", "files": files},
+        _deck(project),
+    )
+    assert result["replaced"] == 5
+    assert "Hi</text>" in drawing.read_text()
+    deck = _deck(project)
+    assert deck.slides[2].title == "Hi deck"
+    assert deck.slides[2].zones["content"] == TextBox("Hi there")
+    assert md.read_text() == "# Hi\n\nSay Hi.\n"
+    session.apply({"action": "undo"}, deck)
+    assert md.read_text() == "# Hello\n\nSay Hi.\n"
+    with pytest.raises(EditError):
+        session.apply(
+            {"action": "find", "query": "(", "regex": True, "files": []}, None
+        )
 
 
 # ── Model ────────────────────────────────────────────────────────────────────

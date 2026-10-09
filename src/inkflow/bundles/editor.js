@@ -87,8 +87,8 @@
   // src/ts/shared/step.ts
   var elementCues = /* @__PURE__ */ new WeakMap();
   var rootStep = /* @__PURE__ */ new WeakMap();
-  function parseCues(el) {
-    const raw = el.getAttribute("data-cues");
+  function parseCues(el2) {
+    const raw = el2.getAttribute("data-cues");
     if (!raw) return [];
     try {
       return JSON.parse(raw);
@@ -96,22 +96,22 @@
       return [];
     }
   }
-  function cueStates(el) {
-    let states = elementCues.get(el);
+  function cueStates(el2) {
+    let states = elementCues.get(el2);
     if (!states) {
-      states = parseCues(el).map((cue) => ({ cue, anim: null }));
-      elementCues.set(el, states);
+      states = parseCues(el2).map((cue) => ({ cue, anim: null }));
+      elementCues.set(el2, states);
     }
     return states;
   }
-  function ensureAnim(el, st) {
+  function ensureAnim(el2, st) {
     if (!st.anim) {
-      const { name, vars, opts } = st.cue;
-      const anim = el.animate(buildKeyframes(`anim-${name}`, vars), {
-        duration: Math.max(0, opts.duration * 1e3),
-        delay: Math.max(0, opts.delay * 1e3),
-        easing: opts.easing || "linear",
-        iterations: opts.iterations ?? 1,
+      const { name, vars, opts: opts2 } = st.cue;
+      const anim = el2.animate(buildKeyframes(`anim-${name}`, vars), {
+        duration: Math.max(0, opts2.duration * 1e3),
+        delay: Math.max(0, opts2.delay * 1e3),
+        easing: opts2.easing || "linear",
+        iterations: opts2.iterations ?? 1,
         fill: "both"
       });
       anim.pause();
@@ -141,23 +141,23 @@
       const spec = JSON.parse(block.dataset.hlSpec);
       const baseStep = +(block.dataset.baseStep ?? "0");
       const specIdx = Math.min(Math.max(step - baseStep, 0), spec.length - 1);
-      const active2 = spec[specIdx];
-      const hasHL = active2 !== null;
+      const active3 = spec[specIdx];
+      const hasHL = active3 !== null;
       block.querySelectorAll(".code-line").forEach((line) => {
         const n = +(line.dataset.line ?? "0");
-        line.classList.toggle("hl-active", hasHL && active2.includes(n));
-        line.classList.toggle("hl-dim", hasHL && !active2.includes(n));
+        line.classList.toggle("hl-active", hasHL && active3.includes(n));
+        line.classList.toggle("hl-dim", hasHL && !active3.includes(n));
         if (!hasHL) line.classList.remove("hl-active", "hl-dim");
       });
     });
   }
   function maxStep(root2) {
     let m = 0;
-    root2.querySelectorAll("[data-cues]").forEach((el) => {
-      for (const c of parseCues(el)) if (c.step > m) m = c.step;
+    root2.querySelectorAll("[data-cues]").forEach((el2) => {
+      for (const c of parseCues(el2)) if (c.step > m) m = c.step;
     });
-    root2.querySelectorAll("[data-play-on-step]").forEach((el) => {
-      const s = +(el.getAttribute("data-play-on-step") ?? "0");
+    root2.querySelectorAll("[data-play-on-step]").forEach((el2) => {
+      const s = +(el2.getAttribute("data-play-on-step") ?? "0");
       if (s > m) m = s;
     });
     root2.querySelectorAll(
@@ -171,14 +171,14 @@
     return m;
   }
   function applyStepInstant(root2, step) {
-    root2.querySelectorAll("[data-cues]").forEach((el) => {
-      const states = cueStates(el);
+    root2.querySelectorAll("[data-cues]").forEach((el2) => {
+      const states = cueStates(el2);
       const actions = restingActions(
         states.map((s) => s.cue),
         step
       );
       states.forEach((st, i) => {
-        if (actions[i] === "hold") holdAtEnd(ensureAnim(el, st));
+        if (actions[i] === "hold") holdAtEnd(ensureAnim(el2, st));
         else st.anim?.cancel();
       });
     });
@@ -197,33 +197,33 @@
 
   // src/ts/editor/dom.ts
   function h(tag, attrs2 = {}, ...children2) {
-    const el = document.createElement(tag);
+    const el2 = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs2)) {
       if (v == null || v === false) continue;
       if (k.startsWith("on") && typeof v === "function") {
-        el.addEventListener(k.slice(2), v);
-      } else if (k === "value" && "value" in el) {
-        el.value = String(v);
+        el2.addEventListener(k.slice(2), v);
+      } else if (k === "value" && "value" in el2) {
+        el2.value = String(v);
       } else if (v === true) {
-        el.setAttribute(k, "");
+        el2.setAttribute(k, "");
       } else {
-        el.setAttribute(k, String(v));
+        el2.setAttribute(k, String(v));
       }
     }
     for (const c of children2) {
       if (c == null || c === false) continue;
-      el.append(typeof c === "string" ? document.createTextNode(c) : c);
+      el2.append(typeof c === "string" ? document.createTextNode(c) : c);
     }
-    return el;
+    return el2;
   }
-  function clear(el) {
-    while (el.firstChild) el.removeChild(el.firstChild);
+  function clear(el2) {
+    while (el2.firstChild) el2.removeChild(el2.firstChild);
   }
   var SVG_NS = "http://www.w3.org/2000/svg";
   function svgEl(tag, attrs2 = {}) {
-    const el = document.createElementNS(SVG_NS, tag);
-    for (const [k, v] of Object.entries(attrs2)) el.setAttribute(k, String(v));
-    return el;
+    const el2 = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs2)) el2.setAttribute(k, String(v));
+    return el2;
   }
   var ICON_PATHS = {
     undo: '<path d="M4 7h7a3.5 3.5 0 0 1 0 7H8"/><path d="M6.5 4.5 4 7l2.5 2.5"/>',
@@ -261,14 +261,14 @@
   }
   var toastTimer = 0;
   function toast(message, kind = "info") {
-    const el = document.getElementById("toast");
-    if (!el) return;
-    el.textContent = message;
-    el.className = `show ${kind}`;
+    const el2 = document.getElementById("toast");
+    if (!el2) return;
+    el2.textContent = message;
+    el2.className = `show ${kind}`;
     window.clearTimeout(toastTimer);
     toastTimer = window.setTimeout(
       () => {
-        el.className = "";
+        el2.className = "";
       },
       kind === "error" ? 6e3 : 2600
     );
@@ -641,8 +641,8 @@
   // src/ts/shared/deck-styles.ts
   function applyDeckStyles(msg) {
     if (msg.styles !== void 0) {
-      const el = document.getElementById("deck-styles");
-      if (el) el.textContent = msg.styles;
+      const el2 = document.getElementById("deck-styles");
+      if (el2) el2.textContent = msg.styles;
     }
     if (msg.mode !== void 0)
       document.documentElement.dataset.theme = msg.mode;
@@ -798,9 +798,9 @@
   }
   var pendingTimer = 0;
   var TRANSIENT = /since the last build|wait for the reload/;
-  async function edit(req, opts = {}) {
+  async function edit(req, opts2 = {}) {
     const result = await request(req);
-    if (!result.ok && !(opts.retrying && TRANSIENT.test(result.error ?? ""))) {
+    if (!result.ok && !(opts2.retrying && TRANSIENT.test(result.error ?? ""))) {
       toast(result.error ?? "edit failed", "error");
     }
     if (result.ok) {
@@ -1004,8 +1004,8 @@
     ed.scope = scopeKey ? host.querySelector(`[data-ink="${scopeKey}"]`) : null;
     ed.selection = [];
     for (const k of keep) {
-      const el = findElement(k, trustLoc);
-      if (el && selectable(el)) addToSelection(el, false);
+      const el2 = findElement(k, trustLoc);
+      if (el2 && selectable(el2)) addToSelection(el2, false);
     }
     layoutPaper();
     emit("render");
@@ -1031,8 +1031,8 @@
       if (start > 0) v.currentTime = start;
     });
     if (ed.step == null) {
-      svg.querySelectorAll(".anim-pending").forEach((el) => {
-        el.classList.remove("anim-pending");
+      svg.querySelectorAll(".anim-pending").forEach((el2) => {
+        el2.classList.remove("anim-pending");
       });
     } else {
       applyStepInstant(svg, ed.step);
@@ -1061,12 +1061,12 @@
       y: inv.b * x + inv.d * y + inv.f
     };
   }
-  function measure(el) {
-    const g = el;
+  function measure(el2) {
+    const g = el2;
     if (typeof g.getBBox !== "function") return null;
-    if (el.localName === "svg" && el !== slideRoot()) {
-      const s = el;
-      const ctm2 = el.parentElement?.getScreenCTM?.();
+    if (el2.localName === "svg" && el2 !== slideRoot()) {
+      const s = el2;
+      const ctm2 = el2.parentElement?.getScreenCTM?.();
       if (!ctm2) return null;
       return {
         bbox: {
@@ -1083,9 +1083,9 @@
     if (!ctm) return null;
     return { bbox: { x: b.x, y: b.y, width: b.width, height: b.height }, ctm };
   }
-  function slideBox(el) {
+  function slideBox(el2) {
     try {
-      const m = measure(el);
+      const m = measure(el2);
       if (!m) return null;
       const { bbox, ctm } = m;
       const toSlide = multiply(invert(rootCTM()), mat(ctm));
@@ -1121,72 +1121,72 @@
     "transform",
     "viewBox"
   ];
-  function elementGeom(el) {
-    const parent = el.parentElement;
+  function elementGeom(el2) {
+    const parent = el2.parentElement;
     const parentCTM = parent?.getScreenCTM?.();
     const attrs2 = {};
-    for (const a of GEOM_ATTRS) attrs2[a] = el.getAttribute(a);
+    for (const a of GEOM_ATTRS) attrs2[a] = el2.getAttribute(a);
     let box = { x: 0, y: 0, width: 0, height: 0 };
     try {
-      box = measure(el)?.bbox ?? box;
+      box = measure(el2)?.bbox ?? box;
     } catch {
     }
     return {
-      tag: el.localName,
-      sourceTag: el.getAttribute("data-ink-tag") ?? el.localName,
+      tag: el2.localName,
+      sourceTag: el2.getAttribute("data-ink-tag") ?? el2.localName,
       attrs: attrs2,
-      own: parseTransform(el.getAttribute("transform")),
+      own: parseTransform(el2.getAttribute("transform")),
       parentToSlide: parentCTM ? multiply(invert(rootCTM()), mat(parentCTM)) : { ...IDENTITY },
       localBox: box
     };
   }
-  function isZone(el) {
-    const id = el.getAttribute("id") ?? "";
+  function isZone(el2) {
+    const id = el2.getAttribute("id") ?? "";
     return id.startsWith("zone-") && !NON_ZONES.has(id);
   }
-  function zoneName(el) {
-    return (el.getAttribute("id") ?? "").replace(/^zone-/, "");
+  function zoneName(el2) {
+    return (el2.getAttribute("id") ?? "").replace(/^zone-/, "");
   }
   function mediaZoneAt(clientX, clientY) {
     const inside = (r) => clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
-    for (const el of overlay.querySelectorAll("[data-media-zone]")) {
-      if (inside(el.getBoundingClientRect()))
-        return el.getAttribute("data-media-zone");
+    for (const el2 of overlay.querySelectorAll("[data-media-zone]")) {
+      if (inside(el2.getBoundingClientRect()))
+        return el2.getAttribute("data-media-zone");
     }
     const slide = currentSlide();
     const svg = slideRoot();
     if (!slide || !svg) return null;
-    for (const el of svg.querySelectorAll('[id^="zone-"]')) {
-      const name = zoneName(el);
+    for (const el2 of svg.querySelectorAll('[id^="zone-"]')) {
+      const name = zoneName(el2);
       const kind = slide.zones[name]?.kind;
-      if ((kind === "image" || kind === "video") && inside(el.getBoundingClientRect()))
+      if ((kind === "image" || kind === "video") && inside(el2.getBoundingClientRect()))
         return name;
     }
     return null;
   }
-  function keyOf(el) {
-    const loc = el.getAttribute("data-ink") ?? "";
+  function keyOf(el2) {
+    const loc = el2.getAttribute("data-ink") ?? "";
     return parseInt(loc.split(":")[0] ?? "", 10);
   }
-  function isLocked(el) {
-    return el.closest("[data-ink-locked]") !== null;
+  function isLocked(el2) {
+    return el2.closest("[data-ink-locked]") !== null;
   }
-  function isOwn(el) {
-    const src = sourceOf(keyOf(el));
+  function isOwn(el2) {
+    const src = sourceOf(keyOf(el2));
     const slide = currentSlide();
     return !!src && src.role === "slide" && !!slide && !slide.srcShared && src.writable;
   }
-  function selectable(el) {
-    if (!el.hasAttribute("data-ink") || isLocked(el)) return false;
-    const src = sourceOf(keyOf(el));
+  function selectable(el2) {
+    if (!el2.hasAttribute("data-ink") || isLocked(el2)) return false;
+    const src = sourceOf(keyOf(el2));
     if (!src) return false;
     if (ed.layoutMode) return src.writable;
-    return isOwn(el) || el.hasAttribute("data-ink-top") && isZone(el);
+    return isOwn(el2) || el2.hasAttribute("data-ink-top") && isZone(el2);
   }
-  function canTransform(el) {
-    const src = sourceOf(keyOf(el));
+  function canTransform(el2) {
+    const src = sourceOf(keyOf(el2));
     if (!src?.writable) return false;
-    return ed.layoutMode || isOwn(el);
+    return ed.layoutMode || isOwn(el2);
   }
   function pick(x, y) {
     const svg = slideRoot();
@@ -1211,15 +1211,15 @@
   function pickByBox(svg, x, y) {
     const pt = clientToSlide(x, y);
     const slide = slideSize();
-    const pool = ed.scope ? [...ed.scope.children].filter((el) => el.hasAttribute("data-ink")) : [...svg.querySelectorAll("[data-ink-top]")];
+    const pool = ed.scope ? [...ed.scope.children].filter((el2) => el2.hasAttribute("data-ink")) : [...svg.querySelectorAll("[data-ink-top]")];
     for (let i = pool.length - 1; i >= 0; i--) {
-      const el = pool[i];
-      if (!selectable(el)) continue;
-      const b = slideBox(el);
+      const el2 = pool[i];
+      if (!selectable(el2)) continue;
+      const b = slideBox(el2);
       if (!b || b.width * b.height > slide.width * slide.height * 0.8)
         continue;
       if (pt.x >= b.x && pt.x <= b.x + b.width && pt.y >= b.y && pt.y <= b.y + b.height) {
-        return el;
+        return el2;
       }
     }
     return null;
@@ -1228,9 +1228,9 @@
     const svg = slideRoot();
     if (!svg) return [];
     const out = [];
-    const add = (el) => {
-      if (el && !out.includes(el) && selectable(el)) {
-        out.push(el);
+    const add = (el2) => {
+      if (el2 && !out.includes(el2) && selectable(el2)) {
+        out.push(el2);
       }
     };
     const owner = (node) => {
@@ -1276,19 +1276,19 @@
       toast(`${index + 1} of ${all.length} here: ${name}`);
     }
   }
-  function setHover(el) {
-    if (el !== hoverEl) {
-      hoverEl = el;
+  function setHover(el2) {
+    if (el2 !== hoverEl) {
+      hoverEl = el2;
       drawOverlay();
     }
   }
-  function toSelected(el) {
-    const loc = el.getAttribute("data-ink") ?? "";
-    return { el, key: keyOf(el), loc };
+  function toSelected(el2) {
+    const loc = el2.getAttribute("data-ink") ?? "";
+    return { el: el2, key: keyOf(el2), loc };
   }
-  function addToSelection(el, notify = true) {
-    if (ed.selection.some((s) => s.el === el)) return;
-    ed.selection.push(toSelected(el));
+  function addToSelection(el2, notify = true) {
+    if (ed.selection.some((s) => s.el === el2)) return;
+    ed.selection.push(toSelected(el2));
     if (notify) {
       drawOverlay();
       emit("selection");
@@ -1308,9 +1308,9 @@
   function selectAll() {
     const svg = slideRoot();
     if (!svg) return;
-    const scope = ed.scope ?? svg;
-    const els = [...scope.querySelectorAll("[data-ink]")].filter(
-      (el) => (ed.scope ? el.parentElement === ed.scope : el.hasAttribute("data-ink-top")) && selectable(el) && (canTransform(el) || ed.scope !== null)
+    const scope2 = ed.scope ?? svg;
+    const els = [...scope2.querySelectorAll("[data-ink]")].filter(
+      (el2) => (ed.scope ? el2.parentElement === ed.scope : el2.hasAttribute("data-ink-top")) && selectable(el2) && (canTransform(el2) || ed.scope !== null)
     );
     select(els);
   }
@@ -1329,9 +1329,9 @@
       class: cls
     });
   }
-  function elementCorners(el) {
+  function elementCorners(el2) {
     try {
-      const measured = measure(el);
+      const measured = measure(el2);
       if (!measured) return null;
       const b = measured.bbox;
       const ctm = measured.ctm;
@@ -1609,14 +1609,14 @@
     }
     return ok;
   }
-  function applyPlanToDom(el, plan) {
+  function applyPlanToDom(el2, plan) {
     for (const [k, v] of Object.entries(plan)) {
-      if (v == null) el.removeAttribute(k);
-      else el.setAttribute(k, v);
+      if (v == null) el2.removeAttribute(k);
+      else el2.setAttribute(k, v);
     }
   }
-  function textChildren(el) {
-    return [...el.querySelectorAll("tspan")].filter(
+  function textChildren(el2) {
+    return [...el2.querySelectorAll("tspan")].filter(
       (t) => t.hasAttribute("x") || t.hasAttribute("y")
     );
   }
@@ -1654,10 +1654,10 @@
     return {
       sel,
       attrs: attrs2,
-      kids: textChildren(sel.el).map((el) => ({
-        el,
-        x: el.getAttribute("x"),
-        y: el.getAttribute("y")
+      kids: textChildren(sel.el).map((el2) => ({
+        el: el2,
+        x: el2.getAttribute("x"),
+        y: el2.getAttribute("y")
       })),
       box: slideBox(sel.el) ?? { x: 0, y: 0, width: 0, height: 0 },
       geom: elementGeom(sel.el)
@@ -1675,10 +1675,10 @@
     const svg = slideRoot();
     const boxes = [];
     if (svg) {
-      for (const el of svg.querySelectorAll("[data-ink-top]")) {
-        if (exclude.has(el) || [...exclude].some((x) => x.contains(el)))
+      for (const el2 of svg.querySelectorAll("[data-ink-top]")) {
+        if (exclude.has(el2) || [...exclude].some((x) => x.contains(el2)))
           continue;
-        const b = slideBox(el);
+        const b = slideBox(el2);
         if (b && b.width > 0 && b.height > 0) boxes.push(b);
       }
     }
@@ -1855,17 +1855,17 @@
       if (!m) return;
       const svg = slideRoot();
       if (!svg) return;
-      const hits = [...svg.querySelectorAll("[data-ink-top]")].filter(
-        (el) => {
-          if (!selectable(el) || !canTransform(el)) return false;
-          const b = slideBox(el);
+      const hits2 = [...svg.querySelectorAll("[data-ink-top]")].filter(
+        (el2) => {
+          if (!selectable(el2) || !canTransform(el2)) return false;
+          const b = slideBox(el2);
           return !!b && b.x >= m.x && b.y >= m.y && b.x + b.width <= m.x + m.width && b.y + b.height <= m.y + m.height;
         }
       );
       if (drag.additive) {
-        for (const el of hits) addToSelection(el, false);
+        for (const el2 of hits2) addToSelection(el2, false);
         select(ed.selection.map((s) => s.el));
-      } else select(hits);
+      } else select(hits2);
       return;
     }
     const plans = lastPlans;
@@ -1943,9 +1943,9 @@
   function onPointerMove(e) {
     if (!pointer) {
       if (ed.tool === "select" && e.buttons === 0) {
-        const el = pick(e.clientX, e.clientY);
-        if (el !== hoverEl) {
-          hoverEl = el;
+        const el2 = pick(e.clientX, e.clientY);
+        if (el2 !== hoverEl) {
+          hoverEl = el2;
           drawOverlay();
         }
       }
@@ -1989,29 +1989,29 @@
   }
   function onDoubleClick(e) {
     if (hooks.editingHost()?.contains(e.target)) return;
-    const el = pick(e.clientX, e.clientY);
-    if (!el) return;
-    if (isZone(el)) {
-      hooks.editZone(zoneName(el), el, { x: e.clientX, y: e.clientY });
+    const el2 = pick(e.clientX, e.clientY);
+    if (!el2) return;
+    if (isZone(el2)) {
+      hooks.editZone(zoneName(el2), el2, { x: e.clientX, y: e.clientY });
       return;
     }
     const text = textUnder(e.clientX, e.clientY);
-    if (text && el.contains(text)) {
-      if (text !== el && !text.hasAttribute("data-ink-top")) {
+    if (text && el2.contains(text)) {
+      if (text !== el2 && !text.hasAttribute("data-ink-top")) {
         enterGroup(text.parentElement);
       }
       select([text]);
       hooks.editText(text);
       return;
     }
-    if (el.localName === "g") {
-      enterGroup(el);
+    if (el2.localName === "g") {
+      enterGroup(el2);
       const inner = pick(e.clientX, e.clientY);
       if (inner) select([inner]);
       return;
     }
-    if (canTransform(el) && (el.localName === "image" || el.localName === "svg" && [...el.children].some((c) => c.localName === "image"))) {
-      hooks.crop(el);
+    if (canTransform(el2) && (el2.localName === "image" || el2.localName === "svg" && [...el2.children].some((c) => c.localName === "image"))) {
+      hooks.crop(el2);
     }
   }
   function initCanvas() {
@@ -2124,35 +2124,35 @@
     if (layer2) return { loc: layer2.getAttribute("data-ink"), el: layer2 };
     return { loc: "0:", el: null };
   }
-  function toParent(el, x, y) {
+  function toParent(el2, x, y) {
     const svg = slideRoot();
-    if (!el || !svg) return { x, y };
-    const p = el.getScreenCTM?.();
+    if (!el2 || !svg) return { x, y };
+    const p = el2.getScreenCTM?.();
     const r = svg.getScreenCTM();
     if (!p || !r) return { x, y };
     const m = multiply(invert(mat(p)), mat(r));
     return { x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f };
   }
-  async function insertXml(xml, base, opts = {}) {
+  async function insertXml(xml, base2, opts2 = {}) {
     if (!await ensureOwnDrawing()) return false;
     const src = ownSource();
     if (!src) return false;
     const parent = insertParent();
     const ops = [];
-    if (opts.marker) ops.push({ kind: "ensure-marker" });
-    ops.push({ kind: "insert", parent: parent.loc, xml, base, key: "new" });
+    if (opts2.marker) ops.push({ kind: "ensure-marker" });
+    ops.push({ kind: "insert", parent: parent.loc, xml, base: base2, key: "new" });
     const result = await edit({
       action: "svg",
       file: src.path,
       hash: src.hash,
       ops,
-      label: `Insert ${base}`
+      label: `Insert ${base2}`
     });
     if (!result.ok) return false;
     const id = result.ids?.new;
     if (id) {
       afterRender.ids = [id];
-      afterRender.editText = !!opts.editText;
+      afterRender.editText = !!opts2.editText;
     }
     return true;
   }
@@ -2359,17 +2359,17 @@
     return new Promise((resolve) => {
       const video = document.createElement("video");
       const fallback = { w: 1280, h: 720 };
-      const timer3 = window.setTimeout(() => resolve(fallback), 3e3);
+      const timer4 = window.setTimeout(() => resolve(fallback), 3e3);
       video.preload = "metadata";
       video.muted = true;
       video.onloadedmetadata = () => {
-        window.clearTimeout(timer3);
+        window.clearTimeout(timer4);
         resolve(
           video.videoWidth && video.videoHeight ? { w: video.videoWidth, h: video.videoHeight } : fallback
         );
       };
       video.onerror = () => {
-        window.clearTimeout(timer3);
+        window.clearTimeout(timer4);
         resolve(fallback);
       };
       video.src = `/${rel}`;
@@ -2481,8 +2481,8 @@
     const file = await pickFile(MEDIA_ACCEPT);
     if (file) await fillZone(zone, file);
   }
-  function cleanForPaste(el) {
-    const copy2 = el.cloneNode(true);
+  function cleanForPaste(el2) {
+    const copy2 = el2.cloneNode(true);
     for (const node of [copy2, ...copy2.querySelectorAll("*")]) {
       for (const attr of [...node.attributes]) {
         const name = attr.name;
@@ -2599,10 +2599,10 @@
     if (!sels.length) return false;
     const fragments = sels.map((s) => cleanForPaste(s.el));
     const refs = fragments.flatMap(imageRefs);
-    let files = {};
+    let files2 = {};
     if (refs.length) {
       const result = await request({ action: "copy-assets", refs });
-      files = result.files ?? {};
+      files2 = result.files ?? {};
     }
     await put({
       type: "inkflow-objects",
@@ -2610,7 +2610,7 @@
       project: ed.model?.projectDir,
       sourceFile: currentSlide()?.sources?.[sels[0].key]?.path ?? "",
       fragments,
-      files
+      files: files2
     });
     const n = sels.length;
     toast(`${cut2 ? "Cut" : "Copied"} ${n} object${n > 1 ? "s" : ""}`);
@@ -2728,8 +2728,8 @@
       const vb = parseViewBox(svg.getAttribute("viewBox"));
       svg.setAttribute("width", "100%");
       svg.setAttribute("height", "100%");
-      svg.querySelectorAll(".anim-pending").forEach((el) => {
-        el.classList.remove("anim-pending");
+      svg.querySelectorAll(".anim-pending").forEach((el2) => {
+        el2.classList.remove("anim-pending");
       });
       for (const z of p.emptyZones) {
         if (z.zone === "slide-number" || z.zone === "slide-total") continue;
@@ -2760,7 +2760,7 @@
     root.classList.remove("open");
     clear(root);
   }
-  async function openGallery(opts) {
+  async function openGallery(opts2) {
     if (!ed.model?.deckEditable) {
       toast(
         "deck.py builds its slide list in code; change it there",
@@ -2774,7 +2774,7 @@
       { class: "gallery-grid" },
       h("p", { class: "hint" }, "Rendering layouts\u2026")
     );
-    const title = opts.mode === "insert" ? "New slide" : "Change layout";
+    const title = opts2.mode === "insert" ? "New slide" : "Change layout";
     root.append(
       h(
         "div",
@@ -2786,7 +2786,7 @@
           h(
             "span",
             { class: "hint" },
-            opts.mode === "insert" ? "Every layout, in this deck's theme" : "The slide keeps its content; zones the new layout lacks are not shown"
+            opts2.mode === "insert" ? "Every layout, in this deck's theme" : "The slide keeps its content; zones the new layout lacks are not shown"
           ),
           h(
             "button",
@@ -2807,15 +2807,15 @@
     clear(grid);
     for (const p of layouts) {
       const [label3, description] = LABELS[p.name] ?? [p.name, ""];
-      const lost = opts.mode === "change" ? lostZones(p) : [];
-      const current = opts.mode === "change" && p.name === opts.current;
+      const lost = opts2.mode === "change" ? lostZones(p) : [];
+      const current = opts2.mode === "change" && p.name === opts2.current;
       const card = h(
         "button",
         {
           type: "button",
           class: `gallery-card${current ? " current" : ""}`,
           title: p.name,
-          onclick: () => void choose(p, opts, lost)
+          onclick: () => void choose(p, opts2, lost)
         },
         thumbnail(p),
         h(
@@ -2838,13 +2838,13 @@
     });
     grid.querySelector(".current, button")?.focus();
   }
-  async function choose(p, opts, lost) {
-    if (opts.mode === "insert") {
+  async function choose(p, opts2, lost) {
+    if (opts2.mode === "insert") {
       close();
-      await newSlide(p.name, opts.after);
+      await newSlide(p.name, opts2.after);
       return;
     }
-    if (p.name === opts.current) {
+    if (p.name === opts2.current) {
       close();
       return;
     }
@@ -2963,8 +2963,8 @@
       svg.setAttribute("height", "100%");
       svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
       svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
-      svg.querySelectorAll(".anim-pending").forEach((el) => {
-        el.classList.remove("anim-pending");
+      svg.querySelectorAll(".anim-pending").forEach((el2) => {
+        el2.classList.remove("anim-pending");
       });
       svg.querySelectorAll("video").forEach((v) => {
         v.removeAttribute("autoplay");
@@ -3006,8 +3006,8 @@
       item.addEventListener("dragend", () => {
         dragFrom = null;
         item.classList.remove("dragging");
-        list.querySelectorAll(".drop-before, .drop-after").forEach((el) => {
-          el.classList.remove("drop-before", "drop-after");
+        list.querySelectorAll(".drop-before, .drop-after").forEach((el2) => {
+          el2.classList.remove("drop-before", "drop-after");
         });
       });
       item.addEventListener("dragover", (e) => {
@@ -3256,7 +3256,7 @@
         const svg = slideRoot();
         if (!svg) return;
         const els = ids.map((id) => svg.querySelector(`[id="${CSS.escape(id)}"]`)).filter(
-          (el) => el instanceof SVGGraphicsElement
+          (el2) => el2 instanceof SVGGraphicsElement
         );
         enterGroup(null);
         select(els);
@@ -3266,14 +3266,14 @@
   }
 
   // src/ts/editor/crop.ts
-  function pictureOf(el) {
-    if (el.localName === "image") return el;
-    if (el.localName !== "svg" || !el.getAttribute("viewBox")) return null;
-    const images = [...el.children].filter((c) => c.localName === "image");
+  function pictureOf(el2) {
+    if (el2.localName === "image") return el2;
+    if (el2.localName !== "svg" || !el2.getAttribute("viewBox")) return null;
+    const images = [...el2.children].filter((c) => c.localName === "image");
     return images.length === 1 ? images[0] : null;
   }
-  function isCropped(el) {
-    return el.localName === "svg" && pictureOf(el) !== null;
+  function isCropped(el2) {
+    return el2.localName === "svg" && pictureOf(el2) !== null;
   }
   function setCropMode(on2) {
     if (ed.cropMode === on2) return;
@@ -3320,17 +3320,17 @@
   // src/ts/editor/dialog.ts
   var host2 = document.getElementById("dialog");
   var onClose = null;
-  function openDialog(title, body2, opts = {}) {
+  function openDialog(title, body2, opts2 = {}) {
     closeDialog();
-    onClose = opts.onClose ?? null;
+    onClose = opts2.onClose ?? null;
     const box = h(
       "div",
-      { class: `dialog-box${opts.wide ? " wide" : ""}`, role: "dialog" },
+      { class: `dialog-box${opts2.wide ? " wide" : ""}`, role: "dialog" },
       h(
         "div",
         { class: "dialog-head" },
         h("h2", {}, title),
-        opts.hint ? h("span", { class: "hint" }, opts.hint) : null,
+        opts2.hint ? h("span", { class: "hint" }, opts2.hint) : null,
         h(
           "button",
           {
@@ -3379,15 +3379,302 @@
     });
   }
 
+  // src/ts/editor/find.ts
+  var panel = document.getElementById("find-panel");
+  var hits = [];
+  var active = -1;
+  var timer2 = 0;
+  var opts = { matchCase: false, wholeWord: false, regex: false };
+  var scope = "deck";
+  function el(sel) {
+    return panel.querySelector(sel);
+  }
+  function slideFiles(s) {
+    const out = (s.sources ?? []).filter((src) => src.writable).map((src) => src.path);
+    if (s.srcPath) out.push(s.srcPath);
+    if (s.md?.path) out.push(s.md.path);
+    if (s.notes?.path) out.push(s.notes.path);
+    return out;
+  }
+  function files() {
+    const slides = scope === "slide" ? [currentSlide()].filter((s) => !!s) : ed.model?.slides ?? [];
+    return [...new Set(slides.flatMap(slideFiles))];
+  }
+  function slidesOf(hit) {
+    if (hit.kind === "deck") return hit.slide != null ? [hit.slide] : [];
+    return (ed.model?.slides ?? []).filter((s) => slideFiles(s).includes(hit.file)).map((s) => s.deckIndex);
+  }
+  function query() {
+    return el(".find-input").value;
+  }
+  function base() {
+    return { query: query(), files: files(), ...opts };
+  }
+  async function search() {
+    const q = query();
+    if (!q) {
+      hits = [];
+      renderResults();
+      return;
+    }
+    const result = await request({ action: "find", ...base() });
+    if (q !== query()) return;
+    if (!result.ok) {
+      hits = [];
+      renderResults(result.error ?? "search failed");
+      return;
+    }
+    hits = result.hits;
+    if (scope === "slide") {
+      const cur = currentSlide()?.deckIndex;
+      hits = hits.filter((h2) => h2.kind !== "deck" || h2.slide === cur);
+    }
+    active = Math.min(active, hits.length - 1);
+    renderResults();
+  }
+  function schedule() {
+    window.clearTimeout(timer2);
+    timer2 = window.setTimeout(() => void search(), 220);
+  }
+  function fileLabel(path) {
+    const root2 = ed.model?.projectDir ?? "";
+    return path.startsWith(root2) ? path.slice(root2.length + 1) : path;
+  }
+  function renderResults(error) {
+    const list2 = el(".find-results");
+    const status = el(".find-status");
+    clear(list2);
+    if (error) {
+      status.textContent = error;
+      return;
+    }
+    if (!query()) {
+      status.textContent = "";
+      return;
+    }
+    const slides = new Set(hits.flatMap(slidesOf));
+    status.textContent = hits.length ? `${hits.length}${hits.length >= 500 ? "+" : ""} match${hits.length === 1 ? "" : "es"} on ${slides.size} slide${slides.size === 1 ? "" : "s"}` : "No matches";
+    let lastGroup = "";
+    hits.forEach((hit, i) => {
+      const on2 = slidesOf(hit);
+      const first = on2[0];
+      const slide = first != null ? ed.model?.slides[first] : null;
+      const group = slide != null ? `${first + 1} \xB7 ${slide.title ?? slide.id ?? ""}` : fileLabel(hit.file);
+      if (group !== lastGroup) {
+        list2.append(h("div", { class: "find-group" }, group));
+        lastGroup = group;
+      }
+      const where = hit.kind === "deck" ? "deck.py" : `${fileLabel(hit.file)}${on2.length > 1 ? ` \xB7 ${on2.length} slides` : ""}`;
+      const row3 = h(
+        "button",
+        {
+          type: "button",
+          class: `find-hit${i === active ? " on" : ""}`,
+          title: where,
+          onclick: () => goTo(i)
+        },
+        h(
+          "span",
+          { class: "find-snippet" },
+          hit.before,
+          h("mark", {}, hit.match),
+          hit.after
+        ),
+        h("span", { class: "find-where" }, where)
+      );
+      list2.append(row3);
+    });
+  }
+  function goTo(i) {
+    const hit = hits[i];
+    if (!hit) return;
+    active = i;
+    renderResults();
+    const on2 = slidesOf(hit);
+    const cur = currentSlide()?.deckIndex;
+    const target = cur != null && on2.includes(cur) ? cur : on2[0];
+    if (target != null) gotoSlide(target);
+    if (hit.kind === "svg" && hit.loc != null) {
+      const slide = currentSlide();
+      const key = slide?.sources?.findIndex((s) => s.path === hit.file) ?? -1;
+      const node = key >= 0 ? slideRoot()?.querySelector(`[data-ink="${key}:${hit.loc}"]`) : null;
+      if (node && selectable(node)) select([node]);
+    }
+    panel.querySelector(".find-hit.on")?.scrollIntoView({ block: "nearest" });
+  }
+  async function replace(all) {
+    const q = query();
+    if (!q) return;
+    if (!all && active < 0) {
+      goTo(0);
+      return;
+    }
+    const replacement = el(".replace-input").value;
+    const hit = hits[active];
+    if (all && hits.length > 1) {
+      const n = hits.length;
+      if (!window.confirm(
+        `Replace ${n} matches of \u201C${q}\u201D with \u201C${replacement}\u201D?`
+      )) {
+        return;
+      }
+    }
+    const result = await edit({
+      action: "replace",
+      replacement,
+      ...base(),
+      only: all ? void 0 : { file: hit.file, index: hit.index }
+    });
+    if (result.ok) {
+      const n = result.replaced;
+      toast(`Replaced ${n} match${n === 1 ? "" : "es"}`);
+    }
+  }
+  function toggle(name, btn) {
+    opts[name] = !opts[name];
+    btn.classList.toggle("on", opts[name]);
+    schedule();
+  }
+  function build() {
+    const flag = (label3, title, name) => {
+      const b = h(
+        "button",
+        { type: "button", class: "find-flag", title },
+        label3
+      );
+      b.addEventListener("click", () => toggle(name, b));
+      return b;
+    };
+    const find = h("input", {
+      type: "text",
+      class: "find-input",
+      placeholder: "Find in slides, notes and deck.py",
+      spellcheck: "false"
+    });
+    const repl = h("input", {
+      type: "text",
+      class: "replace-input",
+      placeholder: "Replace with",
+      spellcheck: "false"
+    });
+    const where = h("select", { class: "find-scope", title: "Where to look" });
+    where.append(
+      h("option", { value: "deck" }, "All slides"),
+      h("option", { value: "slide" }, "This slide")
+    );
+    where.addEventListener("change", () => {
+      scope = where.value === "slide" ? "slide" : "deck";
+      schedule();
+    });
+    find.addEventListener("input", () => {
+      active = -1;
+      schedule();
+    });
+    find.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (hits.length)
+          goTo(
+            (active + (e.shiftKey ? -1 : 1) + hits.length) % hits.length
+          );
+      }
+    });
+    repl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        void replace(e.ctrlKey || e.metaKey);
+      }
+    });
+    panel.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") closeFind();
+    });
+    panel.append(
+      h(
+        "div",
+        { class: "find-row" },
+        find,
+        flag("Aa", "Match case", "matchCase"),
+        flag("ab", "Whole words", "wholeWord"),
+        flag(".*", "Regular expression", "regex"),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "find-close",
+            title: "Close (Esc)",
+            onclick: closeFind
+          },
+          "\xD7"
+        )
+      ),
+      h(
+        "div",
+        { class: "find-row" },
+        repl,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            title: "Replace this match (Enter)",
+            onclick: () => void replace(false)
+          },
+          "Replace"
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            title: "Replace every match (Ctrl+Enter)",
+            onclick: () => void replace(true)
+          },
+          "All"
+        )
+      ),
+      h(
+        "div",
+        { class: "find-row" },
+        where,
+        h("span", { class: "find-status" })
+      ),
+      h("div", { class: "find-results" })
+    );
+  }
+  function openFind(replaceMode = false) {
+    if (!panel.childElementCount) build();
+    panel.hidden = false;
+    const input = el(
+      replaceMode ? ".replace-input" : ".find-input"
+    );
+    const picked = window.getSelection()?.toString().trim();
+    if (picked && !picked.includes("\n")) {
+      el(".find-input").value = picked;
+    }
+    input.focus();
+    input.select();
+    schedule();
+  }
+  function closeFind() {
+    panel.hidden = true;
+  }
+  function initFind() {
+    document.getElementById("btn-find")?.addEventListener("click", () => openFind());
+    on("model", () => {
+      if (!panel.hidden && query()) schedule();
+    });
+  }
+
   // src/ts/editor/notes.ts
   var area = document.getElementById("notes-input");
   var label = document.getElementById("notes-file");
-  var timer2 = 0;
+  var timer3 = 0;
   var slideIndex = -1;
   var sent = "";
   var burst = "";
   async function save() {
-    window.clearTimeout(timer2);
+    window.clearTimeout(timer3);
     const slide = ed.model?.slides[slideIndex];
     if (!slide || area.value === sent) return;
     const before = sent;
@@ -3404,7 +3691,7 @@
     );
     if (!result.ok) {
       sent = before;
-      timer2 = window.setTimeout(() => void save(), 800);
+      timer3 = window.setTimeout(() => void save(), 800);
     }
   }
   function load() {
@@ -3422,8 +3709,8 @@
       burst = `notes-${Date.now()}`;
     });
     area.addEventListener("input", () => {
-      window.clearTimeout(timer2);
-      timer2 = window.setTimeout(() => void save(), 600);
+      window.clearTimeout(timer3);
+      timer3 = window.setTimeout(() => void save(), 600);
     });
     area.addEventListener("blur", () => void save());
     area.addEventListener("keydown", (e) => e.stopPropagation());
@@ -3454,65 +3741,65 @@
     a: "Link"
   };
   var collapsed = /* @__PURE__ */ new Set();
-  function label2(el) {
-    if (isZone(el)) return `Zone \xB7 ${zoneName(el)}`;
-    const id = el.getAttribute("id");
-    const kind = el.hasAttribute("data-ink-layer") ? "Layer" : NAMES[el.localName] ?? el.localName;
-    if (el.localName === "text") {
-      const t = (el.textContent ?? "").trim().replace(/\s+/g, " ");
+  function label2(el2) {
+    if (isZone(el2)) return `Zone \xB7 ${zoneName(el2)}`;
+    const id = el2.getAttribute("id");
+    const kind = el2.hasAttribute("data-ink-layer") ? "Layer" : NAMES[el2.localName] ?? el2.localName;
+    if (el2.localName === "text") {
+      const t = (el2.textContent ?? "").trim().replace(/\s+/g, " ");
       return id ? `${id} \xB7 \u201C${t.slice(0, 24)}\u201D` : `\u201C${t.slice(0, 32)}\u201D`;
     }
     return id ?? kind;
   }
-  function isHidden(el) {
-    return el.style?.display === "none" || el.getAttribute("display") === "none";
+  function isHidden(el2) {
+    return el2.style?.display === "none" || el2.getAttribute("display") === "none";
   }
-  function children(el) {
-    return [...el.children].filter(
+  function children(el2) {
+    return [...el2.children].filter(
       (c) => c.hasAttribute("data-ink") && !["title", "desc", "defs", "style", "metadata"].includes(
         c.localName
       ) && // A cropped picture's own <image> is part of the picture.
-      el.localName !== "svg"
+      el2.localName !== "svg"
     );
   }
-  function selFor(el) {
+  function selFor(el2) {
     return {
-      el,
-      key: keyOf(el),
-      loc: el.getAttribute("data-ink") ?? ""
+      el: el2,
+      key: keyOf(el2),
+      loc: el2.getAttribute("data-ink") ?? ""
     };
   }
-  async function toggleHidden2(el) {
+  async function toggleHidden2(el2) {
     await sendSvgOps(
       [
         {
-          sel: selFor(el),
+          sel: selFor(el2),
           ops: [
             {
               kind: "style",
-              loc: el.getAttribute("data-ink") ?? "",
-              set: { display: isHidden(el) ? null : "none" }
+              loc: el2.getAttribute("data-ink") ?? "",
+              set: { display: isHidden(el2) ? null : "none" }
             }
           ]
         }
       ],
-      isHidden(el) ? "Show" : "Hide"
+      isHidden(el2) ? "Show" : "Hide"
     );
   }
-  async function toggleLocked(el) {
-    const own = el.hasAttribute("data-ink-locked");
-    if (!own && isLocked(el)) {
+  async function toggleLocked(el2) {
+    const own = el2.hasAttribute("data-ink-locked");
+    if (!own && isLocked(el2)) {
       toast("It is inside a locked layer or group: unlock that instead");
       return;
     }
     await sendSvgOps(
       [
         {
-          sel: selFor(el),
+          sel: selFor(el2),
           ops: [
             {
               kind: "lock",
-              loc: el.getAttribute("data-ink") ?? "",
+              loc: el2.getAttribute("data-ink") ?? "",
               locked: !own
             }
           ]
@@ -3521,10 +3808,10 @@
       own ? "Unlock" : "Lock"
     );
   }
-  function rename(el, nameEl) {
-    const src = sourceOf(keyOf(el));
-    if (!src?.writable || isZone(el)) return;
-    const id = el.getAttribute("id") ?? "";
+  function rename(el2, nameEl) {
+    const src = sourceOf(keyOf(el2));
+    if (!src?.writable || isZone(el2)) return;
+    const id = el2.getAttribute("id") ?? "";
     const input = h("input", { type: "text", class: "obj-rename", value: id });
     nameEl.replaceWith(input);
     input.focus();
@@ -3542,7 +3829,7 @@
           ops: [
             {
               kind: "id",
-              loc: el.getAttribute("data-ink"),
+              loc: el2.getAttribute("data-ink"),
               id: v,
               from: id || void 0
             }
@@ -3559,42 +3846,42 @@
     });
     input.addEventListener("blur", () => finish(true));
   }
-  function pickFromList(el) {
-    if (isLocked(el)) {
+  function pickFromList(el2) {
+    if (isLocked(el2)) {
       toast("Locked: unlock it to select it");
       return;
     }
-    const parent = el.parentElement;
-    if (parent && !el.hasAttribute("data-ink-top") && parent.localName === "g" && !parent.hasAttribute("data-ink-layer")) {
+    const parent = el2.parentElement;
+    if (parent && !el2.hasAttribute("data-ink-top") && parent.localName === "g" && !parent.hasAttribute("data-ink-layer")) {
       enterGroup(parent);
-    } else if (ed.scope && !ed.scope.contains(el)) {
+    } else if (ed.scope && !ed.scope.contains(el2)) {
       enterGroup(null);
     }
-    if (!selectable(el)) {
+    if (!selectable(el2)) {
       toast(
         ed.layoutMode ? "This object cannot be edited here" : "From a layout or overlay: use Edit layout to change it"
       );
       return;
     }
-    select([el]);
+    select([el2]);
   }
-  function row(el, depth) {
-    const loc = el.getAttribute("data-ink") ?? "";
-    const src = sourceOf(keyOf(el));
-    const writable = !!src?.writable && (canTransform(el) || ed.layoutMode || isOwnObject(el));
-    const kids = children(el);
+  function row(el2, depth) {
+    const loc = el2.getAttribute("data-ink") ?? "";
+    const src = sourceOf(keyOf(el2));
+    const writable = !!src?.writable && (canTransform(el2) || ed.layoutMode || isOwnObject(el2));
+    const kids = children(el2);
     const group = kids.length > 0;
     const open = group && !collapsed.has(loc);
-    const selected = ed.selection.some((s) => s.el === el);
-    const locked = el.hasAttribute("data-ink-locked");
-    const hidden = isHidden(el);
-    const name = h("span", { class: "obj-name" }, label2(el));
+    const selected = ed.selection.some((s) => s.el === el2);
+    const locked = el2.hasAttribute("data-ink-locked");
+    const hidden = isHidden(el2);
+    const name = h("span", { class: "obj-name" }, label2(el2));
     const out = [];
     const item = h(
       "div",
       {
         class: `obj-row${selected ? " on" : ""}${writable ? "" : " foreign"}${hidden ? " hidden-obj" : ""}`,
-        title: src ? `${label2(el)} \xB7 ${src.rel}` : label2(el),
+        title: src ? `${label2(el2)} \xB7 ${src.rel}` : label2(el2),
         style: `padding-left:${8 + depth * 14}px`
       },
       h(
@@ -3621,7 +3908,7 @@
           title: hidden ? "Hidden: click to show" : "Hide (on the slide and in the presentation)",
           onclick: (e) => {
             e.stopPropagation();
-            void toggleHidden2(el);
+            void toggleHidden2(el2);
           }
         },
         icon(hidden ? "eyeOff" : "eye", 14)
@@ -3634,15 +3921,15 @@
           title: locked ? "Locked: click to unlock" : "Lock (cannot be selected on the slide)",
           onclick: (e) => {
             e.stopPropagation();
-            void toggleLocked(el);
+            void toggleLocked(el2);
           }
         },
         icon(locked ? "lock" : "unlock", 14)
       ) : h("span", { class: "obj-badge" }, src?.role ?? "")
     );
-    item.addEventListener("click", () => pickFromList(el));
-    item.addEventListener("dblclick", () => rename(el, name));
-    item.addEventListener("mouseenter", () => setHover(el));
+    item.addEventListener("click", () => pickFromList(el2));
+    item.addEventListener("dblclick", () => rename(el2, name));
+    item.addEventListener("mouseenter", () => setHover(el2));
     item.addEventListener("mouseleave", () => setHover(null));
     out.push(item);
     if (open) {
@@ -3650,8 +3937,8 @@
     }
     return out;
   }
-  function isOwnObject(el) {
-    const src = sourceOf(keyOf(el));
+  function isOwnObject(el2) {
+    const src = sourceOf(keyOf(el2));
     return !!src && src.role === "slide" && src.writable;
   }
   function renderObjects() {
@@ -3659,8 +3946,8 @@
     clear(host3);
     const svg = slideRoot();
     if (!svg) return;
-    const top = [...svg.querySelectorAll("[data-ink-top], [data-ink-layer]")].filter((el) => {
-      const parent = el.parentElement?.closest(
+    const top = [...svg.querySelectorAll("[data-ink-top], [data-ink-layer]")].filter((el2) => {
+      const parent = el2.parentElement?.closest(
         "[data-ink-top], [data-ink-layer]"
       );
       return !parent || !svg.contains(parent);
@@ -3676,7 +3963,7 @@
         "Top of the stack first. Middle-click (or Alt+click) on the slide steps through overlapping objects."
       )
     );
-    for (const el of top) host3.append(...row(el, 0));
+    for (const el2 of top) host3.append(...row(el2, 0));
   }
   function showTab(tab) {
     for (const b of tabs.querySelectorAll("[data-tab]")) {
@@ -3707,7 +3994,7 @@
   }
 
   // src/ts/editor/props.ts
-  var panel = document.getElementById("props-body");
+  var panel2 = document.getElementById("props-body");
   function section(title, ...body2) {
     return h(
       "section",
@@ -3724,19 +4011,19 @@
       ...controls
     );
   }
-  function numberInput(value, commit, opts = {}) {
+  function numberInput(value, commit, opts2 = {}) {
     const input = h("input", {
       type: "number",
       class: "num",
-      step: opts.step ?? 1,
-      min: opts.min ?? null,
-      placeholder: opts.placeholder ?? "",
+      step: opts2.step ?? 1,
+      min: opts2.min ?? null,
+      placeholder: opts2.placeholder ?? "",
       value: value == null ? "" : String(Math.round(value * 100) / 100)
     });
     const fire = () => {
       const v = parseFloat(input.value);
       if (Number.isFinite(v)) commit(v);
-      else if (input.value.trim() === "") opts.onClear?.();
+      else if (input.value.trim() === "") opts2.onClear?.();
     };
     input.addEventListener("change", fire);
     input.addEventListener("keydown", (e) => {
@@ -3780,20 +4067,20 @@
           "after-previous": "After previous"
         };
         const v = String(value ?? f.default ?? "on-click");
-        const opts = f.choices.map((c) => ({
+        const opts2 = f.choices.map((c) => ({
           value: c,
           label: labels[c] ?? c
         }));
         if (!f.choices.includes(v))
-          opts.push({ value: v, label: `At step ${v}` });
-        return selectInput(opts, v, commit);
+          opts2.push({ value: v, label: `At step ${v}` });
+        return selectInput(opts2, v, commit);
       }
       case "enum":
       case "easing": {
         const v = String(value ?? f.default ?? "");
-        const opts = f.choices.map((c) => ({ value: c, label: c }));
-        if (v && !f.choices.includes(v)) opts.push({ value: v, label: v });
-        return selectInput(opts, v, commit);
+        const opts2 = f.choices.map((c) => ({ value: c, label: c }));
+        if (v && !f.choices.includes(v)) opts2.push({ value: v, label: v });
+        return selectInput(opts2, v, commit);
       }
       case "bool": {
         const cb = h("input", { type: "checkbox" });
@@ -3888,7 +4175,7 @@
         continue;
       }
       if (f.name === "muted") {
-        const opts = [
+        const opts2 = [
           { value: "auto", label: "When autoplaying" },
           { value: "on", label: "Always" },
           { value: "off", label: "Never" }
@@ -3897,7 +4184,7 @@
           row2(
             label3,
             selectInput(
-              opts,
+              opts2,
               String(values.muted ?? "auto"),
               (v) => commit("muted", v)
             )
@@ -3958,7 +4245,7 @@
     const root2 = slideRoot();
     const parent = root2?.getAttribute("inkflow:parent") ?? null;
     const currentLayout = slide.srcShared ? slide.src.replace(/\.svg$/, "") : parent;
-    panel.append(
+    panel2.append(
       section(
         "Slide",
         row2(
@@ -4021,12 +4308,12 @@
         )
       )
     );
-    panel.append(transitionSection(slide.transition, di));
-    panel.append(animationList(slide.animations, slide.animationsEditable, di));
-    const files = h("div", { class: "files" });
+    panel2.append(transitionSection(slide.transition, di));
+    panel2.append(animationList(slide.animations, slide.animationsEditable, di));
+    const files2 = h("div", { class: "files" });
     const addFile = (label3, rel) => {
       if (rel)
-        files.append(
+        files2.append(
           h(
             "div",
             { class: "file" },
@@ -4039,9 +4326,9 @@
     addFile("Layout", slide.srcShared ? slide.srcRel : null);
     addFile("Markdown", slide.md?.rel);
     addFile("Notes", slide.notes.rel);
-    panel.append(section("Files", files));
+    panel2.append(section("Files", files2));
     if (slide.srcShared) {
-      panel.append(
+      panel2.append(
         h(
           "p",
           { class: "hint" },
@@ -4054,7 +4341,7 @@
     const model = ed.model;
     const types = model.transitionTypes;
     const value = current?.type ?? "";
-    const opts = [
+    const opts2 = [
       { value: "", label: `Deck default (${model.defaultTransition.type})` },
       ...types.map((t) => ({ value: t.type, label: t.type }))
     ];
@@ -4062,7 +4349,7 @@
     const body2 = [
       row2(
         "Type",
-        selectInput(opts, value, (v) => {
+        selectInput(opts2, value, (v) => {
           if (!v) send(null);
           else send({ type: v, fields: {} });
         })
@@ -4158,10 +4445,10 @@
   }
   function selectById(id) {
     const svg = slideRoot();
-    const el = svg?.querySelector(`[id="${CSS.escape(id)}"]`);
-    if (el) {
+    const el2 = svg?.querySelector(`[id="${CSS.escape(id)}"]`);
+    if (el2) {
       enterGroup(null);
-      select([el]);
+      select([el2]);
     } else toast(`#${id} is not on this slide`, "error");
   }
   function elementAnimations(sel) {
@@ -4280,8 +4567,8 @@
     use: "Clone",
     foreignObject: "Embedded content"
   };
-  function tokenOf(el, prop) {
-    for (const c of el.classList) {
+  function tokenOf(el2, prop) {
+    for (const c of el2.classList) {
       const m = c.match(/^inkflow-(fill|stroke)-(.+)$/);
       if (m && m[1] === prop) return m[2];
     }
@@ -4334,13 +4621,13 @@
     );
   }
   function renderObjectPanel(sel) {
-    const el = sel.el;
+    const el2 = sel.el;
     const src = sourceOf(sel.key);
-    const zone = isZone(el);
-    const movable = canTransform(el);
-    const id = el.getAttribute("id") ?? "";
-    const tag = zone ? `Zone \xB7 ${zoneName(el)}` : TAG_NAMES[el.localName] ?? el.localName;
-    panel.append(
+    const zone = isZone(el2);
+    const movable = canTransform(el2);
+    const id = el2.getAttribute("id") ?? "";
+    const tag = zone ? `Zone \xB7 ${zoneName(el2)}` : TAG_NAMES[el2.localName] ?? el2.localName;
+    panel2.append(
       section(
         tag,
         row2(
@@ -4376,7 +4663,7 @@
     );
     if (zone) {
       const slide = currentSlide();
-      const name = zoneName(el);
+      const name = zoneName(el2);
       const origin = slide.zoneOrigins?.[name];
       const media = slide.zones[name];
       const where = origin === "deck" ? "deck.py zones=" : origin === "md-file" ? `${slide.md?.rel ?? "Markdown"} (whole file)` : slide.md?.rel ? `${slide.md.rel} \xB7 ::${name}::` : "deck.py";
@@ -4411,12 +4698,12 @@
           )
         );
       }
-      panel.append(section("Content", ...body2));
+      panel2.append(section("Content", ...body2));
       if (media && (media.kind === "image" || media.kind === "video")) {
-        panel.append(mediaSection(slide, name, media));
+        panel2.append(mediaSection(slide, name, media));
       }
     }
-    if (movable) panel.append(geometrySection([sel]));
+    if (movable) panel2.append(geometrySection([sel]));
     if (!zone && src?.writable && (movable || ed.layoutMode)) {
       const fills = ![
         "line",
@@ -4424,15 +4711,15 @@
         "image",
         "foreignObject",
         "g"
-      ].includes(el.localName);
-      const strokeWidth = parseFloat(getComputedStyle(el).strokeWidth) || 0;
-      const opacity = parseFloat(getComputedStyle(el).opacity);
-      panel.append(
+      ].includes(el2.localName);
+      const strokeWidth = parseFloat(getComputedStyle(el2).strokeWidth) || 0;
+      const opacity = parseFloat(getComputedStyle(el2).opacity);
+      panel2.append(
         section(
           "Style",
-          fills && !pictureOf(el) && paintRow([sel], "fill"),
-          !pictureOf(el) && el.localName !== "g" && paintRow([sel], "stroke"),
-          !pictureOf(el) && el.localName !== "g" && row2(
+          fills && !pictureOf(el2) && paintRow([sel], "fill"),
+          !pictureOf(el2) && el2.localName !== "g" && paintRow([sel], "stroke"),
+          !pictureOf(el2) && el2.localName !== "g" && row2(
             "Stroke width",
             numberInput(
               strokeWidth,
@@ -4466,10 +4753,10 @@
               return r;
             })()
           ),
-          el.localName === "rect" && row2(
+          el2.localName === "rect" && row2(
             "Corner radius",
             numberInput(
-              parseFloat(el.getAttribute("rx") ?? "0") || 0,
+              parseFloat(el2.getAttribute("rx") ?? "0") || 0,
               (v) => {
                 void sendSvgOps(
                   [
@@ -4494,16 +4781,16 @@
           )
         )
       );
-      if (el.localName === "text") panel.append(textSection(sel));
+      if (el2.localName === "text") panel2.append(textSection(sel));
     }
-    if (!zone && src?.writable && pictureOf(el)) {
-      panel.append(pictureSection(sel));
+    if (!zone && src?.writable && pictureOf(el2)) {
+      panel2.append(pictureSection(sel));
     }
     if (!zone && src?.writable && (movable || ed.layoutMode)) {
-      panel.append(detailsSection(sel));
+      panel2.append(detailsSection(sel));
     }
-    if (movable) panel.append(arrangeSection([sel]));
-    if (id || zone || src?.writable) panel.append(elementAnimations(sel));
+    if (movable) panel2.append(arrangeSection([sel]));
+    if (id || zone || src?.writable) panel2.append(elementAnimations(sel));
   }
   var FITS = [
     { value: "contain", label: "Fit inside", par: "xMidYMid meet" },
@@ -4572,8 +4859,8 @@
       )
     );
   }
-  function linkOf(el) {
-    const a = el.parentElement;
+  function linkOf(el2) {
+    const a = el2.parentElement;
     if (a?.localName !== "a") return "";
     const slide = a.getAttribute("data-inkflow-slide");
     if (slide) return `slide:${slide}`;
@@ -4636,9 +4923,9 @@
     );
   }
   function textSection(sel) {
-    const el = sel.el;
-    const cs = getComputedStyle(el);
-    const spans = [...el.querySelectorAll("tspan")];
+    const el2 = sel.el;
+    const cs = getComputedStyle(el2);
+    const spans = [...el2.querySelectorAll("tspan")];
     const setAll = (set, label3) => {
       const plans = [
         { sel, ops: [{ kind: "style", loc: sel.loc, set }] }
@@ -4888,10 +5175,10 @@
   function renderMultiPanel() {
     const sels = ed.selection;
     const movable = sels.every((s) => canTransform(s.el));
-    panel.append(section(`${sels.length} objects`));
+    panel2.append(section(`${sels.length} objects`));
     if (movable) {
       const a = (label3, title, how) => button(label3, title, () => alignSelection(how));
-      panel.append(
+      panel2.append(
         section(
           "Align",
           h(
@@ -4912,12 +5199,12 @@
           )
         )
       );
-      panel.append(geometrySection(sels));
+      panel2.append(geometrySection(sels));
       const styleable = sels.filter(
         (s) => !isZone(s.el) && s.el.localName !== "image"
       );
       if (styleable.length === sels.length) {
-        panel.append(
+        panel2.append(
           section(
             "Style",
             paintRow(sels, "fill"),
@@ -4925,15 +5212,15 @@
           )
         );
       }
-      panel.append(arrangeSection(sels));
+      panel2.append(arrangeSection(sels));
     }
   }
   function renderProps() {
-    if (document.activeElement && panel.contains(document.activeElement)) {
+    if (document.activeElement && panel2.contains(document.activeElement)) {
       refreshOnBlur = true;
       return;
     }
-    clear(panel);
+    clear(panel2);
     if (!ed.model) return;
     if (ed.selection.length === 0) renderSlidePanel();
     else if (ed.selection.length === 1) renderObjectPanel(ed.selection[0]);
@@ -4943,9 +5230,9 @@
   function initProps() {
     on("selection", renderProps);
     on("render", renderProps);
-    panel.addEventListener("focusout", () => {
+    panel2.addEventListener("focusout", () => {
       window.setTimeout(() => {
-        if (refreshOnBlur && !panel.contains(document.activeElement)) {
+        if (refreshOnBlur && !panel2.contains(document.activeElement)) {
           refreshOnBlur = false;
           renderProps();
         }
@@ -4958,11 +5245,11 @@
   };
   var COLOR_CLASS = /^inkflow-color-[\w-]+$/;
   var RAW_INLINE = /* @__PURE__ */ new Set(["u", "mark", "sub", "sup"]);
-  function attrs(el) {
-    return [...el.attributes].map((a) => a.name);
+  function attrs(el2) {
+    return [...el2.attributes].map((a) => a.name);
   }
-  function plain(el, allowed = []) {
-    return attrs(el).every(
+  function plain(el2, allowed = []) {
+    return attrs(el2).every(
       (a) => allowed.includes(a) || a === "style" || a === "dir"
     );
   }
@@ -4991,51 +5278,51 @@
       );
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return "";
-    const el = node;
-    const tag = el.localName;
+    const el2 = node;
+    const tag = el2.localName;
     switch (tag) {
       case "strong":
       case "b":
-        if (!plain(el)) throw new Unsupported(tag);
-        return wrap(inline(el), "**");
+        if (!plain(el2)) throw new Unsupported(tag);
+        return wrap(inline(el2), "**");
       case "em":
       case "i":
-        if (!plain(el)) throw new Unsupported(tag);
-        return wrap(inline(el), "*");
+        if (!plain(el2)) throw new Unsupported(tag);
+        return wrap(inline(el2), "*");
       case "s":
       case "del":
       case "strike":
-        if (!plain(el)) throw new Unsupported(tag);
-        return wrap(inline(el), "~~");
+        if (!plain(el2)) throw new Unsupported(tag);
+        return wrap(inline(el2), "~~");
       case "code":
-        if (!plain(el)) throw new Unsupported(tag);
-        return codeSpan(el.textContent ?? "");
+        if (!plain(el2)) throw new Unsupported(tag);
+        return codeSpan(el2.textContent ?? "");
       case "br":
         return "\\\n";
       case "a": {
-        const slide = el.getAttribute("data-inkflow-slide");
-        if (slide && plain(el, ["data-inkflow-slide", "title"])) {
-          return `[${inline(el)}](slide:${slide})`;
+        const slide = el2.getAttribute("data-inkflow-slide");
+        if (slide && plain(el2, ["data-inkflow-slide", "title"])) {
+          return `[${inline(el2)}](slide:${slide})`;
         }
-        if (!plain(el, ["href", "title"])) throw new Unsupported(tag);
-        const href = el.getAttribute("href") ?? "";
-        const title = el.getAttribute("title");
+        if (!plain(el2, ["href", "title"])) throw new Unsupported(tag);
+        const href = el2.getAttribute("href") ?? "";
+        const title = el2.getAttribute("title");
         const t = title ? ` "${title.replace(/"/g, '\\"')}"` : "";
-        return `[${inline(el)}](${href.replace(/[()\s]/g, encodeURIComponent)}${t})`;
+        return `[${inline(el2)}](${href.replace(/[()\s]/g, encodeURIComponent)}${t})`;
       }
       case "span": {
-        const cls = el.getAttribute("class") ?? "";
-        if (!cls && plain(el)) return inline(el);
-        if (COLOR_CLASS.test(cls) && plain(el, ["class"])) {
-          return `<span class="${cls}">${inline(el)}</span>`;
+        const cls = el2.getAttribute("class") ?? "";
+        if (!cls && plain(el2)) return inline(el2);
+        if (COLOR_CLASS.test(cls) && plain(el2, ["class"])) {
+          return `<span class="${cls}">${inline(el2)}</span>`;
         }
         throw new Unsupported(`span.${cls}`);
       }
       case "font":
-        return inline(el);
+        return inline(el2);
       default:
-        if (RAW_INLINE.has(tag) && plain(el)) {
-          return `<${tag}>${inline(el)}</${tag}>`;
+        if (RAW_INLINE.has(tag) && plain(el2)) {
+          return `<${tag}>${inline(el2)}</${tag}>`;
         }
         throw new Unsupported(tag);
     }
@@ -5095,11 +5382,11 @@
       const own = [];
       const nested = [];
       for (const c of li.childNodes) {
-        const el = c;
-        if (c.nodeType === Node.ELEMENT_NODE && /^[ou]l$/.test(el.localName)) {
-          nested.push(listMarkdown(el));
-        } else if (c.nodeType === Node.ELEMENT_NODE && (el.localName === "p" || el.localName === "div")) {
-          own.push(inline(el));
+        const el2 = c;
+        if (c.nodeType === Node.ELEMENT_NODE && /^[ou]l$/.test(el2.localName)) {
+          nested.push(listMarkdown(el2));
+        } else if (c.nodeType === Node.ELEMENT_NODE && (el2.localName === "p" || el2.localName === "div")) {
+          own.push(inline(el2));
         } else {
           own.push(inlineNode(c));
         }
@@ -5115,32 +5402,32 @@ ${pad}`);
     }
     return lines.join("\n");
   }
-  function blockMarkdown(el) {
-    const tag = el.localName;
+  function blockMarkdown(el2) {
+    const tag = el2.localName;
     if (/^h[1-6]$/.test(tag)) {
-      if (!plain(el)) throw new Unsupported(tag);
-      return `${"#".repeat(Number(tag[1]))} ${inline(el).trim()}`;
+      if (!plain(el2)) throw new Unsupported(tag);
+      return `${"#".repeat(Number(tag[1]))} ${inline(el2).trim()}`;
     }
     switch (tag) {
       case "p":
       case "div":
-        if (!plain(el)) throw new Unsupported(tag);
-        if ([...el.children].some((c) => BLOCK.has(c.localName))) {
-          return blocks(el);
+        if (!plain(el2)) throw new Unsupported(tag);
+        if ([...el2.children].some((c) => BLOCK.has(c.localName))) {
+          return blocks(el2);
         }
-        return escapeLineStart(inline(el).replace(/\\\n$/, "").trim());
+        return escapeLineStart(inline(el2).replace(/\\\n$/, "").trim());
       case "ul":
       case "ol":
-        if (!plain(el, ["start"])) throw new Unsupported(tag);
-        return listMarkdown(el);
+        if (!plain(el2, ["start"])) throw new Unsupported(tag);
+        return listMarkdown(el2);
       case "blockquote":
-        if (!plain(el)) throw new Unsupported(tag);
-        return blocks(el).split("\n").map((l) => l ? `> ${l}` : ">").join("\n");
+        if (!plain(el2)) throw new Unsupported(tag);
+        return blocks(el2).split("\n").map((l) => l ? `> ${l}` : ">").join("\n");
       case "hr":
         return "---";
       case "table":
-        if (!plain(el)) throw new Unsupported(tag);
-        return tableMarkdown(el);
+        if (!plain(el2)) throw new Unsupported(tag);
+        return tableMarkdown(el2);
       default:
         throw new Unsupported(tag);
     }
@@ -5161,12 +5448,12 @@ ${pad}`);
     };
     for (const node of root2.childNodes) {
       if (isBlank(node)) continue;
-      const el = node;
-      if (node.nodeType === Node.ELEMENT_NODE && BLOCK.has(el.localName)) {
+      const el2 = node;
+      if (node.nodeType === Node.ELEMENT_NODE && BLOCK.has(el2.localName)) {
         flush();
-        const md = blockMarkdown(el);
+        const md = blockMarkdown(el2);
         if (md.trim()) out.push(md);
-      } else if (node.nodeType === Node.ELEMENT_NODE && el.localName === "br") {
+      } else if (node.nodeType === Node.ELEMENT_NODE && el2.localName === "br") {
         flush();
       } else {
         run += inlineNode(node);
@@ -5194,41 +5481,41 @@ ${pad}`);
     clear(dock);
     document.body.classList.remove("editing-zone");
   }
-  var active = null;
+  var active2 = null;
   function isEditingText() {
-    return active !== null;
+    return active2 !== null;
   }
   async function finishTextEdit() {
-    const a = active;
+    const a = active2;
     if (!a) return;
-    active = null;
+    active2 = null;
     clear(layer);
     closeDock();
     await a.commit();
   }
   function cancel() {
-    const a = active;
+    const a = active2;
     if (!a) return;
-    active = null;
+    active2 = null;
     clear(layer);
     closeDock();
     a.cancel();
   }
-  function linesOf(el) {
-    const spans = [...el.children].filter((c) => c.localName === "tspan");
-    const loose = [...el.childNodes].some(
+  function linesOf(el2) {
+    const spans = [...el2.children].filter((c) => c.localName === "tspan");
+    const loose = [...el2.childNodes].some(
       (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim()
     );
-    if (!spans.length || loose) return [el.textContent ?? ""];
+    if (!spans.length || loose) return [el2.textContent ?? ""];
     return spans.map((s) => s.textContent ?? "");
   }
-  function editSvgText(el, sourcePath, hash, loc) {
+  function editSvgText(el2, sourcePath, hash, loc) {
     void finishTextEdit();
-    const rect = el.getBoundingClientRect();
-    const style = getComputedStyle(el);
-    const ctm = el.getScreenCTM();
+    const rect = el2.getBoundingClientRect();
+    const style = getComputedStyle(el2);
+    const ctm = el2.getScreenCTM();
     const fontPx = parseFloat(style.fontSize) * (ctm ? Math.hypot(ctm.a, ctm.b) : 1);
-    const original = linesOf(el);
+    const original = linesOf(el2);
     const area2 = h("textarea", {
       class: "svg-text-editor",
       spellcheck: "true"
@@ -5255,18 +5542,18 @@ ${pad}`);
       area2.style.width = `${Math.max(area2.scrollWidth + 8, rect.width + 24)}px`;
     };
     area2.addEventListener("input", autosize);
-    el.style.visibility = "hidden";
+    el2.style.visibility = "hidden";
     layer.append(area2);
     autosize();
     area2.focus();
     area2.select();
-    active = {
+    active2 = {
       commit: async () => {
-        el.style.visibility = "";
+        el2.style.visibility = "";
         const lines = area2.value.replace(/\r/g, "").split("\n");
         if (lines.join("\n") === original.join("\n")) return;
-        if (lines.length === 1 && !el.querySelector("tspan")) {
-          el.textContent = lines[0];
+        if (lines.length === 1 && !el2.querySelector("tspan")) {
+          el2.textContent = lines[0];
         }
         await edit({
           action: "svg",
@@ -5277,7 +5564,7 @@ ${pad}`);
         });
       },
       cancel: () => {
-        el.style.visibility = "";
+        el2.style.visibility = "";
       }
     };
     area2.addEventListener("keydown", (e) => {
@@ -5332,10 +5619,10 @@ ${pad}`);
     const area2 = h("textarea", { class: "zone-editor", spellcheck: "true" });
     area2.value = original;
     let sent2 = original;
-    let timer3 = 0;
+    let timer4 = 0;
     const coalesce = `zone-${deckIndex}-${zone}-${Date.now()}`;
     const send = async () => {
-      window.clearTimeout(timer3);
+      window.clearTimeout(timer4);
       if (area2.value === sent2) return;
       const before = sent2;
       sent2 = area2.value;
@@ -5352,12 +5639,12 @@ ${pad}`);
       );
       if (!result.ok) {
         sent2 = before;
-        timer3 = window.setTimeout(() => void send(), 800);
+        timer4 = window.setTimeout(() => void send(), 800);
       }
     };
     area2.addEventListener("input", () => {
-      window.clearTimeout(timer3);
-      timer3 = window.setTimeout(() => void send(), 450);
+      window.clearTimeout(timer4);
+      timer4 = window.setTimeout(() => void send(), 450);
     });
     const button2 = (name, title, fn) => h(
       "button",
@@ -5409,12 +5696,12 @@ ${area2.value.slice(pos)}`;
     dock.append(wrap2);
     document.body.classList.add("editing-zone");
     area2.focus();
-    active = {
+    active2 = {
       commit: async () => {
         await send();
       },
       cancel: () => {
-        window.clearTimeout(timer3);
+        window.clearTimeout(timer4);
         if (sent2 !== original) {
           area2.value = original;
           void send();
@@ -5447,9 +5734,9 @@ ${area2.value.slice(pos)}`;
   function editingHost() {
     return richHost;
   }
-  function editZone(zone, el, opts = {}) {
+  function editZone(zone, el2, opts2 = {}) {
     void finishTextEdit();
-    if (el && editZoneRich(zone, el, opts)) return;
+    if (el2 && editZoneRich(zone, el2, opts2)) return;
     editZoneText(zone);
   }
   var COLORS = [
@@ -5466,9 +5753,9 @@ ${area2.value.slice(pos)}`;
     "pink",
     "grey"
   ];
-  function editZoneRich(zone, el, opts) {
+  function editZoneRich(zone, el2, opts2) {
     const slide = currentSlide();
-    const content2 = el.querySelector(".inkflow-content");
+    const content2 = el2.querySelector(".inkflow-content");
     if (!slide || !content2 || ed.step != null) return false;
     const origin = slide.zoneOrigins?.[zone];
     if (!ed.model?.deckEditable && (origin === "deck" || !slide.md)) {
@@ -5481,7 +5768,7 @@ ${area2.value.slice(pos)}`;
       return false;
     }
     if (!sameMarkdown(start, slide.zoneText?.[zone] ?? "")) return false;
-    const fo = el;
+    const fo = el2;
     const deckIndex = slide.deckIndex;
     ed.richEditing = true;
     richHost = content2;
@@ -5491,7 +5778,7 @@ ${area2.value.slice(pos)}`;
     content2.spellcheck = true;
     document.execCommand("defaultParagraphSeparator", false, "p");
     content2.focus();
-    placeCaret(content2, opts);
+    placeCaret(content2, opts2);
     const bar = richToolbar(content2, () => {
       void finishTextEdit().then(() => editZoneText(zone));
     });
@@ -5508,7 +5795,7 @@ ${area2.value.slice(pos)}`;
     const onSelection = () => syncToolbar(bar, content2);
     document.addEventListener("selectionchange", onSelection);
     syncToolbar(bar, content2);
-    active = {
+    active2 = {
       commit: async () => {
         let md;
         try {
@@ -5581,18 +5868,18 @@ ${area2.value.slice(pos)}`;
     });
     return true;
   }
-  function placeCaret(content2, opts) {
+  function placeCaret(content2, opts2) {
     const sel = window.getSelection();
     if (!sel) return;
     let range = null;
-    if (opts.at && !opts.selectAll) {
-      range = document.caretRangeFromPoint?.(opts.at.x, opts.at.y) ?? null;
+    if (opts2.at && !opts2.selectAll) {
+      range = document.caretRangeFromPoint?.(opts2.at.x, opts2.at.y) ?? null;
       if (range && !content2.contains(range.startContainer)) range = null;
     }
     if (!range) {
       range = document.createRange();
       range.selectNodeContents(content2);
-      if (!opts.selectAll) range.collapse(false);
+      if (!opts2.selectAll) range.collapse(false);
     }
     sel.removeAllRanges();
     sel.addRange(range);
@@ -5651,8 +5938,8 @@ ${area2.value.slice(pos)}`;
     const range = sel.getRangeAt(0);
     return content2.contains(range.commonAncestorContainer) ? range : null;
   }
-  function unwrap(el) {
-    el.replaceWith(...el.childNodes);
+  function unwrap(el2) {
+    el2.replaceWith(...el2.childNodes);
   }
   function wrapRange(content2, make, same) {
     const range = selectionRange(content2);
@@ -5661,10 +5948,10 @@ ${area2.value.slice(pos)}`;
     frag.querySelectorAll(same).forEach(unwrap);
     const sel = window.getSelection();
     if (make) {
-      const el = make();
-      el.append(frag);
-      range.insertNode(el);
-      range.selectNodeContents(el);
+      const el2 = make();
+      el2.append(frag);
+      range.insertNode(el2);
+      range.selectNodeContents(el2);
     } else {
       const first = frag.firstChild;
       const last = frag.lastChild;
@@ -5676,8 +5963,8 @@ ${area2.value.slice(pos)}`;
     }
     sel?.removeAllRanges();
     sel?.addRange(range);
-    content2.querySelectorAll(same).forEach((el) => {
-      if (!el.textContent) el.remove();
+    content2.querySelectorAll(same).forEach((el2) => {
+      if (!el2.textContent) el2.remove();
     });
     changed(content2);
   }
@@ -5968,7 +6255,7 @@ ${area2.value.slice(pos)}`;
   }
   function syncToolbar(bar, content2) {
     if (!bar) return;
-    const el = caretElement(content2);
+    const el2 = caretElement(content2);
     const state = (cmd) => {
       try {
         return document.queryCommandState(cmd);
@@ -5980,11 +6267,11 @@ ${area2.value.slice(pos)}`;
     on2("fmt-bold", state("bold"));
     on2("fmt-italic", state("italic"));
     on2("fmt-strike", state("strikeThrough"));
-    on2("fmt-code", !!el?.closest("code"));
-    on2("fmt-link", !!el?.closest("a"));
-    on2("fmt-ul", !!el?.closest("ul"));
-    on2("fmt-ol", !!el?.closest("ol"));
-    const blockEl = el?.closest("p, h1, h2, h3, h4, h5, h6, blockquote, li");
+    on2("fmt-code", !!el2?.closest("code"));
+    on2("fmt-link", !!el2?.closest("a"));
+    on2("fmt-ul", !!el2?.closest("ul"));
+    on2("fmt-ol", !!el2?.closest("ol"));
+    const blockEl = el2?.closest("p, h1, h2, h3, h4, h5, h6, blockquote, li");
     const select2 = bar.querySelector(".fmt-block");
     if (select2 && blockEl) {
       const tag = blockEl.closest("blockquote") ? "blockquote" : blockEl.localName;
@@ -5992,7 +6279,7 @@ ${area2.value.slice(pos)}`;
     }
     bar.querySelector(".fmt-table")?.classList.toggle(
       "show",
-      !!el?.closest("td, th")
+      !!el2?.closest("td, th")
     );
   }
 
@@ -6426,6 +6713,9 @@ ${area2.value.slice(pos)}`;
       handled();
       if (ed.focus === "sorter") void cutSlides();
       else cut();
+    } else if (mod && (lower === "f" || lower === "h")) {
+      handled();
+      openFind(lower === "h");
     } else if (mod && lower === "g") {
       handled();
       void (e.shiftKey ? ungroupSelection() : groupSelection());
@@ -6470,11 +6760,11 @@ ${area2.value.slice(pos)}`;
       else clearSelection();
     } else if (key === "Enter" && ed.selection.length === 1) {
       handled();
-      const el = ed.selection[0].el;
+      const el2 = ed.selection[0].el;
       emit(
-        isZone(el) ? "edit-zone" : el.localName === "text" ? "edit-text" : "noop"
+        isZone(el2) ? "edit-zone" : el2.localName === "text" ? "edit-text" : "noop"
       );
-      if (el.localName === "g") enterGroup(el);
+      if (el2.localName === "g") enterGroup(el2);
     } else if (!mod && (key === "+" || key === "=")) {
       setZoom(scale() * 1.25);
     } else if (!mod && key === "-") {
@@ -6539,9 +6829,9 @@ ${area2.value.slice(pos)}`;
     errorBox.textContent = ed.error ?? "";
     errorBox.classList.toggle("show", !!ed.error);
   }
-  function editTextOf(el) {
+  function editTextOf(el2) {
     const slide = currentSlide();
-    const loc = el.getAttribute("data-ink");
+    const loc = el2.getAttribute("data-ink");
     if (!slide || !loc) return;
     const key = parseInt(loc.split(":")[0] ?? "", 10);
     const src = slide.sources?.[key];
@@ -6552,7 +6842,7 @@ ${area2.value.slice(pos)}`;
       );
       return;
     }
-    editSvgText(el, src.path, () => slide.sources?.[key]?.hash ?? "", loc);
+    editSvgText(el2, src.path, () => slide.sources?.[key]?.hash ?? "", loc);
   }
   function readHash() {
     const m = location.hash.match(/slide=(\d+)/);
@@ -6577,7 +6867,7 @@ ${area2.value.slice(pos)}`;
     const svg = slideRoot();
     if (!svg) return;
     const els = afterRender.ids.map((id) => svg.querySelector(`[id="${CSS.escape(id)}"]`)).filter(
-      (el) => el instanceof SVGGraphicsElement
+      (el2) => el2 instanceof SVGGraphicsElement
     );
     if (!els.length) return;
     const editText = afterRender.editText;
@@ -6595,10 +6885,10 @@ ${area2.value.slice(pos)}`;
     ed.error = INITIAL_ERROR;
     readHash();
     hooks.editText = editTextOf;
-    hooks.editZone = (zone, el, at) => editZone(zone, el, { at });
+    hooks.editZone = (zone, el2, at) => editZone(zone, el2, { at });
     hooks.editingHost = editingHost;
-    hooks.crop = (el) => {
-      const sel = ed.selection.find((s) => s.el === el);
+    hooks.crop = (el2) => {
+      const sel = ed.selection.find((s) => s.el === el2);
       if (sel) void startCrop(sel);
     };
     hooks.finishEditing = () => void finishTextEdit();
@@ -6612,6 +6902,7 @@ ${area2.value.slice(pos)}`;
     initContext();
     initGallery();
     initDialog();
+    initFind();
     initTheme();
     on("slide", () => {
       void finishTextEdit();
@@ -6625,12 +6916,12 @@ ${area2.value.slice(pos)}`;
     });
     on("error", showError);
     on("edit-zone", () => {
-      const el = ed.selection[0]?.el;
-      if (el && isZone(el)) editZone(zoneName(el), el);
+      const el2 = ed.selection[0]?.el;
+      if (el2 && isZone(el2)) editZone(zoneName(el2), el2);
     });
     on("edit-text", () => {
-      const el = ed.selection[0]?.el;
-      if (el?.localName === "text") editTextOf(el);
+      const el2 = ed.selection[0]?.el;
+      if (el2?.localName === "text") editTextOf(el2);
     });
     window.addEventListener("hashchange", () => {
       const before = ed.current;

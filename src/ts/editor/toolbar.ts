@@ -22,6 +22,7 @@ import {
 import { copy, copySlides, cut, cutSlides } from "./clipboard";
 import { setCropMode } from "./crop";
 import { toast } from "./dom";
+import { openFind } from "./find";
 import { openGallery } from "./gallery";
 import { insertImage, insertVideo, setTool } from "./insert";
 import { edit } from "./net";
@@ -239,6 +240,9 @@ function onKey(e: KeyboardEvent): void {
         handled();
         if (ed.focus === "sorter") void cutSlides();
         else cut();
+    } else if (mod && (lower === "f" || lower === "h")) {
+        handled();
+        openFind(lower === "h");
     } else if (mod && lower === "g") {
         handled();
         void (e.shiftKey ? ungroupSelection() : groupSelection());
