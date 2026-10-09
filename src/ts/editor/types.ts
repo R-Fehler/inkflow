@@ -138,6 +138,7 @@ export interface EditResult {
     path?: string;
     rel?: string;
     theme?: unknown;
+    apps?: { id: string; label: string }[];
 }
 
 // One selected object on the canvas.

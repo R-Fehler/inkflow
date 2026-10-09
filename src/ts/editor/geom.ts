@@ -496,3 +496,23 @@ export function relativePath(fromFile: string, target: string): string {
     const up = from.slice(i).map(() => "..");
     return [...up, ...to.slice(i)].join("/");
 }
+
+/**
+ * The project file a reference names, or null for one no program here opens
+ * (a URL, a data: URI, a theme asset). `base` is the file the reference was
+ * written in; without it the reference is relative to the project.
+ */
+export function projectFile(
+    ref: string | null | undefined,
+    base?: string,
+): string | null {
+    if (!ref || /^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("_theme/"))
+        return null;
+    if (ref.startsWith("/")) return ref;
+    const parts = base ? base.split("/").slice(0, -1) : [];
+    for (const part of ref.split("/")) {
+        if (part === "..") parts.pop();
+        else if (part && part !== ".") parts.push(part);
+    }
+    return parts.join("/");
+}

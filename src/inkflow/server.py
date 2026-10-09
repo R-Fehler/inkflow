@@ -8,6 +8,7 @@ import functools
 import importlib.resources
 import importlib.util
 import io
+import ipaddress
 import json
 import os
 import socket
@@ -37,6 +38,7 @@ from inkflow.edit import (
     NO_EDIT_COMMANDS,
     EditCommands,
     command_for,
+    configured_suffixes,
     open_in_editor,
     resolve_edit_commands,
 )
@@ -342,11 +344,27 @@ def _resolve_edit_request(
     return Path(path_str), template
 
 
+def _is_loopback(websocket: ServerConnection) -> bool:
+    address = cast("object", websocket.remote_address)
+    host = (
+        cast("tuple[object, ...]", address)[0]
+        if isinstance(address, tuple)
+        else address
+    )
+    try:
+        return ipaddress.ip_address(str(host)).is_loopback
+    except ValueError:
+        return False
+
+
 async def _handle_edit_op(
     websocket: ServerConnection, msg: dict[str, object], session: EditorSession
 ) -> None:
     """Apply one editor request and answer the sender with its result."""
     request_id = msg.get("id")
+    # Whether the request comes from this machine (opening a program is only
+    # for a local page); decided here, overriding anything the client sent.
+    msg["_local"] = _is_loopback(websocket)
     try:
         result = await asyncio.to_thread(session.apply, msg, _editor["deck"])
     except EditError as exc:
@@ -483,6 +501,7 @@ def build_html(
         {
             "default": edit_commands.default is not None,
             "svg": edit_commands.svg is not None,
+            "suffixes": configured_suffixes(edit_commands),
         }
     )
     html = (
@@ -813,6 +832,7 @@ async def serve(
     try:
         edit_commands = resolve_edit_commands()
         session = EditorSession(deck_path, exporters)
+        session.edit_commands = edit_commands
         session.server = {"host": host, "port": http_port, "wsPort": ws_port}
         _editor["session"] = session
         http_handler = make_http_handler(ws_port, deck_path.parent, edit_commands)

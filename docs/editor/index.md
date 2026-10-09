@@ -127,13 +127,18 @@ edit the text right where it is on the slide, with a formatting bar above it:
   presentation (it writes a `::step::` marker);
 - tables: insert one, then <kbd>Tab</kbd> moves from cell to cell (and adds a row
   at the end), and the bar gains buttons to add or delete rows and columns and to
-  align a column.
+  align a column;
+- **∑ formulas**: type LaTeX into the field that opens and the formula renders live
+  in the text; tick *Display* for a centred formula on its own line. A formula
+  already in the text is a chip: click it to change the LaTeX, <kbd>Enter</kbd> to
+  finish, <kbd>Esc</kbd> to put it back as it was. It is saved as `$…$` or
+  `$$…$$`, so the presentation renders it exactly like Markdown math.
 
 Click outside the text (or <kbd>Ctrl</kbd>+<kbd>Enter</kbd>) to finish; it is saved
 as ordinary Markdown in the same file it came from, as one undo step;
 <kbd>Esc</kbd> cancels. Pasting brings plain text only.
 
-Some Markdown has no in-place form: math, code blocks, images, `::step::` reveals.
+Some Markdown has no in-place form: code blocks, images, `::step::` reveals.
 A zone that contains any of them opens its Markdown source in a pane under the
 slide instead, where the slide re-renders as you type; the **M↓** button switches
 to that pane at any time. Nothing is ever dropped: the editor only edits in place
@@ -156,6 +161,16 @@ above, and the box grows to fit what you type. A text box you empty is deleted.
 Under the hood it is a zone of its own (a `zone-text` rect), so its Markdown lives
 with the slide's other text. Where there is nowhere to keep Markdown (a slide list
 built in code, or while editing a layout), the tool places a plain SVG text line.
+
+**Text in a shape.** Double-click a rectangle or ellipse (or select it and press
+<kbd>Enter</kbd>) and type: the shape becomes a text box that keeps its fill,
+stroke and rounded corners, with wrapping Markdown text inside it, formulas
+included. The properties panel's **Text box** section sets the padding and the
+horizontal and vertical alignment, and **Draw the box** gives any text box (the
+plain ones too) a visible background and border, styled with the same fill and
+stroke controls as a shape. In the SVG this is the zone shape keeping its own
+style plus `inkflow:show-shape="true"`; without that attribute a zone's shape is
+only a placeholder and is never painted.
 
 Many slides are drawn directly by a shared layout (`Slide("content", md=...)`).
 The first time you draw on one, the editor gives it its own SVG in `slides/`, built
@@ -304,7 +319,7 @@ Each result can also be downloaded straight from the dialog (the web page as a
 | <kbd>Delete</kbd> | Delete the selection (or clear a zone; in the slide list, the selected slides) |
 | <kbd>Ctrl</kbd>+<kbd>G</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> | Group / ungroup |
 | <kbd>Ctrl</kbd>+<kbd>↑</kbd> <kbd>↓</kbd> (+<kbd>Shift</kbd>) | Forward / backward (to front / back) |
-| <kbd>Enter</kbd> | Edit the selected text or zone (when cropping: done) |
+| <kbd>Enter</kbd> | Edit the selected text or zone, or type into a shape (when cropping: done) |
 | Middle-click, <kbd>Alt</kbd>+click | Select the next object under the pointer |
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>H</kbd> | Find / replace |
 | <kbd>G</kbd> | Grid view of all slides |
@@ -313,6 +328,31 @@ Each result can also be downloaded straight from the dialog (the web page as a
 | <kbd>PageUp</kbd> <kbd>PageDown</kbd> | Previous / next slide |
 | <kbd>Ctrl</kbd>+<kbd>M</kbd> | New slide |
 | <kbd>Ctrl</kbd>+<kbd>Enter</kbd> | Present from this slide |
+
+## Opening files in other programs
+
+Every file the editor shows has an **Open ▾** button: the slide's drawing,
+layout, Markdown and notes and `deck.py` (under *Files* with nothing selected), the
+file an object comes from, a picture, and an image or video zone's file. It lists
+the programs found on this machine for that kind of file, then the system's
+default app:
+
+| File | Offered |
+|---|---|
+| SVG | Inkscape, then text editors |
+| PNG, JPEG, WebP, GIF… | GIMP, Krita, Pinta |
+| Markdown, `deck.py`, CSS | VS Code, VSCodium, Zed, Sublime Text, Kate, gedit… |
+| Video | VLC, mpv |
+
+A command set in the environment comes first: `INKFLOW_EDIT_CMD`, or a more
+specific `INKFLOW_EDIT_CMD_SVG`, `INKFLOW_EDIT_CMD_PNG` (any extension) or
+`INKFLOW_EDIT_CMD_IMAGE` / `_TEXT` / `_VIDEO` (see
+[CLI reference](../reference/cli.md#editing-from-the-presenter)). Save in the other
+program and the editor picks up the change as it does any other.
+
+Programs open on the machine running `inkflow edit`, so only an editor page opened
+on that machine can launch them; from anywhere else, **Copy path** in the same
+menu copies the file's path.
 
 ## What stays in Inkscape
 

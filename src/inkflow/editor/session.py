@@ -26,6 +26,7 @@ from typing import Protocol, cast
 from inkflow import animations as animations_module
 from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
+from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, open_with
 from inkflow.editor.codegen import Code, coerce_fields
 from inkflow.editor.deckedit import DeckEditError, DeckSource
 from inkflow.editor.findreplace import (
@@ -275,9 +276,12 @@ class EditorSession:
     """Files this session exported, by download token (served by the server)."""
     exporters: Exporters | None
     """The build functions behind the Export dialog (None: export unavailable)."""
+    edit_commands: EditCommands
+    """The configured ``INKFLOW_EDIT_CMD*`` commands, offered first by "Open"."""
 
     def __init__(self, deck_path: Path, exporters: Exporters | None = None) -> None:
         self.exporters = exporters
+        self.edit_commands = NO_EDIT_COMMANDS
         self.deck_path = deck_path.resolve()
         self.project_dir = self.deck_path.parent
         self.history = History()
@@ -309,6 +313,12 @@ class EditorSession:
             return {"ok": True, "files": export_assets(self.project_dir, names)}
         if action == "math":
             return self._math(msg)
+        if action == "open-apps":
+            path = self._openable(msg)
+            apps = open_choices(path, self.edit_commands)
+            return {"ok": True, "apps": [{"id": a.id, "label": a.label} for a in apps]}
+        if action == "open-file":
+            return self._open_file(msg)
         if action == "find":
             return {"ok": True, "hits": self._find(msg)}
         if deck is None:
@@ -810,6 +820,39 @@ class EditorSession:
             compile(code, str(self.deck_path), "exec")
         except SyntaxError as exc:
             raise EditError(f"the replacement would break deck.py: {exc}") from exc
+
+    # ── Opening a source file in another program ──
+
+    def _openable(self, msg: dict[str, object]) -> Path:
+        """The project file a request names, if it is one a program may open."""
+        raw = msg.get("path")
+        if not isinstance(raw, str) or not raw:
+            raise EditError("no file to open")
+        path = Path(raw)
+        path = (path if path.is_absolute() else self.project_dir / path).resolve()
+        if not path.is_relative_to(self.project_dir.resolve()):
+            raise EditError(f"{raw} is outside the project")
+        suffix = path.suffix.lower().lstrip(".")
+        if suffix != "svg" and suffix not in KINDS:
+            raise EditError(f"cannot open {path.name}: not a deck source file")
+        if not path.is_file():
+            raise EditError(f"{raw} does not exist")
+        return path
+
+    def _open_file(self, msg: dict[str, object]) -> dict[str, object]:
+        # Set by the server from the connection itself, never by the browser: a
+        # program opens on this machine's screen, so only a local page may ask.
+        if msg.get("_local") is not True:
+            raise EditError("files open only from an editor on this machine")
+        path = self._openable(msg)
+        apps = {a.id: a for a in open_choices(path, self.edit_commands)}
+        app = apps.get(str(msg.get("app") or "system"))
+        if app is None:
+            raise EditError(f"no such program for {path.name}")
+        error = open_with(path, app)
+        if error is not None:
+            raise EditError(error)
+        return {"ok": True, "opened": str(path.relative_to(self.project_dir))}
 
     # ── Formulas ──
 

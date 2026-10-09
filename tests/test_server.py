@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from websockets.asyncio.server import ServerConnection
 
 from inkflow.assets import AssetRoots
 from inkflow.edit import EditCommands
@@ -14,6 +15,7 @@ from inkflow.pipeline import EditableFile, SlideData
 from inkflow.server import (
     State,
     _coerce_nav_position,  # pyright: ignore[reportPrivateUsage]
+    _is_loopback,  # pyright: ignore[reportPrivateUsage]
     _resolve_asset,  # pyright: ignore[reportPrivateUsage]
     _resolve_edit_request,  # pyright: ignore[reportPrivateUsage]
     build_html,
@@ -118,7 +120,7 @@ def test_build_html_transitions_json_embedded() -> None:
 
 def test_build_html_edit_commands_default_both_false() -> None:
     html = build_html(_state(), ws_port=7778).decode()
-    assert json.dumps({"default": False, "svg": False}) in html
+    assert json.dumps({"default": False, "svg": False, "suffixes": []}) in html
 
 
 def test_build_html_edit_commands_reflects_configured() -> None:
@@ -127,7 +129,7 @@ def test_build_html_edit_commands_reflects_configured() -> None:
         ws_port=7778,
         edit_commands=EditCommands(svg="code {path}", default=None),
     ).decode()
-    assert json.dumps({"default": False, "svg": True}) in html
+    assert json.dumps({"default": False, "svg": True, "suffixes": ["svg"]}) in html
 
 
 def test_build_html_logs_json_embedded() -> None:
@@ -202,6 +204,25 @@ def test_resolve_asset_symlink_outside_project(tmp_path: Path) -> None:
     (project / "photo.png").symlink_to(real_img)
     result = _resolve_asset(AssetRoots(project), "/photo.png")
     assert result == real_img.resolve()
+
+
+# ── _is_loopback ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("address", "local"),
+    [
+        (("127.0.0.1", 5000), True),
+        (("::1", 5000, 0, 0), True),
+        (("192.168.1.20", 5000), False),
+        (None, False),
+    ],
+)
+def test_only_loopback_peers_are_local(address: object, local: bool) -> None:
+    class Peer:
+        remote_address: object = address
+
+    assert _is_loopback(cast("ServerConnection", cast("object", Peer()))) is local
 
 
 # ── _coerce_nav_position ──────────────────────────────────────────────────────

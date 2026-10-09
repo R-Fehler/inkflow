@@ -11,6 +11,7 @@ import {
     planResize,
     planRotate,
     prependTranslate,
+    projectFile,
     relativePath,
     rotateAbout,
     scaleAbout,
@@ -266,5 +267,22 @@ describe("planCrop", () => {
         expect(
             planCrop(frame({ own: rotateAbout(30, { x: 0, y: 0 }) }), box, box),
         ).toBeNull();
+    });
+});
+
+describe("projectFile", () => {
+    test("resolves a reference against the file it was written in", () => {
+        expect(projectFile("../assets/a.png", "slides/x.svg")).toBe(
+            "assets/a.png",
+        );
+        expect(projectFile("./b.png", "slides/x.svg")).toBe("slides/b.png");
+        expect(projectFile("assets/v.mp4")).toBe("assets/v.mp4");
+    });
+
+    test("ignores what no program here opens", () => {
+        expect(projectFile("https://example.com/a.png")).toBeNull();
+        expect(projectFile("data:image/png;base64,AA")).toBeNull();
+        expect(projectFile("_theme/logo.svg")).toBeNull();
+        expect(projectFile("")).toBeNull();
     });
 });

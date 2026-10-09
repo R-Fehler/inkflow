@@ -1543,6 +1543,45 @@ def test_math_preview(project: Path) -> None:
         session.apply({"action": "math", "latex": " "}, None)
 
 
+def test_open_file_lists_programs_and_launches_only_locally(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from inkflow.edit import App
+
+    def which(binary: str) -> str:
+        return f"/usr/bin/{binary}"
+
+    monkeypatch.setattr("inkflow.edit.shutil.which", which)
+    launched: list[tuple[Path, App]] = []
+
+    def fake_open(path: Path, app: App) -> str | None:
+        launched.append((path, app))
+        return None
+
+    monkeypatch.setattr("inkflow.editor.session.open_with", fake_open)
+    session = EditorSession(project / "deck.py")
+    out = session.apply({"action": "open-apps", "path": "deck.py"}, None)
+    apps = cast("list[dict[str, str]]", out["apps"])
+    assert apps[0]["id"] == "code" and apps[-1]["id"] == "system"
+    svg: dict[str, object] = {"action": "open-apps", "path": "slides/drawing.svg"}
+    svg_apps = cast("list[dict[str, str]]", session.apply(svg, None)["apps"])
+    assert svg_apps[0]["label"] == "Inkscape"
+
+    request = {"action": "open-file", "path": "slides/drawing.svg", "app": "inkscape"}
+    with pytest.raises(EditError, match="this machine"):
+        session.apply({**request, "_local": "true"}, None)
+    out = session.apply({**request, "_local": True}, None)
+    assert out["opened"] == "slides/drawing.svg"
+    assert launched[0][0] == (project / "slides" / "drawing.svg").resolve()
+    assert launched[0][1].id == "inkscape"
+    for path in ("../outside.svg", "slides/missing.svg", "slides/drawing.exe"):
+        with pytest.raises(EditError):
+            session.apply({**request, "path": path, "_local": True}, None)
+    with pytest.raises(EditError, match="no such program"):
+        session.apply({**request, "app": "rm", "_local": True}, None)
+    assert len(launched) == 1
+
+
 # ── Model ────────────────────────────────────────────────────────────────────
 
 

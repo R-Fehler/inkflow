@@ -85,7 +85,8 @@ is never listed, since it isn't yours to edit.
 
 By default this copies the file's absolute path to the clipboard.
 With `INKFLOW_EDIT_CMD` set, it launches that command instead
-(`INKFLOW_EDIT_CMD_SVG` overrides it just for SVG files).
+(`INKFLOW_EDIT_CMD_SVG` overrides it just for SVG files, and
+`INKFLOW_EDIT_CMD_<EXT>` or `_IMAGE` / `_TEXT` / `_VIDEO` for other kinds).
 See [CLI reference](../reference/cli.md#editing-from-the-presenter) for details,
 including suggested commands for VS Code, Neovim, and Inkscape.
 

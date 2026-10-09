@@ -7,8 +7,8 @@
 // A zone filled with Markdown is edited where it stands: its rendered HTML
 // becomes contenteditable, with a formatting bar (bold, italics, colours, links,
 // lists, tables…), and is written back as Markdown when editing ends (see
-// richtext.ts). A zone whose Markdown cannot make that round trip (math, code,
-// images, step reveals) opens its source in a pane under the slide instead,
+// richtext.ts); formulas are chips that edit their LaTeX. A zone whose Markdown
+// cannot make that round trip (code, images, step reveals) opens its source in a pane under the slide instead,
 // where the slide re-renders live as you type.
 
 import { clear, h, icon, toast } from "./dom";
@@ -384,7 +384,7 @@ function editZoneRich(
     placeCaret(content, opts);
 
     const bar = richToolbar(content, () => {
-        // Switch to the Markdown source (math, code, reveals…).
+        // Switch to the Markdown source (code, images, reveals…).
         void finishTextEdit().then(() => editZoneText(zone));
     });
     layer.append(bar);
@@ -1178,7 +1178,11 @@ function richToolbar(content: HTMLElement, toSource: () => void): HTMLElement {
             "Reveal on click: what follows appears one click later (a ::step:: marker; afterwards this text is edited as Markdown)",
             () => insertReveal(content),
         ),
-        btn("M↓", "Edit the Markdown source (math, code, reveals…)", toSource),
+        btn(
+            "M↓",
+            "Edit the Markdown source (code, images, reveals…)",
+            toSource,
+        ),
         btn(
             h("span", {}, icon("select", 13), " Done"),
             "Done (Ctrl+Enter)",

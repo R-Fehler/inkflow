@@ -846,6 +846,29 @@ body.previewing #canvas::after {
     white-space: nowrap;
 }
 
+.files .file code {
+    flex: 1;
+    min-width: 0;
+}
+
+.source-hint {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.source-hint > p {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.pbtn.open-with {
+    flex: none;
+    padding: 1px 8px;
+    font-size: 12px;
+}
+
 .anim-list {
     display: flex;
     flex-direction: column;

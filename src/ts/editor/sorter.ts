@@ -259,12 +259,12 @@ export async function toggleHidden(i = ed.current): Promise<void> {
 // After an insert, follow the new slide once the rebuild lists it.
 let pendingSelect: number | null = null;
 
-function closeMenu(): void {
+export function closeMenu(): void {
     menu.classList.remove("open");
     clear(menu);
 }
 
-function menuItem(
+export function menuItem(
     label: string,
     fn: () => void,
     disabled = false,
@@ -339,7 +339,7 @@ export function openSlideMenu(x: number, y: number, i: number): void {
     showMenu(x, y);
 }
 
-function showMenu(x: number, y: number): void {
+export function showMenu(x: number, y: number): void {
     menu.classList.add("open");
     const r = menu.getBoundingClientRect();
     menu.style.left = `${Math.min(x, window.innerWidth - r.width - 8)}px`;

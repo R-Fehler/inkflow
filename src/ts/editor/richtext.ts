@@ -2,7 +2,7 @@
 //
 // A zone's rendered HTML is edited directly (contenteditable) and written back
 // as Markdown. Only constructs that survive the trip are handled; anything else
-// (math, images, code highlighting, step reveals, footnotes…) throws
+// (images, code highlighting, step reveals, footnotes…) throws
 // `Unsupported`, and the editor falls back to the Markdown source pane. Before
 // editing in place the editor checks that serializing the zone as rendered gives
 // back its source (`sameMarkdown`), so editing can never silently drop content.

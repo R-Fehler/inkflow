@@ -760,6 +760,17 @@
     const up = from.slice(i).map(() => "..");
     return [...up, ...to.slice(i)].join("/");
   }
+  function projectFile(ref, base2) {
+    if (!ref || /^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("_theme/"))
+      return null;
+    if (ref.startsWith("/")) return ref;
+    const parts = base2 ? base2.split("/").slice(0, -1) : [];
+    for (const part of ref.split("/")) {
+      if (part === "..") parts.pop();
+      else if (part && part !== ".") parts.push(part);
+    }
+    return parts.join("/");
+  }
 
   // src/ts/shared/deck-styles.ts
   function applyDeckStyles(msg) {
@@ -4672,7 +4683,7 @@
     const writable = !!src?.writable && (canTransform(el2) || ed.layoutMode || isOwnObject(el2));
     const kids = children(el2);
     const group = kids.length > 0;
-    const open2 = group && !collapsed.has(loc);
+    const open3 = group && !collapsed.has(loc);
     const selected = ed.selection.some((s) => s.el === el2);
     const locked = el2.hasAttribute("data-ink-locked");
     const hidden = isHidden(el2);
@@ -4690,7 +4701,7 @@
         {
           type: "button",
           class: `obj-twisty${group ? "" : " none"}`,
-          title: open2 ? "Collapse" : "Expand",
+          title: open3 ? "Collapse" : "Expand",
           onclick: (e) => {
             e.stopPropagation();
             if (collapsed.has(loc)) collapsed.delete(loc);
@@ -4698,7 +4709,7 @@
             renderObjects();
           }
         },
-        group ? open2 ? "\u25BE" : "\u25B8" : ""
+        group ? open3 ? "\u25BE" : "\u25B8" : ""
       ),
       name,
       writable ? h(
@@ -4733,7 +4744,7 @@
     item.addEventListener("mouseenter", () => setHover(el2));
     item.addEventListener("mouseleave", () => setHover(null));
     out.push(item);
-    if (open2) {
+    if (open3) {
       for (const k of [...kids].reverse()) out.push(...row(k, depth + 1));
     }
     return out;
@@ -4792,6 +4803,62 @@
     showTab(saved === "objects" ? "objects" : "props");
     on("render", renderObjects);
     on("selection", renderObjects);
+  }
+
+  // src/ts/editor/openwith.ts
+  var menu2 = document.getElementById("context-menu");
+  function fileName(path) {
+    return path.split(/[\\/]/).pop() ?? path;
+  }
+  function inProject(path) {
+    const root2 = ed.model?.projectDir;
+    if (!path.startsWith("/")) return !path.split("/").includes("..");
+    return !!root2 && path.startsWith(`${root2}/`);
+  }
+  async function openMenu(path, x, y) {
+    const res = await request({ action: "open-apps", path });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot open this file", "error");
+      return;
+    }
+    const apps = res.apps ?? [];
+    clear(menu2);
+    menu2.append(h("div", { class: "menu-title" }, `Open ${fileName(path)} in`));
+    for (const app of apps) {
+      menu2.append(menuItem(app.label, () => void open2(path, app)));
+    }
+    menu2.append(
+      menuItem("Copy path", () => {
+        const root2 = ed.model?.projectDir ?? "";
+        const full = path.startsWith("/") ? path : `${root2}/${path}`;
+        void navigator.clipboard.writeText(full).then(
+          () => toast(`Copied ${full}`, "ok"),
+          () => toast(full)
+        );
+      })
+    );
+    showMenu(x, y);
+  }
+  async function open2(path, app) {
+    const res = await request({ action: "open-file", path, app: app.id });
+    if (res.ok) toast(`Opened ${fileName(path)} in ${app.label}`, "ok");
+    else toast(res.error ?? "Could not open the file", "error");
+  }
+  function openButton(path, label3 = "Open") {
+    if (!path || !inProject(path)) return null;
+    return h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn open-with",
+        title: `Open ${fileName(path)} in another program`,
+        onclick: (e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          void openMenu(path, r.left, r.bottom + 4);
+        }
+      },
+      `${label3} \u25BE`
+    );
   }
 
   // src/ts/editor/props.ts
@@ -5112,21 +5179,24 @@
     panel2.append(transitionSection(slide.transition, di));
     panel2.append(animationList(slide.animations, slide.animationsEditable, di));
     const files2 = h("div", { class: "files" });
-    const addFile = (label3, rel) => {
+    const addFile = (label3, rel, path) => {
       if (rel)
         files2.append(
           h(
             "div",
             { class: "file" },
             h("span", {}, label3),
-            h("code", {}, rel)
+            h("code", { title: path ?? rel }, rel),
+            openButton(path)
           )
         );
     };
-    addFile("Drawing", slide.srcShared ? null : slide.srcRel);
-    addFile("Layout", slide.srcShared ? slide.srcRel : null);
-    addFile("Markdown", slide.md?.rel);
-    addFile("Notes", slide.notes.rel);
+    addFile("Drawing", slide.srcShared ? null : slide.srcRel, slide.srcPath);
+    addFile("Layout", slide.srcShared ? slide.srcRel : null, slide.srcPath);
+    addFile("Markdown", slide.md?.rel, slide.md?.path);
+    addFile("Notes", slide.notes.rel, slide.notes.path);
+    const deckPath = ed.model?.deckPath;
+    if (deckPath) addFile("Deck", fileName(deckPath), deckPath);
     panel2.append(section("Files", files2));
     const arrows = attachedConnectors();
     if (arrows.length) {
@@ -5487,9 +5557,14 @@
           )
         ),
         src && h(
-          "p",
-          { class: "hint" },
-          `In ${src.rel}${src.role !== "slide" || currentSlide()?.srcShared ? ` \xB7 shared by ${src.usedBy.length} slide${src.usedBy.length === 1 ? "" : "s"}` : ""}`
+          "div",
+          { class: "source-hint" },
+          h(
+            "p",
+            { class: "hint" },
+            `In ${src.rel}${src.role !== "slide" || currentSlide()?.srcShared ? ` \xB7 shared by ${src.usedBy.length} slide${src.usedBy.length === 1 ? "" : "s"}` : ""}`
+          ),
+          openButton(src.path)
         )
       )
     );
@@ -5499,12 +5574,24 @@
       const origin = slide.zoneOrigins?.[name];
       const media = slide.zones[name];
       const where = origin === "deck" ? "deck.py zones=" : origin === "md-file" ? `${slide.md?.rel ?? "Markdown"} (whole file)` : slide.md?.rel ? `${slide.md.rel} \xB7 ::${name}::` : "deck.py";
+      const textFile = origin === "deck" || !slide.md?.path ? ed.model?.deckPath : slide.md.path;
+      const isMedia = !!media && (media.kind === "image" || media.kind === "video");
       const body2 = [
-        h("p", { class: "hint" }, `Content from ${where}`)
+        h(
+          "div",
+          { class: "source-hint" },
+          h("p", { class: "hint" }, `Content from ${where}`),
+          isMedia ? null : openButton(textFile)
+        )
       ];
       if (media && (media.kind === "image" || media.kind === "video")) {
         body2.push(
-          h("p", { class: "hint media-src" }, media.src ?? ""),
+          h(
+            "div",
+            { class: "source-hint" },
+            h("p", { class: "hint media-src" }, media.src ?? ""),
+            openButton(projectFile(media.src))
+          ),
           button(
             "Replace media\u2026",
             "Pick another image or video",
@@ -5841,7 +5928,12 @@
     const cropped = isCropped(sel.el);
     return section(
       "Picture",
-      h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
+      h(
+        "div",
+        { class: "source-hint" },
+        h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
+        openButton(projectFile(href))
+      ),
       h(
         "div",
         { class: "btn-row" },
@@ -7538,7 +7630,11 @@ ${area2.value.slice(pos)}`;
         "Reveal on click: what follows appears one click later (a ::step:: marker; afterwards this text is edited as Markdown)",
         () => insertReveal(content2)
       ),
-      btn("M\u2193", "Edit the Markdown source (math, code, reveals\u2026)", toSource),
+      btn(
+        "M\u2193",
+        "Edit the Markdown source (code, images, reveals\u2026)",
+        toSource
+      ),
       btn(
         h("span", {}, icon("select", 13), " Done"),
         "Done (Ctrl+Enter)",

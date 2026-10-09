@@ -87,6 +87,11 @@ Paths are relative to `deck.py`; keep media files in `assets/`.
 - A free text box is a zone too: a `<rect id="zone-text">` (or `zone-text-2`, …) in
   the slide's own SVG, filled by a `::text::` section in the slide's `.md` (or
   `zones={"text": "..."}`). Its text wraps; SVG `<text>` does not.
+- Text inside a drawn shape: give the zone rect (or ellipse) its own fill/stroke and
+  `inkflow:show-shape="true"`; the shape is then painted as the text box's
+  background and border (otherwise a zone shape is only a placeholder). Padding and
+  alignment are `--inkflow-padding` / `--inkflow-align` / `--inkflow-valign` in its
+  `style`.
 - Colour a few words with the theme palette:
   `<span class="inkflow-color-accent">words</span>` (any colour token).
 - Link to another slide with `[label](slide:<id>)` in Markdown, or wrap an SVG

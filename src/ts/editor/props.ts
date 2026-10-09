@@ -35,11 +35,13 @@ import {
     parseTransform,
     planResize,
     planRotate,
+    projectFile,
     relativePath,
     rotationOf,
 } from "./geom";
 import { pickFile, upload, zoneMedia } from "./insert";
 import { edit } from "./net";
+import { fileName, openButton } from "./openwith";
 import { distribute } from "./snap";
 import { currentSlide, ed, emit, on, sourceOf } from "./state";
 import type {
@@ -434,21 +436,28 @@ function renderSlidePanel(): void {
     panel.append(animationList(slide.animations, slide.animationsEditable, di));
 
     const files = h("div", { class: "files" });
-    const addFile = (label: string, rel: string | null | undefined) => {
+    const addFile = (
+        label: string,
+        rel: string | null | undefined,
+        path: string | null | undefined,
+    ) => {
         if (rel)
             files.append(
                 h(
                     "div",
                     { class: "file" },
                     h("span", {}, label),
-                    h("code", {}, rel),
+                    h("code", { title: path ?? rel }, rel),
+                    openButton(path),
                 ),
             );
     };
-    addFile("Drawing", slide.srcShared ? null : slide.srcRel);
-    addFile("Layout", slide.srcShared ? slide.srcRel : null);
-    addFile("Markdown", slide.md?.rel);
-    addFile("Notes", slide.notes.rel);
+    addFile("Drawing", slide.srcShared ? null : slide.srcRel, slide.srcPath);
+    addFile("Layout", slide.srcShared ? slide.srcRel : null, slide.srcPath);
+    addFile("Markdown", slide.md?.rel, slide.md?.path);
+    addFile("Notes", slide.notes.rel, slide.notes.path);
+    const deckPath = ed.model?.deckPath;
+    if (deckPath) addFile("Deck", fileName(deckPath), deckPath);
     panel.append(section("Files", files));
     const arrows = attachedConnectors();
     if (arrows.length) {
@@ -864,9 +873,14 @@ function renderObjectPanel(sel: Selected): void {
             ),
             src &&
                 h(
-                    "p",
-                    { class: "hint" },
-                    `In ${src.rel}${src.role !== "slide" || currentSlide()?.srcShared ? ` · shared by ${src.usedBy.length} slide${src.usedBy.length === 1 ? "" : "s"}` : ""}`,
+                    "div",
+                    { class: "source-hint" },
+                    h(
+                        "p",
+                        { class: "hint" },
+                        `In ${src.rel}${src.role !== "slide" || currentSlide()?.srcShared ? ` · shared by ${src.usedBy.length} slide${src.usedBy.length === 1 ? "" : "s"}` : ""}`,
+                    ),
+                    openButton(src.path),
                 ),
         ),
     );
@@ -884,12 +898,28 @@ function renderObjectPanel(sel: Selected): void {
                   : slide.md?.rel
                     ? `${slide.md.rel} · ::${name}::`
                     : "deck.py";
+        const textFile =
+            origin === "deck" || !slide.md?.path
+                ? ed.model?.deckPath
+                : slide.md.path;
+        const isMedia =
+            !!media && (media.kind === "image" || media.kind === "video");
         const body: Node[] = [
-            h("p", { class: "hint" }, `Content from ${where}`),
+            h(
+                "div",
+                { class: "source-hint" },
+                h("p", { class: "hint" }, `Content from ${where}`),
+                isMedia ? null : openButton(textFile),
+            ),
         ];
         if (media && (media.kind === "image" || media.kind === "video")) {
             body.push(
-                h("p", { class: "hint media-src" }, media.src ?? ""),
+                h(
+                    "div",
+                    { class: "source-hint" },
+                    h("p", { class: "hint media-src" }, media.src ?? ""),
+                    openButton(projectFile(media.src)),
+                ),
                 button(
                     "Replace media…",
                     "Pick another image or video",
@@ -1284,7 +1314,12 @@ function pictureSection(sel: Selected): HTMLElement {
     const cropped = isCropped(sel.el);
     return section(
         "Picture",
-        h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
+        h(
+            "div",
+            { class: "source-hint" },
+            h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
+            openButton(projectFile(href)),
+        ),
         h(
             "div",
             { class: "btn-row" },
