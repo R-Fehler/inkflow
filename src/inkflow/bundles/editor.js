@@ -1041,6 +1041,8 @@
     },
     crop: (_el) => {
     },
+    typeInto: (_el) => {
+    },
     zoneMedia: (_zone) => {
     },
     toolDown: (_e, _pt) => false
@@ -1334,6 +1336,11 @@
       }
     }
     return pickByBox(svg, x, y);
+  }
+  function canTypeInto(el2) {
+    if (!["rect", "ellipse", "circle"].includes(el2.localName)) return false;
+    if (!canTransform(el2) || ed.layoutMode || !isOwn(el2)) return false;
+    return !isZone(el2) || el2.hasAttribute("inkflow:show-shape");
   }
   function isLineLike(el2) {
     return el2.localName === "line" || isConnector(el2);
@@ -2406,6 +2413,10 @@
     if (hooks.editingHost()?.contains(e.target)) return;
     const el2 = pick(e.clientX, e.clientY);
     if (!el2) return;
+    if (canTypeInto(el2)) {
+      hooks.typeInto(el2);
+      return;
+    }
     if (isZone(el2)) {
       hooks.editZone(zoneName(el2), el2, { x: e.clientX, y: e.clientY });
       return;
@@ -2810,6 +2821,31 @@
       afterRender.editText = true;
     }
   }
+  async function typeInto(el2) {
+    const slide = currentSlide();
+    const loc = el2.getAttribute("data-ink");
+    const src = slide?.sources?.[keyOf(el2)];
+    if (!slide || !loc || !src) return;
+    if (!ed.model?.deckEditable && !slide.md) {
+      toast(
+        "deck.py builds its slides in code; there is nowhere to keep the text",
+        "error"
+      );
+      return;
+    }
+    const result = await edit({
+      action: "shape-text",
+      slide: slide.deckIndex,
+      file: src.path,
+      hash: src.hash,
+      loc
+    });
+    const id = result.ids?.new;
+    if (result.ok && id) {
+      afterRender.ids = [id];
+      afterRender.editText = true;
+    }
+  }
   function readBase64(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -2990,6 +3026,7 @@
   }
   function initInsert() {
     hooks.toolDown = onToolDown;
+    hooks.typeInto = (el2) => void typeInto(el2);
     hooks.zoneMedia = (zone) => void zoneMedia(zone);
     const canvas2 = document.getElementById("canvas");
     canvas2.addEventListener("dragover", (e) => {
@@ -5361,14 +5398,24 @@
     if (!m || m.length < 3) return "#000000";
     return `#${m.slice(0, 3).map((v) => Math.round(Number(v)).toString(16).padStart(2, "0")).join("")}`;
   }
+  function boxOps(s) {
+    return isZone(s.el) ? [{ kind: "attrs", loc: s.loc, set: { "inkflow:show-shape": "true" } }] : [];
+  }
+  function boxShown(el2) {
+    return !isZone(el2) || el2.hasAttribute("inkflow:show-shape");
+  }
   function paintRow(sel, prop) {
     const first = sel[0].el;
-    const token = tokenOf(first, prop);
-    const computed = getComputedStyle(first)[prop];
+    const shown = boxShown(first);
+    const token = shown ? tokenOf(first, prop) : null;
+    const computed = shown ? getComputedStyle(first)[prop] : "none";
     const send = (paint) => {
       const plans = sel.map((s) => ({
         sel: s,
-        ops: [{ kind: "paint", loc: s.loc, prop, ...paint }]
+        ops: [
+          ...boxOps(s),
+          { kind: "paint", loc: s.loc, prop, ...paint }
+        ]
       }));
       void sendSvgOps(plans, prop === "fill" ? "Fill" : "Stroke");
     };
@@ -5398,7 +5445,10 @@
   }
   function styleOps(sel, set, label3) {
     void sendSvgOps(
-      sel.map((s) => ({ sel: s, ops: [{ kind: "style", loc: s.loc, set }] })),
+      sel.map((s) => ({
+        sel: s,
+        ops: [...boxOps(s), { kind: "style", loc: s.loc, set }]
+      })),
       label3
     );
   }
@@ -5486,14 +5536,16 @@
       }
     }
     if (movable) panel2.append(geometrySection([sel]));
-    if (!zone && src?.writable && (movable || ed.layoutMode)) {
+    const textZone = zone && el2.localName === "foreignObject" && !!el2.querySelector(".inkflow-content");
+    const shapeTag = textZone ? el2.getAttribute("data-ink-tag") ?? "rect" : el2.localName;
+    if ((!zone || textZone) && src?.writable && (movable || ed.layoutMode)) {
       const fills = ![
         "line",
         "polyline",
         "image",
         "foreignObject",
         "g"
-      ].includes(el2.localName);
+      ].includes(shapeTag);
       const strokeWidth = parseFloat(getComputedStyle(el2).strokeWidth) || 0;
       const opacity = parseFloat(getComputedStyle(el2).opacity);
       panel2.append(
@@ -5535,7 +5587,7 @@
               return r;
             })()
           ),
-          el2.localName === "rect" && row2(
+          shapeTag === "rect" && row2(
             "Corner radius",
             numberInput(
               parseFloat(el2.getAttribute("rx") ?? "0") || 0,
@@ -5545,6 +5597,7 @@
                     {
                       sel,
                       ops: [
+                        ...boxOps(sel),
                         {
                           kind: "attrs",
                           loc: sel.loc,
@@ -5564,6 +5617,7 @@
         )
       );
       if (el2.localName === "text") panel2.append(textSection(sel));
+      if (textZone) panel2.append(textBoxSection(sel));
     }
     if (!zone && src?.writable && movable && isConnector(el2)) {
       panel2.append(connectorSection(sel));
@@ -5683,6 +5737,90 @@
             },
             "Detach"
           )
+        )
+      )
+    );
+  }
+  function textBoxSection(sel) {
+    const el2 = sel.el;
+    const value = (name) => el2.style.getPropertyValue(name).trim();
+    const setVar = (name, v, label3) => void sendSvgOps(
+      [
+        {
+          sel,
+          ops: [{ kind: "style", loc: sel.loc, set: { [name]: v } }]
+        }
+      ],
+      label3
+    );
+    const shown = el2.hasAttribute("inkflow:show-shape");
+    const box = h("input", { type: "checkbox" });
+    box.checked = shown;
+    box.addEventListener(
+      "change",
+      () => void sendSvgOps(
+        [
+          {
+            sel,
+            ops: [
+              {
+                kind: "attrs",
+                loc: sel.loc,
+                set: {
+                  "inkflow:show-shape": box.checked ? "true" : null
+                }
+              }
+            ]
+          }
+        ],
+        box.checked ? "Show box" : "Hide box"
+      )
+    );
+    const padding = parseFloat(value("--inkflow-padding"));
+    return section(
+      "Text box",
+      row2("Draw the box", box),
+      row2(
+        "Padding",
+        numberInput(
+          Number.isFinite(padding) ? padding : null,
+          (v) => setVar(
+            "--inkflow-padding",
+            `${Math.max(0, v)}px`,
+            "Padding"
+          ),
+          {
+            min: 0,
+            placeholder: "auto",
+            onClear: () => setVar("--inkflow-padding", null, "Padding")
+          }
+        )
+      ),
+      row2(
+        "Align",
+        selectInput(
+          [
+            { value: "", label: "Default" },
+            { value: "left", label: "Left" },
+            { value: "center", label: "Centre" },
+            { value: "right", label: "Right" },
+            { value: "justify", label: "Justify" }
+          ],
+          value("--inkflow-align"),
+          (v) => setVar("--inkflow-align", v || null, "Text align")
+        )
+      ),
+      row2(
+        "Vertical",
+        selectInput(
+          [
+            { value: "", label: "Default" },
+            { value: "start", label: "Top" },
+            { value: "center", label: "Middle" },
+            { value: "end", label: "Bottom" }
+          ],
+          value("--inkflow-valign"),
+          (v) => setVar("--inkflow-valign", v || null, "Vertical align")
         )
       )
     );
@@ -7734,6 +7872,9 @@ ${area2.value.slice(pos)}`;
       if (ed.tool !== "select") setTool("select");
       else if (ed.scope) enterGroup(null);
       else clearSelection();
+    } else if (key === "Enter" && ed.selection.length === 1 && canTypeInto(ed.selection[0].el)) {
+      handled();
+      void typeInto(ed.selection[0].el);
     } else if (key === "Enter" && ed.selection.length === 1) {
       handled();
       const el2 = ed.selection[0].el;

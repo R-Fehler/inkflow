@@ -5,6 +5,7 @@
 import { maxStep } from "../shared/step";
 import {
     canTransform,
+    canTypeInto,
     clearSelection,
     drawOverlay,
     enterGroup,
@@ -25,7 +26,7 @@ import { toast } from "./dom";
 import { openFind } from "./find";
 import { openGallery } from "./gallery";
 import { toggleGrid } from "./grid";
-import { insertImage, insertVideo, setTool } from "./insert";
+import { insertImage, insertVideo, setTool, typeInto } from "./insert";
 import { edit } from "./net";
 import { alignSelection } from "./props";
 import { deleteSlide, deleteSlides, duplicateSlide, gotoSlide } from "./sorter";
@@ -295,6 +296,13 @@ function onKey(e: KeyboardEvent): void {
         if (ed.tool !== "select") setTool("select");
         else if (ed.scope) enterGroup(null);
         else clearSelection();
+    } else if (
+        key === "Enter" &&
+        ed.selection.length === 1 &&
+        canTypeInto(ed.selection[0].el)
+    ) {
+        handled();
+        void typeInto(ed.selection[0].el);
     } else if (key === "Enter" && ed.selection.length === 1) {
         handled();
         const el = ed.selection[0].el;

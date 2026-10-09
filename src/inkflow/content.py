@@ -250,6 +250,110 @@ def _swap_zone(
     parent.insert(idx, new_el)
 
 
+def _style_props(el: SvgElement) -> dict[str, str]:
+    props: dict[str, str] = {}
+    for decl in (el.get("style") or "").split(";"):
+        name, sep, value = decl.partition(":")
+        if sep and name.strip():
+            props[name.strip()] = value.strip()
+    return props
+
+
+_PAINT = re.compile(
+    r"^(#[0-9a-fA-F]{3,8}|(rgb|rgba|hsl|hsla)\([\d\s.,%/+-]+\)|[a-zA-Z]+)$"
+)
+_TOKEN_CLASS = re.compile(r"^inkflow-(fill|stroke)-([\w-]+)$")
+
+
+def _paint(el: SvgElement, props: dict[str, str], prop: str) -> str | None:
+    """A shape's fill or stroke as a CSS colour (a theme token's var or a plain
+    colour), or None when it has none. Anything else is ignored, never copied."""
+    for cls in (el.get("class") or "").split():
+        m = _TOKEN_CLASS.match(cls)
+        if m and m[1] == prop:
+            return f"var(--inkflow-{m[2]})"
+    value = props.get(prop) or el.get(prop)
+    if not value or value == "none" or not _PAINT.match(value):
+        return None
+    return value
+
+
+def _number(value: str | None) -> float | None:
+    try:
+        return float(str(value).removesuffix("px")) if value is not None else None
+    except ValueError:
+        return None
+
+
+# Fills (theme tokens) bright enough that body text needs the on-accent colour.
+_VIVID = frozenset(
+    (
+        "accent",
+        "red",
+        "orange",
+        "yellow",
+        "green",
+        "teal",
+        "blue",
+        "purple",
+        "pink",
+        "grey",
+    )
+)
+
+
+def zone_shape_css(el: SvgElement) -> list[str]:
+    """The zone shape's own look, as CSS for the box its text is drawn in.
+
+    Only for a shape marked ``inkflow:show-shape``: a zone's shape is otherwise a
+    placeholder (Inkscape gives every rect a style) and draws nothing. The fill
+    becomes the background, the stroke a border, ``rx``/``ry`` (or an ellipse)
+    the corner radius, so the text and its box stay one element for animations,
+    transitions and the editor."""
+    if el.get(ns.INKFLOW_SHOW_SHAPE) != "true":
+        return []
+    props = _style_props(el)
+    css: list[str] = []
+    fill = _paint(el, props, "fill")
+    if fill:
+        css.append(f"background:{fill}")
+        if fill.removeprefix("var(--inkflow-").removesuffix(")") in _VIVID:
+            # Text on an accent-coloured box: the theme's colour for that.
+            css.append("color:var(--inkflow-accent-fg)")
+    stroke = _paint(el, props, "stroke")
+    if stroke:
+        width = _number(props.get("stroke-width") or el.get("stroke-width")) or 1.0
+        dashed = props.get("stroke-dasharray") or el.get("stroke-dasharray") or "none"
+        style = "solid" if dashed == "none" else "dashed"
+        css.append(f"border:{width:g}px {style} {stroke}")
+    tag = el.tag.rsplit("}", 1)[-1]
+    if tag in ("ellipse", "circle"):
+        css.append("border-radius:50%")
+    else:
+        rx = _number(el.get("rx"))
+        ry = _number(el.get("ry"))
+        if rx or ry:
+            rx = rx if rx is not None else ry
+            ry = ry if ry is not None else rx
+            css.append(
+                f"border-radius:{rx:g}px"
+                if rx == ry
+                else f"border-radius:{rx:g}px / {ry:g}px"
+            )
+    # Text kept off the border; an ellipse needs more to stay inside its curve.
+    inset = "14% 16%" if tag in ("ellipse", "circle") else "0.45em 0.7em"
+    css.append(f"padding:var(--inkflow-padding,{inset})")
+    return css
+
+
+def _zone_vars(el: SvgElement) -> str:
+    """``--inkflow-*`` custom properties set on the zone shape itself (padding,
+    alignment): they apply to its text like the layout CSS that sets them."""
+    return ";".join(
+        f"{k}:{v}" for k, v in _style_props(el).items() if k.startswith("--inkflow-")
+    )
+
+
 def _replace_with_foreignobject(
     el: SvgElement,
     zone_id: str,
@@ -261,8 +365,23 @@ def _replace_with_foreignobject(
     fo = etree.Element(f"{{{ns.SVG}}}foreignObject")
     fo.set("overflow", "visible")
     fo.set("font-size", str(font_size))  # SVG user units; cascades into HTML via em
+    shape_css = zone_shape_css(el)
+    if shape_css:
+        # The shape's classes and style ride along (they paint nothing on a
+        # foreignObject) so the editor reads the box's look from the element.
+        for attr in ("class", "style", "rx", "ry"):
+            if el.get(attr) is not None:
+                fo.set(attr, el.get(attr, ""))
+        fo.set(ns.INKFLOW_SHOW_SHAPE, "true")
+        opacity = el.get("opacity") or _style_props(el).get("opacity")
+        if opacity:
+            fo.set("opacity", opacity)
+    else:
+        variables = _zone_vars(el)
+        if variables:
+            fo.set("style", variables)
 
-    wrapper_style_parts: list[str] = []
+    wrapper_style_parts: list[str] = list(shape_css)
     if item.valign is not None:
         wrapper_style_parts.append(f"justify-content:{_VALIGN_CSS[item.valign]}")
     if item.padding is not None:
@@ -464,11 +583,15 @@ _ZONE_SHAPE_TAGS = frozenset(
 
 
 def unreferenced_zones(root: SvgElement) -> list[SvgElement]:
-    """Zone shapes nothing filled: still placeholders, pruned before rendering."""
+    """Zone shapes nothing filled: still placeholders, pruned before rendering.
+
+    A shape shown as a box (``inkflow:show-shape``) stays, empty."""
     return [
         el
         for el in root.iter(*_ZONE_SHAPE_TAGS)
-        if (el.get("id") or "").startswith("zone-") and not el.get("class")
+        if (el.get("id") or "").startswith("zone-")
+        and not el.get("class")
+        and el.get(ns.INKFLOW_SHOW_SHAPE) != "true"
     ]
 
 

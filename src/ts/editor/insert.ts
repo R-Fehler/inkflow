@@ -454,6 +454,34 @@ async function insertTextBox(
     }
 }
 
+// ── Text in shapes ──
+
+export async function typeInto(el: Element): Promise<void> {
+    const slide = currentSlide();
+    const loc = el.getAttribute("data-ink");
+    const src = slide?.sources?.[keyOf(el)];
+    if (!slide || !loc || !src) return;
+    if (!ed.model?.deckEditable && !slide.md) {
+        toast(
+            "deck.py builds its slides in code; there is nowhere to keep the text",
+            "error",
+        );
+        return;
+    }
+    const result = await edit({
+        action: "shape-text",
+        slide: slide.deckIndex,
+        file: src.path,
+        hash: src.hash,
+        loc,
+    });
+    const id = result.ids?.new;
+    if (result.ok && id) {
+        afterRender.ids = [id];
+        afterRender.editText = true;
+    }
+}
+
 // ── Images ──
 
 function readBase64(file: File): Promise<string> {
@@ -681,6 +709,7 @@ export function cleanForPaste(el: Element): string {
 
 export function initInsert(): void {
     hooks.toolDown = onToolDown;
+    hooks.typeInto = (el) => void typeInto(el);
     hooks.zoneMedia = (zone) => void zoneMedia(zone);
     const canvas = document.getElementById("canvas")!;
     canvas.addEventListener("dragover", (e) => {

@@ -1488,6 +1488,52 @@ def test_connector_attrs_and_renames() -> None:
     assert "connect-end" not in svg.to_bytes().decode()
 
 
+def test_shape_text_turns_a_rectangle_into_a_styled_text_box(project: Path) -> None:
+    session = EditorSession(project / "deck.py")
+    drawing = project / "slides" / "drawing.svg"
+    drawing.write_text(
+        drawing.read_text().replace(
+            '<rect id="box" x="100" y="100" width="200" height="100"/>',
+            '<rect id="box" x="100" y="100" width="200" height="100" rx="10"'
+            + ' class="inkflow-fill-surface"/>',
+        )
+    )
+    svg = SvgFile.from_bytes(drawing, drawing.read_bytes())
+    result = session.apply(
+        {
+            "action": "shape-text",
+            "slide": 0,
+            "file": str(drawing),
+            "hash": _hash(drawing),
+            "loc": _loc(svg, "box"),
+            "text": "Inside **the** box",
+        },
+        _deck(project),
+    )
+    assert result["ids"] == {"new": "zone-text"}
+    text = drawing.read_text()
+    assert 'id="zone-text"' in text and 'inkflow:show-shape="true"' in text
+    deck = _deck(project)
+    # The animation that targeted the rectangle follows it.
+    assert deck.slides[0].animations[0].element == "zone-text"
+    assert deck.slides[0].zones == {"text": "Inside **the** box"}
+    html = process_deck(deck, project, project / "deck.py")[0]["svg"]
+    assert "background:var(--inkflow-surface)" in html
+    assert "<strong>the</strong>" in html
+    with pytest.raises(EditError, match="rectangles and ellipses"):
+        svg = SvgFile.from_bytes(drawing, drawing.read_bytes())
+        session.apply(
+            {
+                "action": "shape-text",
+                "slide": 0,
+                "file": str(drawing),
+                "hash": _hash(drawing),
+                "loc": _loc(svg, "label"),
+            },
+            _deck(project),
+        )
+
+
 # ── Model ────────────────────────────────────────────────────────────────────
 
 

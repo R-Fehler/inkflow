@@ -76,6 +76,7 @@ from inkflow.layout import (
     resolve_parent_path,
 )
 from inkflow.manifest import Deck, Image, Inline, Slide, TextBox, Video
+from inkflow.ns import INKFLOW_SHOW_SHAPE
 from inkflow.pipeline import resolve_slide_src
 from inkflow.transitions import Transition
 from inkflow.zones import remove_zone_section, replace_zone_text, zone_spans
@@ -334,6 +335,7 @@ class EditorSession:
             "media-props": self._media_props,
             "insert-video": self._insert_video,
             "insert-textbox": self._insert_textbox,
+            "shape-text": self._shape_text,
             "theme-set": self._theme_set,
             "replace": self._replace,
             "md-text": self._md_text,
@@ -610,23 +612,26 @@ class EditorSession:
         self._save_deck(txn, source, code.imports)
         return f"{'Video' if isinstance(current, Video) else 'Image'} settings"
 
-    def _new_zone(
-        self, msg: dict[str, object], deck: Deck, slide: Slide, txn: _Txn, base: str
-    ) -> str:
-        """Add a zone rect to the slide's own SVG; returns the zone's name.
-
-        The name must be free in the whole composition, not just this file: a
-        layout's own ``zone-video`` (or a Markdown section of that name) would
-        otherwise take the content."""
+    def _own_svg(
+        self, msg: dict[str, object], deck: Deck, slide: Slide, txn: _Txn, what: str
+    ) -> tuple[Path, SvgFile]:
+        """The slide's own SVG named by the request, checked against its hash."""
         path = Path(cast("str", msg.get("file")))
         own = resolve_slide_src(slide.src, self.project_dir, deck.theme)
         if own.resolve() != path.resolve() or not self._is_own(own, deck):
-            raise EditError(f"the {base} goes into the slide's own SVG")
+            raise EditError(f"the {what} goes into the slide's own SVG")
         data = txn.read(path)
         expected = msg.get("hash")
         if isinstance(expected, str) and expected and file_hash(data) != expected:
             raise EditError(f"{path.name} changed on disk; wait for the reload")
-        svg = SvgFile.from_bytes(path, data)
+        return path, SvgFile.from_bytes(path, data)
+
+    def _free_zone_id(
+        self, svg: SvgFile, path: Path, slide: Slide, deck: Deck, txn: _Txn, base: str
+    ) -> str:
+        """A ``zone-<base>`` id free in the whole composition, not just this file:
+        a layout's own ``zone-video`` (or a Markdown section of that name) would
+        otherwise take the content."""
         taken = all_ids(svg.root) | {f"zone-{z}" for z in slide.zones}
         try:
             chain = resolve_chain(path, self.project_dir, deck.theme)
@@ -638,7 +643,14 @@ class EditorSession:
         if md_path is not None:
             md = txn.read(md_path).decode("utf-8")
             taken |= {f"zone-{z}" for z in zone_spans(md)}
-        zone_id = unique_id(svg.root, f"zone-{base}", taken)
+        return unique_id(svg.root, f"zone-{base}", taken)
+
+    def _new_zone(
+        self, msg: dict[str, object], deck: Deck, slide: Slide, txn: _Txn, base: str
+    ) -> str:
+        """Add a zone rect to the slide's own SVG; returns the zone's name."""
+        path, svg = self._own_svg(msg, deck, slide, txn, base)
+        zone_id = self._free_zone_id(svg, path, slide, deck, txn, base)
         box = {
             k: float(cast("float", msg.get(k))) for k in ("x", "y", "width", "height")
         }
@@ -861,6 +873,36 @@ class EditorSession:
         if source is not None:
             self._save_deck(txn, source, imports)
         return str(msg.get("label") or "Theme")
+
+    def _shape_text(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """Type into a rectangle or ellipse: it becomes a text zone that keeps
+        its look (``inkflow:show-shape``), and animations and connectors that
+        named it follow its new id."""
+        index, slide = self._deck_slide(deck, msg)
+        path, svg = self._own_svg(msg, deck, slide, txn, "text")
+        el = element_at(svg.root, msg.get("loc"))
+        if el.tag.rsplit("}", 1)[-1] not in ("rect", "ellipse", "circle"):
+            raise EditError("only rectangles and ellipses can hold text")
+        old = el.get("id") or ""
+        if old.startswith("zone-"):
+            zone_id = old
+        else:
+            zone_id = self._free_zone_id(svg, path, slide, deck, txn, "text")
+            apply_ops(
+                svg, [{"kind": "id", "loc": msg.get("loc"), "id": zone_id, "from": old}]
+            )
+        el.set(INKFLOW_SHOW_SHAPE, "true")
+        txn.write(path, svg.to_bytes())
+        if old and old != zone_id:
+            self._rename_cues(deck, path, {old: zone_id}, txn)
+        zone = zone_id.removeprefix("zone-")
+        text = str(msg.get("text") or "Text").strip() or "Text"
+        self._put_zone_text(index, slide, zone, text, txn)
+        extra["ids"] = {"new": zone_id}
+        extra["structural"] = True
+        return "Text in shape"
 
     # ── Zone content that follows its zone ──
 

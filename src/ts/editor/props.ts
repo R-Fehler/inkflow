@@ -758,14 +758,30 @@ function rgbToHex(rgb: string): string {
         .join("")}`;
 }
 
+// A text zone's box is drawn only once it is styled (inkflow:show-shape):
+// styling it turns the box on.
+function boxOps(s: Selected): SvgOp[] {
+    return isZone(s.el)
+        ? [{ kind: "attrs", loc: s.loc, set: { "inkflow:show-shape": "true" } }]
+        : [];
+}
+
+function boxShown(el: Element): boolean {
+    return !isZone(el) || el.hasAttribute("inkflow:show-shape");
+}
+
 function paintRow(sel: Selected[], prop: "fill" | "stroke"): HTMLElement {
     const first = sel[0].el;
-    const token = tokenOf(first, prop);
-    const computed = getComputedStyle(first)[prop];
+    const shown = boxShown(first);
+    const token = shown ? tokenOf(first, prop) : null;
+    const computed = shown ? getComputedStyle(first)[prop] : "none";
     const send = (paint: { token?: string; color?: string }) => {
         const plans = sel.map((s) => ({
             sel: s,
-            ops: [{ kind: "paint", loc: s.loc, prop, ...paint } as SvgOp],
+            ops: [
+                ...boxOps(s),
+                { kind: "paint", loc: s.loc, prop, ...paint } as SvgOp,
+            ],
         }));
         void sendSvgOps(plans, prop === "fill" ? "Fill" : "Stroke");
     };
@@ -800,7 +816,10 @@ function styleOps(
     label: string,
 ) {
     void sendSvgOps(
-        sel.map((s) => ({ sel: s, ops: [{ kind: "style", loc: s.loc, set }] })),
+        sel.map((s) => ({
+            sel: s,
+            ops: [...boxOps(s), { kind: "style", loc: s.loc, set }],
+        })),
         label,
     );
 }
@@ -904,14 +923,23 @@ function renderObjectPanel(sel: Selected): void {
 
     if (movable) panel.append(geometrySection([sel]));
 
-    if (!zone && src?.writable && (movable || ed.layoutMode)) {
+    // A text zone (a text box, text typed into a shape) is styled like a shape:
+    // its source rect / ellipse draws the box behind the text.
+    const textZone =
+        zone &&
+        el.localName === "foreignObject" &&
+        !!el.querySelector(".inkflow-content");
+    const shapeTag = textZone
+        ? (el.getAttribute("data-ink-tag") ?? "rect")
+        : el.localName;
+    if ((!zone || textZone) && src?.writable && (movable || ed.layoutMode)) {
         const fills = ![
             "line",
             "polyline",
             "image",
             "foreignObject",
             "g",
-        ].includes(el.localName);
+        ].includes(shapeTag);
         const strokeWidth = parseFloat(getComputedStyle(el).strokeWidth) || 0;
         const opacity = parseFloat(getComputedStyle(el).opacity);
         panel.append(
@@ -955,7 +983,7 @@ function renderObjectPanel(sel: Selected): void {
                         return r;
                     })(),
                 ),
-                el.localName === "rect" &&
+                shapeTag === "rect" &&
                     row(
                         "Corner radius",
                         numberInput(
@@ -966,6 +994,7 @@ function renderObjectPanel(sel: Selected): void {
                                         {
                                             sel,
                                             ops: [
+                                                ...boxOps(sel),
                                                 {
                                                     kind: "attrs",
                                                     loc: sel.loc,
@@ -985,6 +1014,7 @@ function renderObjectPanel(sel: Selected): void {
             ),
         );
         if (el.localName === "text") panel.append(textSection(sel));
+        if (textZone) panel.append(textBoxSection(sel));
     }
     if (!zone && src?.writable && movable && isConnector(el)) {
         panel.append(connectorSection(sel));
@@ -1133,6 +1163,101 @@ function connectorSection(sel: Selected): HTMLElement {
                     },
                     "Detach",
                 ),
+            ),
+        ),
+    );
+}
+
+// ── Text boxes ──
+
+// Padding and alignment are CSS custom properties on the zone's shape (the
+// same --inkflow-* a layout sets for its zones), so they apply to the text
+// wherever it is written: its .md section, deck.py or Inline Markdown.
+function textBoxSection(sel: Selected): HTMLElement {
+    const el = sel.el as SVGGraphicsElement & ElementCSSInlineStyle;
+    const value = (name: string) => el.style.getPropertyValue(name).trim();
+    const setVar = (name: string, v: string | null, label: string) =>
+        void sendSvgOps(
+            [
+                {
+                    sel,
+                    ops: [{ kind: "style", loc: sel.loc, set: { [name]: v } }],
+                },
+            ],
+            label,
+        );
+    const shown = el.hasAttribute("inkflow:show-shape");
+    const box = h("input", { type: "checkbox" });
+    box.checked = shown;
+    box.addEventListener(
+        "change",
+        () =>
+            void sendSvgOps(
+                [
+                    {
+                        sel,
+                        ops: [
+                            {
+                                kind: "attrs",
+                                loc: sel.loc,
+                                set: {
+                                    "inkflow:show-shape": box.checked
+                                        ? "true"
+                                        : null,
+                                },
+                            },
+                        ],
+                    },
+                ],
+                box.checked ? "Show box" : "Hide box",
+            ),
+    );
+    const padding = parseFloat(value("--inkflow-padding"));
+    return section(
+        "Text box",
+        row("Draw the box", box),
+        row(
+            "Padding",
+            numberInput(
+                Number.isFinite(padding) ? padding : null,
+                (v) =>
+                    setVar(
+                        "--inkflow-padding",
+                        `${Math.max(0, v)}px`,
+                        "Padding",
+                    ),
+                {
+                    min: 0,
+                    placeholder: "auto",
+                    onClear: () => setVar("--inkflow-padding", null, "Padding"),
+                },
+            ),
+        ),
+        row(
+            "Align",
+            selectInput(
+                [
+                    { value: "", label: "Default" },
+                    { value: "left", label: "Left" },
+                    { value: "center", label: "Centre" },
+                    { value: "right", label: "Right" },
+                    { value: "justify", label: "Justify" },
+                ],
+                value("--inkflow-align"),
+                (v) => setVar("--inkflow-align", v || null, "Text align"),
+            ),
+        ),
+        row(
+            "Vertical",
+            selectInput(
+                [
+                    { value: "", label: "Default" },
+                    { value: "start", label: "Top" },
+                    { value: "center", label: "Middle" },
+                    { value: "end", label: "Bottom" },
+                ],
+                value("--inkflow-valign"),
+                (v) => setVar("--inkflow-valign", v || null, "Vertical align"),
             ),
         ),
     );

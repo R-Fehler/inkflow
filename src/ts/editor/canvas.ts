@@ -66,6 +66,7 @@ export const hooks = {
     editingHost: (): Element | null => null,
     finishEditing: (): void => {},
     crop: (_el: SVGGraphicsElement): void => {},
+    typeInto: (_el: SVGGraphicsElement): void => {},
     zoneMedia: (_zone: string): void => {},
     toolDown: (_e: PointerEvent, _pt: { x: number; y: number }): boolean =>
         false,
@@ -441,6 +442,17 @@ export function pick(x: number, y: number): SVGGraphicsElement | null {
         }
     }
     return pickByBox(svg, x, y);
+}
+
+/**
+ * A rectangle or ellipse of the slide's own drawing that text can be typed
+ * into (it becomes a text zone that keeps its look), or a shown zone box that
+ * is still empty.
+ */
+export function canTypeInto(el: Element): boolean {
+    if (!["rect", "ellipse", "circle"].includes(el.localName)) return false;
+    if (!canTransform(el) || ed.layoutMode || !isOwn(el)) return false;
+    return !isZone(el) || el.hasAttribute("inkflow:show-shape");
 }
 
 // Lines and connectors are picked by their stroke only: their box (a long
@@ -1809,6 +1821,10 @@ function onDoubleClick(e: MouseEvent): void {
     if (hooks.editingHost()?.contains(e.target as Node)) return;
     const el = pick(e.clientX, e.clientY);
     if (!el) return;
+    if (canTypeInto(el)) {
+        hooks.typeInto(el);
+        return;
+    }
     if (isZone(el)) {
         hooks.editZone(zoneName(el), el, { x: e.clientX, y: e.clientY });
         return;
