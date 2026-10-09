@@ -50,7 +50,7 @@ import type {
     ZoneValue,
 } from "./types";
 
-const panel = document.getElementById("props")!;
+const panel = document.getElementById("props-body")!;
 
 // ── Small widgets ──
 

@@ -9,6 +9,8 @@ INKSCAPE_LABEL = f"{{{INKSCAPE}}}label"
 
 INKFLOW_PARENT = f"{{{INKFLOW}}}parent"
 INKFLOW_DEFAULT_ZONE = f"{{{INKFLOW}}}default-zone"
+INKFLOW_LOCKED = f"{{{INKFLOW}}}locked"
+"""Set by the visual editor on an object or layer it must not select."""
 INKFLOW_LAYOUT_SRC = f"{{{INKFLOW}}}layout-src"
 INKFLOW_LAYOUT_HASH = f"{{{INKFLOW}}}layout-hash"
 INKFLOW_OVERLAY_SRC = f"{{{INKFLOW}}}overlay-src"

@@ -29,7 +29,8 @@ INK_TOP = "data-ink-top"
 INK_LAYER = "data-ink-layer"
 """Marks an Inkscape layer group (selection passes through it)."""
 INK_LOCKED = "data-ink-locked"
-"""Marks a layer Inkscape has locked; its objects are not selectable."""
+"""Marks a locked layer or object (``inkflow:locked``, or a layer Inkscape has
+locked); it and everything in it is not selectable."""
 
 INK_TAG = "data-ink-tag"
 """On an element that replaced another (a filled zone): the source element's tag,
@@ -102,6 +103,8 @@ def stamper(key: int) -> Callable[[SvgElement], None]:
             if el is root or not is_element(el):
                 continue
             el.set(INK, f"{key}:{child_path(el)}")
+            if el.get(ns.INKFLOW_LOCKED) == "true":
+                el.set(INK_LOCKED, "")
             if is_layer(el):
                 el.set(INK_LAYER, "")
                 if el.get(_INSENSITIVE) == "true":

@@ -60,7 +60,14 @@
       <div id="sorter-list"></div>
       <button type="button" id="sorter-add" title="New slide (Ctrl+M)">+ New slide</button>
     </aside>
-    <aside id="props"></aside>
+    <aside id="props">
+      <div id="panel-tabs" role="tablist">
+        <button type="button" role="tab" data-tab="props" class="on">Properties</button>
+        <button type="button" role="tab" data-tab="objects">Objects</button>
+      </div>
+      <div id="props-body"></div>
+      <div id="objects" hidden></div>
+    </aside>
   </div>
   <div id="text-layer"></div>
   <div id="context-menu" role="menu"></div>

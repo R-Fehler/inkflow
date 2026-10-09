@@ -16,6 +16,7 @@ import { initGallery } from "./gallery";
 import { afterRender, initInsert } from "./insert";
 import { connect } from "./net";
 import { initNotes } from "./notes";
+import { initObjects } from "./objects";
 import { initProps } from "./props";
 import { initSorter, renderSorter } from "./sorter";
 import { currentSlide, ed, emit, on } from "./state";
@@ -111,6 +112,7 @@ function boot(): void {
     initInsert();
     initSorter();
     initProps();
+    initObjects();
     initNotes();
     initToolbar();
     initContext();

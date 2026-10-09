@@ -568,7 +568,99 @@ body.previewing #canvas::after {
   overflow-y: auto;
   background: var(--ui-panel);
   border-left: 1px solid var(--ui-line);
-  padding: 4px 0 24px;
+  padding: 0 0 24px;
+}
+#panel-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  gap: 2px;
+  padding: 6px 10px 0;
+  background: var(--ui-panel);
+  border-bottom: 1px solid var(--ui-line);
+}
+#panel-tabs button {
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--subtext);
+  cursor: pointer;
+}
+#panel-tabs button.on {
+  color: var(--text);
+  border-bottom-color: var(--sel);
+}
+#objects {
+  padding: 4px 0;
+}
+.obj-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding-right: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.obj-row:hover {
+  background: color-mix(in srgb, var(--sel) 8%, transparent);
+}
+.obj-row.on {
+  background: var(--sel-soft);
+}
+.obj-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.obj-row.foreign .obj-name,
+.obj-row.hidden-obj .obj-name {
+  color: var(--subtext);
+}
+.obj-row.hidden-obj .obj-name {
+  font-style: italic;
+}
+.obj-twisty {
+  width: 16px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--subtext);
+  cursor: pointer;
+}
+.obj-twisty.none {
+  visibility: hidden;
+}
+.obj-toggle {
+  display: inline-flex;
+  padding: 3px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--subtext);
+  opacity: 0.35;
+  cursor: pointer;
+}
+.obj-row:hover .obj-toggle,
+.obj-toggle.on {
+  opacity: 1;
+}
+.obj-toggle.on {
+  color: var(--sel);
+}
+.obj-badge {
+  font-size: 10px;
+  color: var(--subtext);
+  text-transform: uppercase;
+}
+.obj-rename {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
 }
 .props-section {
   padding: 10px 14px;
@@ -636,8 +728,11 @@ body.previewing #canvas::after {
   color: var(--subtext);
   font-size: 12px;
 }
-#props > .hint {
+#props-body > .hint {
   padding: 0 14px;
+}
+#objects > .hint {
+  padding: 4px 14px 8px;
 }
 .btn-row {
   display: flex;

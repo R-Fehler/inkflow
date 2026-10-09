@@ -159,7 +159,8 @@ export function render(): void {
     ed.selection = [];
     for (const k of keep) {
         const el = findElement(k, trustLoc);
-        if (el) addToSelection(el, false);
+        // An object locked or hidden by the last edit is let go.
+        if (el && selectable(el)) addToSelection(el, false);
     }
     layoutPaper();
     emit("render");
@@ -364,7 +365,8 @@ export function keyOf(el: Element): number {
     return parseInt(loc.split(":")[0] ?? "", 10);
 }
 
-function inLockedLayer(el: Element): boolean {
+// A locked layer or object (inkflow:locked), or anything inside one.
+export function isLocked(el: Element): boolean {
     return el.closest("[data-ink-locked]") !== null;
 }
 
@@ -382,7 +384,7 @@ export function isOwn(el: Element): boolean {
 }
 
 export function selectable(el: Element): boolean {
-    if (!el.hasAttribute("data-ink") || inLockedLayer(el)) return false;
+    if (!el.hasAttribute("data-ink") || isLocked(el)) return false;
     const src = sourceOf(keyOf(el));
     if (!src) return false;
     if (ed.layoutMode) return src.writable;
@@ -455,6 +457,82 @@ function pickByBox(
         }
     }
     return null;
+}
+
+// Every object a click at a point could mean, topmost first: what is drawn
+// there, then objects whose box contains it. Middle-click (or Alt+click)
+// steps through them, to reach an object hidden under another.
+export function candidatesAt(x: number, y: number): SVGGraphicsElement[] {
+    const svg = slideRoot();
+    if (!svg) return [];
+    const out: SVGGraphicsElement[] = [];
+    const add = (el: Element | null) => {
+        if (el && !out.includes(el as SVGGraphicsElement) && selectable(el)) {
+            out.push(el as SVGGraphicsElement);
+        }
+    };
+    const owner = (node: Element | null): Element | null => {
+        while (node && node !== svg) {
+            if (ed.scope) {
+                if (node.parentElement === (ed.scope as Element)) return node;
+            } else if (node.hasAttribute("data-ink-top")) return node;
+            node = node.parentElement;
+        }
+        return null;
+    };
+    for (const hit of document.elementsFromPoint(x, y)) {
+        if (!svg.contains(hit)) continue;
+        const node =
+            hit instanceof SVGElement ? hit : hit.closest("foreignObject");
+        add(owner(node));
+    }
+    const pt = clientToSlide(x, y);
+    const pool = ed.scope
+        ? [...ed.scope.children]
+        : [...svg.querySelectorAll("[data-ink-top]")];
+    for (let i = pool.length - 1; i >= 0; i--) {
+        const b = slideBox(pool[i]);
+        if (
+            b &&
+            pt.x >= b.x &&
+            pt.x <= b.x + b.width &&
+            pt.y >= b.y &&
+            pt.y <= b.y + b.height
+        ) {
+            add(pool[i]);
+        }
+    }
+    return out;
+}
+
+let cycle: { x: number; y: number; index: number } | null = null;
+
+function cycleSelect(e: PointerEvent): void {
+    const near =
+        cycle !== null &&
+        Math.hypot(cycle.x - e.clientX, cycle.y - e.clientY) < 6;
+    const all = candidatesAt(e.clientX, e.clientY);
+    if (!all.length) {
+        clearSelection();
+        return;
+    }
+    const current = ed.selection.length === 1 ? ed.selection[0].el : null;
+    let index = near && cycle ? cycle.index + 1 : 0;
+    if (!near && current && all[0] === current) index = 1;
+    index %= all.length;
+    cycle = { x: e.clientX, y: e.clientY, index };
+    select([all[index]]);
+    if (all.length > 1) {
+        const name = all[index].getAttribute("id") ?? all[index].localName;
+        toast(`${index + 1} of ${all.length} here: ${name}`);
+    }
+}
+
+export function setHover(el: Element | null): void {
+    if (el !== hoverEl) {
+        hoverEl = el;
+        drawOverlay();
+    }
 }
 
 // ── Selection ──
@@ -1204,7 +1282,17 @@ function onPointerDown(e: PointerEvent): void {
         if (editing.contains(target)) return;
         hooks.finishEditing();
     }
-    if (e.button !== 0 || !slideRoot()) return;
+    if (!slideRoot()) return;
+    if (
+        e.button === 1 ||
+        (e.button === 0 && e.altKey && ed.tool === "select")
+    ) {
+        // Middle-click (no autoscroll) or Alt+click: the next object down.
+        e.preventDefault();
+        cycleSelect(e);
+        return;
+    }
+    if (e.button !== 0) return;
     const handle = (target.closest("[data-handle]") as SVGElement | null)
         ?.dataset.handle as Handle | undefined;
     const pt = clientToSlide(e.clientX, e.clientY);
@@ -1342,6 +1430,12 @@ function onDoubleClick(e: MouseEvent): void {
 
 export function initCanvas(): void {
     paper.addEventListener("pointerdown", onPointerDown);
+    // No autoscroll or "open link in new tab" on the middle button.
+    for (const type of ["mousedown", "auxclick"]) {
+        paper.addEventListener(type, (e) => {
+            if ((e as MouseEvent).button === 1) e.preventDefault();
+        });
+    }
     paper.addEventListener("pointermove", onPointerMove);
     paper.addEventListener("pointerup", (e) => void onPointerUp(e));
     paper.addEventListener("pointercancel", (e) => void onPointerUp(e));

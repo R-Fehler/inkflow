@@ -196,7 +196,7 @@
   }
 
   // src/ts/editor/dom.ts
-  function h(tag, attrs2 = {}, ...children) {
+  function h(tag, attrs2 = {}, ...children2) {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs2)) {
       if (v == null || v === false) continue;
@@ -210,7 +210,7 @@
         el.setAttribute(k, String(v));
       }
     }
-    for (const c of children) {
+    for (const c of children2) {
       if (c == null || c === false) continue;
       el.append(typeof c === "string" ? document.createTextNode(c) : c);
     }
@@ -244,6 +244,8 @@
     sun: '<circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15"/>',
     eye: '<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="2"/>',
     eyeOff: '<path d="M2 2l12 12M6.5 4A6.6 6.6 0 0 1 14.5 8a9 9 0 0 1-1.8 2.3M9.9 11.9A6.3 6.3 0 0 1 1.5 8 9.5 9.5 0 0 1 4 5"/>',
+    lock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>',
+    unlock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 4.9-.7"/>',
     up: '<path d="M4 10l4-4 4 4"/>',
     down: '<path d="M4 6l4 4 4-4"/>',
     front: '<rect x="5" y="5" width="8" height="8" rx="1" fill="currentColor"/><path d="M3 10.5V3h7.5"/>',
@@ -709,8 +711,8 @@
     commandHandler = fn;
   }
   function connect(port) {
-    const host2 = location.hostname || "localhost";
-    const sock = new WebSocket(`ws://${host2}:${port}`);
+    const host3 = location.hostname || "localhost";
+    const sock = new WebSocket(`ws://${host3}:${port}`);
     ws = sock;
     sock.onopen = () => {
       sock.send(JSON.stringify({ type: "hello", role: "editor" }));
@@ -992,7 +994,7 @@
     ed.selection = [];
     for (const k of keep) {
       const el = findElement(k, trustLoc);
-      if (el) addToSelection(el, false);
+      if (el && selectable(el)) addToSelection(el, false);
     }
     layoutPaper();
     emit("render");
@@ -1155,7 +1157,7 @@
     const loc = el.getAttribute("data-ink") ?? "";
     return parseInt(loc.split(":")[0] ?? "", 10);
   }
-  function inLockedLayer(el) {
+  function isLocked(el) {
     return el.closest("[data-ink-locked]") !== null;
   }
   function isOwn(el) {
@@ -1164,7 +1166,7 @@
     return !!src && src.role === "slide" && !!slide && !slide.srcShared && src.writable;
   }
   function selectable(el) {
-    if (!el.hasAttribute("data-ink") || inLockedLayer(el)) return false;
+    if (!el.hasAttribute("data-ink") || isLocked(el)) return false;
     const src = sourceOf(keyOf(el));
     if (!src) return false;
     if (ed.layoutMode) return src.writable;
@@ -1210,6 +1212,64 @@
       }
     }
     return null;
+  }
+  function candidatesAt(x, y) {
+    const svg = slideRoot();
+    if (!svg) return [];
+    const out = [];
+    const add = (el) => {
+      if (el && !out.includes(el) && selectable(el)) {
+        out.push(el);
+      }
+    };
+    const owner = (node) => {
+      while (node && node !== svg) {
+        if (ed.scope) {
+          if (node.parentElement === ed.scope) return node;
+        } else if (node.hasAttribute("data-ink-top")) return node;
+        node = node.parentElement;
+      }
+      return null;
+    };
+    for (const hit of document.elementsFromPoint(x, y)) {
+      if (!svg.contains(hit)) continue;
+      const node = hit instanceof SVGElement ? hit : hit.closest("foreignObject");
+      add(owner(node));
+    }
+    const pt = clientToSlide(x, y);
+    const pool = ed.scope ? [...ed.scope.children] : [...svg.querySelectorAll("[data-ink-top]")];
+    for (let i = pool.length - 1; i >= 0; i--) {
+      const b = slideBox(pool[i]);
+      if (b && pt.x >= b.x && pt.x <= b.x + b.width && pt.y >= b.y && pt.y <= b.y + b.height) {
+        add(pool[i]);
+      }
+    }
+    return out;
+  }
+  var cycle = null;
+  function cycleSelect(e) {
+    const near = cycle !== null && Math.hypot(cycle.x - e.clientX, cycle.y - e.clientY) < 6;
+    const all = candidatesAt(e.clientX, e.clientY);
+    if (!all.length) {
+      clearSelection();
+      return;
+    }
+    const current = ed.selection.length === 1 ? ed.selection[0].el : null;
+    let index = near && cycle ? cycle.index + 1 : 0;
+    if (!near && current && all[0] === current) index = 1;
+    index %= all.length;
+    cycle = { x: e.clientX, y: e.clientY, index };
+    select([all[index]]);
+    if (all.length > 1) {
+      const name = all[index].getAttribute("id") ?? all[index].localName;
+      toast(`${index + 1} of ${all.length} here: ${name}`);
+    }
+  }
+  function setHover(el) {
+    if (el !== hoverEl) {
+      hoverEl = el;
+      drawOverlay();
+    }
   }
   function toSelected(el) {
     const loc = el.getAttribute("data-ink") ?? "";
@@ -1472,13 +1532,13 @@
       const tx = pb.x + 6;
       const ty = pb.y + 6;
       g.append(svgEl("rect", { x: tx, y: ty, width: w, height: 22, rx: 11 }));
-      const label2 = svgEl("text", {
+      const label3 = svgEl("text", {
         x: tx + w / 2,
         y: ty + 15,
         "text-anchor": "middle"
       });
-      label2.textContent = text;
-      g.append(label2);
+      label3.textContent = text;
+      g.append(label3);
       const title = svgEl("title");
       title.textContent = media ? `Add an image or video to the ${z.zone} zone` : `Add ${z.zone} text (Markdown)`;
       g.append(title);
@@ -1502,19 +1562,19 @@
     }
     return out;
   }
-  async function sendSvgOps(plans, label2, coalesce) {
+  async function sendSvgOps(plans, label3, coalesce) {
     const slide = currentSlide();
     if (!slide) return false;
     if (ed.structuralPending) {
       toast("One moment: the last change is still being applied");
       return false;
     }
-    const run = queue.then(() => sendQueued(plans, label2, coalesce));
+    const run = queue.then(() => sendQueued(plans, label3, coalesce));
     queue = run.catch(() => false);
     return run;
   }
   var queue = Promise.resolve();
-  async function sendQueued(plans, label2, coalesce) {
+  async function sendQueued(plans, label3, coalesce) {
     const slide = currentSlide();
     if (!slide) return false;
     let ok = true;
@@ -1528,7 +1588,7 @@
         file: path,
         hash: src?.hash ?? "",
         ops,
-        label: label2,
+        label: label3,
         coalesce,
         // Deleting or duplicating a zone takes its content along (not in
         // layout mode: a layout's zones are filled by every slide).
@@ -1801,8 +1861,8 @@
     lastPlans = [];
     drawOverlay();
     if (!plans.length) return;
-    const label2 = drag.kind === "move" ? "Move" : drag.kind === "resize" ? ed.cropMode ? "Crop" : "Resize" : "Rotate";
-    const ok = await sendSvgOps(plans, label2);
+    const label3 = drag.kind === "move" ? "Move" : drag.kind === "resize" ? ed.cropMode ? "Crop" : "Resize" : "Rotate";
+    const ok = await sendSvgOps(plans, label3);
     if (!ok) restore(drag.snaps);
     drawOverlay();
   }
@@ -1818,7 +1878,13 @@
       if (editing.contains(target)) return;
       hooks.finishEditing();
     }
-    if (e.button !== 0 || !slideRoot()) return;
+    if (!slideRoot()) return;
+    if (e.button === 1 || e.button === 0 && e.altKey && ed.tool === "select") {
+      e.preventDefault();
+      cycleSelect(e);
+      return;
+    }
+    if (e.button !== 0) return;
     const handle = target.closest("[data-handle]")?.dataset.handle;
     const pt = clientToSlide(e.clientX, e.clientY);
     if (!handle && ed.tool !== "select") {
@@ -1939,6 +2005,11 @@
   }
   function initCanvas() {
     paper.addEventListener("pointerdown", onPointerDown);
+    for (const type of ["mousedown", "auxclick"]) {
+      paper.addEventListener(type, (e) => {
+        if (e.button === 1) e.preventDefault();
+      });
+    }
     paper.addEventListener("pointermove", onPointerMove);
     paper.addEventListener("pointerup", (e) => void onPointerUp(e));
     paper.addEventListener("pointercancel", (e) => void onPointerUp(e));
@@ -2724,7 +2795,7 @@
     const layouts = await previews();
     clear(grid);
     for (const p of layouts) {
-      const [label2, description] = LABELS[p.name] ?? [p.name, ""];
+      const [label3, description] = LABELS[p.name] ?? [p.name, ""];
       const lost = opts.mode === "change" ? lostZones(p) : [];
       const current = opts.mode === "change" && p.name === opts.current;
       const card = h(
@@ -2739,7 +2810,7 @@
         h(
           "div",
           { class: "gallery-label" },
-          h("strong", {}, label2),
+          h("strong", {}, label3),
           p.source === "local" && h("span", { class: "badge" }, "project")
         ),
         description && h("div", { class: "gallery-desc" }, description),
@@ -3005,7 +3076,7 @@
     menu.classList.remove("open");
     clear(menu);
   }
-  function menuItem(label2, fn, disabled = false) {
+  function menuItem(label3, fn, disabled = false) {
     return h(
       "button",
       {
@@ -3017,7 +3088,7 @@
           fn();
         }
       },
-      label2
+      label3
     );
   }
   function openMenu(x, y, i) {
@@ -3289,21 +3360,294 @@
     on("model", load);
   }
 
+  // src/ts/editor/objects.ts
+  var host2 = document.getElementById("objects");
+  var body = document.getElementById("props-body");
+  var tabs = document.getElementById("panel-tabs");
+  var NAMES = {
+    g: "Group",
+    rect: "Rectangle",
+    circle: "Circle",
+    ellipse: "Ellipse",
+    line: "Line",
+    polyline: "Polyline",
+    polygon: "Polygon",
+    path: "Path",
+    text: "Text",
+    image: "Image",
+    svg: "Image",
+    use: "Clone",
+    foreignObject: "Content",
+    a: "Link"
+  };
+  var collapsed = /* @__PURE__ */ new Set();
+  function label2(el) {
+    if (isZone(el)) return `Zone \xB7 ${zoneName(el)}`;
+    const id = el.getAttribute("id");
+    const kind = el.hasAttribute("data-ink-layer") ? "Layer" : NAMES[el.localName] ?? el.localName;
+    if (el.localName === "text") {
+      const t = (el.textContent ?? "").trim().replace(/\s+/g, " ");
+      return id ? `${id} \xB7 \u201C${t.slice(0, 24)}\u201D` : `\u201C${t.slice(0, 32)}\u201D`;
+    }
+    return id ?? kind;
+  }
+  function isHidden(el) {
+    return el.style?.display === "none" || el.getAttribute("display") === "none";
+  }
+  function children(el) {
+    return [...el.children].filter(
+      (c) => c.hasAttribute("data-ink") && !["title", "desc", "defs", "style", "metadata"].includes(
+        c.localName
+      ) && // A cropped picture's own <image> is part of the picture.
+      el.localName !== "svg"
+    );
+  }
+  function selFor(el) {
+    return {
+      el,
+      key: keyOf(el),
+      loc: el.getAttribute("data-ink") ?? ""
+    };
+  }
+  async function toggleHidden2(el) {
+    await sendSvgOps(
+      [
+        {
+          sel: selFor(el),
+          ops: [
+            {
+              kind: "style",
+              loc: el.getAttribute("data-ink") ?? "",
+              set: { display: isHidden(el) ? null : "none" }
+            }
+          ]
+        }
+      ],
+      isHidden(el) ? "Show" : "Hide"
+    );
+  }
+  async function toggleLocked(el) {
+    const own = el.hasAttribute("data-ink-locked");
+    if (!own && isLocked(el)) {
+      toast("It is inside a locked layer or group: unlock that instead");
+      return;
+    }
+    await sendSvgOps(
+      [
+        {
+          sel: selFor(el),
+          ops: [
+            {
+              kind: "lock",
+              loc: el.getAttribute("data-ink") ?? "",
+              locked: !own
+            }
+          ]
+        }
+      ],
+      own ? "Unlock" : "Lock"
+    );
+  }
+  function rename(el, nameEl) {
+    const src = sourceOf(keyOf(el));
+    if (!src?.writable || isZone(el)) return;
+    const id = el.getAttribute("id") ?? "";
+    const input = h("input", { type: "text", class: "obj-rename", value: id });
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (save2) => {
+      if (done) return;
+      done = true;
+      const v = input.value.trim();
+      if (save2 && v && v !== id) {
+        void edit({
+          action: "svg",
+          file: src.path,
+          hash: src.hash,
+          ops: [
+            {
+              kind: "id",
+              loc: el.getAttribute("data-ink"),
+              id: v,
+              from: id || void 0
+            }
+          ],
+          label: "Rename"
+        });
+      }
+      renderObjects();
+    };
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") finish(true);
+      else if (e.key === "Escape") finish(false);
+    });
+    input.addEventListener("blur", () => finish(true));
+  }
+  function pickFromList(el) {
+    if (isLocked(el)) {
+      toast("Locked: unlock it to select it");
+      return;
+    }
+    const parent = el.parentElement;
+    if (parent && !el.hasAttribute("data-ink-top") && parent.localName === "g" && !parent.hasAttribute("data-ink-layer")) {
+      enterGroup(parent);
+    } else if (ed.scope && !ed.scope.contains(el)) {
+      enterGroup(null);
+    }
+    if (!selectable(el)) {
+      toast(
+        ed.layoutMode ? "This object cannot be edited here" : "From a layout or overlay: use Edit layout to change it"
+      );
+      return;
+    }
+    select([el]);
+  }
+  function row(el, depth) {
+    const loc = el.getAttribute("data-ink") ?? "";
+    const src = sourceOf(keyOf(el));
+    const writable = !!src?.writable && (canTransform(el) || ed.layoutMode || isOwnObject(el));
+    const kids = children(el);
+    const group = kids.length > 0;
+    const open = group && !collapsed.has(loc);
+    const selected = ed.selection.some((s) => s.el === el);
+    const locked = el.hasAttribute("data-ink-locked");
+    const hidden = isHidden(el);
+    const name = h("span", { class: "obj-name" }, label2(el));
+    const out = [];
+    const item = h(
+      "div",
+      {
+        class: `obj-row${selected ? " on" : ""}${writable ? "" : " foreign"}${hidden ? " hidden-obj" : ""}`,
+        title: src ? `${label2(el)} \xB7 ${src.rel}` : label2(el),
+        style: `padding-left:${8 + depth * 14}px`
+      },
+      h(
+        "button",
+        {
+          type: "button",
+          class: `obj-twisty${group ? "" : " none"}`,
+          title: open ? "Collapse" : "Expand",
+          onclick: (e) => {
+            e.stopPropagation();
+            if (collapsed.has(loc)) collapsed.delete(loc);
+            else collapsed.add(loc);
+            renderObjects();
+          }
+        },
+        group ? open ? "\u25BE" : "\u25B8" : ""
+      ),
+      name,
+      writable ? h(
+        "button",
+        {
+          type: "button",
+          class: `obj-toggle${hidden ? " on" : ""}`,
+          title: hidden ? "Hidden: click to show" : "Hide (on the slide and in the presentation)",
+          onclick: (e) => {
+            e.stopPropagation();
+            void toggleHidden2(el);
+          }
+        },
+        icon(hidden ? "eyeOff" : "eye", 14)
+      ) : null,
+      writable ? h(
+        "button",
+        {
+          type: "button",
+          class: `obj-toggle${locked ? " on" : ""}`,
+          title: locked ? "Locked: click to unlock" : "Lock (cannot be selected on the slide)",
+          onclick: (e) => {
+            e.stopPropagation();
+            void toggleLocked(el);
+          }
+        },
+        icon(locked ? "lock" : "unlock", 14)
+      ) : h("span", { class: "obj-badge" }, src?.role ?? "")
+    );
+    item.addEventListener("click", () => pickFromList(el));
+    item.addEventListener("dblclick", () => rename(el, name));
+    item.addEventListener("mouseenter", () => setHover(el));
+    item.addEventListener("mouseleave", () => setHover(null));
+    out.push(item);
+    if (open) {
+      for (const k of [...kids].reverse()) out.push(...row(k, depth + 1));
+    }
+    return out;
+  }
+  function isOwnObject(el) {
+    const src = sourceOf(keyOf(el));
+    return !!src && src.role === "slide" && src.writable;
+  }
+  function renderObjects() {
+    if (host2.hidden) return;
+    clear(host2);
+    const svg = slideRoot();
+    if (!svg) return;
+    const top = [...svg.querySelectorAll("[data-ink-top], [data-ink-layer]")].filter((el) => {
+      const parent = el.parentElement?.closest(
+        "[data-ink-top], [data-ink-layer]"
+      );
+      return !parent || !svg.contains(parent);
+    }).reverse();
+    if (!top.length) {
+      host2.append(h("p", { class: "hint" }, "No objects on this slide."));
+      return;
+    }
+    host2.append(
+      h(
+        "p",
+        { class: "hint" },
+        "Top of the stack first. Middle-click (or Alt+click) on the slide steps through overlapping objects."
+      )
+    );
+    for (const el of top) host2.append(...row(el, 0));
+  }
+  function showTab(tab) {
+    for (const b of tabs.querySelectorAll("[data-tab]")) {
+      b.classList.toggle("on", b.dataset.tab === tab);
+      b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+    }
+    host2.hidden = tab !== "objects";
+    body.hidden = tab === "objects";
+    try {
+      localStorage.setItem("inkflow-editor-tab", tab);
+    } catch {
+    }
+    renderObjects();
+  }
+  function initObjects() {
+    tabs.addEventListener("click", (e) => {
+      const tab = e.target.closest("[data-tab]")?.dataset.tab;
+      if (tab) showTab(tab);
+    });
+    let saved = "props";
+    try {
+      saved = localStorage.getItem("inkflow-editor-tab") ?? "props";
+    } catch {
+    }
+    showTab(saved === "objects" ? "objects" : "props");
+    on("render", renderObjects);
+    on("selection", renderObjects);
+  }
+
   // src/ts/editor/props.ts
-  var panel = document.getElementById("props");
-  function section(title, ...body) {
+  var panel = document.getElementById("props-body");
+  function section(title, ...body2) {
     return h(
       "section",
       { class: "props-section" },
       h("h3", {}, title),
-      ...body.filter((b) => !!b)
+      ...body2.filter((b) => !!b)
     );
   }
-  function row(label2, ...controls) {
+  function row2(label3, ...controls) {
     return h(
       "label",
       { class: "prop-row" },
-      h("span", { class: "prop-label" }, label2),
+      h("span", { class: "prop-label" }, label3),
       ...controls
     );
   }
@@ -3347,11 +3691,11 @@
     sel.addEventListener("change", () => commit(sel.value));
     return sel;
   }
-  function button(label2, title, fn, cls = "") {
+  function button(label3, title, fn, cls = "") {
     return h(
       "button",
       { type: "button", class: `pbtn ${cls}`, title, onclick: fn },
-      label2
+      label3
     );
   }
   function fieldControl(f, value, commit) {
@@ -3402,10 +3746,10 @@
   function fieldsEditor(schema, values, commit) {
     const box = h("div", { class: "fields" });
     for (const f of schema) {
-      const label2 = f.name.replace(/_/g, " ");
+      const label3 = f.name.replace(/_/g, " ");
       box.append(
-        row(
-          label2,
+        row2(
+          label3,
           fieldControl(
             f,
             values[f.name] ?? f.default,
@@ -3439,14 +3783,14 @@
     });
     const rows = [];
     for (const f of schema) {
-      const label2 = MEDIA_LABELS[f.name] ?? f.name.replace(/_/g, " ");
+      const label3 = MEDIA_LABELS[f.name] ?? f.name.replace(/_/g, " ");
       if (f.name === "poster") {
         const poster = values.poster;
         rows.push(
           h(
             "div",
             { class: "prop-row" },
-            h("span", { class: "prop-label" }, label2),
+            h("span", { class: "prop-label" }, label3),
             h(
               "span",
               { class: "media-poster" },
@@ -3477,8 +3821,8 @@
           { value: "off", label: "Never" }
         ];
         rows.push(
-          row(
-            label2,
+          row2(
+            label3,
             selectInput(
               opts,
               String(values.muted ?? "auto"),
@@ -3491,8 +3835,8 @@
       if (f.name === "start" || f.name === "end") {
         const v = values[f.name];
         rows.push(
-          row(
-            label2,
+          row2(
+            label3,
             numberInput(
               typeof v === "number" ? v : null,
               (n) => commit(f.name, n),
@@ -3508,8 +3852,8 @@
         continue;
       }
       rows.push(
-        row(
-          label2,
+        row2(
+          label3,
           fieldControl(
             f,
             values[f.name] ?? f.default,
@@ -3544,7 +3888,7 @@
     panel.append(
       section(
         "Slide",
-        row(
+        row2(
           "Title",
           textInput(slide.title ?? "", (v) => {
             void edit({
@@ -3555,7 +3899,7 @@
             });
           })
         ),
-        row(
+        row2(
           "Layout",
           button(
             `${currentLayout ? layoutLabel(currentLayout) : "None"} \u25BE`,
@@ -3567,7 +3911,7 @@
             "wide"
           )
         ),
-        row(
+        row2(
           "Font size",
           numberInput(
             slide.fontSize,
@@ -3580,7 +3924,7 @@
             { placeholder: "deck default" }
           )
         ),
-        row(
+        row2(
           "Hidden",
           (() => {
             const cb = h("input", { type: "checkbox" });
@@ -3607,13 +3951,13 @@
     panel.append(transitionSection(slide.transition, di));
     panel.append(animationList(slide.animations, slide.animationsEditable, di));
     const files = h("div", { class: "files" });
-    const addFile = (label2, rel) => {
+    const addFile = (label3, rel) => {
       if (rel)
         files.append(
           h(
             "div",
             { class: "file" },
-            h("span", {}, label2),
+            h("span", {}, label3),
             h("code", {}, rel)
           )
         );
@@ -3642,8 +3986,8 @@
       ...types.map((t) => ({ value: t.type, label: t.type }))
     ];
     const send = (spec) => void edit({ action: "slide", op: "transition", slide: di, spec });
-    const body = [
-      row(
+    const body2 = [
+      row2(
         "Type",
         selectInput(opts, value, (v) => {
           if (!v) send(null);
@@ -3654,7 +3998,7 @@
     if (current) {
       const info = typeInfo(types, current.type);
       if (info) {
-        body.push(
+        body2.push(
           fieldsEditor(
             info.fields,
             current.fields,
@@ -3663,7 +4007,7 @@
         );
       }
     }
-    return section("Transition into this slide", ...body);
+    return section("Transition into this slide", ...body2);
   }
   function triggerLabel(t) {
     if (t === "with-previous") return "with previous";
@@ -3753,7 +4097,7 @@
     const id = sel.el.getAttribute("id");
     const di = slide.deckIndex;
     const editable = slide.animationsEditable && model.deckEditable;
-    const body = h("div", { class: "anim-list" });
+    const body2 = h("div", { class: "anim-list" });
     const elementName = isZone(sel.el) ? zoneName(sel.el) : id;
     slide.animations.forEach((cue, index) => {
       if (!elementName || cue.element !== (cue.kind === "video" ? zoneName(sel.el) : id))
@@ -3789,7 +4133,7 @@
           });
         })
       );
-      body.append(
+      body2.append(
         h(
           "div",
           { class: "anim-card" },
@@ -3836,9 +4180,9 @@
           }
         });
       });
-      body.append(add);
+      body2.append(add);
     } else if (!slide.animationsEditable) {
-      body.append(
+      body2.append(
         h(
           "p",
           { class: "hint" },
@@ -3846,7 +4190,7 @@
         )
       );
     }
-    return section("Animations", body);
+    return section("Animations", body2);
   }
   var TAG_NAMES = {
     g: "Group",
@@ -3908,12 +4252,12 @@
     swatches.append(
       button("\u2205", "None", () => send({ color: "none" }), "none-btn")
     );
-    return row(prop === "fill" ? "Fill" : "Stroke", swatches);
+    return row2(prop === "fill" ? "Fill" : "Stroke", swatches);
   }
-  function styleOps(sel, set, label2) {
+  function styleOps(sel, set, label3) {
     void sendSvgOps(
       sel.map((s) => ({ sel: s, ops: [{ kind: "style", loc: s.loc, set }] })),
-      label2
+      label3
     );
   }
   function renderObjectPanel(sel) {
@@ -3926,7 +4270,7 @@
     panel.append(
       section(
         tag,
-        row(
+        row2(
           "Id",
           zone ? h("code", {}, id) : textInput(
             id,
@@ -3963,11 +4307,11 @@
       const origin = slide.zoneOrigins?.[name];
       const media = slide.zones[name];
       const where = origin === "deck" ? "deck.py zones=" : origin === "md-file" ? `${slide.md?.rel ?? "Markdown"} (whole file)` : slide.md?.rel ? `${slide.md.rel} \xB7 ::${name}::` : "deck.py";
-      const body = [
+      const body2 = [
         h("p", { class: "hint" }, `Content from ${where}`)
       ];
       if (media && (media.kind === "image" || media.kind === "video")) {
-        body.push(
+        body2.push(
           h("p", { class: "hint media-src" }, media.src ?? ""),
           button(
             "Replace media\u2026",
@@ -3984,7 +4328,7 @@
           })
         );
       } else {
-        body.push(
+        body2.push(
           button(
             "Edit text",
             "Edit this zone's Markdown (double-click)",
@@ -3994,7 +4338,7 @@
           )
         );
       }
-      panel.append(section("Content", ...body));
+      panel.append(section("Content", ...body2));
       if (media && (media.kind === "image" || media.kind === "video")) {
         panel.append(mediaSection(slide, name, media));
       }
@@ -4015,7 +4359,7 @@
           "Style",
           fills && !pictureOf(el) && paintRow([sel], "fill"),
           !pictureOf(el) && el.localName !== "g" && paintRow([sel], "stroke"),
-          !pictureOf(el) && el.localName !== "g" && row(
+          !pictureOf(el) && el.localName !== "g" && row2(
             "Stroke width",
             numberInput(
               strokeWidth,
@@ -4026,7 +4370,7 @@
               )
             )
           ),
-          row(
+          row2(
             "Opacity",
             (() => {
               const r = h("input", {
@@ -4049,7 +4393,7 @@
               return r;
             })()
           ),
-          el.localName === "rect" && row(
+          el.localName === "rect" && row2(
             "Corner radius",
             numberInput(
               parseFloat(el.getAttribute("rx") ?? "0") || 0,
@@ -4100,7 +4444,7 @@
     const href = image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? "";
     const par = image.getAttribute("preserveAspectRatio") ?? "xMidYMid meet";
     const fit = FITS.find((f) => f.par === par)?.value ?? "contain";
-    const imageOps = (set, label2) => void sendSvgOps([{ sel, ops: [{ kind: "attrs", loc, set }] }], label2);
+    const imageOps = (set, label3) => void sendSvgOps([{ sel, ops: [{ kind: "attrs", loc, set }] }], label3);
     const cropped = isCropped(sel.el);
     return section(
       "Picture",
@@ -4140,7 +4484,7 @@
           () => void resetCrop(sel)
         ) : null
       ),
-      row(
+      row2(
         "Fit",
         selectInput(
           FITS.map((f) => ({ value: f.value, label: f.label })),
@@ -4159,7 +4503,7 @@
     const title = [...sel.el.children].find((c) => c.localName === "title")?.textContent ?? "";
     return section(
       "Accessibility",
-      row(
+      row2(
         "Alt text",
         textInput(
           title,
@@ -4181,7 +4525,7 @@
     const el = sel.el;
     const cs = getComputedStyle(el);
     const spans = [...el.querySelectorAll("tspan")];
-    const setAll = (set, label2) => {
+    const setAll = (set, label3) => {
       const plans = [
         { sel, ops: [{ kind: "style", loc: sel.loc, set }] }
       ];
@@ -4195,21 +4539,21 @@
           plans[0].ops.push({ kind: "style", loc, set });
         }
       }
-      void sendSvgOps(plans, label2);
+      void sendSvgOps(plans, label3);
     };
     const bold = parseInt(cs.fontWeight, 10) >= 600;
     const italic = cs.fontStyle === "italic";
     const anchor = cs.textAnchor;
     return section(
       "Text",
-      row(
+      row2(
         "Size",
         numberInput(
           parseFloat(cs.fontSize),
           (v) => setAll({ "font-size": `${v}px` }, "Font size")
         )
       ),
-      row(
+      row2(
         "Font",
         textInput(
           cs.fontFamily,
@@ -4285,15 +4629,15 @@
       h(
         "div",
         { class: "grid2" },
-        row(
+        row2(
           "X",
           numberInput(box.x, (v) => resizeTo({ ...box, x: v }))
         ),
-        row(
+        row2(
           "Y",
           numberInput(box.y, (v) => resizeTo({ ...box, y: v }))
         ),
-        row(
+        row2(
           "W",
           numberInput(
             box.width,
@@ -4301,7 +4645,7 @@
             { min: 1 }
           )
         ),
-        row(
+        row2(
           "H",
           numberInput(
             box.height,
@@ -4310,7 +4654,7 @@
           )
         )
       ),
-      sels.length === 1 && row(
+      sels.length === 1 && row2(
         "Rotation",
         numberInput(
           rot,
@@ -4432,7 +4776,7 @@
     const movable = sels.every((s) => canTransform(s.el));
     panel.append(section(`${sels.length} objects`));
     if (movable) {
-      const a = (label2, title, how) => button(label2, title, () => alignSelection(how));
+      const a = (label3, title, how) => button(label3, title, () => alignSelection(how));
       panel.append(
         section(
           "Align",
@@ -5295,37 +5639,37 @@ ${area2.value.slice(pos)}`;
     return cell;
   }
   function addRow(cell) {
-    const row2 = cell.parentElement;
-    const table = row2.closest("table");
-    let body = table.tBodies[0];
-    if (!body) {
-      body = document.createElement("tbody");
-      table.append(body);
+    const row3 = cell.parentElement;
+    const table = row3.closest("table");
+    let body2 = table.tBodies[0];
+    if (!body2) {
+      body2 = document.createElement("tbody");
+      table.append(body2);
     }
     const tr = document.createElement("tr");
-    for (const c of row2.children) tr.append(newCell("td", c));
-    if (row2.parentElement?.localName === "thead") body.prepend(tr);
-    else row2.after(tr);
+    for (const c of row3.children) tr.append(newCell("td", c));
+    if (row3.parentElement?.localName === "thead") body2.prepend(tr);
+    else row3.after(tr);
   }
   function addColumn(cell) {
     const table = cell.closest("table");
     const index = cell.cellIndex;
-    for (const row2 of table.rows) {
-      const ref = row2.cells[index];
-      const tag = row2.parentElement?.localName === "thead" ? "th" : "td";
+    for (const row3 of table.rows) {
+      const ref = row3.cells[index];
+      const tag = row3.parentElement?.localName === "thead" ? "th" : "td";
       const c = newCell(tag, ref);
       if (ref) ref.after(c);
-      else row2.append(c);
+      else row3.append(c);
     }
   }
   function deleteRow(cell) {
-    const row2 = cell.parentElement;
-    const table = row2.closest("table");
+    const row3 = cell.parentElement;
+    const table = row3.closest("table");
     if (table.rows.length <= 1) {
       table.remove();
       return;
     }
-    if (row2.parentElement?.localName === "thead") {
+    if (row3.parentElement?.localName === "thead") {
       const next = table.tBodies[0]?.rows[0];
       if (!next) return;
       const head = document.createElement("tr");
@@ -5334,11 +5678,11 @@ ${area2.value.slice(pos)}`;
         th.replaceChildren(...c.childNodes);
         head.append(th);
       }
-      row2.replaceWith(head);
+      row3.replaceWith(head);
       next.remove();
       return;
     }
-    row2.remove();
+    row3.remove();
   }
   function deleteColumn(cell) {
     const table = cell.closest("table");
@@ -5347,22 +5691,22 @@ ${area2.value.slice(pos)}`;
       table.remove();
       return;
     }
-    for (const row2 of [...table.rows]) row2.cells[index]?.remove();
+    for (const row3 of [...table.rows]) row3.cells[index]?.remove();
   }
   function alignColumn(cell, align2) {
     const table = cell.closest("table");
-    for (const row2 of table.rows) {
-      const c = row2.cells[cell.cellIndex];
+    for (const row3 of table.rows) {
+      const c = row3.cells[cell.cellIndex];
       if (c) c.style.textAlign = align2;
     }
   }
   function insertTable(content) {
     const head = "<th>Header</th><th>Header</th><th>Header</th>";
-    const row2 = "<td><br></td><td><br></td><td><br></td>";
+    const row3 = "<td><br></td><td><br></td><td><br></td>";
     document.execCommand(
       "insertHTML",
       false,
-      `<table><thead><tr>${head}</tr></thead><tbody><tr>${row2}</tr><tr>${row2}</tr></tbody></table><p><br></p>`
+      `<table><thead><tr>${head}</tr></thead><tbody><tr>${row3}</tr><tr>${row3}</tr></tbody></table><p><br></p>`
     );
     const after = caretElement(content)?.closest("p");
     const table = after?.previousElementSibling;
@@ -5384,7 +5728,7 @@ ${area2.value.slice(pos)}`;
     syncToolbar(document.querySelector(".rich-bar"), content);
   }
   function richToolbar(content, toSource) {
-    const btn = (label2, title, fn, cls = "") => h(
+    const btn = (label3, title, fn, cls = "") => h(
       "button",
       {
         type: "button",
@@ -5396,7 +5740,7 @@ ${area2.value.slice(pos)}`;
           syncToolbar(bar, content);
         }
       },
-      label2
+      label3
     );
     const exec = (cmd, value) => () => {
       document.execCommand(cmd, false, value);
@@ -5419,8 +5763,8 @@ ${area2.value.slice(pos)}`;
       changed(content);
     });
     const swatches = h("div", { class: "fmt-colors" });
-    const host2 = content.closest("svg");
-    const css = host2 ? getComputedStyle(host2) : null;
+    const host3 = content.closest("svg");
+    const css = host3 ? getComputedStyle(host3) : null;
     swatches.append(
       btn(
         "A",
@@ -5904,6 +6248,7 @@ ${area2.value.slice(pos)}`;
     initInsert();
     initSorter();
     initProps();
+    initObjects();
     initNotes();
     initToolbar();
     initContext();

@@ -1229,6 +1229,27 @@ def test_title_op_sets_and_clears_alt_text() -> None:
         )
 
 
+def test_lock_op_writes_inkflow_locked_and_stamps_it() -> None:
+    from inkflow.editor.provenance import INK_LOCKED, INK_TOP, stamper
+
+    svg = _svg()
+    loc = _loc(svg, "box")
+    apply_ops(svg, [{"kind": "lock", "loc": loc, "locked": True}])
+    data = svg.to_bytes().decode()
+    assert 'xmlns:inkflow="urn:inkflow"' in data
+    assert (
+        '<rect id="box" x="100" y="100" width="200" height="100" '
+        + 'inkflow:locked="true"/>'
+        in data
+    )
+    root = parse_svg(data)
+    stamper(0)(root)
+    box = root.find(f".//{{{SVG_NS}}}rect[@id='box']")
+    assert box is not None and box.get(INK_LOCKED) == "" and box.get(INK_TOP) == ""
+    apply_ops(svg, [{"kind": "lock", "loc": loc, "locked": False}])
+    assert "locked" not in svg.to_bytes().decode()
+
+
 # ── Model ────────────────────────────────────────────────────────────────────
 
 

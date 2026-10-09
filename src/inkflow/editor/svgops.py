@@ -54,6 +54,19 @@ class SvgFile:
         return self.tree.getroot()
 
     def to_bytes(self) -> bytes:
+        root = self.root
+        if ns.INKFLOW not in root.nsmap.values() and any(
+            str(name).startswith(f"{{{ns.INKFLOW}}}")
+            for el in root.iter()
+            if is_element(el)
+            for name in el.attrib
+        ):
+            # Declare inkflow: once on the root, not as ns0: on each element.
+            etree.cleanup_namespaces(
+                self.tree,
+                top_nsmap={"inkflow": ns.INKFLOW},
+                keep_ns_prefixes=[p for p in root.nsmap if p],
+            )
         data = etree.tostring(
             self.tree,
             xml_declaration=self.declaration,
@@ -428,6 +441,12 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
             result.structural = True
         elif kind == "title":
             _set_title(el, str(op.get("text") or ""))
+        elif kind == "lock":
+            if op.get("locked"):
+                el.set(ns.INKFLOW_LOCKED, "true")
+            else:
+                _drop(el, ns.INKFLOW_LOCKED)
+                _drop(el, f"{{{ns.SODIPODI}}}insensitive")
         elif kind == "ensure-marker":
             if ensure_arrow_marker(root):
                 result.structural = True
