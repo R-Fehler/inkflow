@@ -954,6 +954,9 @@
   function onCommand(fn) {
     commandHandler = fn;
   }
+  function connected() {
+    return ws !== null && ws.readyState === WebSocket.OPEN;
+  }
   function connect(port) {
     const host4 = location.hostname || "localhost";
     const sock = new WebSocket(`ws://${host4}:${port}`);
@@ -985,6 +988,10 @@
           emit("error");
           break;
         case "editor-model":
+          if (ed.model && msg.model.deckPath !== ed.model.deckPath) {
+            location.reload();
+            return;
+          }
           if (pendingSlides) {
             ed.slides = pendingSlides;
             pendingSlides = null;
@@ -1829,13 +1836,13 @@
       const tx = pb.x + 6;
       const ty = pb.y + 6;
       g.append(svgEl("rect", { x: tx, y: ty, width: w, height: 22, rx: 11 }));
-      const label3 = svgEl("text", {
+      const label4 = svgEl("text", {
         x: tx + w / 2,
         y: ty + 15,
         "text-anchor": "middle"
       });
-      label3.textContent = text;
-      g.append(label3);
+      label4.textContent = text;
+      g.append(label4);
       const title = svgEl("title");
       title.textContent = media ? `Add an image or video to the ${z.zone} zone` : `Add ${z.zone} text (Markdown)`;
       g.append(title);
@@ -2131,19 +2138,19 @@
     }
     return out;
   }
-  async function sendSvgOps(plans, label3, coalesce) {
+  async function sendSvgOps(plans, label4, coalesce) {
     const slide = currentSlide();
     if (!slide) return false;
     if (ed.structuralPending) {
       toast("One moment: the last change is still being applied");
       return false;
     }
-    const run = queue.then(() => sendQueued(plans, label3, coalesce));
+    const run = queue.then(() => sendQueued(plans, label4, coalesce));
     queue = run.catch(() => false);
     return run;
   }
   var queue = Promise.resolve();
-  async function sendQueued(plans, label3, coalesce) {
+  async function sendQueued(plans, label4, coalesce) {
     const slide = currentSlide();
     if (!slide) return false;
     let ok = true;
@@ -2158,7 +2165,7 @@
         file: path,
         hash: src?.hash ?? "",
         ops,
-        label: label3,
+        label: label4,
         coalesce,
         // Deleting or duplicating a zone takes its content along (not in
         // layout mode: a layout's zones are filled by every slide).
@@ -2458,8 +2465,8 @@
     drawOverlay();
     if (!plans.length) return;
     if (siteHints.length) siteHints = [];
-    const label3 = drag.kind === "endpoint" ? "Connect" : drag.kind === "bend" ? "Reshape arrow" : drag.kind === "move" ? "Move" : drag.kind === "resize" ? ed.cropMode ? "Crop" : "Resize" : "Rotate";
-    const ok = await sendSvgOps(plans, label3);
+    const label4 = drag.kind === "endpoint" ? "Connect" : drag.kind === "bend" ? "Reshape arrow" : drag.kind === "move" ? "Move" : drag.kind === "resize" ? ed.cropMode ? "Crop" : "Resize" : "Rotate";
+    const ok = await sendSvgOps(plans, label4);
     if (!ok) restore(drag.snaps);
     drawOverlay();
   }
@@ -2788,8 +2795,6 @@
   function drawDraft(tool, a, b, ends) {
     draft?.remove();
     const m = slideToPaper();
-    const pa = { x: m.a * a.x + m.e, y: m.d * a.y + m.f };
-    const pb = { x: m.a * b.x + m.e, y: m.d * b.y + m.f };
     const style = CONNECTOR_TOOLS[tool];
     if (style) {
       const r = route(style, ends?.a ?? a, ends?.b ?? b);
@@ -3075,17 +3080,17 @@
     return new Promise((resolve) => {
       const video = document.createElement("video");
       const fallback = { w: 1280, h: 720 };
-      const timer4 = window.setTimeout(() => resolve(fallback), 3e3);
+      const timer5 = window.setTimeout(() => resolve(fallback), 3e3);
       video.preload = "metadata";
       video.muted = true;
       video.onloadedmetadata = () => {
-        window.clearTimeout(timer4);
+        window.clearTimeout(timer5);
         resolve(
           video.videoWidth && video.videoHeight ? { w: video.videoWidth, h: video.videoHeight } : fallback
         );
       };
       video.onerror = () => {
-        window.clearTimeout(timer4);
+        window.clearTimeout(timer5);
         resolve(fallback);
       };
       video.src = `/${rel}`;
@@ -3523,7 +3528,7 @@
     const layouts = await previews();
     clear(grid);
     for (const p of layouts) {
-      const [label3, description] = LABELS[p.name] ?? [p.name, ""];
+      const [label4, description] = LABELS[p.name] ?? [p.name, ""];
       const lost = opts2.mode === "change" ? lostZones(p) : [];
       const current = opts2.mode === "change" && p.name === opts2.current;
       const card = h(
@@ -3538,7 +3543,7 @@
         h(
           "div",
           { class: "gallery-label" },
-          h("strong", {}, label3),
+          h("strong", {}, label4),
           p.source === "local" && h("span", { class: "badge" }, "project")
         ),
         description && h("div", { class: "gallery-desc" }, description),
@@ -3813,7 +3818,7 @@
     menu.classList.remove("open");
     clear(menu);
   }
-  function menuItem(label3, fn, disabled = false) {
+  function menuItem(label4, fn, disabled = false) {
     return h(
       "button",
       {
@@ -3825,7 +3830,7 @@
           fn();
         }
       },
-      label3
+      label4
     );
   }
   function openSlideMenu(x, y, i) {
@@ -4105,6 +4110,315 @@
     });
   }
 
+  // src/ts/editor/decks.ts
+  var menu2 = document.getElementById("context-menu");
+  var button = document.getElementById("btn-deck");
+  function baseName(path) {
+    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
+  }
+  function join(dir, name) {
+    return `${dir.replace(/[\\/]+$/, "")}/${name}`;
+  }
+  function slug(text) {
+    return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "my-deck";
+  }
+  function renderButton() {
+    const dir = ed.model?.projectDir;
+    button.textContent = `${dir ? baseName(dir) : "deck"} \u25BE`;
+    button.title = dir ? `${dir}
+Decks: new, open, recent` : "Decks";
+  }
+  async function info() {
+    const res = await request({ action: "project-info" });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot read the deck's folder", "error");
+      return null;
+    }
+    return res;
+  }
+  async function openMenu() {
+    const data = await info();
+    if (!data) return;
+    clear(menu2);
+    menu2.append(
+      menuItem("New deck\u2026", () => newDeckDialog(data)),
+      menuItem("Open deck\u2026", () => openDeckDialog(data))
+    );
+    if (data.recent.length) {
+      menu2.append(h("div", { class: "menu-title" }, "Recent decks"));
+      for (const path of data.recent) {
+        const dir = path.replace(/[\\/]deck\.py$/, "");
+        const item = menuItem(baseName(dir), () => void openDeck(path));
+        item.title = dir;
+        menu2.append(item);
+      }
+    }
+    const r = button.getBoundingClientRect();
+    showMenu(r.left, r.bottom + 4);
+  }
+  async function openDeck(path) {
+    const res = await request({ action: "open-deck", path });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot open that deck", "error");
+      return false;
+    }
+    closeDialog();
+    toast(
+      `Opening ${baseName(String(res.deck ?? path).replace(/[\\/]deck\.py$/, ""))}\u2026`
+    );
+    return true;
+  }
+  function folderPicker(start, onChange) {
+    let folder = null;
+    const path = h("input", {
+      type: "text",
+      class: "folder-path",
+      spellcheck: "false"
+    });
+    const list3 = h("div", { class: "folder-list" });
+    const where = h("div", { class: "hint folder-where" });
+    const go = async (target) => {
+      const res = await request({ action: "browse", path: target });
+      if (!res.ok) {
+        where.textContent = res.error ?? "Cannot open that folder";
+        return;
+      }
+      folder = res;
+      path.value = folder.path;
+      clear(list3);
+      if (folder.parent) {
+        list3.append(
+          h(
+            "button",
+            {
+              type: "button",
+              class: "folder up",
+              onclick: () => void go(folder?.parent ?? "")
+            },
+            "\u2191 .."
+          )
+        );
+      }
+      for (const name of folder.dirs) {
+        list3.append(
+          h(
+            "button",
+            {
+              type: "button",
+              class: "folder",
+              onclick: () => void go(join(folder?.path ?? "", name))
+            },
+            `\u{1F4C1} ${name}`
+          )
+        );
+      }
+      if (!folder.dirs.length && !folder.parent) {
+        list3.append(h("p", { class: "hint" }, "No folders here."));
+      }
+      where.textContent = folder.repo ? `In the git repository at ${folder.repo}` : "Not in a git repository";
+      onChange(folder);
+    };
+    path.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        void go(path.value);
+      }
+    });
+    const el2 = h(
+      "div",
+      { class: "folder-picker" },
+      h(
+        "div",
+        { class: "folder-bar" },
+        path,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            title: "Your home folder",
+            onclick: () => void go(folder?.home ?? "~")
+          },
+          "Home"
+        )
+      ),
+      list3,
+      where
+    );
+    void go(start);
+    return { el: el2, current: () => folder };
+  }
+  function newDeckDialog(data) {
+    const title = h("input", {
+      type: "text",
+      value: "My presentation"
+    });
+    const name = h("input", {
+      type: "text",
+      value: data.name
+    });
+    let nameEdited = false;
+    name.addEventListener("input", () => {
+      nameEdited = true;
+      update();
+    });
+    title.addEventListener("input", () => {
+      if (!nameEdited) name.value = slug(title.value);
+      update();
+    });
+    let look = data.themes.some((t) => t.id === "current") ? "current" : "starter";
+    const looks = h(
+      "div",
+      { class: "look-list" },
+      ...data.themes.map((t) => {
+        const radio = h("input", {
+          type: "radio",
+          name: "deck-look",
+          value: t.id
+        });
+        radio.checked = t.id === look;
+        radio.addEventListener("change", () => {
+          look = t.id;
+        });
+        return h(
+          "label",
+          { class: "look" },
+          radio,
+          h(
+            "span",
+            { class: "look-text" },
+            h("strong", {}, t.label),
+            h("span", { class: "hint" }, t.description)
+          )
+        );
+      })
+    );
+    const git2 = h("input", { type: "checkbox" });
+    git2.checked = true;
+    const gitRow = h(
+      "label",
+      { class: "check-row" },
+      git2,
+      "Create a git repository for this deck"
+    );
+    const gitNote = h("p", { class: "hint" });
+    const full = h("p", { class: "hint full-path" });
+    const picker = folderPicker(data.parent, () => update());
+    function update() {
+      const folder = picker.current();
+      const parent = folder?.path ?? data.parent;
+      full.textContent = `New deck: ${join(parent, name.value || "\u2026")}`;
+      const inRepo = !!folder?.repo;
+      gitRow.hidden = inRepo || !data.git;
+      gitNote.textContent = inRepo ? `It becomes a new folder of the git repository at ${folder?.repo}, versioned with it.` : data.git ? "" : "git is not installed, so the deck gets no repository.";
+    }
+    const create = h(
+      "button",
+      { type: "button", class: "pbtn primary" },
+      "Create and open"
+    );
+    create.addEventListener("click", async () => {
+      const folder = picker.current();
+      if (!folder || !name.value.trim()) {
+        toast("Choose a folder and a name for the deck", "error");
+        return;
+      }
+      create.disabled = true;
+      create.textContent = "Creating\u2026";
+      const res = await request({
+        action: "new-deck",
+        path: join(folder.path, name.value.trim()),
+        title: title.value,
+        theme: look,
+        git: !folder.repo && git2.checked
+      });
+      create.disabled = false;
+      create.textContent = "Create and open";
+      if (!res.ok) {
+        toast(res.error ?? "Could not create the deck", "error");
+        return;
+      }
+      closeDialog();
+      toast(`Created ${name.value.trim()}; opening it\u2026`, "ok");
+    });
+    openDialog(
+      "New deck",
+      h(
+        "div",
+        { class: "deck-form" },
+        h(
+          "label",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Title"),
+          title
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Look"),
+          looks
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Where"),
+          h(
+            "div",
+            {},
+            picker.el,
+            h(
+              "label",
+              { class: "field inline" },
+              h("span", { class: "field-label" }, "Folder name"),
+              name
+            ),
+            full,
+            gitRow,
+            gitNote
+          )
+        ),
+        h("div", { class: "btn-row end" }, create)
+      ),
+      { wide: true }
+    );
+    update();
+    title.select();
+  }
+  function openDeckDialog(data) {
+    const open3 = h(
+      "button",
+      { type: "button", class: "pbtn primary", disabled: true },
+      "Open this deck"
+    );
+    const picker = folderPicker(
+      data.current.replace(/[\\/][^\\/]*$/, ""),
+      (f) => {
+        open3.disabled = !f.isDeck;
+        open3.textContent = f.isDeck ? `Open ${baseName(f.path)}` : "No deck.py in this folder";
+      }
+    );
+    open3.addEventListener("click", () => {
+      const f = picker.current();
+      if (f?.isDeck) void openDeck(join(f.path, "deck.py"));
+    });
+    openDialog(
+      "Open deck",
+      h(
+        "div",
+        { class: "deck-form" },
+        h("p", { class: "hint" }, "Go to a folder with a deck.py in it."),
+        picker.el,
+        h("div", { class: "btn-row end" }, open3)
+      ),
+      { wide: true }
+    );
+  }
+  function initDecks() {
+    button.addEventListener("click", () => void openMenu());
+    on("model", renderButton);
+    renderButton();
+  }
+
   // src/ts/editor/exportdlg.ts
   var FORMATS = [
     {
@@ -4137,12 +4451,12 @@
       spellcheck: "false",
       title: "Where to save it, relative to deck.py"
     });
-    const status = h("div", { class: "export-status" });
+    const status2 = h("div", { class: "export-status" });
     const go = h("button", { type: "button", class: "pbtn primary" }, "Export");
     go.addEventListener("click", async () => {
       go.disabled = true;
-      status.textContent = f.format === "pdf" ? "Rendering pages\u2026" : "Building\u2026";
-      status.className = "export-status busy";
+      status2.textContent = f.format === "pdf" ? "Rendering pages\u2026" : "Building\u2026";
+      status2.className = "export-status busy";
       const result = await request({
         action: "export",
         format: f.format,
@@ -4150,13 +4464,13 @@
       });
       go.disabled = false;
       if (!result.ok) {
-        status.className = "export-status error";
-        status.textContent = result.error ?? "export failed";
+        status2.className = "export-status error";
+        status2.textContent = result.error ?? "export failed";
         return;
       }
       const r = result;
-      status.className = "export-status done";
-      status.replaceChildren(
+      status2.className = "export-status done";
+      status2.replaceChildren(
         h("span", {}, `Saved to ${r.rel} \xB7 ${size(r.size)}`),
         h(
           "a",
@@ -4175,7 +4489,7 @@
         h("p", { class: "hint" }, f.text)
       ),
       h("div", { class: "export-row" }, output, go),
-      status
+      status2
     );
   }
   function openExport() {
@@ -4257,18 +4571,18 @@
   }
   function renderResults(error) {
     const list3 = el(".find-results");
-    const status = el(".find-status");
+    const status2 = el(".find-status");
     clear(list3);
     if (error) {
-      status.textContent = error;
+      status2.textContent = error;
       return;
     }
     if (!query()) {
-      status.textContent = "";
+      status2.textContent = "";
       return;
     }
     const slides = new Set(hits.flatMap(slidesOf));
-    status.textContent = hits.length ? `${hits.length}${hits.length >= 500 ? "+" : ""} match${hits.length === 1 ? "" : "es"} on ${slides.size} slide${slides.size === 1 ? "" : "s"}` : "No matches";
+    status2.textContent = hits.length ? `${hits.length}${hits.length >= 500 ? "+" : ""} match${hits.length === 1 ? "" : "es"} on ${slides.size} slide${slides.size === 1 ? "" : "s"}` : "No matches";
     let lastGroup = "";
     hits.forEach((hit, i) => {
       const on2 = slidesOf(hit);
@@ -4351,11 +4665,11 @@
     schedule();
   }
   function build() {
-    const flag = (label3, title, name) => {
+    const flag = (label4, title, name) => {
       const b = h(
         "button",
         { type: "button", class: "find-flag", title },
-        label3
+        label4
       );
       b.addEventListener("click", () => toggle(name, b));
       return b;
@@ -4478,6 +4792,503 @@
     document.getElementById("btn-find")?.addEventListener("click", () => openFind());
     on("model", () => {
       if (!panel.hidden && query()) schedule();
+    });
+  }
+
+  // src/ts/editor/git.ts
+  var menu3 = document.getElementById("context-menu");
+  var button2 = document.getElementById("btn-git");
+  var label = button2.querySelector(".git-label");
+  var badge = button2.querySelector(".git-badge");
+  var status = { repo: false, git: false };
+  function render2() {
+    button2.hidden = !status.git;
+    if (!status.repo) {
+      label.textContent = "Git";
+      badge.hidden = true;
+      button2.title = "Not versioned: create a git repository for this deck";
+      return;
+    }
+    label.textContent = status.branch ?? `@${status.detached ?? "?"}`;
+    const n2 = status.changes?.length ?? 0;
+    badge.hidden = n2 === 0;
+    badge.textContent = String(n2);
+    const sync = [
+      status.ahead ? `${status.ahead} to push` : "",
+      status.behind ? `${status.behind} to pull` : ""
+    ].filter(Boolean).join(", ");
+    button2.title = [
+      status.branch ? `Branch ${status.branch}` : `Viewing ${status.detached}`,
+      n2 ? `${n2} changed file${n2 === 1 ? "" : "s"}` : "No changes",
+      sync
+    ].filter(Boolean).join(" \xB7 ");
+  }
+  async function refreshGit() {
+    if (!connected()) return status;
+    const res = await request({ action: "git", op: "status" });
+    if (res.ok && res.git) status = res.git;
+    render2();
+    return status;
+  }
+  async function git(op, args = {}) {
+    button2.classList.add("busy");
+    const res = await request({ action: "git", op, ...args });
+    button2.classList.remove("busy");
+    if (res.git) {
+      status = res.git;
+      render2();
+    }
+    if (!res.ok) {
+      toast(res.error ?? `git ${op} failed`, "error");
+      return null;
+    }
+    if (typeof res.message === "string") toast(res.message, "ok");
+    return res;
+  }
+  async function openMenu2() {
+    await refreshGit();
+    clear(menu3);
+    if (!status.repo) {
+      menu3.append(
+        h("div", { class: "menu-title" }, "Not versioned"),
+        menuItem("Create a git repository", async () => {
+          if (await git("init"))
+            toast("This deck is now versioned with git", "ok");
+        })
+      );
+    } else {
+      const n2 = status.changes?.length ?? 0;
+      const deckChanges = (status.changes ?? []).filter((c) => c.inDeck);
+      const where = status.branch ? `On ${status.branch}` : `Viewing ${status.detached} (no branch)`;
+      menu3.append(
+        h(
+          "div",
+          { class: "menu-title" },
+          `${where} \xB7 ${n2 ? `${n2} change${n2 === 1 ? "" : "s"}` : "no changes"}`
+        )
+      );
+      if (status.last) {
+        menu3.append(
+          h(
+            "div",
+            { class: "menu-note" },
+            `Last: ${status.last.subject} (${status.last.when})`
+          )
+        );
+      }
+      menu3.append(
+        menuItem(
+          "Commit\u2026",
+          () => commitDialog(),
+          n2 === 0 || !status.branch
+        ),
+        menuItem(
+          status.ahead ? `Push (${status.ahead})` : "Push",
+          () => void git("push"),
+          !status.remotes?.length || !status.branch
+        ),
+        menuItem(
+          status.behind ? `Pull (${status.behind})` : "Pull",
+          () => void git("pull"),
+          !status.upstream
+        ),
+        menuItem(
+          "Discard changes\u2026",
+          () => discardDialog(),
+          deckChanges.length === 0
+        ),
+        menuItem(
+          "Undo last commit",
+          async () => {
+            if (!confirm(
+              `Take back "${status.last?.subject}"? Its changes stay, uncommitted.`
+            ))
+              return;
+            if (await git("undo-commit"))
+              toast(
+                "Last commit taken back; its changes are kept",
+                "ok"
+              );
+          },
+          !status.canUndoCommit
+        ),
+        h("div", { class: "menu-sep" }),
+        menuItem(
+          status.branch ? "Branches\u2026" : "Back to a branch\u2026",
+          () => void branchesDialog(),
+          !status.hasCommits
+        ),
+        menuItem(
+          "History\u2026",
+          () => void historyDialog(),
+          !status.hasCommits
+        )
+      );
+    }
+    const r = button2.getBoundingClientRect();
+    showMenu(Math.max(8, r.right - 260), r.bottom + 4);
+  }
+  function fileRow(change, checked) {
+    const box = h("input", {
+      type: "checkbox",
+      value: change.path
+    });
+    box.checked = checked;
+    return h(
+      "label",
+      { class: `git-file${change.inDeck ? "" : " outside"}` },
+      box,
+      h("span", { class: `git-status s-${change.status}` }, change.status),
+      h("code", { class: "git-path" }, change.path)
+    );
+  }
+  function checkedPaths(list3) {
+    return [...list3.querySelectorAll("input:checked")].map(
+      (b) => b.value
+    );
+  }
+  function commitDialog() {
+    const changes = status.changes ?? [];
+    const message = h("textarea", {
+      class: "git-message",
+      rows: "3"
+    });
+    message.value = status.suggestedMessage ?? "Update slides";
+    const files2 = h(
+      "div",
+      { class: "git-files" },
+      ...changes.map((c) => fileRow(c, c.inDeck))
+    );
+    const outside = changes.some((c) => !c.inDeck);
+    const name = h("input", {
+      type: "text",
+      placeholder: "Your name"
+    });
+    const email = h("input", {
+      type: "email",
+      placeholder: "you@example.com"
+    });
+    const identity = status.identity ? null : h(
+      "div",
+      { class: "git-identity" },
+      h(
+        "p",
+        { class: "hint" },
+        "git needs to know who commits (kept in this repository only):"
+      ),
+      h("div", { class: "btn-row" }, name, email)
+    );
+    const run = async (push) => {
+      const paths = checkedPaths(files2);
+      const res = await git("commit", {
+        message: message.value,
+        paths,
+        ...identity ? { name: name.value, email: email.value } : {}
+      });
+      if (!res) return;
+      closeDialog();
+      if (push) await git("push");
+    };
+    const canPush = !!status.remotes?.length;
+    message.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        void run(false);
+      }
+    });
+    openDialog(
+      "Commit",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "label",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Message"),
+          message
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Files"),
+          h(
+            "div",
+            {},
+            files2,
+            outside && h(
+              "p",
+              { class: "hint" },
+              "Files outside this deck are left out unless you tick them."
+            )
+          )
+        ),
+        identity,
+        h(
+          "div",
+          { class: "btn-row end" },
+          canPush && h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => void run(true)
+            },
+            "Commit and push"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              title: "Ctrl+Enter",
+              onclick: () => void run(false)
+            },
+            "Commit"
+          )
+        )
+      ),
+      { wide: true, hint: status.branch ? `on ${status.branch}` : void 0 }
+    );
+    message.focus();
+    message.select();
+  }
+  function discardDialog() {
+    const changes = (status.changes ?? []).filter((c) => c.inDeck);
+    const files2 = h(
+      "div",
+      { class: "git-files" },
+      ...changes.map((c) => fileRow(c, true))
+    );
+    openDialog(
+      "Discard changes",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "p",
+          { class: "hint warn" },
+          "The ticked files go back to how they were in the last commit; new files are deleted. This cannot be undone."
+        ),
+        files2,
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn danger",
+              onclick: async () => {
+                const paths = checkedPaths(files2);
+                if (!paths.length) return;
+                if (await git("discard", { paths })) {
+                  closeDialog();
+                  toast(
+                    `Discarded changes to ${paths.length} file${paths.length === 1 ? "" : "s"}`,
+                    "ok"
+                  );
+                }
+              }
+            },
+            "Discard"
+          )
+        )
+      ),
+      { wide: true }
+    );
+  }
+  async function branchesDialog() {
+    const res = await git("branches");
+    if (!res) return;
+    const branches = res.branches;
+    const name = h("input", {
+      type: "text",
+      placeholder: "new-branch-name"
+    });
+    const create = async () => {
+      if (!name.value.trim()) return;
+      if (await git("create-branch", { name: name.value.trim() })) {
+        closeDialog();
+        toast(`Created and switched to ${name.value.trim()}`, "ok");
+      }
+    };
+    name.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        void create();
+      }
+    });
+    openDialog(
+      "Branches",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "div",
+          { class: "git-list" },
+          ...branches.map(
+            (b) => h(
+              "div",
+              { class: `git-row${b.current ? " current" : ""}` },
+              h("strong", {}, b.name),
+              h(
+                "span",
+                { class: "hint" },
+                b.current ? "current" : b.when
+              ),
+              !b.current && h(
+                "button",
+                {
+                  type: "button",
+                  class: "pbtn",
+                  onclick: async () => {
+                    if (await git("switch", {
+                      name: b.name
+                    })) {
+                      closeDialog();
+                      toast(
+                        `Switched to ${b.name}`,
+                        "ok"
+                      );
+                    }
+                  }
+                },
+                "Switch"
+              )
+            )
+          )
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "New branch"),
+          h(
+            "div",
+            { class: "btn-row" },
+            name,
+            h(
+              "button",
+              {
+                type: "button",
+                class: "pbtn primary",
+                onclick: create
+              },
+              "Create and switch"
+            )
+          )
+        ),
+        h(
+          "p",
+          { class: "hint" },
+          "Uncommitted changes come along to the branch you switch to; git refuses a switch that would overwrite them."
+        )
+      ),
+      { wide: true }
+    );
+  }
+  async function historyDialog() {
+    const res = await git("log");
+    if (!res) return;
+    const log = res.log;
+    const act = async (op, c, question, done) => {
+      if (!confirm(question)) return;
+      if (await git(op, { sha: c.sha })) {
+        closeDialog();
+        toast(done, "ok");
+      }
+    };
+    openDialog(
+      "History",
+      h(
+        "div",
+        { class: "git-form" },
+        log.length ? h(
+          "div",
+          { class: "git-list history" },
+          ...log.map(
+            (c) => h(
+              "div",
+              { class: `git-row${c.head ? " current" : ""}` },
+              h(
+                "div",
+                { class: "git-commit" },
+                h("strong", {}, c.subject),
+                h(
+                  "span",
+                  { class: "hint" },
+                  `${c.short} \xB7 ${c.author} \xB7 ${c.when}${c.refs.length ? ` \xB7 ${c.refs.join(", ")}` : ""}`
+                )
+              ),
+              h(
+                "div",
+                { class: "btn-row" },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    title: "Show the deck as it was then (switch back with Branches)",
+                    onclick: () => void act(
+                      "view",
+                      c,
+                      `Show the deck as it was at "${c.subject}"? Edits there are not on any branch until you create one.`,
+                      `Viewing ${c.short}; switch back to a branch from the git menu`
+                    )
+                  },
+                  "View"
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    title: "Make the deck's files what they were then, as uncommitted changes",
+                    onclick: () => void act(
+                      "restore",
+                      c,
+                      `Restore the deck's files to "${c.subject}"? Your current files are replaced (commit first to keep them).`,
+                      `Restored the deck to ${c.short}; commit to keep it`
+                    )
+                  },
+                  "Restore"
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    title: "A new commit that undoes this one",
+                    onclick: () => void act(
+                      "revert",
+                      c,
+                      `Undo "${c.subject}" with a new commit?`,
+                      `Reverted ${c.short}`
+                    )
+                  },
+                  "Revert"
+                )
+              )
+            )
+          )
+        ) : h("p", { class: "hint" }, "No commits touch this deck yet."),
+        h(
+          "p",
+          { class: "hint" },
+          "View: look at an old version (no branch). Restore: bring the deck back to it as changes you can commit. Revert: undo one commit with a new one."
+        )
+      ),
+      {
+        wide: true,
+        hint: status.scope ? `changes to ${status.scope}/` : void 0
+      }
+    );
+  }
+  var timer3 = 0;
+  function initGit() {
+    button2.addEventListener("click", () => void openMenu2());
+    on("model", () => {
+      window.clearTimeout(timer3);
+      timer3 = window.setTimeout(() => void refreshGit(), 600);
     });
   }
 
@@ -4663,13 +5474,13 @@
 
   // src/ts/editor/notes.ts
   var area = document.getElementById("notes-input");
-  var label = document.getElementById("notes-file");
-  var timer3 = 0;
+  var label2 = document.getElementById("notes-file");
+  var timer4 = 0;
   var slideIndex = -1;
   var sent = "";
   var burst = "";
   async function save() {
-    window.clearTimeout(timer3);
+    window.clearTimeout(timer4);
     const slide = ed.model?.slides[slideIndex];
     if (!slide || area.value === sent) return;
     const before = sent;
@@ -4686,7 +5497,7 @@
     );
     if (!result.ok) {
       sent = before;
-      timer3 = window.setTimeout(() => void save(), 800);
+      timer4 = window.setTimeout(() => void save(), 800);
     }
   }
   function load() {
@@ -4697,15 +5508,15 @@
     slideIndex = slide.deckIndex;
     area.value = slide.notes.text;
     sent = area.value;
-    label.textContent = slide.notes.kind === "file" ? slide.notes.rel ?? "" : slide.notes.kind === "inline" ? "inline in deck.py" : "new notes file on first edit";
+    label2.textContent = slide.notes.kind === "file" ? slide.notes.rel ?? "" : slide.notes.kind === "inline" ? "inline in deck.py" : "new notes file on first edit";
   }
   function initNotes() {
     area.addEventListener("focus", () => {
       burst = `notes-${Date.now()}`;
     });
     area.addEventListener("input", () => {
-      window.clearTimeout(timer3);
-      timer3 = window.setTimeout(() => void save(), 600);
+      window.clearTimeout(timer4);
+      timer4 = window.setTimeout(() => void save(), 600);
     });
     area.addEventListener("blur", () => void save());
     area.addEventListener("keydown", (e) => e.stopPropagation());
@@ -4736,7 +5547,7 @@
     a: "Link"
   };
   var collapsed = /* @__PURE__ */ new Set();
-  function label2(el2) {
+  function label3(el2) {
     if (isZone(el2)) return `Zone \xB7 ${zoneName(el2)}`;
     const id = el2.getAttribute("id");
     const kind = el2.hasAttribute("data-ink-layer") ? "Layer" : NAMES[el2.localName] ?? el2.localName;
@@ -4870,13 +5681,13 @@
     const selected = ed.selection.some((s) => s.el === el2);
     const locked = el2.hasAttribute("data-ink-locked");
     const hidden = isHidden(el2);
-    const name = h("span", { class: "obj-name" }, label2(el2));
+    const name = h("span", { class: "obj-name" }, label3(el2));
     const out = [];
     const item = h(
       "div",
       {
         class: `obj-row${selected ? " on" : ""}${writable ? "" : " foreign"}${hidden ? " hidden-obj" : ""}`,
-        title: src ? `${label2(el2)} \xB7 ${src.rel}` : label2(el2),
+        title: src ? `${label3(el2)} \xB7 ${src.rel}` : label3(el2),
         style: `padding-left:${8 + depth * 14}px`
       },
       h(
@@ -4989,7 +5800,7 @@
   }
 
   // src/ts/editor/openwith.ts
-  var menu2 = document.getElementById("context-menu");
+  var menu4 = document.getElementById("context-menu");
   function fileName(path) {
     return path.split(/[\\/]/).pop() ?? path;
   }
@@ -4998,19 +5809,19 @@
     if (!path.startsWith("/")) return !path.split("/").includes("..");
     return !!root2 && path.startsWith(`${root2}/`);
   }
-  async function openMenu(path, x, y) {
+  async function openMenu3(path, x, y) {
     const res = await request({ action: "open-apps", path });
     if (!res.ok) {
       toast(res.error ?? "Cannot open this file", "error");
       return;
     }
     const apps = res.apps ?? [];
-    clear(menu2);
-    menu2.append(h("div", { class: "menu-title" }, `Open ${fileName(path)} in`));
+    clear(menu4);
+    menu4.append(h("div", { class: "menu-title" }, `Open ${fileName(path)} in`));
     for (const app of apps) {
-      menu2.append(menuItem(app.label, () => void open2(path, app)));
+      menu4.append(menuItem(app.label, () => void open2(path, app)));
     }
-    menu2.append(
+    menu4.append(
       menuItem("Copy path", () => {
         const root2 = ed.model?.projectDir ?? "";
         const full = path.startsWith("/") ? path : `${root2}/${path}`;
@@ -5027,7 +5838,7 @@
     if (res.ok) toast(`Opened ${fileName(path)} in ${app.label}`, "ok");
     else toast(res.error ?? "Could not open the file", "error");
   }
-  function openButton(path, label3 = "Open") {
+  function openButton(path, label4 = "Open") {
     if (!path || !inProject(path)) return null;
     return h(
       "button",
@@ -5037,10 +5848,10 @@
         title: `Open ${fileName(path)} in another program`,
         onclick: (e) => {
           const r = e.currentTarget.getBoundingClientRect();
-          void openMenu(path, r.left, r.bottom + 4);
+          void openMenu3(path, r.left, r.bottom + 4);
         }
       },
-      `${label3} \u25BE`
+      `${label4} \u25BE`
     );
   }
 
@@ -5054,11 +5865,11 @@
       ...body2.filter((b) => !!b)
     );
   }
-  function row2(label3, ...controls) {
+  function row2(label4, ...controls) {
     return h(
       "label",
       { class: "prop-row" },
-      h("span", { class: "prop-label" }, label3),
+      h("span", { class: "prop-label" }, label4),
       ...controls
     );
   }
@@ -5102,11 +5913,11 @@
     sel.addEventListener("change", () => commit(sel.value));
     return sel;
   }
-  function button(label3, title, fn, cls = "") {
+  function button3(label4, title, fn, cls = "") {
     return h(
       "button",
       { type: "button", class: `pbtn ${cls}`, title, onclick: fn },
-      label3
+      label4
     );
   }
   function fieldControl(f, value, commit) {
@@ -5157,10 +5968,10 @@
   function fieldsEditor(schema, values, commit) {
     const box = h("div", { class: "fields" });
     for (const f of schema) {
-      const label3 = f.name.replace(/_/g, " ");
+      const label4 = f.name.replace(/_/g, " ");
       box.append(
         row2(
-          label3,
+          label4,
           fieldControl(
             f,
             values[f.name] ?? f.default,
@@ -5194,20 +6005,20 @@
     });
     const rows = [];
     for (const f of schema) {
-      const label3 = MEDIA_LABELS[f.name] ?? f.name.replace(/_/g, " ");
+      const label4 = MEDIA_LABELS[f.name] ?? f.name.replace(/_/g, " ");
       if (f.name === "poster") {
         const poster = values.poster;
         rows.push(
           h(
             "div",
             { class: "prop-row" },
-            h("span", { class: "prop-label" }, label3),
+            h("span", { class: "prop-label" }, label4),
             h(
               "span",
               { class: "media-poster" },
               poster ? String(poster).split("/").pop() : "None"
             ),
-            button(
+            button3(
               poster ? "Change\u2026" : "Pick\u2026",
               poster ? `Poster: ${poster}` : "Still image shown before playback",
               async () => {
@@ -5216,7 +6027,7 @@
                 if (up) commit("poster", up.path);
               }
             ),
-            poster ? button(
+            poster ? button3(
               "\u2715",
               "Remove the poster",
               () => commit("poster", null)
@@ -5233,7 +6044,7 @@
         ];
         rows.push(
           row2(
-            label3,
+            label4,
             selectInput(
               opts2,
               String(values.muted ?? "auto"),
@@ -5247,7 +6058,7 @@
         const v = values[f.name];
         rows.push(
           row2(
-            label3,
+            label4,
             numberInput(
               typeof v === "number" ? v : null,
               (n2) => commit(f.name, n2),
@@ -5264,7 +6075,7 @@
       }
       rows.push(
         row2(
-          label3,
+          label4,
           fieldControl(
             f,
             values[f.name] ?? f.default,
@@ -5312,7 +6123,7 @@
         ),
         row2(
           "Layout",
-          button(
+          button3(
             `${currentLayout ? layoutLabel(currentLayout) : "None"} \u25BE`,
             "Pick a layout from previews",
             () => void openGallery({
@@ -5362,13 +6173,13 @@
     panel2.append(transitionSection(slide.transition, di));
     panel2.append(animationList(slide.animations, slide.animationsEditable, di));
     const files2 = h("div", { class: "files" });
-    const addFile = (label3, rel, path) => {
+    const addFile = (label4, rel, path) => {
       if (rel)
         files2.append(
           h(
             "div",
             { class: "file" },
-            h("span", {}, label3),
+            h("span", {}, label4),
             h("code", { title: path ?? rel }, rel),
             openButton(path)
           )
@@ -5383,7 +6194,7 @@
     const textInDeck = slide.md?.kind !== "file" && (slide.md?.kind === "inline" || Object.values(slide.zones).some((z) => z.kind === "text"));
     if (textInDeck && editable)
       files2.append(
-        button(
+        button3(
           "Move text to Markdown",
           "Move this slide's text out of deck.py into its own .md file",
           () => void edit({ action: "to-markdown", slide: di })
@@ -5400,7 +6211,7 @@
             { class: "hint" },
             `${arrows.length} arrow${arrows.length === 1 ? " is" : "s are"} attached to shapes and follow them when they move here. After moving shapes in another editor, re-route them:`
           ),
-          button(
+          button3(
             "Re-route all",
             "Re-attach every arrow to its shapes",
             () => reroute(arrows)
@@ -5437,11 +6248,11 @@
       )
     ];
     if (current) {
-      const info2 = typeInfo(types, current.type);
-      if (info2) {
+      const info3 = typeInfo(types, current.type);
+      if (info3) {
         body2.push(
           fieldsEditor(
-            info2.fields,
+            info3.fields,
             current.fields,
             (fields) => send({ type: current.type, fields })
           )
@@ -5481,7 +6292,7 @@
           { class: "anim-trigger" },
           triggerLabel(cue.fields.trigger ?? null)
         ),
-        editable && button(icon("up", 12), "Earlier", () => {
+        editable && button3(icon("up", 12), "Earlier", () => {
           if (i > 0)
             void edit({
               action: "anim",
@@ -5491,7 +6302,7 @@
               to: i - 1
             });
         }),
-        editable && button(icon("down", 12), "Later", () => {
+        editable && button3(icon("down", 12), "Later", () => {
           if (i < cues.length - 1) {
             void edit({
               action: "anim",
@@ -5502,7 +6313,7 @@
             });
           }
         }),
-        editable && button(icon("trash", 12), "Remove", () => {
+        editable && button3(icon("trash", 12), "Remove", () => {
           void edit({
             action: "anim",
             slide: di,
@@ -5543,7 +6354,7 @@
     slide.animations.forEach((cue, index) => {
       if (!elementName || cue.element !== (cue.kind === "video" ? zoneName(sel.el) : id))
         return;
-      const info2 = typeInfo(model.animationTypes, cue.type);
+      const info3 = typeInfo(model.animationTypes, cue.type);
       const send = (type, fields) => void edit({
         action: "anim",
         slide: di,
@@ -5565,7 +6376,7 @@
             trigger: cue.fields.trigger ?? "on-click"
           })
         ) : h("span", {}, cue.type),
-        editable && button(icon("trash", 12), "Remove", () => {
+        editable && button3(icon("trash", 12), "Remove", () => {
           void edit({
             action: "anim",
             slide: di,
@@ -5579,8 +6390,8 @@
           "div",
           { class: "anim-card" },
           header,
-          info2 && editable ? fieldsEditor(
-            info2.fields,
+          info3 && editable ? fieldsEditor(
+            info3.fields,
             cue.fields,
             (f) => send(cue.type, f)
           ) : null
@@ -5701,17 +6512,17 @@
     custom.addEventListener("change", () => send({ color: custom.value }));
     swatches.append(custom);
     swatches.append(
-      button("\u2205", "None", () => send({ color: "none" }), "none-btn")
+      button3("\u2205", "None", () => send({ color: "none" }), "none-btn")
     );
     return row2(prop === "fill" ? "Fill" : "Stroke", swatches);
   }
-  function styleOps(sel, set, label3) {
+  function styleOps(sel, set, label4) {
     void sendSvgOps(
       sel.map((s) => ({
         sel: s,
         ops: [...boxOps(s), { kind: "style", loc: s.loc, set }]
       })),
-      label3
+      label4
     );
   }
   function renderObjectPanel(sel) {
@@ -5784,12 +6595,12 @@
             h("p", { class: "hint media-src" }, media.src ?? ""),
             openButton(projectFile(media.src))
           ),
-          button(
+          button3(
             "Replace media\u2026",
             "Pick another image or video",
             () => void zoneMedia(name)
           ),
-          button("Clear", "Empty this zone", () => {
+          button3("Clear", "Empty this zone", () => {
             void edit({
               action: "zone-media",
               slide: slide.deckIndex,
@@ -5800,7 +6611,7 @@
         );
       } else {
         body2.push(
-          button(
+          button3(
             "Edit text",
             "Edit this zone's Markdown (double-click)",
             () => {
@@ -5939,7 +6750,7 @@
     const el2 = sel.el;
     const has = (attr) => (el2.getAttribute(attr) ?? "").includes("inkflow-arrow");
     const heads = has("marker-start") ? has("marker-end") ? "both" : "start" : has("marker-end") ? "end" : "none";
-    const send = (set, label3, marker = false) => void sendSvgOps(
+    const send = (set, label4, marker = false) => void sendSvgOps(
       [
         {
           sel,
@@ -5949,7 +6760,7 @@
           ]
         }
       ],
-      label3
+      label4
     );
     const describe = (which) => {
       const c = parseConnection(el2.getAttribute(`inkflow:connect-${which}`));
@@ -6008,12 +6819,12 @@
       h(
         "div",
         { class: "btn-row" },
-        button(
+        button3(
           "Re-route",
           "Re-attach to the shapes where they are now",
           () => reroute([sel])
         ),
-        el2.hasAttribute("inkflow:bend") && button(
+        el2.hasAttribute("inkflow:bend") && button3(
           "Reset bend",
           "Put the elbow's middle segment back where it goes by default",
           () => {
@@ -6024,7 +6835,7 @@
             );
           }
         ),
-        button(
+        button3(
           "Detach",
           "Free both ends",
           () => send(
@@ -6080,14 +6891,14 @@
   function textBoxSection(sel) {
     const el2 = sel.el;
     const value = (name) => el2.style.getPropertyValue(name).trim();
-    const setVar = (name, v, label3) => void sendSvgOps(
+    const setVar = (name, v, label4) => void sendSvgOps(
       [
         {
           sel,
           ops: [{ kind: "style", loc: sel.loc, set: { [name]: v } }]
         }
       ],
-      label3
+      label4
     );
     const shown = el2.hasAttribute("inkflow:show-shape");
     const box = h("input", { type: "checkbox" });
@@ -6173,7 +6984,7 @@
     const href = image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? "";
     const par = image.getAttribute("preserveAspectRatio") ?? "xMidYMid meet";
     const fit = FITS.find((f) => f.par === par)?.value ?? "contain";
-    const imageOps = (set, label3) => void sendSvgOps([{ sel, ops: [{ kind: "attrs", loc, set }] }], label3);
+    const imageOps = (set, label4) => void sendSvgOps([{ sel, ops: [{ kind: "attrs", loc, set }] }], label4);
     const cropped = isCropped(sel.el);
     return section(
       "Picture",
@@ -6186,7 +6997,7 @@
       h(
         "div",
         { class: "btn-row" },
-        button(
+        button3(
           "Replace\u2026",
           "Pick another picture; it keeps this size and place",
           async () => {
@@ -6202,17 +7013,17 @@
             );
           }
         ),
-        ed.cropMode ? button(
+        ed.cropMode ? button3(
           "Done cropping",
           "Enter",
           () => setCropMode(false),
           "on"
-        ) : button(
+        ) : button3(
           "Crop",
           "Crop (double-click the picture)",
           () => void startCrop(sel)
         ),
-        cropped ? button(
+        cropped ? button3(
           "Reset crop",
           "Show the whole picture again",
           () => void resetCrop(sel)
@@ -6300,7 +7111,7 @@
     const el2 = sel.el;
     const cs = getComputedStyle(el2);
     const spans = [...el2.querySelectorAll("tspan")];
-    const setAll = (set, label3) => {
+    const setAll = (set, label4) => {
       const plans = [
         { sel, ops: [{ kind: "style", loc: sel.loc, set }] }
       ];
@@ -6314,7 +7125,7 @@
           plans[0].ops.push({ kind: "style", loc, set });
         }
       }
-      void sendSvgOps(plans, label3);
+      void sendSvgOps(plans, label4);
     };
     const bold = parseInt(cs.fontWeight, 10) >= 600;
     const italic = cs.fontStyle === "italic";
@@ -6339,13 +7150,13 @@
       h(
         "div",
         { class: "btn-row" },
-        button(
+        button3(
           h("b", {}, "B"),
           "Bold",
           () => setAll({ "font-weight": bold ? null : "bold" }, "Bold"),
           bold ? "on" : ""
         ),
-        button(
+        button3(
           h("i", {}, "I"),
           "Italic",
           () => setAll(
@@ -6354,25 +7165,25 @@
           ),
           italic ? "on" : ""
         ),
-        button(
+        button3(
           "\u27F8",
           "Align start",
           () => setAll({ "text-anchor": null }, "Align"),
           anchor === "start" ? "on" : ""
         ),
-        button(
+        button3(
           "\u21D4",
           "Align middle",
           () => setAll({ "text-anchor": "middle" }, "Align"),
           anchor === "middle" ? "on" : ""
         ),
-        button(
+        button3(
           "\u27F9",
           "Align end",
           () => setAll({ "text-anchor": "end" }, "Align"),
           anchor === "end" ? "on" : ""
         ),
-        button("Edit", "Edit text (double-click)", () => emit("edit-text"))
+        button3("Edit", "Edit text (double-click)", () => emit("edit-text"))
       )
     );
   }
@@ -6479,26 +7290,26 @@
       h(
         "div",
         { class: "btn-row" },
-        button("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
-        button("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
-        button("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
-        button("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
-        button(
+        button3("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
+        button3("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
+        button3("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
+        button3("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
+        button3(
           icon("copy", 14),
           "Duplicate (Ctrl+D)",
           () => emit("duplicate")
         ),
-        sels.length > 1 && button(
+        sels.length > 1 && button3(
           icon("group", 14),
           "Group (Ctrl+G)",
           () => emit("group")
         ),
-        isGroup && button(
+        isGroup && button3(
           "Ungroup",
           "Ungroup (Ctrl+Shift+G)",
           () => emit("ungroup")
         ),
-        button(
+        button3(
           icon("trash", 14),
           "Delete (Del)",
           () => emit("delete"),
@@ -6551,7 +7362,7 @@
     const movable = sels.every((s) => canTransform(s.el));
     panel2.append(section(`${sels.length} objects`));
     if (movable) {
-      const a = (label3, title, how) => button(label3, title, () => alignSelection(how));
+      const a = (label4, title, how) => button3(label4, title, () => alignSelection(how));
       panel2.append(
         section(
           "Align",
@@ -7023,10 +7834,10 @@ $$`;
     const area2 = h("textarea", { class: "zone-editor", spellcheck: "true" });
     area2.value = original;
     let sent2 = original;
-    let timer4 = 0;
+    let timer5 = 0;
     const coalesce = `zone-${deckIndex}-${zone}-${Date.now()}`;
     const send = async () => {
-      window.clearTimeout(timer4);
+      window.clearTimeout(timer5);
       if (area2.value === sent2) return;
       const before = sent2;
       sent2 = area2.value;
@@ -7043,14 +7854,14 @@ $$`;
       );
       if (!result.ok) {
         sent2 = before;
-        timer4 = window.setTimeout(() => void send(), 800);
+        timer5 = window.setTimeout(() => void send(), 800);
       }
     };
     area2.addEventListener("input", () => {
-      window.clearTimeout(timer4);
-      timer4 = window.setTimeout(() => void send(), 450);
+      window.clearTimeout(timer5);
+      timer5 = window.setTimeout(() => void send(), 450);
     });
-    const button2 = (name, title, fn) => h(
+    const button4 = (name, title, fn) => h(
       "button",
       {
         type: "button",
@@ -7067,14 +7878,14 @@ $$`;
       "div",
       { class: "zone-toolbar" },
       h("span", { class: "zone-label" }, `${zone} \xB7 Markdown`),
-      button2("B", "Bold (Ctrl+B)", () => wrapSelection(area2, "**")),
-      button2("I", "Italic (Ctrl+I)", () => wrapSelection(area2, "*")),
-      button2("H", "Heading", () => prefixLines(area2, "## ")),
-      button2("\u2022", "Bullet list", () => prefixLines(area2, "- ")),
-      button2("1.", "Numbered list", () => prefixLines(area2, "1. ")),
-      button2("`", "Code", () => wrapSelection(area2, "`")),
-      button2("\u2211", "Math", () => wrapSelection(area2, "$")),
-      button2("\u23F5", "Reveal on click: insert a ::step:: marker", () => {
+      button4("B", "Bold (Ctrl+B)", () => wrapSelection(area2, "**")),
+      button4("I", "Italic (Ctrl+I)", () => wrapSelection(area2, "*")),
+      button4("H", "Heading", () => prefixLines(area2, "## ")),
+      button4("\u2022", "Bullet list", () => prefixLines(area2, "- ")),
+      button4("1.", "Numbered list", () => prefixLines(area2, "1. ")),
+      button4("`", "Code", () => wrapSelection(area2, "`")),
+      button4("\u2211", "Math", () => wrapSelection(area2, "$")),
+      button4("\u23F5", "Reveal on click: insert a ::step:: marker", () => {
         const pos = area2.selectionStart;
         area2.value = `${area2.value.slice(0, pos)}
 ::step::
@@ -7105,7 +7916,7 @@ ${area2.value.slice(pos)}`;
         await send();
       },
       cancel: () => {
-        window.clearTimeout(timer4);
+        window.clearTimeout(timer5);
         if (sent2 !== original) {
           area2.value = original;
           void send();
@@ -7565,7 +8376,7 @@ ${area2.value.slice(pos)}`;
     field.value = original || (isNew ? "x" : "");
     const block = h("input", { type: "checkbox" });
     block.checked = chip.classList.contains("block");
-    const status = h("span", { class: "formula-status" });
+    const status2 = h("span", { class: "formula-status" });
     const pop = h(
       "div",
       { class: "formula-pop" },
@@ -7574,7 +8385,7 @@ ${area2.value.slice(pos)}`;
         "div",
         { class: "formula-row" },
         h("label", {}, block, " On its own line"),
-        status,
+        status2,
         h(
           "button",
           {
@@ -7617,10 +8428,10 @@ ${area2.value.slice(pos)}`;
         closeFormula(false);
       }
     });
-    let timer4 = 0;
+    let timer5 = 0;
     let seq = 0;
     const renderNow = async () => {
-      window.clearTimeout(timer4);
+      window.clearTimeout(timer5);
       const latex = field.value.trim();
       if (!latex) return;
       const mine = ++seq;
@@ -7632,11 +8443,11 @@ ${area2.value.slice(pos)}`;
       });
       if (mine !== seq || formula2 !== self) return;
       if (!result.ok) {
-        status.textContent = result.error ?? "cannot render";
+        status2.textContent = result.error ?? "cannot render";
         pop.classList.add("error");
         return;
       }
-      status.textContent = "";
+      status2.textContent = "";
       pop.classList.remove("error");
       if (wantBlock !== self.chip.classList.contains("block")) {
         self.chip = swapKind(content2, self.chip, wantBlock);
@@ -7648,8 +8459,8 @@ ${area2.value.slice(pos)}`;
       placePop(pop, self.chip);
     };
     field.addEventListener("input", () => {
-      window.clearTimeout(timer4);
-      timer4 = window.setTimeout(() => void renderNow(), 250);
+      window.clearTimeout(timer5);
+      timer5 = window.setTimeout(() => void renderNow(), 250);
     });
     block.addEventListener("change", () => void renderNow());
     chip.classList.add("editing");
@@ -7762,7 +8573,7 @@ ${area2.value.slice(pos)}`;
     syncToolbar(document.querySelector(".rich-bar"), content2);
   }
   function richToolbar(content2, toSource) {
-    const btn = (label3, title, fn, cls = "") => h(
+    const btn = (label4, title, fn, cls = "") => h(
       "button",
       {
         type: "button",
@@ -7774,7 +8585,7 @@ ${area2.value.slice(pos)}`;
           syncToolbar(bar, content2);
         }
       },
-      label3
+      label4
     );
     const exec = (cmd, value) => () => {
       document.execCommand(cmd, false, value);
@@ -7955,7 +8766,7 @@ ${area2.value.slice(pos)}`;
     ["heading_font", "Headings", "sans-serif"],
     ["mono_font", "Code", "monospace"]
   ];
-  var info = null;
+  var info2 = null;
   var content = null;
   var cssVar = (name) => `--inkflow-${name.replace(/_/g, "-")}`;
   function toHex(value) {
@@ -7970,14 +8781,14 @@ ${area2.value.slice(pos)}`;
     probe.remove();
     return `#${rgb.slice(0, 3).map((n2) => Number(n2).toString(16).padStart(2, "0")).join("")}`;
   }
-  async function save2(body2, label3) {
-    await edit({ action: "theme-set", label: label3, ...body2 });
+  async function save2(body2, label4) {
+    await edit({ action: "theme-set", label: label4, ...body2 });
   }
   function setToken(group, name, value) {
     void save2({ changes: { [group]: { [name]: value } } }, "Theme");
   }
   function colorCell(mode, name) {
-    const t = info;
+    const t = info2;
     const own = t.overrides[mode][name];
     const value = own ?? t.values[mode][name] ?? "#000000";
     const input = h("input", {
@@ -8021,22 +8832,22 @@ ${area2.value.slice(pos)}`;
         h("span", {}, "Light")
       )
     ];
-    const add = (name, label3) => rows.push(
+    const add = (name, label4) => rows.push(
       h(
         "div",
         { class: "theme-row" },
-        h("span", { class: "theme-label" }, label3),
+        h("span", { class: "theme-label" }, label4),
         colorCell("dark", name),
         colorCell("light", name)
       )
     );
-    for (const [name, label3] of SEMANTIC) add(name, label3);
+    for (const [name, label4] of SEMANTIC) add(name, label4);
     rows.push(h("div", { class: "theme-sub" }, "Named colours"));
     for (const name of NAMED) add(name, name[0].toUpperCase() + name.slice(1));
     return h("div", { class: "theme-colors" }, ...rows);
   }
-  function fontRow(name, label3, generic) {
-    const t = info;
+  function fontRow(name, label4, generic) {
+    const t = info2;
     const own = t.overrides.typography[name];
     const value = own ?? t.values.typography[name] ?? generic;
     const input = h("input", {
@@ -8060,7 +8871,7 @@ ${area2.value.slice(pos)}`;
     return h(
       "div",
       { class: "theme-font" },
-      h("span", { class: "theme-label" }, label3),
+      h("span", { class: "theme-label" }, label4),
       input,
       sample,
       own ? h(
@@ -8075,9 +8886,9 @@ ${area2.value.slice(pos)}`;
       ) : null
     );
   }
-  function render2() {
-    if (!content || !info) return;
-    const t = info;
+  function render3() {
+    if (!content || !info2) return;
+    const t = info2;
     clear(content);
     const mode = h("select", {});
     for (const [v, l] of [
@@ -8136,8 +8947,8 @@ ${area2.value.slice(pos)}`;
   async function refresh() {
     const result = await request({ action: "theme-get" });
     if (!result.ok) return;
-    info = result.theme;
-    render2();
+    info2 = result.theme;
+    render3();
   }
   async function openTheme() {
     content = h(
@@ -8554,6 +9365,8 @@ ${area2.value.slice(pos)}`;
     initFind();
     initGrid();
     initTheme();
+    initDecks();
+    initGit();
     on("slide", () => {
       void finishTextEdit();
       render();

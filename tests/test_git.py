@@ -1,0 +1,260 @@
+"""The editor's git operations and deck management (editor/gitops.py,
+editor/projects.py), against throwaway repositories."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+from typing import cast
+
+import pytest
+
+from inkflow.editor import gitops, projects
+from inkflow.editor.session import EditError, EditorSession
+
+pytestmark = pytest.mark.skipif(not gitops.available(), reason="needs git")
+
+
+@pytest.fixture(autouse=True)
+def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Nobody's own git config, and a fixed identity from the environment.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for who in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{who}_NAME", "Test")
+        monkeypatch.setenv(f"GIT_{who}_EMAIL", "test@example.com")
+    monkeypatch.setattr(projects, "_recent_file", lambda: tmp_path / "recent.json")
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True
+    ).stdout
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    """A repository with a deck in ``talk/`` and one unrelated file, committed."""
+    root = tmp_path / "repo"
+    deck = root / "talk"
+    (deck / "slides").mkdir(parents=True)
+    (deck / "deck.py").write_text("# deck\n", encoding="utf-8")
+    (deck / "slides" / "intro.md").write_text("# Hi\n", encoding="utf-8")
+    (root / "README.md").write_text("readme\n", encoding="utf-8")
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "First")
+    return deck
+
+
+def _repo(deck: Path) -> gitops.Repo:
+    r = gitops.open_repo(deck)
+    assert r is not None
+    return r
+
+
+def test_status_names_the_branch_and_the_deck_changes(repo: Path) -> None:
+    (repo / "slides" / "intro.md").write_text("# Changed\n", encoding="utf-8")
+    (repo / "slides" / "new.md").write_text("new\n", encoding="utf-8")
+    (repo.parent / "README.md").write_text("other\n", encoding="utf-8")
+    status = gitops.status(repo)
+    assert status["repo"] and status["branch"] == "main" and status["scope"] == "talk"
+    changes = cast("list[dict[str, object]]", status["changes"])
+    assert [(c["path"], c["status"], c["inDeck"]) for c in changes] == [
+        ("talk/slides/intro.md", "modified", True),
+        ("talk/slides/new.md", "new", True),
+        ("README.md", "modified", False),
+    ]
+    assert str(status["suggestedMessage"]).startswith("Update slides (")
+    assert gitops.status(repo.parent.parent)["repo"] is False
+
+
+def test_commit_only_the_chosen_files(repo: Path) -> None:
+    (repo / "slides" / "intro.md").write_text("# Changed\n", encoding="utf-8")
+    (repo.parent / "README.md").write_text("other\n", encoding="utf-8")
+    r = _repo(repo)
+    gitops.commit(r, "Edit intro", ["talk/slides/intro.md"])
+    assert _git(r.root, "log", "-1", "--format=%s").strip() == "Edit intro"
+    left = cast("list[dict[str, object]]", gitops.status(repo)["changes"])
+    assert [c["path"] for c in left] == ["README.md"]
+    with pytest.raises(gitops.GitError, match="message"):
+        gitops.commit(r, "  ", None)
+
+
+def test_discard_restores_and_deletes(repo: Path) -> None:
+    intro = repo / "slides" / "intro.md"
+    intro.write_text("# Changed\n", encoding="utf-8")
+    (repo / "slides" / "new.md").write_text("new\n", encoding="utf-8")
+    r = _repo(repo)
+    gitops.discard(r, ["talk/slides/intro.md", "talk/slides/new.md"])
+    assert intro.read_text() == "# Hi\n"
+    assert not (repo / "slides" / "new.md").exists()
+    assert gitops.status(repo)["changes"] == []
+
+
+def test_branches_history_revert_restore_and_view(repo: Path) -> None:
+    r = _repo(repo)
+    intro = repo / "slides" / "intro.md"
+    intro.write_text("# Two\n", encoding="utf-8")
+    gitops.commit(r, "Second", None)
+    (repo.parent / "README.md").write_text("not the deck\n", encoding="utf-8")
+    gitops.commit(r, "Readme only", None)
+
+    log = gitops.log(r)
+    assert [c["subject"] for c in log] == ["Second", "First"]  # deck commits only
+
+    gitops.revert(r, str(log[0]["sha"]))
+    assert intro.read_text() == "# Hi\n"
+    assert _git(r.root, "log", "-1", "--format=%s").startswith('Revert "Second"')
+
+    gitops.restore_deck(r, str(log[0]["sha"]))
+    assert intro.read_text() == "# Two\n"  # as uncommitted changes
+    gitops.commit(r, "Back to two", None)
+
+    gitops.create_branch(r, "draft")
+    assert gitops.status(repo)["branch"] == "draft"
+    names = [b["name"] for b in gitops.branches(r)]
+    assert set(names) == {"main", "draft"}
+    gitops.switch(r, "main")
+    with pytest.raises(gitops.GitError, match="valid branch"):
+        gitops.create_branch(r, "no spaces")
+
+    gitops.view_commit(r, str(log[-1]["sha"]))
+    status = gitops.status(repo)
+    assert status["branch"] is None and status["detached"]
+    assert intro.read_text() == "# Hi\n"
+    gitops.switch(r, "main")
+
+
+def test_restore_removes_files_added_since(repo: Path) -> None:
+    r = _repo(repo)
+    first = str(gitops.log(r)[0]["sha"])
+    (repo / "slides" / "later.md").write_text("later\n", encoding="utf-8")
+    gitops.commit(r, "Add later", None)
+    gitops.restore_deck(r, first)
+    assert not (repo / "slides" / "later.md").exists()
+
+
+def test_undo_commit_only_before_pushing(repo: Path, tmp_path: Path) -> None:
+    r = _repo(repo)
+    (repo / "slides" / "intro.md").write_text("# Two\n", encoding="utf-8")
+    gitops.commit(r, "Second", None)
+    assert gitops.status(repo)["canUndoCommit"] is True
+    gitops.undo_commit(r)
+    assert _git(r.root, "log", "-1", "--format=%s").strip() == "First"
+    assert (repo / "slides" / "intro.md").read_text() == "# Two\n"  # kept
+
+    remote = tmp_path / "remote.git"
+    _git(tmp_path, "init", "-q", "--bare", str(remote))
+    _git(r.root, "remote", "add", "origin", str(remote))
+    gitops.commit(r, "Second", None)
+    assert gitops.push(r) == "Pushed main to origin"
+    status = gitops.status(repo)
+    assert status["upstream"] == "origin/main" and status["ahead"] == 0
+    assert status["canUndoCommit"] is False
+    with pytest.raises(gitops.GitError, match="pushed"):
+        gitops.undo_commit(r)
+    assert gitops.pull(r) == "Already up to date"
+
+
+# ── Through the editor session ──
+
+
+def test_session_git_actions(repo: Path) -> None:
+    session = EditorSession(repo / "deck.py")
+    out = session.apply({"action": "git", "op": "status"}, None)
+    assert cast("dict[str, object]", out["git"])["branch"] == "main"
+    (repo / "slides" / "intro.md").write_text("# Changed\n", encoding="utf-8")
+    out = session.apply(
+        {"action": "git", "op": "commit", "message": "Edit", "paths": None}, None
+    )
+    assert str(out["message"]).startswith("Committed ")
+    with pytest.raises(EditError, match="this machine"):
+        session.apply({"action": "git", "op": "push"}, None)
+    with pytest.raises(EditError, match="unknown git operation"):
+        session.apply({"action": "git", "op": "rebase"}, None)
+    log = cast(
+        "list[dict[str, object]]",
+        session.apply({"action": "git", "op": "log"}, None)["log"],
+    )
+    session.apply({"action": "git", "op": "revert", "sha": log[0]["sha"]}, None)
+    assert (repo / "slides" / "intro.md").read_text() == "# Hi\n"
+
+
+def test_session_creates_a_repository(tmp_path: Path) -> None:
+    deck = tmp_path / "solo"
+    deck.mkdir()
+    (deck / "deck.py").write_text("# deck\n", encoding="utf-8")
+    session = EditorSession(deck / "deck.py")
+    assert (
+        cast("dict[str, object]", session.apply({"action": "git"}, None)["git"])["repo"]
+        is False
+    )
+    out = session.apply({"action": "git", "op": "init", "_local": True}, None)
+    assert cast("dict[str, object]", out["git"])["repo"] is True
+    assert (deck / ".gitignore").exists() and (deck / ".git").is_dir()
+
+
+# ── New decks ──
+
+
+def test_new_deck_inside_a_repository_is_a_new_folder_of_it(repo: Path) -> None:
+    info = projects.new_deck_info(repo / "deck.py", None)
+    assert info["repo"] == str(repo.parent)
+    assert info["parent"] == str(repo.parent)  # next to the open deck
+    deck_py = projects.create_deck(
+        repo.parent / "second", title="Second talk", theme="starter", git=True
+    )
+    assert deck_py.is_file() and 'title="Second talk"' in deck_py.read_text()
+    assert not (repo.parent / "second" / ".git").exists()
+    assert projects.recent() == [str(deck_py)]
+
+
+def test_new_deck_elsewhere_gets_its_own_repository(tmp_path: Path) -> None:
+    target = tmp_path / "decks" / "talk"
+    deck_py = projects.create_deck(target, title="T", theme="example", git=True)
+    assert (target / ".git").is_dir() and (target / ".gitignore").is_file()
+    assert (target / "overlays" / "footer.svg").is_file()
+    assert 'overlays=[Overlay("footer")]' in deck_py.read_text()
+    plain = projects.create_deck(
+        tmp_path / "plain", title="", theme="starter", git=False
+    )
+    assert not (plain.parent / ".git").exists()
+    with pytest.raises(projects.ProjectError, match="already has a deck"):
+        projects.create_deck(target, title="T", theme="starter", git=False)
+    (tmp_path / "busy").mkdir()
+    (tmp_path / "busy" / "file.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(projects.ProjectError, match="not empty"):
+        projects.create_deck(tmp_path / "busy", title="", theme="starter", git=False)
+
+
+def test_new_deck_reusing_the_open_decks_look(tmp_path: Path) -> None:
+    demo = Path(__file__).parent.parent / "demo" / "deck.py"
+    deck_py = projects.create_deck(
+        tmp_path / "mine", title="Mine", theme="current", git=False, current=demo
+    )
+    code = deck_py.read_text()
+    assert "class Flip(Transition)" in code  # the deck's own classes come along
+    assert 'Slide("title", notes="notes/title.md")' in code
+    assert code.count("Slide(") == 3  # the starter's three slides
+    for name in ("styles.css", "scripts.js", "overlays/footer.svg"):
+        assert (deck_py.parent / name).is_file()
+
+
+def test_browse_and_open_deck(repo: Path, tmp_path: Path) -> None:
+    listing = projects.browse(str(repo.parent), tmp_path)
+    assert listing["dirs"] == ["talk"] and listing["repo"] == str(repo.parent)
+    assert projects.browse(str(repo), tmp_path)["isDeck"] is True
+
+    session = EditorSession(repo / "deck.py")
+    with pytest.raises(EditError, match="this machine"):
+        session.apply({"action": "browse", "path": str(repo)}, None)
+    out = session.apply(
+        {"action": "open-deck", "path": str(repo), "_local": True}, None
+    )
+    assert out["deck"] == str((repo / "deck.py").resolve())
+    assert session.switch_to == (repo / "deck.py").resolve()
+    with pytest.raises(EditError, match=r"no deck\.py"):
+        session.apply(
+            {"action": "open-deck", "path": str(tmp_path), "_local": True}, None
+        )

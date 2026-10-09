@@ -56,6 +56,63 @@ Every edit is one undo step (<kbd>Ctrl</kbd>+<kbd>Z</kbd>). A burst of typing is
 one step, not one per keystroke. Undo restores the exact bytes it replaced, and it
 refuses rather than overwrite a file that was changed outside the editor since.
 
+## New decks, and switching between them
+
+The **deck ▾** button next to the logo names the open deck and manages decks:
+
+- **New deck…** asks for a title, a look and a folder:
+    - *This deck's look* keeps the open deck's `deck.py` (theme, overlays, colour
+      mode, transitions, its own animation classes) with three starter slides in
+      place of its slides, and copies its `styles.css`, `scripts.js`, `layouts/`,
+      `overlays/` and `fonts/`, with the files those refer to;
+    - *Inkflow default* is what `inkflow init` makes: the built-in theme and three
+      starter slides;
+    - *Inkflow example* is the same in the look of inkflow's demo deck (the logo
+      footer overlay);
+    - *Layout showcase* has one slide for each built-in layout, to start from.
+
+    When the open deck is in a git repository, the new deck goes into a new folder
+    next to it, in the same repository. Anywhere else, browse to any folder on
+    your computer, and **Create a git repository for this deck** (on by default)
+    gives it its own repository with a `.gitignore` and the SVG hooks of
+    `inkflow setup-git`. The deck opens once it is made.
+- **Open deck…** browses to any folder with a `deck.py` in it.
+- **Recent decks** reopens one of the last ten.
+
+Opening a deck switches the running server to it, on the same address: the
+editor page reloads with the new deck, and the presenter at `/` shows it too.
+
+## Version control
+
+When the deck is in a git repository, the toolbar's **git** button shows the
+branch and how many files changed. Its menu covers what a deck needs day to day:
+
+- **Commit…** lists the changed files (the deck's own ticked, others in the
+  repository not) with a message ready to change, *Update slides (2026-10-09
+  14:30)*; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> commits. **Commit and push** does
+  both when there is a remote. If git does not know who you are yet, the dialog
+  asks for a name and email for this repository.
+- **Push** and **Pull** (fast-forward only). The first push of a new branch sets
+  its upstream on `origin`.
+- **Discard changes…** puts the ticked files back as they were in the last commit
+  and deletes new ones. It cannot be undone, so the dialog lists every file.
+- **Undo last commit** takes the last commit back while it has not been pushed;
+  its changes stay as uncommitted edits.
+- **Branches…** switches branch or creates one from where you are (uncommitted
+  changes come along).
+- **History…** lists the commits that changed this deck. **View** shows the deck
+  as it was then (no branch; switch back under Branches), **Restore** makes the
+  deck's files what they were then as changes you can commit, and **Revert**
+  undoes one commit with a new commit.
+
+Without a repository, the menu offers **Create a git repository**. Everything runs
+the `git` on your computer, so your usual credentials and hooks apply; the editor
+never waits for a password prompt (a push that needs one fails with git's
+message). Files git changes are picked up like any other change, and the
+editor's own undo history starts over after them. Pushing, pulling, creating a
+repository and opening or creating decks work only from an editor page on the
+computer running `inkflow edit`.
+
 ## Several decks, and copying between them
 
 Run `inkflow edit` once per deck. Each instance takes the next free ports

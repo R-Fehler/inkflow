@@ -54,6 +54,14 @@ export function connect(port: number): void {
                 emit("error");
                 break;
             case "editor-model":
+                // The server opened another deck: start the page afresh.
+                if (
+                    ed.model &&
+                    (msg.model as EditorModel).deckPath !== ed.model.deckPath
+                ) {
+                    location.reload();
+                    return;
+                }
                 if (pendingSlides) {
                     ed.slides = pendingSlides;
                     pendingSlides = null;

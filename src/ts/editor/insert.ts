@@ -207,8 +207,6 @@ function drawDraft(
 ) {
     draft?.remove();
     const m = slideToPaper();
-    const pa = { x: m.a * a.x + m.e, y: m.d * a.y + m.f };
-    const pb = { x: m.a * b.x + m.e, y: m.d * b.y + m.f };
     const style = CONNECTOR_TOOLS[tool as Tool];
     if (style) {
         // The route the connector will take, ends facing their sites.

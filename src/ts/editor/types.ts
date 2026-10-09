@@ -139,6 +139,8 @@ export interface EditResult {
     rel?: string;
     theme?: unknown;
     apps?: { id: string; label: string }[];
+    // Results of the git and deck actions (git.ts, decks.ts).
+    [key: string]: unknown;
 }
 
 // One selected object on the canvas.

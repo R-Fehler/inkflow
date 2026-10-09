@@ -11,11 +11,13 @@ import {
 } from "./canvas";
 import { initContext } from "./context";
 import { isCropped, setCropMode, startCrop } from "./crop";
+import { initDecks } from "./decks";
 import { initDialog } from "./dialog";
 import { toast } from "./dom";
 import { initExport } from "./exportdlg";
 import { initFind } from "./find";
 import { initGallery } from "./gallery";
+import { initGit } from "./git";
 import { initGrid } from "./grid";
 import { afterRender, initInsert } from "./insert";
 import { connect } from "./net";
@@ -127,6 +129,8 @@ function boot(): void {
     initFind();
     initGrid();
     initTheme();
+    initDecks();
+    initGit();
 
     on("slide", () => {
         void finishTextEdit();

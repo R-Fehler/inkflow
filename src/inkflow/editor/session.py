@@ -27,6 +27,7 @@ from inkflow import animations as animations_module
 from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
 from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, open_with
+from inkflow.editor import gitops, projects
 from inkflow.editor.codegen import Code, coerce_fields
 from inkflow.editor.deckedit import DeckEditError, DeckSource
 from inkflow.editor.findreplace import (
@@ -280,11 +281,14 @@ class EditorSession:
     exporters: Exporters | None
     """The build functions behind the Export dialog (None: export unavailable)."""
     edit_commands: EditCommands
+    switch_to: Path | None
+    """A deck.py the editor asked to open instead (the server switches to it)."""
     """The configured ``INKFLOW_EDIT_CMD*`` commands, offered first by "Open"."""
 
     def __init__(self, deck_path: Path, exporters: Exporters | None = None) -> None:
         self.exporters = exporters
         self.edit_commands = NO_EDIT_COMMANDS
+        self.switch_to = None
         self.deck_path = deck_path.resolve()
         self.project_dir = self.deck_path.parent
         self.history = History()
@@ -316,6 +320,10 @@ class EditorSession:
             return {"ok": True, "files": export_assets(self.project_dir, names)}
         if action == "math":
             return self._math(msg)
+        if action == "git":
+            return self._git(msg)
+        if action in ("project-info", "browse", "new-deck", "open-deck"):
+            return self._project(msg, deck)
         if action == "open-apps":
             path = self._openable(msg)
             apps = open_choices(path, self.edit_commands)
@@ -885,6 +893,122 @@ class EditorSession:
         except (ValueError, OSError) as exc:
             logger.warning(f"{path.name}: cannot update its Inkscape preview ({exc})")
             return None
+
+    # ── Git ──
+
+    # Operations that change files on disk: the editor's undo steps no longer
+    # match them, so the history starts over.
+    _GIT_REWRITES: frozenset[str] = frozenset(
+        {"discard", "pull", "switch", "view", "revert", "restore", "create-branch"}
+    )
+
+    def _git(self, msg: dict[str, object]) -> dict[str, object]:
+        op = str(msg.get("op") or "status")
+        if op == "init":
+            self._local_only(msg, "create a repository")
+            try:
+                gitops.init(self.project_dir)
+            except gitops.GitError as exc:
+                raise EditError(str(exc)) from exc
+            return {"ok": True, "git": gitops.status(self.project_dir)}
+        if op == "status":
+            return {"ok": True, "git": gitops.status(self.project_dir)}
+        repo = gitops.open_repo(self.project_dir)
+        if repo is None:
+            raise EditError("this deck is not in a git repository")
+
+        def text(key: str) -> str:
+            return str(msg.get(key) or "")
+
+        extra: dict[str, object] = {}
+        try:
+            if op == "commit":
+                if msg.get("name") or msg.get("email"):
+                    gitops.set_identity(repo, text("name"), text("email"))
+                raw = msg.get("paths")
+                paths = (
+                    [str(p) for p in cast("list[object]", raw)]
+                    if isinstance(raw, list)
+                    else None
+                )
+                extra["message"] = (
+                    f"Committed {gitops.commit(repo, text('message'), paths)}"
+                )
+            elif op in ("push", "pull"):
+                self._local_only(msg, f"{op} from here")
+                extra["message"] = (gitops.push if op == "push" else gitops.pull)(repo)
+            elif op == "discard":
+                raw = msg.get("paths")
+                if not isinstance(raw, list):
+                    raise EditError("choose the files to discard")
+                gitops.discard(repo, [str(p) for p in cast("list[object]", raw)])
+            elif op == "undo-commit":
+                gitops.undo_commit(repo)
+            elif op == "branches":
+                extra["branches"] = gitops.branches(repo)
+            elif op == "create-branch":
+                gitops.create_branch(repo, text("name"))
+            elif op == "switch":
+                gitops.switch(repo, text("name"))
+            elif op == "log":
+                extra["log"] = gitops.log(repo)
+            elif op == "view":
+                gitops.view_commit(repo, text("sha"))
+            elif op == "revert":
+                gitops.revert(repo, text("sha"))
+            elif op == "restore":
+                gitops.restore_deck(repo, text("sha"))
+            else:
+                raise EditError(f"unknown git operation {op!r}")
+        except gitops.GitError as exc:
+            raise EditError(str(exc)) from exc
+        if op in self._GIT_REWRITES:
+            self.history = History()
+        return {"ok": True, **extra, "git": gitops.status(self.project_dir)}
+
+    def _local_only(self, msg: dict[str, object], what: str) -> None:
+        # Set by the server from the connection, never by the browser.
+        if msg.get("_local") is not True:
+            raise EditError(f"only an editor on this machine can {what}")
+
+    # ── Decks ──
+
+    def _project(self, msg: dict[str, object], deck: Deck | None) -> dict[str, object]:
+        action = msg.get("action")
+        try:
+            if action == "project-info":
+                return {
+                    "ok": True,
+                    **projects.new_deck_info(self.deck_path, deck),
+                    "recent": [
+                        p for p in projects.recent() if p != str(self.deck_path)
+                    ],
+                }
+            self._local_only(msg, "open or create decks")
+            if action == "browse":
+                path = msg.get("path")
+                return {
+                    "ok": True,
+                    **projects.browse(
+                        path if isinstance(path, str) else None, self.project_dir
+                    ),
+                }
+            if action == "new-deck":
+                deck_py = projects.create_deck(
+                    Path(str(msg.get("path") or "")),
+                    title=str(msg.get("title") or ""),
+                    theme=str(msg.get("theme") or "starter"),
+                    git=msg.get("git") is not False,
+                    current=self.deck_path,
+                )
+            else:
+                deck_py = projects.deck_file(str(msg.get("path") or ""))
+                projects.remember(deck_py)
+        except (projects.ProjectError, OSError) as exc:
+            raise EditError(str(exc)) from exc
+        if msg.get("open") is not False:
+            self.switch_to = deck_py
+        return {"ok": True, "deck": str(deck_py), "opening": self.switch_to is not None}
 
     # ── Formulas ──
 

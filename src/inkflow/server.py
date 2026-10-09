@@ -42,6 +42,7 @@ from inkflow.edit import (
     open_in_editor,
     resolve_edit_commands,
 )
+from inkflow.editor import projects
 from inkflow.editor.context import write_context
 from inkflow.editor.model import build_model
 from inkflow.editor.session import EditError, EditorSession, Exporters
@@ -99,10 +100,18 @@ class EditorState(TypedDict):
     clients: set[ServerConnection]
     """Connections that identified as an editor page."""
     session: EditorSession | None
-    """Undo history and file writes for the editor (one per server)."""
+    """Undo history and file writes for the editor (one per open deck)."""
+    switch: asyncio.Event | None
+    """Set when the editor asked to open another deck (see ``serve``)."""
 
 
-_editor: EditorState = {"deck": None, "model": None, "clients": set(), "session": None}
+_editor: EditorState = {
+    "deck": None,
+    "model": None,
+    "clients": set(),
+    "session": None,
+    "switch": None,
+}
 
 
 # ── Deck loader ───────────────────────────────────────────────────────────────
@@ -375,6 +384,8 @@ async def _handle_edit_op(
     await websocket.send(
         json.dumps({"type": "edit-result", "id": request_id, **result})
     )
+    if session.switch_to is not None and _editor["switch"] is not None:
+        _editor["switch"].set()
 
 
 def make_ws_handler(
@@ -821,10 +832,41 @@ async def serve(
 ) -> None:
     """Run the server until quit. ``open_path`` (e.g. ``"/edit"``) opens a
     browser on that page once the first build is done; ``exporters`` enable
-    the editor's Export dialog."""
+    the editor's Export dialog.
+
+    When the editor opens another deck (or creates one), the servers close and
+    start again on the same ports for that deck; open pages reconnect to it."""
+    while True:
+        next_deck = await _serve_deck(
+            deck_path, host, http_port, ws_port, levels, open_path, exporters
+        )
+        if next_deck is None:
+            return
+        report("Opening", str(next_deck))
+        deck_path, open_path = next_deck, None
+        _state["slides"] = []
+        _state["position"] = {"slideIndex": 0, "step": 0}
+        _state["error"] = None
+        _editor["deck"] = None
+        _editor["model"] = None
+
+
+async def _serve_deck(
+    deck_path: Path,
+    host: str,
+    http_port: int,
+    ws_port: int,
+    levels: Levels,
+    open_path: str | None,
+    exporters: Exporters | None,
+) -> Path | None:
+    """Serve one deck until quit (None) or until the editor opens another
+    (its deck.py)."""
     console = Console()
     rebuild_lock = asyncio.Lock()
     shutdown = asyncio.Event()
+    switch = asyncio.Event()
+    _editor["switch"] = switch
 
     loop = asyncio.get_running_loop()
     uninstall_shutdown_handler = install_shutdown_handler(loop, shutdown)
@@ -835,6 +877,7 @@ async def serve(
         session.edit_commands = edit_commands
         session.server = {"host": host, "port": http_port, "wsPort": ws_port}
         _editor["session"] = session
+        projects.remember(deck_path)
         http_handler = make_http_handler(ws_port, deck_path.parent, edit_commands)
         # Bind before the Live UI so port conflicts fail fast with a clean message
         try:
@@ -888,8 +931,12 @@ async def serve(
                             )
                         ),
                     ]
-                    await shutdown.wait()
-                    for t in tasks:
+                    waits = [
+                        asyncio.create_task(shutdown.wait()),
+                        asyncio.create_task(switch.wait()),
+                    ]
+                    _ = await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+                    for t in [*tasks, *waits]:
                         t.cancel()
                     await asyncio.gather(*tasks, return_exceptions=True)
             except OSError as e:
@@ -903,3 +950,7 @@ async def serve(
                     raise
     finally:
         uninstall_shutdown_handler()
+        _editor["switch"] = None
+    if switch.is_set() and not shutdown.is_set():
+        return _editor["session"].switch_to if _editor["session"] else None
+    return None
