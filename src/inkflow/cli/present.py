@@ -9,6 +9,7 @@ import click
 from inkflow.cli._common import deck_option, main, resolve_deck_path
 from inkflow.export import build_pdf, build_static_html
 from inkflow.logging import Levels, report
+from inkflow.server import pick_ports
 from inkflow.server import serve as _serve
 
 
@@ -20,10 +21,22 @@ from inkflow.server import serve as _serve
     show_default=True,
     help="Bind address",
 )
-@click.option("--port", default=7777, show_default=True, help="HTTP port")
-@click.option("--ws-port", default=7778, show_default=True, help="WebSocket port")
+@click.option(
+    "--port",
+    type=int,
+    default=None,
+    help="HTTP port [default: 7777, or the next free one]",
+)
+@click.option(
+    "--ws-port",
+    type=int,
+    default=None,
+    help="WebSocket port [default: the HTTP port + 1, or the next free one]",
+)
 @click.pass_obj
-def serve(levels: Levels, deck_path: Path, host: str, port: int, ws_port: int) -> None:
+def serve(
+    levels: Levels, deck_path: Path, host: str, port: int | None, ws_port: int | None
+) -> None:
     """Start the presentation server with live reload.
 
     Serves the deck at `http://{host}:{port}` and pushes slide updates over a
@@ -38,6 +51,7 @@ def serve(levels: Levels, deck_path: Path, host: str, port: int, ws_port: int) -
     - `q`: quit (Ctrl-D and Ctrl-C also work)
     """
     resolved = resolve_deck_path(deck_path)
+    port, ws_port = pick_ports(host, port, ws_port)
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(_serve(resolved, host, port, ws_port, levels))
 
@@ -50,8 +64,18 @@ def serve(levels: Levels, deck_path: Path, host: str, port: int, ws_port: int) -
     show_default=True,
     help="Bind address",
 )
-@click.option("--port", default=7777, show_default=True, help="HTTP port")
-@click.option("--ws-port", default=7778, show_default=True, help="WebSocket port")
+@click.option(
+    "--port",
+    type=int,
+    default=None,
+    help="HTTP port [default: 7777, or the next free one]",
+)
+@click.option(
+    "--ws-port",
+    type=int,
+    default=None,
+    help="WebSocket port [default: the HTTP port + 1, or the next free one]",
+)
 @click.option(
     "--no-open",
     "no_open",
@@ -63,8 +87,8 @@ def edit(
     levels: Levels,
     deck_path: Path,
     host: str,
-    port: int,
-    ws_port: int,
+    port: int | None,
+    ws_port: int | None,
     no_open: bool,
 ) -> None:
     """Open the visual editor: click, drag and type on your slides.
@@ -73,13 +97,16 @@ def edit(
     change is written straight back to the deck's own files (slide SVGs, Markdown,
     `deck.py`), so the editor, Inkscape, your text editor and an agent such as
     Claude Code can all work on the deck at once; each sees the others' edits live.
-    The presenter stays at `/`.
+    The presenter stays at `/`. Run it once per deck to edit several side by
+    side: each picks the next free ports, and slides copied in one editor paste
+    into another.
 
     Keyboard shortcuts in the terminal are those of `serve`, plus `e` to open the
     editor again.
     """
     resolved = resolve_deck_path(deck_path)
     open_path = None if no_open else "/edit"
+    port, ws_port = pick_ports(host, port, ws_port)
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(_serve(resolved, host, port, ws_port, levels, open_path))
 

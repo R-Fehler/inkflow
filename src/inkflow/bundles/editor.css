@@ -316,6 +316,10 @@ body.offline #conn {
   color: var(--sel);
   font-weight: 700;
 }
+.sorter-item.picked .thumb {
+  outline-color: var(--sel);
+  outline-style: dashed;
+}
 .sorter-item.hidden-slide .thumb {
   opacity: 0.45;
 }

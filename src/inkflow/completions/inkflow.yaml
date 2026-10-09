@@ -80,6 +80,7 @@ commands:
   - name: goto
     description: Show a slide in every open editor.
     flags:
+      -d, --deck=: Path to deck.py
       --ws-port=: The server's WebSocket port
       --host=: Server host
 
@@ -87,6 +88,7 @@ commands:
     description: Select elements by id in every open editor.
     flags:
       --slide=: Go to this slide first
+      -d, --deck=: Path to deck.py
       --ws-port=: The server's WebSocket port
       --host=: Server host
 

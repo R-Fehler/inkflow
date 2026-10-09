@@ -13,10 +13,11 @@ import {
     slideRoot,
     slideToPaper,
 } from "./canvas";
+import { pasteText } from "./clipboard";
 import { svgEl, toast } from "./dom";
 import { fmt, invert, mat, multiply, relativePath, transformBox } from "./geom";
 import { edit, request } from "./net";
-import { currentSlide, ed, emit, on } from "./state";
+import { currentSlide, ed, emit, off, on } from "./state";
 import type { SlideModel } from "./types";
 
 const overlay = document.getElementById("overlay") as unknown as SVGSVGElement;
@@ -38,13 +39,20 @@ function waitForModel(
     ms = 5000,
 ): Promise<boolean> {
     return new Promise((resolve) => {
-        const deadline = window.setTimeout(() => resolve(false), ms);
+        let done = false;
+        const finish = (ok: boolean) => {
+            if (done) return;
+            done = true;
+            off("model", check);
+            resolve(ok);
+        };
+        const deadline = window.setTimeout(() => finish(false), ms);
         const check = () => {
             const s = currentSlide();
             if (s && pred(s)) {
                 window.clearTimeout(deadline);
-                resolve(true);
-            } else on("model", check);
+                finish(true);
+            }
         };
         on("model", check);
     });
@@ -74,13 +82,13 @@ export async function ensureOwnDrawing(): Promise<boolean> {
     return waitForModel((s) => s.deckIndex === deckIndex && !s.srcShared);
 }
 
-function ownSource() {
+export function ownSource() {
     return currentSlide()?.sources?.find((s) => s.role === "slide") ?? null;
 }
 
 // Where new objects go: the entered group, else the topmost unlocked layer of
 // the slide's own file, else its root.
-function insertParent(): { loc: string; el: Element | null } {
+export function insertParent(): { loc: string; el: Element | null } {
     const svg = slideRoot();
     if (ed.scope?.getAttribute("data-ink")?.startsWith("0:")) {
         return { loc: ed.scope.getAttribute("data-ink")!, el: ed.scope };
@@ -126,9 +134,7 @@ export async function insertXml(
         action: "svg",
         file: src.path,
         hash: src.hash,
-        ops: ops.map((o) =>
-            o.kind === "ensure-marker" ? { ...o, loc: undefined } : o,
-        ),
+        ops,
         label: `Insert ${base}`,
     });
     if (!result.ok) return false;
@@ -382,7 +388,7 @@ async function zoneMedia(zone: string): Promise<void> {
 
 // ── Copy / paste ──
 
-function cleanForPaste(el: Element): string {
+export function cleanForPaste(el: Element): string {
     const copy = el.cloneNode(true) as Element;
     for (const node of [copy, ...copy.querySelectorAll("*")]) {
         for (const attr of [...node.attributes]) {
@@ -404,57 +410,6 @@ function cleanForPaste(el: Element): string {
         (node as HTMLElement).style?.removeProperty?.("visibility");
     }
     return new XMLSerializer().serializeToString(copy);
-}
-
-export function copySelection(): boolean {
-    const own = ed.selection.filter((s) => s.el.localName !== "foreignObject");
-    if (!own.length) return false;
-    ed.clip = {
-        fragments: own.map((s) => cleanForPaste(s.el)),
-        sourceFile: currentSlide()?.sources?.[own[0].key]?.path ?? "",
-    };
-    toast(`Copied ${own.length} object${own.length > 1 ? "s" : ""}`);
-    return true;
-}
-
-// Image references are written project-relative in the rendered slide; a pasted
-// copy must point at the same file from wherever it lands.
-function retarget(xml: string, targetFile: string): string {
-    const projectDir = ed.model?.projectDir ?? "";
-    return xml.replace(/\shref="([^"]+)"/g, (whole, href: string) => {
-        if (/^(data:|https?:|#|\/)/.test(href)) return whole;
-        return ` href="${relativePath(targetFile, `${projectDir}/${href}`)}"`;
-    });
-}
-
-export async function pasteClip(): Promise<void> {
-    const clip = ed.clip;
-    if (!clip) return;
-    if (!(await ensureOwnDrawing())) return;
-    const src = ownSource();
-    if (!src) return;
-    const sameFile = clip.sourceFile === src.path;
-    const parent = insertParent();
-    const result = await edit({
-        action: "svg",
-        file: src.path,
-        hash: src.hash,
-        // Copies on the same slide are offset so they do not hide the original.
-        ops: clip.fragments.map((xml, i) => {
-            const frag = retarget(xml, src.path);
-            return {
-                kind: "insert",
-                parent: parent.loc,
-                xml: frag,
-                offset: sameFile ? [24, 24] : null,
-                key: `paste${i}`,
-            };
-        }),
-        label: "Paste",
-    });
-    if (result.ok && result.ids) {
-        afterRender.ids = Object.values(result.ids);
-    }
 }
 
 // ── Wiring ──
@@ -486,9 +441,9 @@ export function initInsert(): void {
         if (file) {
             e.preventDefault();
             void insertImageFile(file);
-        } else if (ed.clip) {
-            e.preventDefault();
-            void pasteClip();
+            return;
         }
+        e.preventDefault();
+        void pasteText(e.clipboardData?.getData("text/plain") ?? "");
     });
 }

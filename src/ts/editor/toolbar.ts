@@ -19,11 +19,18 @@ import {
     slideRoot,
     zoneName,
 } from "./canvas";
+import { copy, copySlides, cut, cutSlides } from "./clipboard";
 import { toast } from "./dom";
-import { copySelection, insertImage, setTool } from "./insert";
+import { insertImage, setTool } from "./insert";
 import { edit } from "./net";
 import { alignSelection } from "./props";
-import { deleteSlide, duplicateSlide, gotoSlide, layoutMenu } from "./sorter";
+import {
+    deleteSlide,
+    deleteSlides,
+    duplicateSlide,
+    gotoSlide,
+    layoutMenu,
+} from "./sorter";
 import { currentSlide, ed, emit, on, type Tool } from "./state";
 import { isEditingText } from "./textedit";
 import type { SvgOp } from "./types";
@@ -229,12 +236,13 @@ function onKey(e: KeyboardEvent): void {
         handled();
         void duplicateSelection();
     } else if (mod && lower === "c") {
-        if (copySelection()) handled();
+        handled();
+        if (ed.focus === "sorter") void copySlides();
+        else copy();
     } else if (mod && lower === "x") {
-        if (copySelection()) {
-            handled();
-            void deleteSelection();
-        }
+        handled();
+        if (ed.focus === "sorter") void cutSlides();
+        else cut();
     } else if (mod && lower === "g") {
         handled();
         void (e.shiftKey ? ungroupSelection() : groupSelection());
@@ -251,6 +259,12 @@ function onKey(e: KeyboardEvent): void {
         void order(
             e.shiftKey ? (up ? "front" : "back") : up ? "forward" : "backward",
         );
+    } else if (
+        (key === "Delete" || key === "Backspace") &&
+        ed.focus === "sorter"
+    ) {
+        handled();
+        void deleteSlides();
     } else if (key === "Delete" || key === "Backspace") {
         if (ed.selection.length) {
             handled();

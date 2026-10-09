@@ -54,9 +54,10 @@ right away.
 | `inkflow context` | Prints what the editor has selected right now (`--json` for the raw data). |
 | `inkflow render` | Writes PNGs of slides at any build step to `.inkflow/render/`, the editor's current slide by default (`--slide N`, `--all`, `--step S`). Claude looks at them to check its own work. |
 | `inkflow verify` | Checks the deck for authoring mistakes. |
-| `inkflow goto N` | Shows slide `N` in every open editor. |
-| `inkflow select ID…` | Selects elements by id in every open editor, so Claude can point at what it means. |
+| `inkflow goto N` | Shows slide `N` in the editor open on this deck. |
+| `inkflow select ID…` | Selects elements by id in the editor open on this deck, so Claude can point at what it means. |
 
-The editor keeps its state in `.inkflow/` in the project, which ignores itself in
+With several editors running, `goto` and `select` find the right one from the
+deck's `.inkflow/context.json`. The editor keeps its state in `.inkflow/` in the project, which ignores itself in
 git and is not watched for changes. `render` needs Chromium or Chrome, like
 `inkflow export`; one installed by Playwright is found too.

@@ -1100,6 +1100,11 @@ async function endDrag(drag: Drag): Promise<void> {
 }
 
 function onPointerDown(e: PointerEvent): void {
+    ed.focus = "canvas";
+    if (ed.slideSelection.size) {
+        ed.slideSelection.clear();
+        emit("slide-selection");
+    }
     if (e.button !== 0 || !slideRoot()) return;
     const target = e.target as Element;
     const handle = (target.closest("[data-handle]") as SVGElement | null)

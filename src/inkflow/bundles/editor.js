@@ -612,7 +612,10 @@
     renderPending: false,
     canUndo: false,
     canRedo: false,
-    clip: null,
+    slideSelection: /* @__PURE__ */ new Set(),
+    // deck indices picked in the slide list
+    focus: "canvas",
+    // where Delete / copy apply
     error: null,
     // A structural edit was sent and its rebuild has not been rendered yet.
     structuralPending: false,
@@ -627,6 +630,9 @@
       listeners.set(event, set);
     }
     set.add(fn);
+  }
+  function off(event, fn) {
+    listeners.get(event)?.delete(fn);
   }
   function emit(event) {
     for (const fn of [...listeners.get(event) ?? []]) fn();
@@ -1694,6 +1700,11 @@
     drawOverlay();
   }
   function onPointerDown(e) {
+    ed.focus = "canvas";
+    if (ed.slideSelection.size) {
+      ed.slideSelection.clear();
+      emit("slide-selection");
+    }
     if (e.button !== 0 || !slideRoot()) return;
     const target = e.target;
     const handle = target.closest("[data-handle]")?.dataset.handle;
@@ -1845,320 +1856,6 @@
     emit("zoom");
   }
 
-  // src/ts/editor/sorter.ts
-  var list = document.getElementById("sorter-list");
-  var addBtn = document.getElementById("sorter-add");
-  var menu = document.getElementById("context-menu");
-  var dragFrom = null;
-  function gotoSlide(deckIndex) {
-    const n = ed.model?.slides.length ?? 0;
-    if (!n) return;
-    const i = Math.max(0, Math.min(n - 1, deckIndex));
-    if (i === ed.current) return;
-    ed.current = i;
-    ed.selection = [];
-    ed.scope = null;
-    emit("slide");
-  }
-  var thumbs = /* @__PURE__ */ new Map();
-  var used = /* @__PURE__ */ new Map();
-  function thumb(slide) {
-    const box = h("div", { class: "thumb" });
-    if (slide.visibleIndex == null) {
-      box.append(h("div", { class: "thumb-hidden" }, icon("eyeOff", 18)));
-      return box;
-    }
-    const data = ed.slides[slide.visibleIndex];
-    if (!data) return box;
-    const cached = thumbs.get(data.svg);
-    if (cached && !used.has(data.svg)) {
-      used.set(data.svg, cached);
-      return cached;
-    }
-    used.set(data.svg, box);
-    box.innerHTML = data.svg;
-    const svg = box.querySelector("svg");
-    if (svg) {
-      const vb = parseViewBox(svg.getAttribute("viewBox"));
-      svg.setAttribute("width", "100%");
-      svg.setAttribute("height", "100%");
-      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-      svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
-      svg.querySelectorAll(".anim-pending").forEach((el) => {
-        el.classList.remove("anim-pending");
-      });
-      svg.querySelectorAll("video").forEach((v) => {
-        v.removeAttribute("autoplay");
-      });
-    }
-    return box;
-  }
-  function renderSorter() {
-    clear(list);
-    used = /* @__PURE__ */ new Map();
-    const slides = ed.model?.slides ?? [];
-    slides.forEach((slide, i) => {
-      const item = h(
-        "div",
-        {
-          class: `sorter-item${i === ed.current ? " active" : ""}${slide.visible ? "" : " hidden-slide"}`,
-          draggable: ed.model?.deckEditable ? "true" : null,
-          title: slide.title ?? slide.id ?? slide.src,
-          "data-index": i
-        },
-        h("span", { class: "sorter-num" }, String(i + 1)),
-        thumb(slide)
-      );
-      item.addEventListener("click", () => gotoSlide(i));
-      item.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        gotoSlide(i);
-        openMenu(e.clientX, e.clientY, i);
-      });
-      item.addEventListener("dragstart", (e) => {
-        dragFrom = i;
-        e.dataTransfer?.setData("text/plain", String(i));
-        item.classList.add("dragging");
-      });
-      item.addEventListener("dragend", () => {
-        dragFrom = null;
-        item.classList.remove("dragging");
-        list.querySelectorAll(".drop-before, .drop-after").forEach((el) => {
-          el.classList.remove("drop-before", "drop-after");
-        });
-      });
-      item.addEventListener("dragover", (e) => {
-        if (dragFrom == null) return;
-        e.preventDefault();
-        const r = item.getBoundingClientRect();
-        const after = e.clientY > r.top + r.height / 2;
-        item.classList.toggle("drop-after", after);
-        item.classList.toggle("drop-before", !after);
-      });
-      item.addEventListener("dragleave", () => {
-        item.classList.remove("drop-before", "drop-after");
-      });
-      item.addEventListener("drop", (e) => {
-        e.preventDefault();
-        if (dragFrom == null) return;
-        const r = item.getBoundingClientRect();
-        const after = e.clientY > r.top + r.height / 2;
-        let to = after ? i + 1 : i;
-        if (dragFrom < to) to -= 1;
-        void moveSlide(dragFrom, to);
-      });
-      list.append(item);
-    });
-    thumbs = used;
-    list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
-  }
-  async function moveSlide(from, to) {
-    if (from === to) return;
-    const result = await edit({ action: "slide", op: "move", from, to });
-    if (result.ok) {
-      ed.current = to;
-      emit("slide");
-    }
-  }
-  async function newSlide(layout, after = ed.current) {
-    const result = await edit({
-      action: "slide",
-      op: "new",
-      after,
-      layout,
-      name: "slide"
-    });
-    if (result.ok && result.select != null) pendingSelect = result.select;
-  }
-  async function duplicateSlide(i = ed.current) {
-    const result = await edit({ action: "slide", op: "duplicate", slide: i });
-    if (result.ok && result.select != null) pendingSelect = result.select;
-  }
-  async function deleteSlide(i = ed.current) {
-    const slide = ed.model?.slides[i];
-    if (!slide) return;
-    const name = slide.title ?? slide.id ?? `slide ${i + 1}`;
-    if (!window.confirm(
-      `Delete \u201C${name}\u201D from the deck? (Its files stay on disk.)`
-    )) {
-      return;
-    }
-    const result = await edit({ action: "slide", op: "delete", slide: i });
-    if (result.ok) {
-      ed.current = Math.max(0, i - 1);
-      emit("slide");
-    }
-  }
-  async function toggleHidden(i = ed.current) {
-    const slide = ed.model?.slides[i];
-    if (!slide) return;
-    await edit({
-      action: "slide",
-      op: "hide",
-      slide: i,
-      hidden: slide.visible
-    });
-  }
-  var pendingSelect = null;
-  function closeMenu() {
-    menu.classList.remove("open");
-    clear(menu);
-  }
-  function menuItem(label2, fn, disabled = false) {
-    return h(
-      "button",
-      {
-        type: "button",
-        class: "menu-item",
-        disabled,
-        onclick: () => {
-          closeMenu();
-          fn();
-        }
-      },
-      label2
-    );
-  }
-  function layoutMenu(x, y, after) {
-    clear(menu);
-    menu.append(h("div", { class: "menu-title" }, "New slide"));
-    menu.append(menuItem("Blank", () => void newSlide(null, after)));
-    for (const layout of ed.model?.layouts ?? []) {
-      menu.append(
-        menuItem(
-          `${layout.name}${layout.source === "local" ? "" : ` \xB7 ${layout.source}`}`,
-          () => void newSlide(layout.name, after)
-        )
-      );
-    }
-    showMenu(x, y);
-  }
-  function openMenu(x, y, i) {
-    const slide = ed.model?.slides[i];
-    const editable = !!ed.model?.deckEditable;
-    clear(menu);
-    menu.append(
-      menuItem("New slide after\u2026", () => layoutMenu(x, y, i), !editable)
-    );
-    menu.append(menuItem("Duplicate", () => void duplicateSlide(i), !editable));
-    menu.append(
-      menuItem(
-        slide?.visible ? "Hide (skip in presentation)" : "Show",
-        () => void toggleHidden(i),
-        !editable
-      )
-    );
-    menu.append(menuItem("Delete", () => void deleteSlide(i), !editable));
-    showMenu(x, y);
-  }
-  function showMenu(x, y) {
-    menu.classList.add("open");
-    const r = menu.getBoundingClientRect();
-    menu.style.left = `${Math.min(x, window.innerWidth - r.width - 8)}px`;
-    menu.style.top = `${Math.min(y, window.innerHeight - r.height - 8)}px`;
-  }
-  function initSorter() {
-    on("model", () => {
-      const n = ed.model?.slides.length ?? 0;
-      if (pendingSelect != null && pendingSelect < n) {
-        ed.current = pendingSelect;
-        pendingSelect = null;
-        emit("slide");
-      }
-      if (ed.current >= n) ed.current = Math.max(0, n - 1);
-      renderSorter();
-    });
-    on("slide", renderSorter);
-    addBtn.addEventListener("click", (e) => {
-      if (!ed.model?.deckEditable) {
-        toast(
-          "deck.py builds its slides in code; add slides there",
-          "error"
-        );
-        return;
-      }
-      const r = e.currentTarget.getBoundingClientRect();
-      layoutMenu(r.left, r.bottom + 4, ed.current);
-    });
-    document.addEventListener("pointerdown", (e) => {
-      if (!menu.contains(e.target)) closeMenu();
-    });
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeMenu();
-    });
-  }
-
-  // src/ts/editor/context.ts
-  var timer = 0;
-  function snapshot2() {
-    const slide = currentSlide();
-    const visible = ed.model?.slides.filter((s) => s.visible).length ?? 0;
-    return {
-      deck: ed.model?.deckPath,
-      slide: slide && {
-        number: (slide.visibleIndex ?? -1) + 1 || null,
-        total: visible,
-        deckIndex: slide.deckIndex,
-        id: slide.id ?? slide.explicitId,
-        title: slide.title,
-        svg: slide.srcRel,
-        sharedLayout: slide.srcShared,
-        md: slide.md?.rel ?? (slide.md ? "inline in deck.py" : null),
-        notes: slide.notes.rel
-      },
-      step: ed.step,
-      layoutMode: ed.layoutMode,
-      selection: ed.selection.map((s) => {
-        const box = slideBox(s.el);
-        const text = (s.el.textContent ?? "").replace(/\s+/g, " ").trim();
-        return {
-          id: s.el.getAttribute("id"),
-          tag: s.el.localName,
-          zone: isZone(s.el) ? zoneName(s.el) : null,
-          file: sourceOf(s.key)?.rel,
-          locator: s.loc,
-          box: box && {
-            x: Math.round(box.x),
-            y: Math.round(box.y),
-            width: Math.round(box.width),
-            height: Math.round(box.height)
-          },
-          text: text.slice(0, 200) || null
-        };
-      })
-    };
-  }
-  function report() {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(() => {
-      sendRaw({ type: "editor-context", context: snapshot2() });
-    }, 250);
-  }
-  function initContext() {
-    on("selection", report);
-    on("slide", report);
-    on("model", report);
-    on("step", report);
-    onCommand((msg) => {
-      if (msg.command === "goto") {
-        const n = Number(msg.slide);
-        const slides = ed.model?.slides ?? [];
-        const target = slides.find((s) => s.visibleIndex === n - 1);
-        if (target) gotoSlide(target.deckIndex);
-      } else if (msg.command === "select") {
-        const ids = msg.ids ?? [];
-        const svg = slideRoot();
-        if (!svg) return;
-        const els = ids.map((id) => svg.querySelector(`[id="${CSS.escape(id)}"]`)).filter(
-          (el) => el instanceof SVGGraphicsElement
-        );
-        enterGroup(null);
-        select(els);
-        emit("flash");
-      }
-    });
-  }
-
   // src/ts/editor/insert.ts
   var overlay2 = document.getElementById("overlay");
   var afterRender = {
@@ -2172,13 +1869,20 @@
   }
   function waitForModel(pred, ms = 5e3) {
     return new Promise((resolve) => {
-      const deadline = window.setTimeout(() => resolve(false), ms);
+      let done = false;
+      const finish = (ok) => {
+        if (done) return;
+        done = true;
+        off("model", check);
+        resolve(ok);
+      };
+      const deadline = window.setTimeout(() => finish(false), ms);
       const check = () => {
         const s = currentSlide();
         if (s && pred(s)) {
           window.clearTimeout(deadline);
-          resolve(true);
-        } else on("model", check);
+          finish(true);
+        }
       };
       on("model", check);
     });
@@ -2241,9 +1945,7 @@
       action: "svg",
       file: src.path,
       hash: src.hash,
-      ops: ops.map(
-        (o) => o.kind === "ensure-marker" ? { ...o, loc: void 0 } : o
-      ),
+      ops,
       label: `Insert ${base}`
     });
     if (!result.ok) return false;
@@ -2459,8 +2161,8 @@
     });
   }
   function cleanForPaste(el) {
-    const copy = el.cloneNode(true);
-    for (const node of [copy, ...copy.querySelectorAll("*")]) {
+    const copy2 = el.cloneNode(true);
+    for (const node of [copy2, ...copy2.querySelectorAll("*")]) {
       for (const attr of [...node.attributes]) {
         const name = attr.name;
         if (name.startsWith("data-")) node.removeAttribute(name);
@@ -2477,53 +2179,7 @@
       }
       node.style?.removeProperty?.("visibility");
     }
-    return new XMLSerializer().serializeToString(copy);
-  }
-  function copySelection() {
-    const own = ed.selection.filter((s) => s.el.localName !== "foreignObject");
-    if (!own.length) return false;
-    ed.clip = {
-      fragments: own.map((s) => cleanForPaste(s.el)),
-      sourceFile: currentSlide()?.sources?.[own[0].key]?.path ?? ""
-    };
-    toast(`Copied ${own.length} object${own.length > 1 ? "s" : ""}`);
-    return true;
-  }
-  function retarget(xml, targetFile) {
-    const projectDir = ed.model?.projectDir ?? "";
-    return xml.replace(/\shref="([^"]+)"/g, (whole, href) => {
-      if (/^(data:|https?:|#|\/)/.test(href)) return whole;
-      return ` href="${relativePath(targetFile, `${projectDir}/${href}`)}"`;
-    });
-  }
-  async function pasteClip() {
-    const clip = ed.clip;
-    if (!clip) return;
-    if (!await ensureOwnDrawing()) return;
-    const src = ownSource();
-    if (!src) return;
-    const sameFile = clip.sourceFile === src.path;
-    const parent = insertParent();
-    const result = await edit({
-      action: "svg",
-      file: src.path,
-      hash: src.hash,
-      // Copies on the same slide are offset so they do not hide the original.
-      ops: clip.fragments.map((xml, i) => {
-        const frag = retarget(xml, src.path);
-        return {
-          kind: "insert",
-          parent: parent.loc,
-          xml: frag,
-          offset: sameFile ? [24, 24] : null,
-          key: `paste${i}`
-        };
-      }),
-      label: "Paste"
-    });
-    if (result.ok && result.ids) {
-      afterRender.ids = Object.values(result.ids);
-    }
+    return new XMLSerializer().serializeToString(copy2);
   }
   function initInsert() {
     hooks.toolDown = onToolDown;
@@ -2552,9 +2208,546 @@
       if (file) {
         e.preventDefault();
         void insertImageFile(file);
-      } else if (ed.clip) {
+        return;
+      }
+      e.preventDefault();
+      void pasteText(e.clipboardData?.getData("text/plain") ?? "");
+    });
+  }
+
+  // src/ts/editor/clipboard.ts
+  var PREFIX = "inkflow-clipboard:";
+  var lastCopied = null;
+  async function put(payload) {
+    const text = PREFIX + JSON.stringify(payload);
+    lastCopied = text;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      toast("Copied for this tab only: the browser blocked the clipboard");
+    }
+  }
+  function selectedSlides() {
+    const picked = [...ed.slideSelection].sort((a, b) => a - b);
+    return picked.length ? picked : [ed.current];
+  }
+  async function copySlides(indices = selectedSlides()) {
+    const result = await request({ action: "copy-slides", slides: indices });
+    if (!result.ok) {
+      toast(result.error ?? "could not copy", "error");
+      return false;
+    }
+    const bundle = result.bundle;
+    await put(bundle);
+    const dropped = bundle.dropped ?? [];
+    const n = indices.length;
+    toast(
+      `Copied ${n} slide${n > 1 ? "s" : ""}` + (dropped.length ? `; left out ${dropped.join(", ")}` : "")
+    );
+    return true;
+  }
+  async function cutSlides() {
+    const indices = selectedSlides();
+    if (!await copySlides(indices)) return;
+    const result = await edit({
+      action: "slide",
+      op: "delete",
+      slides: indices
+    });
+    if (result.ok) {
+      ed.slideSelection.clear();
+      ed.current = Math.max(0, Math.min(...indices) - 1);
+      emit("slide");
+    }
+  }
+  function imageRefs(xml) {
+    const refs = /* @__PURE__ */ new Set();
+    for (const m of xml.matchAll(
+      /<image\b[^>]*?\b(?:xlink:)?href="([^"]*)"/g
+    )) {
+      if (!/^(data:|https?:|#|\/)/.test(m[1])) refs.add(m[1]);
+    }
+    return [...refs];
+  }
+  async function copyObjects(cut2 = false) {
+    const sels = ed.selection.filter((s) => s.el.localName !== "foreignObject");
+    if (!sels.length) return false;
+    const fragments = sels.map((s) => cleanForPaste(s.el));
+    const refs = fragments.flatMap(imageRefs);
+    let files = {};
+    if (refs.length) {
+      const result = await request({ action: "copy-assets", refs });
+      files = result.files ?? {};
+    }
+    await put({
+      type: "inkflow-objects",
+      version: 1,
+      project: ed.model?.projectDir,
+      sourceFile: currentSlide()?.sources?.[sels[0].key]?.path ?? "",
+      fragments,
+      files
+    });
+    const n = sels.length;
+    toast(`${cut2 ? "Cut" : "Copied"} ${n} object${n > 1 ? "s" : ""}`);
+    if (cut2) emit("delete");
+    return true;
+  }
+  function copy() {
+    if (ed.selection.length) void copyObjects();
+    else void copySlides();
+  }
+  function cut() {
+    if (ed.selection.some((s) => canTransform(s.el))) void copyObjects(true);
+    else void cutSlides();
+  }
+  async function pasteSlides(bundle) {
+    const after = ed.current;
+    const result = await edit({ action: "paste-slides", after, bundle });
+    if (!result.ok) return;
+    const n = result.pasted;
+    toast(`Pasted ${n} slide${n > 1 ? "s" : ""}`, "ok");
+    ed.slideSelection.clear();
+    afterSlides = after + 1;
+  }
+  var afterSlides = null;
+  function followPastedSlides() {
+    if (afterSlides != null && afterSlides < (ed.model?.slides.length ?? 0)) {
+      const target = afterSlides;
+      afterSlides = null;
+      gotoSlide(target);
+    }
+  }
+  async function pasteObjects(bundle) {
+    if (!await ensureOwnDrawing()) return;
+    const src = ownSource();
+    if (!src) return;
+    const sameFile = bundle.sourceFile === src.path;
+    clearSelection();
+    const result = await edit({
+      action: "paste-objects",
+      file: src.path,
+      hash: src.hash,
+      parent: insertParent().loc,
+      fragments: bundle.fragments,
+      files: bundle.files,
+      // Copies on the same slide are offset so they do not hide the original.
+      offset: sameFile ? [24, 24] : null
+    });
+    if (result.ok && result.ids) afterRender.ids = Object.values(result.ids);
+  }
+  async function pasteText(text) {
+    const raw = text.startsWith(PREFIX) ? text : lastCopied;
+    if (!raw?.startsWith(PREFIX)) return;
+    let bundle;
+    try {
+      bundle = JSON.parse(raw.slice(PREFIX.length));
+    } catch {
+      toast("The clipboard holds damaged inkflow data", "error");
+      return;
+    }
+    if (bundle.type === "inkflow-slides") await pasteSlides(bundle);
+    else if (bundle.type === "inkflow-objects") await pasteObjects(bundle);
+  }
+  async function pasteFromClipboard() {
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      text = lastCopied ?? "";
+    }
+    await pasteText(text);
+  }
+
+  // src/ts/editor/sorter.ts
+  var list = document.getElementById("sorter-list");
+  var addBtn = document.getElementById("sorter-add");
+  var menu = document.getElementById("context-menu");
+  var dragFrom = null;
+  function pick2(i, e) {
+    ed.focus = "sorter";
+    if (e.shiftKey) {
+      const [a, b] = [Math.min(ed.current, i), Math.max(ed.current, i)];
+      for (let k = a; k <= b; k++) ed.slideSelection.add(k);
+      renderSorter();
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+      if (!ed.slideSelection.size) ed.slideSelection.add(ed.current);
+      if (ed.slideSelection.has(i)) ed.slideSelection.delete(i);
+      else ed.slideSelection.add(i);
+      renderSorter();
+      if (ed.slideSelection.has(i)) gotoSlide(i);
+      return;
+    }
+    ed.slideSelection.clear();
+    if (i === ed.current) renderSorter();
+    else gotoSlide(i);
+  }
+  async function deleteSlides() {
+    const indices = [...ed.slideSelection].sort((a, b) => a - b);
+    if (indices.length <= 1) {
+      await deleteSlide(indices[0] ?? ed.current);
+      return;
+    }
+    if (!window.confirm(
+      `Delete ${indices.length} slides from the deck? (Their files stay on disk.)`
+    )) {
+      return;
+    }
+    const result = await edit({
+      action: "slide",
+      op: "delete",
+      slides: indices
+    });
+    if (result.ok) {
+      ed.slideSelection.clear();
+      ed.current = Math.max(0, indices[0] - 1);
+      emit("slide");
+    }
+  }
+  function gotoSlide(deckIndex) {
+    const n = ed.model?.slides.length ?? 0;
+    if (!n) return;
+    const i = Math.max(0, Math.min(n - 1, deckIndex));
+    if (i === ed.current) return;
+    ed.current = i;
+    ed.selection = [];
+    ed.scope = null;
+    emit("slide");
+  }
+  var thumbs = /* @__PURE__ */ new Map();
+  var used = /* @__PURE__ */ new Map();
+  function thumb(slide) {
+    const box = h("div", { class: "thumb" });
+    if (slide.visibleIndex == null) {
+      box.append(h("div", { class: "thumb-hidden" }, icon("eyeOff", 18)));
+      return box;
+    }
+    const data = ed.slides[slide.visibleIndex];
+    if (!data) return box;
+    const cached = thumbs.get(data.svg);
+    if (cached && !used.has(data.svg)) {
+      used.set(data.svg, cached);
+      return cached;
+    }
+    used.set(data.svg, box);
+    box.innerHTML = data.svg;
+    const svg = box.querySelector("svg");
+    if (svg) {
+      const vb = parseViewBox(svg.getAttribute("viewBox"));
+      svg.setAttribute("width", "100%");
+      svg.setAttribute("height", "100%");
+      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+      svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
+      svg.querySelectorAll(".anim-pending").forEach((el) => {
+        el.classList.remove("anim-pending");
+      });
+      svg.querySelectorAll("video").forEach((v) => {
+        v.removeAttribute("autoplay");
+      });
+    }
+    return box;
+  }
+  function renderSorter() {
+    clear(list);
+    used = /* @__PURE__ */ new Map();
+    const slides = ed.model?.slides ?? [];
+    slides.forEach((slide, i) => {
+      const item = h(
+        "div",
+        {
+          class: `sorter-item${i === ed.current ? " active" : ""}${ed.slideSelection.has(i) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
+          draggable: ed.model?.deckEditable ? "true" : null,
+          title: slide.title ?? slide.id ?? slide.src,
+          "data-index": i
+        },
+        h("span", { class: "sorter-num" }, String(i + 1)),
+        thumb(slide)
+      );
+      item.addEventListener("click", (e) => pick2(i, e));
+      item.addEventListener("contextmenu", (e) => {
         e.preventDefault();
-        void pasteClip();
+        ed.focus = "sorter";
+        if (!ed.slideSelection.has(i)) {
+          ed.slideSelection.clear();
+          gotoSlide(i);
+        }
+        openMenu(e.clientX, e.clientY, i);
+      });
+      item.addEventListener("dragstart", (e) => {
+        dragFrom = i;
+        e.dataTransfer?.setData("text/plain", String(i));
+        item.classList.add("dragging");
+      });
+      item.addEventListener("dragend", () => {
+        dragFrom = null;
+        item.classList.remove("dragging");
+        list.querySelectorAll(".drop-before, .drop-after").forEach((el) => {
+          el.classList.remove("drop-before", "drop-after");
+        });
+      });
+      item.addEventListener("dragover", (e) => {
+        if (dragFrom == null) return;
+        e.preventDefault();
+        const r = item.getBoundingClientRect();
+        const after = e.clientY > r.top + r.height / 2;
+        item.classList.toggle("drop-after", after);
+        item.classList.toggle("drop-before", !after);
+      });
+      item.addEventListener("dragleave", () => {
+        item.classList.remove("drop-before", "drop-after");
+      });
+      item.addEventListener("drop", (e) => {
+        e.preventDefault();
+        if (dragFrom == null) return;
+        const r = item.getBoundingClientRect();
+        const after = e.clientY > r.top + r.height / 2;
+        let to = after ? i + 1 : i;
+        if (dragFrom < to) to -= 1;
+        void moveSlide(dragFrom, to);
+      });
+      list.append(item);
+    });
+    thumbs = used;
+    list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+  }
+  async function moveSlide(from, to) {
+    if (from === to) return;
+    const result = await edit({ action: "slide", op: "move", from, to });
+    if (result.ok) {
+      ed.current = to;
+      emit("slide");
+    }
+  }
+  async function newSlide(layout, after = ed.current) {
+    const result = await edit({
+      action: "slide",
+      op: "new",
+      after,
+      layout,
+      name: "slide"
+    });
+    if (result.ok && result.select != null) pendingSelect = result.select;
+  }
+  async function duplicateSlide(i = ed.current) {
+    const result = await edit({ action: "slide", op: "duplicate", slide: i });
+    if (result.ok && result.select != null) pendingSelect = result.select;
+  }
+  async function deleteSlide(i = ed.current) {
+    const slide = ed.model?.slides[i];
+    if (!slide) return;
+    const name = slide.title ?? slide.id ?? `slide ${i + 1}`;
+    if (!window.confirm(
+      `Delete \u201C${name}\u201D from the deck? (Its files stay on disk.)`
+    )) {
+      return;
+    }
+    const result = await edit({ action: "slide", op: "delete", slide: i });
+    if (result.ok) {
+      ed.current = Math.max(0, i - 1);
+      emit("slide");
+    }
+  }
+  async function toggleHidden(i = ed.current) {
+    const slide = ed.model?.slides[i];
+    if (!slide) return;
+    await edit({
+      action: "slide",
+      op: "hide",
+      slide: i,
+      hidden: slide.visible
+    });
+  }
+  var pendingSelect = null;
+  function closeMenu() {
+    menu.classList.remove("open");
+    clear(menu);
+  }
+  function menuItem(label2, fn, disabled = false) {
+    return h(
+      "button",
+      {
+        type: "button",
+        class: "menu-item",
+        disabled,
+        onclick: () => {
+          closeMenu();
+          fn();
+        }
+      },
+      label2
+    );
+  }
+  function layoutMenu(x, y, after) {
+    clear(menu);
+    menu.append(h("div", { class: "menu-title" }, "New slide"));
+    menu.append(menuItem("Blank", () => void newSlide(null, after)));
+    for (const layout of ed.model?.layouts ?? []) {
+      menu.append(
+        menuItem(
+          `${layout.name}${layout.source === "local" ? "" : ` \xB7 ${layout.source}`}`,
+          () => void newSlide(layout.name, after)
+        )
+      );
+    }
+    showMenu(x, y);
+  }
+  function openMenu(x, y, i) {
+    const slide = ed.model?.slides[i];
+    const editable = !!ed.model?.deckEditable;
+    const many = ed.slideSelection.size > 1;
+    clear(menu);
+    menu.append(
+      menuItem(
+        many ? `Copy ${ed.slideSelection.size} slides` : "Copy",
+        () => void copySlides()
+      )
+    );
+    menu.append(
+      menuItem(
+        many ? "Cut slides" : "Cut",
+        () => void cutSlides(),
+        !editable
+      )
+    );
+    menu.append(
+      menuItem(
+        "Paste after this slide",
+        () => void pasteFromClipboard(),
+        !editable
+      )
+    );
+    if (many) {
+      menu.append(
+        menuItem(
+          `Delete ${ed.slideSelection.size} slides`,
+          () => void deleteSlides(),
+          !editable
+        )
+      );
+      showMenu(x, y);
+      return;
+    }
+    menu.append(
+      menuItem("New slide after\u2026", () => layoutMenu(x, y, i), !editable)
+    );
+    menu.append(menuItem("Duplicate", () => void duplicateSlide(i), !editable));
+    menu.append(
+      menuItem(
+        slide?.visible ? "Hide (skip in presentation)" : "Show",
+        () => void toggleHidden(i),
+        !editable
+      )
+    );
+    menu.append(menuItem("Delete", () => void deleteSlide(i), !editable));
+    showMenu(x, y);
+  }
+  function showMenu(x, y) {
+    menu.classList.add("open");
+    const r = menu.getBoundingClientRect();
+    menu.style.left = `${Math.min(x, window.innerWidth - r.width - 8)}px`;
+    menu.style.top = `${Math.min(y, window.innerHeight - r.height - 8)}px`;
+  }
+  function initSorter() {
+    on("model", () => {
+      followPastedSlides();
+      const n = ed.model?.slides.length ?? 0;
+      if (pendingSelect != null && pendingSelect < n) {
+        ed.current = pendingSelect;
+        pendingSelect = null;
+        emit("slide");
+      }
+      if (ed.current >= n) ed.current = Math.max(0, n - 1);
+      renderSorter();
+    });
+    on("slide", renderSorter);
+    on("slide-selection", renderSorter);
+    addBtn.addEventListener("click", (e) => {
+      if (!ed.model?.deckEditable) {
+        toast(
+          "deck.py builds its slides in code; add slides there",
+          "error"
+        );
+        return;
+      }
+      const r = e.currentTarget.getBoundingClientRect();
+      layoutMenu(r.left, r.bottom + 4, ed.current);
+    });
+    document.addEventListener("pointerdown", (e) => {
+      if (!menu.contains(e.target)) closeMenu();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeMenu();
+    });
+  }
+
+  // src/ts/editor/context.ts
+  var timer = 0;
+  function snapshot2() {
+    const slide = currentSlide();
+    const visible = ed.model?.slides.filter((s) => s.visible).length ?? 0;
+    return {
+      deck: ed.model?.deckPath,
+      slide: slide && {
+        number: (slide.visibleIndex ?? -1) + 1 || null,
+        total: visible,
+        deckIndex: slide.deckIndex,
+        id: slide.id ?? slide.explicitId,
+        title: slide.title,
+        svg: slide.srcRel,
+        sharedLayout: slide.srcShared,
+        md: slide.md?.rel ?? (slide.md ? "inline in deck.py" : null),
+        notes: slide.notes.rel
+      },
+      step: ed.step,
+      layoutMode: ed.layoutMode,
+      selection: ed.selection.map((s) => {
+        const box = slideBox(s.el);
+        const text = (s.el.textContent ?? "").replace(/\s+/g, " ").trim();
+        return {
+          id: s.el.getAttribute("id"),
+          tag: s.el.localName,
+          zone: isZone(s.el) ? zoneName(s.el) : null,
+          file: sourceOf(s.key)?.rel,
+          locator: s.loc,
+          box: box && {
+            x: Math.round(box.x),
+            y: Math.round(box.y),
+            width: Math.round(box.width),
+            height: Math.round(box.height)
+          },
+          text: text.slice(0, 200) || null
+        };
+      })
+    };
+  }
+  function report() {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
+      sendRaw({ type: "editor-context", context: snapshot2() });
+    }, 250);
+  }
+  function initContext() {
+    on("selection", report);
+    on("slide", report);
+    on("model", report);
+    on("step", report);
+    onCommand((msg) => {
+      if (msg.command === "goto") {
+        const n = Number(msg.slide);
+        const slides = ed.model?.slides ?? [];
+        const target = slides.find((s) => s.visibleIndex === n - 1);
+        if (target) gotoSlide(target.deckIndex);
+      } else if (msg.command === "select") {
+        const ids = msg.ids ?? [];
+        const svg = slideRoot();
+        if (!svg) return;
+        const els = ids.map((id) => svg.querySelector(`[id="${CSS.escape(id)}"]`)).filter(
+          (el) => el instanceof SVGGraphicsElement
+        );
+        enterGroup(null);
+        select(els);
+        emit("flash");
       }
     });
   }
@@ -3946,7 +4139,7 @@ ${area2.value.slice(pos)}`;
     const sels = ed.selection.filter((s) => canTransform(s.el));
     if (!sels.length) return;
     const k = 1 / (scale() || 1);
-    const off = Math.round(24 * Math.max(1, k * 0.5));
+    const off2 = Math.round(24 * Math.max(1, k * 0.5));
     await sendSvgOps(
       sels.map((s, i) => ({
         sel: s,
@@ -3954,7 +4147,7 @@ ${area2.value.slice(pos)}`;
           {
             kind: "duplicate",
             loc: s.loc,
-            offset: [off, off],
+            offset: [off2, off2],
             key: `dup${i}`
           }
         ]
@@ -4073,12 +4266,13 @@ ${area2.value.slice(pos)}`;
       handled();
       void duplicateSelection();
     } else if (mod && lower === "c") {
-      if (copySelection()) handled();
+      handled();
+      if (ed.focus === "sorter") void copySlides();
+      else copy();
     } else if (mod && lower === "x") {
-      if (copySelection()) {
-        handled();
-        void deleteSelection();
-      }
+      handled();
+      if (ed.focus === "sorter") void cutSlides();
+      else cut();
     } else if (mod && lower === "g") {
       handled();
       void (e.shiftKey ? ungroupSelection() : groupSelection());
@@ -4095,6 +4289,9 @@ ${area2.value.slice(pos)}`;
       void order(
         e.shiftKey ? up ? "front" : "back" : up ? "forward" : "backward"
       );
+    } else if ((key === "Delete" || key === "Backspace") && ed.focus === "sorter") {
+      handled();
+      void deleteSlides();
     } else if (key === "Delete" || key === "Backspace") {
       if (ed.selection.length) {
         handled();

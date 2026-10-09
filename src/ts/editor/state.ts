@@ -3,11 +3,6 @@ import type { EditorModel, Selected, SlideModel, SourceInfo } from "./types";
 
 export type Tool = "select" | "text" | "rect" | "ellipse" | "line" | "arrow";
 
-export interface Clip {
-    fragments: string[];
-    sourceFile: string;
-}
-
 // All mutable editor state, in one place (mirrors presenter/state.ts).
 export const ed = {
     model: null as EditorModel | null,
@@ -23,7 +18,8 @@ export const ed = {
     renderPending: false,
     canUndo: false,
     canRedo: false,
-    clip: null as Clip | null,
+    slideSelection: new Set<number>(), // deck indices picked in the slide list
+    focus: "canvas" as "canvas" | "sorter", // where Delete / copy apply
     error: null as string | null,
     // A structural edit was sent and its rebuild has not been rendered yet.
     structuralPending: false,

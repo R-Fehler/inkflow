@@ -1086,3 +1086,200 @@ def test_render_writes_a_png(
     import struct
 
     assert struct.unpack(">II", out.read_bytes()[16:24]) == (960, 540)
+
+
+# ── Copy and paste between decks ──────────────────────────────────────────────
+
+
+def _second_project(root: Path) -> Path:
+    for d in ("slides", "layouts", "notes"):
+        (root / d).mkdir(parents=True)
+    (root / "slides" / "drawing.svg").write_text(
+        "<svg xmlns='http://www.w3.org/2000/svg'/>"
+    )
+    (root / "deck.py").write_text(
+        "from inkflow import Deck, Slide\n\n\ndef main() -> Deck:\n"
+        + '    return Deck(slides=[Slide("drawing.svg")])\n'
+    )
+    return root
+
+
+class TestTransfer:
+    def test_slides_travel_with_their_files(
+        self, project: Path, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        from inkflow.editor.transfer import export_slides
+
+        (project / "assets").mkdir()
+        (project / "assets" / "pic.png").write_bytes(b"png")
+        md = project / "slides" / "text.md"
+        md.write_text("# Title\n\n![pic](../assets/pic.png)\n")
+        bundle = export_slides(_deck(project), project / "deck.py", [0, 1])
+        files = cast("dict[str, dict[str, str]]", bundle["files"])
+        assert {k: v["role"] for k, v in files.items()} == {
+            "slides/drawing.svg": "slide",
+            "notes/drawing.md": "notes",
+            "layouts/two.svg": "layout",
+            "slides/text.md": "md",
+            "assets/pic.png": "asset",
+        }
+
+        target = _second_project(tmp_path_factory.mktemp("b"))
+        session = EditorSession(target / "deck.py")
+        result = session.apply(
+            {
+                "action": "paste-slides",
+                "after": 0,
+                "bundle": json.loads(json.dumps(bundle)),
+            },
+            _deck(target),
+        )
+        assert result["pasted"] == 2
+        deck = _deck(target)
+        # The target's own drawing.svg is kept; the pasted one gets a new name.
+        assert [s.src for s in deck.slides] == ["drawing.svg", "drawing-2.svg", "two"]
+        assert (target / "layouts" / "two.svg").read_text() == LAYOUT
+        assert (target / "assets" / "pic.png").read_bytes() == b"png"
+        assert deck.slides[1].animations[0].element == "box"
+        process_deck(deck, target, target / "deck.py")
+        session.apply({"action": "undo"}, None)
+        assert len(_deck(target).slides) == 1
+        assert not (target / "slides" / "drawing-2.svg").exists()
+
+    def test_a_clashing_layout_is_renamed_and_its_users_follow(
+        self, project: Path, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        from inkflow.editor.transfer import export_slides
+
+        (project / "slides" / "drawing.svg").write_text(
+            DRAWING.replace(
+                "<svg ", '<svg xmlns:inkflow="urn:inkflow" inkflow:parent="two" ', 1
+            )
+        )
+        bundle = export_slides(_deck(project), project / "deck.py", [0, 2])
+        target = _second_project(tmp_path_factory.mktemp("b"))
+        (target / "layouts" / "two.svg").write_text(LAYOUT.replace("1760", "1700"))
+        EditorSession(target / "deck.py").apply(
+            {"action": "paste-slides", "after": 0, "bundle": bundle}, _deck(target)
+        )
+        deck = _deck(target)
+        assert deck.slides[2].src == "local:two-2"
+        assert (
+            'inkflow:parent="local:two-2"'
+            in (target / "slides" / "drawing-2.svg").read_text()
+        )
+        assert (target / "layouts" / "two.svg").read_text() != LAYOUT
+        process_deck(deck, target, target / "deck.py")
+
+    def test_pasting_into_the_same_deck_duplicates(self, project: Path) -> None:
+        from inkflow.editor.transfer import export_slides
+
+        bundle = export_slides(_deck(project), project / "deck.py", [0])
+        EditorSession(project / "deck.py").apply(
+            {"action": "paste-slides", "after": 2, "bundle": bundle}, _deck(project)
+        )
+        deck = _deck(project)
+        assert deck.slides[3].src == "drawing-2.svg"
+        assert deck.slides[3].notes == "notes/drawing-2.md"
+
+    def test_custom_types_are_left_out(self, project: Path) -> None:
+        from inkflow.editor.transfer import export_slides
+
+        deck_py = project / "deck.py"
+        deck_py.write_text(
+            deck_py.read_text().replace(
+                'animations=[animations.FadeIn("box")]',
+                'animations=[animations.FadeIn("box"), Sparkle("box")]',
+            )
+            + "\n\nfrom dataclasses import dataclass\n\n\n@dataclass\n"
+            + "class Sparkle(animations.Emphasis):\n    pass\n"
+        )
+        bundle = export_slides(_deck(project), deck_py, [0])
+        slides = cast("list[dict[str, object]]", bundle["slides"])
+        assert "Sparkle" not in str(slides[0]["code"])
+        assert bundle["dropped"] == ['the animation Sparkle("box")']
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            'Slide(__import__("os").system("x"))',
+            'Slide("a", notes=open("x").read())',
+            'Slide(f"{x}")',
+            'Slide("a", title=(lambda: 1)())',
+            'Slide("a", zones={"t": Path("x")})',
+            "os.system('x')",
+            'Slide("a", animations=[animations.Animation("x")])',
+        ],
+    )
+    def test_pasted_code_must_be_plain_data(self, code: str) -> None:
+        from inkflow.editor.transfer import TransferError, check_slide_code
+
+        with pytest.raises(TransferError):
+            check_slide_code(code)
+
+    def test_plain_slides_are_accepted(self) -> None:
+        from inkflow.editor.transfer import check_slide_code
+
+        check_slide_code(
+            'Slide("a.svg", id="x", zones={"m": Image("p.png", fit=MediaFit.COVER)}, '
+            + 'animations=[animations.SlideIn("b", Trigger.at(2), distance=-3.5, '
+            + "easing=Easing.cubic_bezier(0.2, 0, 0.3, 1))], "
+            + "transition=transitions.Push(direction=Direction.LEFT), visible=False)"
+        )
+
+    @pytest.mark.parametrize("rel", ["../evil.svg", "/etc/passwd", "slides/../../x"])
+    def test_files_cannot_land_outside_the_project(
+        self, project: Path, rel: str
+    ) -> None:
+        bundle: dict[str, object] = {
+            "type": "inkflow-slides",
+            "version": 1,
+            "files": {rel: {"role": "asset", "data": base64.b64encode(b"x").decode()}},
+            "slides": [{"code": 'Slide("drawing.svg")', "refs": {}}],
+        }
+        with pytest.raises(EditError, match="outside the project"):
+            EditorSession(project / "deck.py").apply(
+                {"action": "paste-slides", "after": 0, "bundle": bundle},
+                _deck(project),
+            )
+
+    def test_objects_bring_their_images(
+        self, project: Path, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        (project / "assets").mkdir()
+        (project / "assets" / "pic.png").write_bytes(b"png")
+        source = EditorSession(project / "deck.py")
+        files = source.apply(
+            {"action": "copy-assets", "refs": ["assets/pic.png", "https://x/y.png"]},
+            None,
+        )["files"]
+        target = _second_project(tmp_path_factory.mktemp("b"))
+        (target / "assets").mkdir()
+        (target / "assets" / "pic.png").write_bytes(b"other")
+        svg_path = target / "slides" / "drawing.svg"
+        result = EditorSession(target / "deck.py").apply(
+            {
+                "action": "paste-objects",
+                "file": str(svg_path),
+                "fragments": ['<image href="assets/pic.png" width="5" height="5"/>'],
+                "files": files,
+            },
+            _deck(target),
+        )
+        assert result["ids"] == {"paste0": "image"}
+        assert (target / "assets" / "pic-2.png").read_bytes() == b"png"
+        assert 'href="../assets/pic-2.png"' in svg_path.read_text()
+
+
+def test_pick_ports_skips_busy_ones() -> None:
+    import socket
+
+    from inkflow.server import pick_ports
+
+    with socket.socket() as busy:
+        busy.bind(("localhost", 0))
+        busy.listen()
+        port = cast("int", busy.getsockname()[1])
+        assert pick_ports("localhost", port, 9) == (port, 9)
+        http, ws = pick_ports("localhost", port, None)
+        assert http == port and ws != port

@@ -36,6 +36,39 @@ Every edit is one undo step (<kbd>Ctrl</kbd>+<kbd>Z</kbd>). A burst of typing is
 one step, not one per keystroke. Undo restores the exact bytes it replaced, and it
 refuses rather than overwrite a file that was changed outside the editor since.
 
+## Several decks, and copying between them
+
+Run `inkflow edit` once per deck. Each instance takes the next free ports
+(7777, then 7779, …), so the editors open side by side in your browser, like
+two PowerPoint windows.
+
+Slides copy between them through the system clipboard. Select slides in the
+slide list (<kbd>Ctrl</kbd>+click adds one, <kbd>Shift</kbd>+click a range),
+press <kbd>Ctrl</kbd>+<kbd>C</kbd> (or right-click → Copy), switch to the other
+editor, pick the slide to paste after, and press <kbd>Ctrl</kbd>+<kbd>V</kbd>.
+A copied slide takes everything it needs with it: its SVG, Markdown and notes,
+the project's own layouts it is built on, and every image or video it shows.
+In the receiving project:
+
+- a file that is already there with the same contents is reused, so a shared
+  layout or logo is not duplicated;
+- anything else that would clash gets a new name (`intro-2.svg`), and every
+  reference to it (in `deck.py`, in the SVGs that build on it, in Markdown
+  image links) is rewritten to match;
+- the pasted `Slide(...)` calls go into `Deck(slides=[...])` in one undoable
+  step, with any `from inkflow import` names they need.
+
+Pasting into the deck the slides came from makes independent copies.
+
+Objects copy the same way: select shapes, <kbd>Ctrl</kbd>+<kbd>C</kbd>, and
+<kbd>Ctrl</kbd>+<kbd>V</kbd> on a slide in either editor; images come along.
+
+Two things cannot travel. Animation or transition types a deck defines in its
+own `deck.py` are left out, and copying says which. Slide-specific overlays are
+dropped too, since the receiving deck's own overlays apply. And because the
+clipboard is shared with everything else on your computer, a paste only accepts
+a plain `Slide(...)` built from inkflow's own types, never arbitrary Python.
+
 ## The canvas
 
 - **Select** with a click; <kbd>Shift</kbd>+click adds to the selection; drag on
@@ -105,8 +138,8 @@ Renaming an object keeps the slide's animations pointing at it.
 |---|---|
 | <kbd>V</kbd> <kbd>T</kbd> <kbd>R</kbd> <kbd>O</kbd> <kbd>L</kbd> <kbd>A</kbd> <kbd>I</kbd> | Select, text, rectangle, ellipse, line, arrow, image |
 | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> | Undo / redo |
-| <kbd>Ctrl</kbd>+<kbd>C</kbd> <kbd>X</kbd> <kbd>V</kbd> <kbd>D</kbd> | Copy, cut, paste, duplicate |
-| <kbd>Delete</kbd> | Delete the selection (or clear a zone) |
+| <kbd>Ctrl</kbd>+<kbd>C</kbd> <kbd>X</kbd> <kbd>V</kbd> <kbd>D</kbd> | Copy, cut, paste, duplicate (objects, or slides in the slide list) |
+| <kbd>Delete</kbd> | Delete the selection (or clear a zone; in the slide list, the selected slides) |
 | <kbd>Ctrl</kbd>+<kbd>G</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> | Group / ungroup |
 | <kbd>Ctrl</kbd>+<kbd>↑</kbd> <kbd>↓</kbd> (+<kbd>Shift</kbd>) | Forward / backward (to front / back) |
 | <kbd>Enter</kbd> | Edit the selected text or zone |

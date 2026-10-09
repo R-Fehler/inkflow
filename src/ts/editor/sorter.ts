@@ -4,6 +4,12 @@
 // change is a structured edit of the Deck(slides=[...]) list in deck.py.
 
 import { parseViewBox } from "../shared/viewbox";
+import {
+    copySlides,
+    cutSlides,
+    followPastedSlides,
+    pasteFromClipboard,
+} from "./clipboard";
 import { clear, h, icon, toast } from "./dom";
 import { edit } from "./net";
 import { ed, emit, on } from "./state";
@@ -14,6 +20,54 @@ const addBtn = document.getElementById("sorter-add")!;
 const menu = document.getElementById("context-menu")!;
 
 let dragFrom: number | null = null;
+
+// Click picks one slide; Ctrl/Cmd adds or removes one, Shift a range (for
+// copying, cutting or deleting several at once).
+function pick(i: number, e: MouseEvent): void {
+    ed.focus = "sorter";
+    if (e.shiftKey) {
+        const [a, b] = [Math.min(ed.current, i), Math.max(ed.current, i)];
+        for (let k = a; k <= b; k++) ed.slideSelection.add(k);
+        renderSorter();
+        return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+        if (!ed.slideSelection.size) ed.slideSelection.add(ed.current);
+        if (ed.slideSelection.has(i)) ed.slideSelection.delete(i);
+        else ed.slideSelection.add(i);
+        renderSorter();
+        if (ed.slideSelection.has(i)) gotoSlide(i);
+        return;
+    }
+    ed.slideSelection.clear();
+    if (i === ed.current) renderSorter();
+    else gotoSlide(i);
+}
+
+export async function deleteSlides(): Promise<void> {
+    const indices = [...ed.slideSelection].sort((a, b) => a - b);
+    if (indices.length <= 1) {
+        await deleteSlide(indices[0] ?? ed.current);
+        return;
+    }
+    if (
+        !window.confirm(
+            `Delete ${indices.length} slides from the deck? (Their files stay on disk.)`,
+        )
+    ) {
+        return;
+    }
+    const result = await edit({
+        action: "slide",
+        op: "delete",
+        slides: indices,
+    });
+    if (result.ok) {
+        ed.slideSelection.clear();
+        ed.current = Math.max(0, indices[0] - 1);
+        emit("slide");
+    }
+}
 
 export function gotoSlide(deckIndex: number): void {
     const n = ed.model?.slides.length ?? 0;
@@ -73,7 +127,7 @@ export function renderSorter(): void {
         const item = h(
             "div",
             {
-                class: `sorter-item${i === ed.current ? " active" : ""}${slide.visible ? "" : " hidden-slide"}`,
+                class: `sorter-item${i === ed.current ? " active" : ""}${ed.slideSelection.has(i) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
                 draggable: ed.model?.deckEditable ? "true" : null,
                 title: slide.title ?? slide.id ?? slide.src,
                 "data-index": i,
@@ -81,10 +135,14 @@ export function renderSorter(): void {
             h("span", { class: "sorter-num" }, String(i + 1)),
             thumb(slide),
         );
-        item.addEventListener("click", () => gotoSlide(i));
+        item.addEventListener("click", (e) => pick(i, e));
         item.addEventListener("contextmenu", (e) => {
             e.preventDefault();
-            gotoSlide(i);
+            ed.focus = "sorter";
+            if (!ed.slideSelection.has(i)) {
+                ed.slideSelection.clear();
+                gotoSlide(i);
+            }
             openMenu(e.clientX, e.clientY, i);
         });
         item.addEventListener("dragstart", (e) => {
@@ -228,7 +286,39 @@ export function layoutMenu(x: number, y: number, after: number): void {
 function openMenu(x: number, y: number, i: number): void {
     const slide = ed.model?.slides[i];
     const editable = !!ed.model?.deckEditable;
+    const many = ed.slideSelection.size > 1;
     clear(menu);
+    menu.append(
+        menuItem(
+            many ? `Copy ${ed.slideSelection.size} slides` : "Copy",
+            () => void copySlides(),
+        ),
+    );
+    menu.append(
+        menuItem(
+            many ? "Cut slides" : "Cut",
+            () => void cutSlides(),
+            !editable,
+        ),
+    );
+    menu.append(
+        menuItem(
+            "Paste after this slide",
+            () => void pasteFromClipboard(),
+            !editable,
+        ),
+    );
+    if (many) {
+        menu.append(
+            menuItem(
+                `Delete ${ed.slideSelection.size} slides`,
+                () => void deleteSlides(),
+                !editable,
+            ),
+        );
+        showMenu(x, y);
+        return;
+    }
     menu.append(
         menuItem("New slide after…", () => layoutMenu(x, y, i), !editable),
     );
@@ -253,6 +343,7 @@ function showMenu(x: number, y: number): void {
 
 export function initSorter(): void {
     on("model", () => {
+        followPastedSlides();
         const n = ed.model?.slides.length ?? 0;
         if (pendingSelect != null && pendingSelect < n) {
             ed.current = pendingSelect;
@@ -263,6 +354,7 @@ export function initSorter(): void {
         renderSorter();
     });
     on("slide", renderSorter);
+    on("slide-selection", renderSorter);
     addBtn.addEventListener("click", (e) => {
         if (!ed.model?.deckEditable) {
             toast(

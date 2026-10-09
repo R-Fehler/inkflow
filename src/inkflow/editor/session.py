@@ -33,6 +33,14 @@ from inkflow.editor.svgops import (
     group,
     ungroup,
 )
+from inkflow.editor.transfer import (
+    TransferError,
+    export_assets,
+    export_slides,
+    plan_asset_paste,
+    plan_slide_paste,
+    retarget_fragment,
+)
 from inkflow.layout import create_slide, discover_layouts, resolve_parent_path
 from inkflow.manifest import Deck, Inline, Slide, TextBox
 from inkflow.pipeline import resolve_slide_src
@@ -199,12 +207,15 @@ class EditorSession:
     history: History
     built_hash: str | None
     """Hash of the deck.py the current build came from (set by the server)."""
+    server: dict[str, object]
+    """Where the serving process listens, recorded in the editor context."""
 
     def __init__(self, deck_path: Path) -> None:
         self.deck_path = deck_path.resolve()
         self.project_dir = self.deck_path.parent
         self.history = History()
         self.built_hash = None
+        self.server = {}
 
     # ── Entry point ──
 
@@ -218,8 +229,27 @@ class EditorSession:
             return self._result(step)
         if action == "upload":
             return self._upload(msg)
+        if action == "copy-assets":
+            refs = msg.get("refs")
+            names = (
+                [str(r) for r in cast("list[object]", refs)]
+                if isinstance(refs, list)
+                else []
+            )
+            return {"ok": True, "files": export_assets(self.project_dir, names)}
         if deck is None:
             raise EditError("the deck has not built yet")
+        if action == "copy-slides":
+            indices = msg.get("slides")
+            if not isinstance(indices, list) or not all(
+                isinstance(i, int) for i in cast("list[object]", indices)
+            ):
+                raise EditError("nothing to copy")
+            try:
+                bundle = export_slides(deck, self.deck_path, cast("list[int]", indices))
+            except TransferError as exc:
+                raise EditError(str(exc)) from exc
+            return {"ok": True, "bundle": bundle}
         txn = _Txn(self.project_dir)
         extra: dict[str, object] = {}
         handler = {
@@ -230,12 +260,21 @@ class EditorSession:
             "notes": self._notes,
             "slide": self._slide,
             "anim": self._anim,
+            "paste-slides": self._paste_slides,
+            "paste-objects": self._paste_objects,
         }.get(cast("str", action))
         if handler is None:
             raise EditError(f"unknown action {action!r}")
         try:
             label = handler(msg, deck, txn, extra)
-        except (DeckEditError, SvgOpError, ValueError, KeyError, TypeError) as exc:
+        except (
+            DeckEditError,
+            SvgOpError,
+            TransferError,
+            ValueError,
+            KeyError,
+            TypeError,
+        ) as exc:
             raise EditError(str(exc)) from exc
         step = txn.commit(label)
         coalesce = msg.get("coalesce")
@@ -513,9 +552,20 @@ class EditorSession:
             source.move_slide(src, dst)
             label = "Move slide"
         elif op == "delete":
-            index, _ = self._deck_slide(deck, msg)
-            source.remove_slide(index)
-            label = "Delete slide"
+            many = msg.get("slides")
+            if isinstance(many, list):
+                indices = sorted(
+                    {int(cast("int", i)) for i in cast("list[object]", many)},
+                    reverse=True,
+                )
+            else:
+                indices = [self._deck_slide(deck, msg)[0]]
+            if any(not 0 <= i < len(deck.slides) for i in indices):
+                raise EditError("no such slide")
+            # Highest first, so each removal leaves the others' indices alone.
+            for index in indices:
+                source.remove_slide(index)
+            label = "Delete slide" if len(indices) == 1 else "Delete slides"
         elif op == "hide":
             index, _ = self._deck_slide(deck, msg)
             hidden = bool(msg.get("hidden"))
@@ -749,6 +799,60 @@ class EditorSession:
             raise EditError(f"unknown animation operation {op!r}")
         self._save_deck(txn, source, code.imports)
         return label
+
+    # ── Copy and paste between decks ──
+
+    def _paste_slides(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        after = int(cast("int", msg.get("after", len(deck.slides) - 1)))
+        plan = plan_slide_paste(self.project_dir, deck, msg.get("bundle"))
+        source = self._deck_source(txn)
+        if source.slide_calls(expected=len(deck.slides)) is None:
+            raise EditError(
+                "deck.py builds its slide list in code; paste slides there by hand"
+            )
+        for rel, data in plan.writes.items():
+            txn.write(self.project_dir / rel, data)
+        for i, code in enumerate(plan.calls):
+            source.insert_slide(after + 1 + i, code)
+        self._save_deck(txn, source, plan.imports)
+        extra["select"] = after + 1
+        extra["pasted"] = len(plan.calls)
+        extra["written"] = sorted(plan.writes)
+        n = len(plan.calls)
+        return f"Paste {n} slide{'s' if n != 1 else ''}"
+
+    def _paste_objects(
+        self, msg: dict[str, object], _deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        path = Path(cast("str", msg.get("file")))
+        data = txn.read(path)
+        expected = msg.get("hash")
+        if isinstance(expected, str) and expected and file_hash(data) != expected:
+            raise EditError(f"{path.name} changed on disk; wait for the reload")
+        writes, targets = plan_asset_paste(self.project_dir, msg.get("files"))
+        for rel, payload in writes.items():
+            txn.write(self.project_dir / rel, payload)
+        file_rel = path.resolve().relative_to(self.project_dir).as_posix()
+        svg = SvgFile.from_bytes(path, data)
+        fragments = cast("list[object]", msg.get("fragments") or [])
+        offset = msg.get("offset")
+        ops: list[dict[str, object]] = [
+            {
+                "kind": "insert",
+                "parent": msg.get("parent") or "0:",
+                "xml": retarget_fragment(str(xml), file_rel, targets),
+                "offset": offset,
+                "key": f"paste{i}",
+            }
+            for i, xml in enumerate(fragments)
+        ]
+        result = apply_ops(svg, ops)
+        txn.write(path, svg.to_bytes())
+        extra["ids"] = result.ids
+        extra["structural"] = True
+        return "Paste"
 
     # ── Uploads ──
 

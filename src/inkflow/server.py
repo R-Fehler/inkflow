@@ -9,6 +9,7 @@ import importlib.resources
 import importlib.util
 import json
 import os
+import socket
 import sys
 import time
 import traceback
@@ -410,9 +411,16 @@ def make_ws_handler(
                 elif msg_type == "edit-op" and session is not None:
                     await _handle_edit_op(websocket, msg, session)
                 elif msg_type == "editor-context" and session is not None:
-                    await asyncio.to_thread(
-                        write_context, session.project_dir, msg.get("context")
-                    )
+                    raw_context: object = msg.get("context")
+                    context: object = raw_context
+                    if isinstance(raw_context, dict):
+                        # Which server this editor talks to: `inkflow goto`
+                        # and `select` find it here when several are running.
+                        context = {
+                            **cast("dict[str, object]", raw_context),
+                            "server": session.server,
+                        }
+                    await asyncio.to_thread(write_context, session.project_dir, context)
                 elif msg_type == "editor-command":
                     # From `inkflow goto/select`: steer every open editor.
                     await _send_editors(msg)
@@ -675,6 +683,48 @@ async def _read_keys(
                 ui.toggle_trace()
 
 
+# ── Ports ─────────────────────────────────────────────────────────────────────
+
+DEFAULT_PORT = 7777
+
+
+def _port_free(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def pick_ports(host: str, port: int | None, ws_port: int | None) -> tuple[int, int]:
+    """The HTTP and WebSocket ports to serve on.
+
+    Explicit ports are used as given (a clash is then reported as before).
+    Unset ones take the first free pair from 7777 up, so a second
+    ``inkflow edit`` for another deck simply comes up next to the first.
+    """
+    if port is not None and ws_port is not None:
+        return port, ws_port
+    if port is not None:
+        ws = port + 1
+        while not _port_free(host, ws):
+            ws += 1
+        return port, ws
+    candidate = DEFAULT_PORT
+    for _ in range(200):
+        ws = ws_port if ws_port is not None else candidate + 1
+        if (
+            candidate != ws
+            and _port_free(host, candidate)
+            and (ws_port is not None or _port_free(host, ws))
+        ):
+            return candidate, ws
+        candidate += 2 if ws_port is None else 1
+    return DEFAULT_PORT, ws_port if ws_port is not None else DEFAULT_PORT + 1
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 
@@ -698,6 +748,7 @@ async def serve(
     try:
         edit_commands = resolve_edit_commands()
         session = EditorSession(deck_path)
+        session.server = {"host": host, "port": http_port, "wsPort": ws_port}
         _editor["session"] = session
         http_handler = make_http_handler(ws_port, deck_path.parent, edit_commands)
         # Bind before the Live UI so port conflicts fail fast with a clean message

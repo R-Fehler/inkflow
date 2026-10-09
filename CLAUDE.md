@@ -100,7 +100,10 @@ src/
                                schemas for the property panels), session.py (one request ->
                                one undoable whole-file step; EditorSession/History),
                                model.py (build_model: per-slide sources, zones, cues for the
-                               editor), context.py (.inkflow/context.json for agents)
+                               editor), context.py (.inkflow/context.json for agents),
+                               transfer.py (clipboard bundles: copy slides/objects with their
+                               files, paste into any project; pasted Slide(...) must pass the
+                               `check_slide_code` allowlist, never arbitrary Python)
     cli/              CLI package (entry point inkflow.cli:main). _common.py holds the
                                `main` group, shared options, and the Project/Target helpers;
                                commands are grouped by area: project.py (init, setup-git,
@@ -182,7 +185,8 @@ src/
                       attribute plans), geom.ts (pure matrices + move/resize/rotate plans),
                       snap.ts (smart guides), textedit.ts, insert.ts (tools, images,
                       paste), sorter.ts, props.ts, notes.ts, toolbar.ts (shortcuts),
-                      context.ts (agent context + goto/select), net.ts (edit-op requests)
+                      context.ts (agent context + goto/select), net.ts (edit-op requests),
+                      clipboard.ts (system-clipboard copy/paste of slides and objects)
     render/           the single-slide page behind `inkflow render`
   css/                CSS source
     shared/           theme variables, animation keyframes

@@ -176,35 +176,59 @@ def _send(ws_port: int, host: str, payload: dict[str, object]) -> None:
 
 
 _ws_port_option = click.option(
-    "--ws-port", default=7778, show_default=True, help="The server's WebSocket port"
+    "--ws-port",
+    type=int,
+    default=None,
+    help="The server's WebSocket port [default: the one editing this deck, else 7778]",
 )
+
+
+def _editor_ws_port(deck_path: Path, ws_port: int | None) -> int:
+    """The WebSocket port of the editor open on this deck, from its context."""
+    if ws_port is not None:
+        return ws_port
+    data = read_context(deck_path.resolve().parent) or {}
+    server = data.get("server")
+    if isinstance(server, dict):
+        port = cast("dict[str, object]", server).get("wsPort")
+        if isinstance(port, int):
+            return port
+    return 7778
+
+
 _host_option = click.option("--host", default="localhost", show_default=True)
 
 
 @main.command()
 @click.argument("slide", type=int)
+@deck_option
 @_ws_port_option
 @_host_option
-def goto(slide: int, ws_port: int, host: str) -> None:
-    """Show slide SLIDE (1-based) in every open editor."""
-    _send(ws_port, host, {"type": "editor-command", "command": "goto", "slide": slide})
+def goto(slide: int, deck_path: Path, ws_port: int | None, host: str) -> None:
+    """Show slide SLIDE (1-based) in every editor open on the deck."""
+    port = _editor_ws_port(deck_path, ws_port)
+    _send(port, host, {"type": "editor-command", "command": "goto", "slide": slide})
 
 
 @main.command("select")
 @click.argument("ids", nargs=-1, required=True)
 @click.option("--slide", type=int, default=None, help="Go to this slide first.")
+@deck_option
 @_ws_port_option
 @_host_option
 def select_cmd(
-    ids: tuple[str, ...], slide: int | None, ws_port: int, host: str
+    ids: tuple[str, ...],
+    slide: int | None,
+    deck_path: Path,
+    ws_port: int | None,
+    host: str,
 ) -> None:
-    """Select elements by id in every open editor (on its current slide)."""
+    """Select elements by id in every editor open on the deck."""
+    port = _editor_ws_port(deck_path, ws_port)
     if slide is not None:
-        _send(
-            ws_port, host, {"type": "editor-command", "command": "goto", "slide": slide}
-        )
+        _send(port, host, {"type": "editor-command", "command": "goto", "slide": slide})
     _send(
-        ws_port,
+        port,
         host,
         {"type": "editor-command", "command": "select", "ids": list(ids)},
     )
