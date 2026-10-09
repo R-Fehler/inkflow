@@ -4,11 +4,11 @@ import json
 import re
 import site
 import sysconfig
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from functools import cache
 from pathlib import Path
-from typing import NamedTuple, TypedDict, cast
+from typing import NamedTuple, NotRequired, TypedDict, cast
 
 from inkflow import ns
 from inkflow.animations import Animation, Cue, PlayVideo
@@ -18,7 +18,10 @@ from inkflow.content import (
     remove_unreferenced_zones,
     substitute_content,
     substitute_zone_numbers,
+    unreferenced_zones,
+    zone_box,
 )
+from inkflow.editor.provenance import INK, stamper
 from inkflow.enums import AnimationKind, ColorMode, Direction, Trigger
 from inkflow.layout import (
     AssetKind,
@@ -54,12 +57,38 @@ class EditableFile(TypedDict):
     path: str
 
 
+class EmptyZone(TypedDict):
+    """A zone nothing filled. Pruned from the slide, so the editor draws its
+    placeholder from this instead."""
+
+    zone: str
+    locator: str
+    x: float
+    y: float
+    width: float
+    height: float
+    transform: str | None
+
+
+class SlideEditInfo(TypedDict):
+    """Pipeline facts only the visual editor needs (``process_deck(editor=True)``)."""
+
+    sources: list[str]
+    """Absolute source paths; a ``data-ink`` locator's key indexes this list."""
+    emptyZones: list[EmptyZone]
+    zoneOrigins: dict[str, str]
+    """Filled zone name → where its content was written: ``deck`` (the slide's
+    ``zones=``), ``md`` (that zone's own section of the Markdown file) or
+    ``md-file`` (several Markdown sections merged into a default zone)."""
+
+
 class SlideData(TypedDict):
     id: str
     svg: str
     title: str
     notes: str
     editableFiles: list[EditableFile]
+    edit: NotRequired[SlideEditInfo]
 
 
 # ── Path conventions ─────────────────────────────────────────────────────────
@@ -457,6 +486,25 @@ def _add_layout_classes(
 # ── Per-slide pipeline ────────────────────────────────────────────────────────
 
 
+class SourceTable:
+    """The files one slide is composed from, in first-read order.
+
+    A file's position is the key its ``data-ink`` locators carry, so the editor
+    can name a file with a small integer on every element.
+    """
+
+    def __init__(self) -> None:
+        self.paths: list[Path] = []
+
+    def key(self, path: Path) -> int:
+        if path not in self.paths:
+            self.paths.append(path)
+        return self.paths.index(path)
+
+    def stamp(self, path: Path) -> Callable[[SvgElement], None]:
+        return stamper(self.key(path))
+
+
 @dataclass
 class SlideSvg:
     """A slide's SVG tree as it moves through the per-slide pipeline.
@@ -472,14 +520,24 @@ class SlideSvg:
     """The file the slide was read from. Kept because a relative reference inside
     the tree resolves against it, and because the layout tagging needs it later."""
 
+    sources: SourceTable | None = None
+    """Set when the editor needs provenance: every file read is stamped."""
+
     @classmethod
-    def read(cls, src: Path, roots: AssetRoots) -> SlideSvg:
-        return cls(read_resolved_svg(src, roots), src)
+    def read(
+        cls, src: Path, roots: AssetRoots, sources: SourceTable | None = None
+    ) -> SlideSvg:
+        stamp = sources.stamp(src) if sources is not None else None
+        return cls(read_resolved_svg(src, roots, stamp), src, sources)
+
+    def _read(self, path: Path, roots: AssetRoots) -> SvgElement:
+        stamp = self.sources.stamp(path) if self.sources is not None else None
+        return read_resolved_svg(path, roots, stamp)
 
     def compose_ancestors(self, chain: list[Path], roots: AssetRoots) -> None:
         if chain:
             self.root = compose_with_ancestors(
-                self.root, [read_resolved_svg(path, roots) for path in chain]
+                self.root, [self._read(path, roots) for path in chain]
             )
 
     def compose_overlays(
@@ -489,10 +547,27 @@ class SlideSvg:
             self.root = compose_overlays(
                 self.root,
                 [
-                    [read_resolved_svg(path, roots) for path in chain]
+                    [self._read(path, roots) for path in chain]
                     for chain in overlay_chains
                 ],
             )
+
+    def empty_zones(self) -> list[EmptyZone]:
+        zones: list[EmptyZone] = []
+        for el in unreferenced_zones(self.root):
+            x, y, width, height = zone_box(el)
+            zones.append(
+                {
+                    "zone": (el.get("id") or "").removeprefix("zone-"),
+                    "locator": el.get(INK, ""),
+                    "x": x,
+                    "y": y,
+                    "width": width,
+                    "height": height,
+                    "transform": el.get("transform"),
+                }
+            )
+        return zones
 
     def tag_layout(self, chain: list[Path], overlay_chains: list[list[Path]]) -> None:
         self.root = _add_layout_classes(self.root, chain, self.src, overlay_chains)
@@ -543,6 +618,8 @@ class DeckContext:
     overlays: Sequence[Overlay]  # deck default, already resolved against the theme
     mode: ColorMode
     total_slides: int
+    editor: bool = False
+    """Stamp provenance and collect ``SlideEditInfo`` for the visual editor."""
 
 
 def _resolve_autoplay_conflicts(
@@ -568,6 +645,38 @@ def _resolve_autoplay_conflicts(
     return result
 
 
+class ProcessedSlide(NamedTuple):
+    svg: str
+    notes: str
+    """The slide's markdown-derived notes."""
+    edit: SlideEditInfo | None
+    """Editor facts, when ``DeckContext.editor`` is set."""
+
+
+def _zone_origins(
+    filled: set[str],
+    slide: Slide,
+    parsed: ParsedMarkdown | None,
+    zone_ids: set[str],
+    default_zone: str,
+) -> dict[str, str]:
+    """Where each filled zone's content was written (see ``SlideEditInfo``)."""
+    displaced = parsed is not None and any(
+        name in parsed.auto_zones and f"zone-{name}" not in zone_ids
+        for name in ("title", "subtitle", "content")
+    )
+    origins: dict[str, str] = {}
+    for zone_id in filled:
+        name = zone_id.removeprefix("zone-")
+        if name in slide.zones:
+            origins[name] = "deck"
+        elif displaced and name == default_zone:
+            origins[name] = "md-file"
+        else:
+            origins[name] = "md"
+    return origins
+
+
 def process_slide(
     slide: Slide,
     ctx: DeckContext,
@@ -575,14 +684,16 @@ def process_slide(
     parsed: ParsedMarkdown | None,
     md_source: AssetSource,
     slide_id: str,
-) -> tuple[str, str]:
-    """Return the processed SVG string and the slide's markdown-derived notes."""
+) -> ProcessedSlide:
+    """Return the processed SVG string, markdown-derived notes and editor facts."""
     src = resolve_slide_src(slide.src, ctx.project_dir, ctx.theme)
     chain = resolve_chain(src, ctx.project_dir, ctx.theme)
     overlays = slide.overlays if slide.overlays is not None else ctx.overlays
     overlay_chains = resolve_overlay_chains(overlays, ctx.project_dir, ctx.theme)
 
-    doc = SlideSvg.read(src, ctx.assets)
+    sources = SourceTable() if ctx.editor else None
+    zone_origins: dict[str, str] = {}
+    doc = SlideSvg.read(src, ctx.assets, sources)
     doc.compose_ancestors(chain, ctx.assets)
     doc.compose_overlays(overlay_chains, ctx.assets)
     for zone_id in doc.duplicate_zone_ids():
@@ -610,6 +721,10 @@ def process_slide(
         md_notes = result.notes
         reveal_pairs = [(anim, step) for anim, step in result.animations]
         reveal_max = result.max_step
+        if sources is not None:
+            zone_origins = _zone_origins(
+                set(result.content), slide, parsed, zone_ids, default_zone
+            )
         if result.content:
             font_size = (
                 slide.font_size if slide.font_size is not None else ctx.font_size
@@ -629,9 +744,16 @@ def process_slide(
     if combined_css:
         doc.add_style(combined_css)
 
+    edit: SlideEditInfo | None = None
+    if sources is not None:
+        edit = {
+            "sources": [str(p) for p in sources.paths],
+            "emptyZones": doc.empty_zones(),
+            "zoneOrigins": zone_origins,
+        }
     doc.prune_zones()
     doc.scope_styles(slide_number)
-    return doc.to_svg(), md_notes
+    return ProcessedSlide(doc.to_svg(), md_notes, edit)
 
 
 @cache
@@ -705,7 +827,9 @@ def _editable_files(
     return files
 
 
-def process_deck(deck: Deck, project_dir: Path, deck_path: Path) -> list[SlideData]:
+def process_deck(
+    deck: Deck, project_dir: Path, deck_path: Path, *, editor: bool = False
+) -> list[SlideData]:
     visible_slides = [s for s in deck.slides if s.visible]
     assets = AssetRoots(project_dir, deck.theme.asset_dir())
     ctx = DeckContext(
@@ -717,6 +841,7 @@ def process_deck(deck: Deck, project_dir: Path, deck_path: Path) -> list[SlideDa
         overlays=deck.effective_overlays,
         mode=deck.effective_mode,
         total_slides=len(visible_slides),
+        editor=editor,
     )
     raw_ids = [_infer_slide_id(s) for s in visible_slides]
     slide_ids = _deduplicate_ids(raw_ids)
@@ -729,20 +854,21 @@ def process_deck(deck: Deck, project_dir: Path, deck_path: Path) -> list[SlideDa
         loaded_notes = load_notes(slide.notes, project_dir)
         explicit_notes = _source_for(assets, loaded_notes.path).html(loaded_notes.text)
         md_source = _source_for(assets, md.path if md is not None else None)
-        svg, md_notes = process_slide(slide, ctx, i + 1, parsed, md_source, slide_id)
-        notes = "\n".join(filter(None, [explicit_notes, md_notes]))
+        processed = process_slide(slide, ctx, i + 1, parsed, md_source, slide_id)
+        notes = "\n".join(filter(None, [explicit_notes, processed.notes]))
 
         svg_path = resolve_slide_src(slide.src, ctx.project_dir, ctx.theme)
         editable_files = _editable_files(ctx, svg_path, md, loaded_notes, deck_path)
 
-        results.append(
-            {
-                "id": slide_id,
-                "svg": svg,
-                "title": title,
-                "notes": notes,
-                "editableFiles": editable_files,
-            }
-        )
+        data: SlideData = {
+            "id": slide_id,
+            "svg": processed.svg,
+            "title": title,
+            "notes": notes,
+            "editableFiles": editable_files,
+        }
+        if processed.edit is not None:
+            data["edit"] = processed.edit
+        results.append(data)
     logger.info(f"processed {len(results)} slide(s)")
     return results

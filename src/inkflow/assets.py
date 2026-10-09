@@ -194,7 +194,11 @@ def _label(path: Path, project_dir: Path) -> str:
     return str(path)
 
 
-def read_resolved_svg(path: Path, roots: AssetRoots) -> SvgElement:
+def read_resolved_svg(
+    path: Path,
+    roots: AssetRoots,
+    before_clean: Callable[[SvgElement], None] | None = None,
+) -> SvgElement:
     """Parse an SVG and canonicalise its references against its own directory.
 
     Every SVG the presentation pipeline composes is read through this, because
@@ -202,4 +206,5 @@ def read_resolved_svg(path: Path, roots: AssetRoots) -> SvgElement:
     came from. Authoring paths (preview injection, `verify`) read the file plainly
     with `clean_inkscape_tree` instead, so the author's own paths survive.
     """
-    return AssetSource.for_file(roots, path).svg(clean_inkscape_tree(path))
+    root = clean_inkscape_tree(path, before_clean=before_clean)
+    return AssetSource.for_file(roots, path).svg(root)

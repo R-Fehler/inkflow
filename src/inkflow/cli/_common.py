@@ -70,7 +70,9 @@ def main(
         browser=log_level_browser,
         log_file=log_file,
     )
-    inkflow_logging.configure(levels, attach_console=ctx.invoked_subcommand != "serve")
+    inkflow_logging.configure(
+        levels, attach_console=ctx.invoked_subcommand not in ("serve", "edit")
+    )
     # `serve` reads the resolved levels back to filter its per-rebuild log collection
     # for the TUI and browser sinks.
     ctx.obj = levels

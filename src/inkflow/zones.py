@@ -556,3 +556,100 @@ def build_slide_content(
     return SlideContent(
         content=result, notes=notes_html, animations=animations, max_step=base_step
     )
+
+
+# ── Source spans (for the visual editor) ──────────────────────────────────────
+
+
+def zone_spans(source: str) -> dict[str, tuple[int, int]]:
+    """Where each zone's text sits in ``source``, as ``(start, end)`` offsets.
+
+    Mirrors ``parse_markdown_zones`` exactly (the same markers, the same
+    auto-extraction of a leading ``#``/``##``), but keeps positions instead of
+    content, so the editor can replace one zone's section and leave every other
+    byte of the file alone. A span covers the section's stripped text; an empty
+    zone has no span.
+    """
+    spans: dict[str, tuple[int, int]] = {}
+    markers = list(_ZONE_PATTERN.finditer(source))
+    head_end = markers[0].start() if markers else len(source)
+    spans.update(_auto_spans(source, 0, head_end))
+    for idx, m in enumerate(markers):
+        start = m.end()
+        end = markers[idx + 1].start() if idx + 1 < len(markers) else len(source)
+        span = _strip_span(source, start, end)
+        if span is not None:
+            spans[m.group(1)] = span
+    return spans
+
+
+def _strip_span(text: str, start: int, end: int) -> tuple[int, int] | None:
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    return (start, end) if end > start else None
+
+
+def _auto_spans(text: str, start: int, end: int) -> dict[str, tuple[int, int]]:
+    """``_auto_extract``'s title/subtitle/content split, as spans."""
+    spans: dict[str, tuple[int, int]] = {}
+    pos = start
+
+    def next_nonblank(p: int) -> int:
+        while p < end:
+            line_end = text.find("\n", p, end)
+            line_end = end if line_end == -1 else line_end + 1
+            if text[p:line_end].strip():
+                return p
+            p = line_end
+        return end
+
+    def line_end(p: int) -> int:
+        e = text.find("\n", p, end)
+        return end if e == -1 else e
+
+    i = next_nonblank(pos)
+    if i < end and text.startswith("# ", i):
+        e = line_end(i)
+        spans["title"] = (i, len(text[:e].rstrip()))
+        pos = min(end, e + 1)
+        j = next_nonblank(pos)
+        if j < end and text.startswith("## ", j):
+            e2 = line_end(j)
+            spans["subtitle"] = (j, len(text[:e2].rstrip()))
+            pos = min(end, e2 + 1)
+    rest = _strip_span(text, pos, end)
+    if rest is not None:
+        spans["content"] = rest
+    return spans
+
+
+def replace_zone_text(source: str, zone: str, text: str) -> str:
+    """``source`` with zone ``zone``'s section replaced by ``text``.
+
+    A zone the file does not mention yet is added: a title as a leading ``#``
+    heading when the file has none, anything else as a new ``::zone::`` section
+    at the end. Empty ``text`` clears the section but keeps its marker.
+    """
+    text = text.strip()
+    spans = zone_spans(source)
+    if zone in spans:
+        start, end = spans[zone]
+        if zone in ("title", "subtitle") and not _ZONE_PATTERN.search(source[:start]):
+            # An auto-extracted heading: keep it a heading of the same level.
+            prefix = "# " if zone == "title" else "## "
+            if text and not text.startswith("#"):
+                text = prefix + text
+        return source[:start] + text + source[end:]
+    if not text:
+        return source
+    has_markers = _ZONE_PATTERN.search(source) is not None
+    if zone == "title" and "title" not in spans and not has_markers:
+        heading = text if text.startswith("#") else f"# {text}"
+        body = source.lstrip("\n")
+        return f"{heading}\n\n{body}" if body.strip() else f"{heading}\n"
+    gap = "\n\n" if source.strip() else ""
+    if zone == "content" and not has_markers and "content" not in spans:
+        return source.rstrip() + gap + text + "\n"
+    return source.rstrip() + gap + f"::{zone}::\n{text}\n"

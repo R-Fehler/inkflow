@@ -42,6 +42,48 @@ def serve(levels: Levels, deck_path: Path, host: str, port: int, ws_port: int) -
         asyncio.run(_serve(resolved, host, port, ws_port, levels))
 
 
+@main.command()
+@deck_option
+@click.option(
+    "--host",
+    default="localhost",
+    show_default=True,
+    help="Bind address",
+)
+@click.option("--port", default=7777, show_default=True, help="HTTP port")
+@click.option("--ws-port", default=7778, show_default=True, help="WebSocket port")
+@click.option(
+    "--no-open",
+    "no_open",
+    is_flag=True,
+    help="Do not open the editor in a browser on start.",
+)
+@click.pass_obj
+def edit(
+    levels: Levels,
+    deck_path: Path,
+    host: str,
+    port: int,
+    ws_port: int,
+    no_open: bool,
+) -> None:
+    """Open the visual editor: click, drag and type on your slides.
+
+    Runs the same server as `serve` and opens `http://{host}:{port}/edit`. Every
+    change is written straight back to the deck's own files (slide SVGs, Markdown,
+    `deck.py`), so the editor, Inkscape, your text editor and an agent such as
+    Claude Code can all work on the deck at once; each sees the others' edits live.
+    The presenter stays at `/`.
+
+    Keyboard shortcuts in the terminal are those of `serve`, plus `e` to open the
+    editor again.
+    """
+    resolved = resolve_deck_path(deck_path)
+    open_path = None if no_open else "/edit"
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(_serve(resolved, host, port, ws_port, levels, open_path))
+
+
 @main.command("build")
 @deck_option
 @click.option(

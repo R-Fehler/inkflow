@@ -13,7 +13,7 @@ import sys
 import time
 import traceback
 import webbrowser
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from html import escape as escape_html
 from pathlib import Path
 from typing import Literal, TypedDict, cast
@@ -22,7 +22,10 @@ from urllib.parse import unquote
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
-from watchfiles import awatch  # pyright: ignore[reportUnknownVariableType]
+from watchfiles import (
+    DefaultFilter,
+    awatch,  # pyright: ignore[reportUnknownVariableType]
+)
 from websockets.asyncio.server import ServerConnection
 from websockets.asyncio.server import serve as ws_serve
 
@@ -34,6 +37,9 @@ from inkflow.edit import (
     open_in_editor,
     resolve_edit_commands,
 )
+from inkflow.editor.context import write_context
+from inkflow.editor.model import build_model
+from inkflow.editor.session import EditError, EditorSession
 from inkflow.enums import ColorMode
 from inkflow.fonts import embed_fonts_css
 from inkflow.loaders import load_deck_scripts, load_deck_styles
@@ -79,6 +85,18 @@ _state: State = {
 }
 
 
+class EditorState(TypedDict):
+    deck: Deck | None
+    """The last deck that built, which editor requests are validated against."""
+    model: dict[str, object] | None
+    """The visual editor's model for the last build (see ``editor.model``)."""
+    clients: set[ServerConnection]
+    """Connections that identified as an editor page."""
+
+
+_editor: EditorState = {"deck": None, "model": None, "clients": set()}
+
+
 # ── Deck loader ───────────────────────────────────────────────────────────────
 
 
@@ -119,7 +137,16 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         with collect_logs(min(levels.console, levels.browser)) as entries:
             deck = await asyncio.to_thread(load_deck, deck_path)
             project_dir = deck_path.parent
-            slides = await asyncio.to_thread(process_deck, deck, project_dir, deck_path)
+            # The editor build stamps source locators on every element; the
+            # presenter ignores them, so one build serves both pages.
+            edit_slides = await asyncio.to_thread(
+                functools.partial(process_deck, editor=True),
+                deck,
+                project_dir,
+                deck_path,
+            )
+            model = await asyncio.to_thread(build_model, deck, deck_path, edit_slides)
+            slides = [_without_edit(s) for s in edit_slides]
             transitions = resolve_transitions(deck)
             styles_css = await asyncio.to_thread(load_deck_styles, deck, project_dir)
             if deck.embed_fonts:
@@ -144,6 +171,8 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         _state["mode"] = deck.effective_mode
         _state["title"] = resolve_deck_title(deck, project_dir)
         _state["theme_dir"] = deck.theme.asset_dir()
+        _editor["deck"] = deck
+        _editor["model"] = model
         _state["error"] = None
         _state["logs"] = browser_logs
         if slides:
@@ -163,6 +192,7 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
                 }
             )
         )
+        await _send_editors({"type": "editor-model", "model": model})
     except Exception:
         # Outside collect_logs, so a fatal error reaches only the file sink. The overlay
         # and TUI error phase show it instead, never the banner.
@@ -178,7 +208,23 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         ui.refresh()
 
 
+def _without_edit(slide: SlideData) -> SlideData:
+    """The presenter's copy of a slide: the editor facts travel in its model."""
+    data = slide.copy()
+    data.pop("edit", None)
+    return data
+
+
 # ── WebSocket broadcast ───────────────────────────────────────────────────────
+
+
+async def _send_editors(payload: dict[str, object]) -> None:
+    msg = json.dumps(payload)
+    for ws in list(_editor["clients"]):
+        try:
+            await ws.send(msg)
+        except Exception:
+            _editor["clients"].discard(ws)
 
 
 async def broadcast(msg: str, sender: ServerConnection | None = None) -> None:
@@ -259,8 +305,27 @@ def _resolve_edit_request(
     return Path(path_str), template
 
 
+async def _handle_edit_op(
+    websocket: ServerConnection, msg: dict[str, object], session: EditorSession
+) -> None:
+    """Apply one editor request and answer the sender with its result."""
+    request_id = msg.get("id")
+    try:
+        result = await asyncio.to_thread(session.apply, msg, _editor["deck"])
+    except EditError as exc:
+        result = {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        logger.exception("editor request failed")
+        result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    await websocket.send(
+        json.dumps({"type": "edit-result", "id": request_id, **result})
+    )
+
+
 def make_ws_handler(
-    ui: LiveUI, edit_commands: EditCommands
+    ui: LiveUI,
+    edit_commands: EditCommands,
+    session: EditorSession | None = None,
 ) -> Callable[[ServerConnection], Awaitable[None]]:
     async def handler(websocket: ServerConnection) -> None:
         _state["ws_clients"].add(websocket)
@@ -315,6 +380,26 @@ def make_ws_handler(
                     if msg.get("snap"):
                         position_msg["snap"] = True
                     await broadcast(json.dumps(position_msg), sender=websocket)
+                elif msg_type == "hello" and msg.get("role") == "editor":
+                    _editor["clients"].add(websocket)
+                    if _editor["model"] is not None:
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "editor-model",
+                                    "model": _editor["model"],
+                                }
+                            )
+                        )
+                elif msg_type == "edit-op" and session is not None:
+                    await _handle_edit_op(websocket, msg, session)
+                elif msg_type == "editor-context" and session is not None:
+                    await asyncio.to_thread(
+                        write_context, session.project_dir, msg.get("context")
+                    )
+                elif msg_type == "editor-command":
+                    # From `inkflow goto/select`: steer every open editor.
+                    await _send_editors(msg)
                 elif msg_type == "edit":
                     request = _resolve_edit_request(
                         msg, _state["slides"], edit_commands
@@ -325,6 +410,7 @@ def make_ws_handler(
                             await notify(websocket, error, style="red")
         finally:
             _state["ws_clients"].discard(websocket)
+            _editor["clients"].discard(websocket)
             logger.debug(f"client disconnected ({len(_state['ws_clients'])} total)")
             ui.refresh()
 
@@ -378,6 +464,33 @@ def build_html(
         .replace("__TITLE__", escape_html(state["title"]))
     )
     return html.encode("utf-8")
+
+
+def build_editor_html(state: State, editor: EditorState, ws_port: int) -> bytes:
+    """The visual editor page: its own shell and bundle, the deck's styles."""
+    pkg = importlib.resources.files("inkflow")
+    template = pkg.joinpath("editor.html").read_text(encoding="utf-8")
+    css = pkg.joinpath("bundles", "editor.css").read_text(encoding="utf-8")
+    js = pkg.joinpath("bundles", "editor.js").read_text(encoding="utf-8")
+    data_theme = "" if state["mode"] == ColorMode.DARK else "light"
+    html = (
+        template.replace("/* __CSS__ */", css)
+        .replace("/* __JS__ */", js)
+        .replace("/* __STYLES__ */", state["styles_css"])
+        .replace("__DATA_THEME__", data_theme)
+        .replace("__SLIDES_JSON__", json.dumps(state["slides"]))
+        .replace("__MODEL_JSON__", json.dumps(editor["model"]))
+        .replace("__WS_PORT__", str(ws_port))
+        .replace("__ERROR_JSON__", json.dumps(state["error"]))
+        .replace("__FAVICON__", favicon_data_uri())
+        .replace("__TITLE__", escape_html(f"Edit · {state['title']}"))
+    )
+    return html.encode("utf-8")
+
+
+def _is_editor_path(request_path: str) -> bool:
+    path = request_path.split("?", 1)[0].split("#", 1)[0]
+    return path == "/edit" or path.startswith("/edit/")
 
 
 _SERVED_SUFFIXES = set(MIME_TYPES)
@@ -435,7 +548,10 @@ def make_http_handler(
                     await writer.drain()
                     return
 
-            body = build_html(_state, ws_port, edit_commands)
+            if _is_editor_path(request_path):
+                body = build_editor_html(_state, _editor, ws_port)
+            else:
+                body = build_html(_state, ws_port, edit_commands)
             header = (
                 b"HTTP/1.1 200 OK\r\n"
                 + b"Content-Type: text/html; charset=utf-8\r\n"
@@ -477,10 +593,16 @@ def make_http_handler(
 # ── File watcher ──────────────────────────────────────────────────────────────
 
 
+class _WatchFilter(DefaultFilter):
+    """The default ignores, plus ``.inkflow/`` (editor context the server writes)."""
+
+    ignore_dirs: Sequence[str] = (*DefaultFilter.ignore_dirs, ".inkflow")
+
+
 async def _watch(
     deck_path: Path, ui: LiveUI, lock: asyncio.Lock, levels: Levels
 ) -> None:
-    async for changes in awatch(str(deck_path.parent)):
+    async for changes in awatch(str(deck_path.parent), watch_filter=_WatchFilter()):
         logger.debug(f"change detected in {len(changes)} file(s), rebuilding")
         async with lock:
             await rebuild(deck_path, ui, levels)
@@ -528,6 +650,8 @@ async def _read_keys(
                 return
             elif ch == "o":
                 _open_browser(f"http://{host}:{http_port}")
+            elif ch == "e":
+                _open_browser(f"http://{host}:{http_port}/edit")
             elif ch == "r":
                 async with lock:
                     await rebuild(deck_path, ui, levels)
@@ -539,8 +663,15 @@ async def _read_keys(
 
 
 async def serve(
-    deck_path: Path, host: str, http_port: int, ws_port: int, levels: Levels
+    deck_path: Path,
+    host: str,
+    http_port: int,
+    ws_port: int,
+    levels: Levels,
+    open_path: str | None = None,
 ) -> None:
+    """Run the server until quit. ``open_path`` (e.g. ``"/edit"``) opens a
+    browser on that page once the first build is done."""
     console = Console()
     rebuild_lock = asyncio.Lock()
     shutdown = asyncio.Event()
@@ -550,6 +681,7 @@ async def serve(
 
     try:
         edit_commands = resolve_edit_commands()
+        session = EditorSession(deck_path)
         http_handler = make_http_handler(ws_port, deck_path.parent, edit_commands)
         # Bind before the Live UI so port conflicts fail fast with a clean message
         try:
@@ -575,9 +707,17 @@ async def serve(
             try:
                 async with (
                     http_server,
-                    ws_serve(make_ws_handler(ui, edit_commands), host, ws_port),
+                    ws_serve(
+                        make_ws_handler(ui, edit_commands, session),
+                        host,
+                        ws_port,
+                        # Image uploads from the editor arrive as base64 frames.
+                        max_size=80 * 1024 * 1024,
+                    ),
                 ):
                     await rebuild(deck_path, ui, levels)
+                    if open_path is not None:
+                        _open_browser(f"http://{host}:{http_port}{open_path}")
                     tasks = [
                         asyncio.create_task(http_server.serve_forever()),
                         asyncio.create_task(

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from lxml import etree
 
 from inkflow import ns
+from inkflow.editor.provenance import copy_provenance
 from inkflow.enums import Muted
 from inkflow.logging import logger
 from inkflow.manifest import Media, TextBox, Video
@@ -233,6 +234,7 @@ def _swap_zone(
 ) -> None:
     """Set geometry + id on new_el and swap it in place of old_el in the tree."""
     new_el.set("id", zone_id)
+    copy_provenance(old_el, new_el)
     new_el.set("x", rect.x)
     new_el.set("y", rect.y)
     new_el.set("width", rect.width)
@@ -461,12 +463,28 @@ _ZONE_SHAPE_TAGS = frozenset(
 )
 
 
-def remove_unreferenced_zones(root: SvgElement) -> SvgElement:
-    to_remove = [
+def unreferenced_zones(root: SvgElement) -> list[SvgElement]:
+    """Zone shapes nothing filled: still placeholders, pruned before rendering."""
+    return [
         el
         for el in root.iter(*_ZONE_SHAPE_TAGS)
         if (el.get("id") or "").startswith("zone-") and not el.get("class")
     ]
+
+
+def zone_box(el: SvgElement) -> tuple[float, float, float, float]:
+    """A zone shape's ``(x, y, width, height)`` in its own user units."""
+    rect = _zone_geometry(el).rect
+    return (
+        _parse_dimension(rect.x),
+        _parse_dimension(rect.y),
+        _parse_dimension(rect.width),
+        _parse_dimension(rect.height),
+    )
+
+
+def remove_unreferenced_zones(root: SvgElement) -> SvgElement:
+    to_remove = unreferenced_zones(root)
     for el in to_remove:
         parent = el.getparent()
         if parent is not None:
