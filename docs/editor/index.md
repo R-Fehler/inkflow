@@ -11,7 +11,7 @@ inkflow edit            # opens http://localhost:7777/edit
 
 It is the same server as `inkflow serve`: the presenter stays at `/`, and
 <kbd>e</kbd> in the terminal opens the editor again. There is no separate project
-format and nothing to import or export. The editor, Inkscape, your text editor and an
+format and nothing to import. The editor, Inkscape, your text editor and an
 agent such as [Claude Code](claude-code.md) can all work on a deck at the same time;
 the file watcher shows each one the others' changes within a moment.
 
@@ -28,6 +28,11 @@ the file watcher shows each one the others' changes within a moment.
 | An inserted image | Copied into `assets/`, referenced relative to the SVG |
 | An inserted video | Copied into `assets/`; a `zone-video` rect in the slide's SVG plus `zones={"video": Video(...)}` in `deck.py`, as one undo step |
 | An image or video zone's settings | Its `Image(...)` / `Video(...)` call in `deck.py` |
+| A new text box | A `zone-text` rect in the slide's SVG; its Markdown in the slide's `.md` file (or `zones={...}` when it has none) |
+| A crop | The picture's SVG: the `<image>` goes into a nested `<svg>` frame |
+| A link, alt text, hiding, locking | The object in the SVG: an `<a href>` around it, a `<title>`, `display:none`, `inkflow:locked` |
+| Theme colours and fonts | One marked block in the project's `styles.css` |
+| Colour mode, base font size | `Deck(mode=..., font_size=...)` in `deck.py` |
 
 `deck.py` is edited structurally: comments and formatting are kept, and a comment
 written above a slide moves with it. If your slide list is built in code (a loop, a
@@ -83,6 +88,8 @@ a plain `Slide(...)` built from inkflow's own types, never arbitrary Python.
   <kbd>Shift</kbd> toggles that.
 - **Rotate** with the round handle above the selection; <kbd>Shift</kbd> snaps to
   15°.
+- **Reach an object under another** with a middle-click (or <kbd>Alt</kbd>+click):
+  each click selects the next object under the pointer, topmost first.
 - **Edit text** by double-clicking it. Text inside a group is edited directly.
 - **Enter a group** by double-clicking it; <kbd>Esc</kbd> leaves it.
 - **Zoom** with <kbd>Ctrl</kbd>+scroll or <kbd>+</kbd> / <kbd>−</kbd>;
@@ -91,22 +98,69 @@ a plain `Slide(...)` built from inkflow's own types, never arbitrary Python.
 The editor shows every object by default. To see what the audience sees at a given
 click, pick a build step in the toolbar; editing pauses while you preview.
 
-## Markdown zones
+## Text boxes and Markdown zones
 
-A layout's zones show their content as on the slide. Double-click one and its
-Markdown opens in a pane under the slide, in place of the notes. The slide
-re-renders as you type, and the bar above the text has buttons for bold, italics,
-headings, lists, code, math and `::step::` reveals. Empty zones show a small
-**+ zone** label; click it to start writing (or to pick an image or video, for
-zones named like `media`, `image` or `video`).
+Text in a layout's zones, and in text boxes, is Markdown: double-click it and you
+edit the text right where it is on the slide, with a formatting bar above it:
+
+- paragraph style (text, title, heading, subheading, quote);
+- **bold**, *italic*, ~~strikethrough~~ and `code` for the selected words
+  (<kbd>Ctrl</kbd>+<kbd>B</kbd>, <kbd>Ctrl</kbd>+<kbd>I</kbd> work too);
+- a text colour from the theme's palette, so coloured words follow dark and light
+  mode;
+- links (<kbd>Ctrl</kbd>+<kbd>K</kbd>): a web address, or `slide:<id>` to jump to
+  another slide;
+- bulleted and numbered lists (<kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd>
+  indent and outdent);
+- tables: insert one, then <kbd>Tab</kbd> moves from cell to cell (and adds a row
+  at the end), and the bar gains buttons to add or delete rows and columns and to
+  align a column.
+
+Click outside the text (or <kbd>Ctrl</kbd>+<kbd>Enter</kbd>) to finish; it is saved
+as ordinary Markdown in the same file it came from, as one undo step;
+<kbd>Esc</kbd> cancels. Pasting brings plain text only.
+
+Some Markdown has no in-place form: math, code blocks, images, `::step::` reveals.
+A zone that contains any of them opens its Markdown source in a pane under the
+slide instead, where the slide re-renders as you type; the **M↓** button switches
+to that pane at any time. Nothing is ever dropped: the editor only edits in place
+when it can write back exactly what the zone holds.
+
+Empty zones show a small **+ zone** label; click it to start writing (or to pick an
+image or video, for zones named like `media`, `image` or `video`).
 
 ## Drawing
 
-The toolbar's text, rectangle, ellipse, line and arrow tools draw new objects.
-Click to drop one at a default size, or drag to size it. New shapes use the theme's
-colour classes (`inkflow-fill-surface`, `inkflow-stroke-accent`, …), so they follow
-dark and light mode like everything else. Images can be picked from the toolbar,
+The toolbar's rectangle, ellipse, line and arrow tools draw new objects. Click to
+drop one at a default size, or drag to size it. New shapes use the theme's colour
+classes (`inkflow-fill-surface`, `inkflow-stroke-accent`, …), so they follow dark
+and light mode like everything else. Images can be picked from the toolbar,
 dropped onto the slide or pasted from the clipboard.
+
+The **text** tool draws a text box: drag out its width (or click for a default
+one) and start typing. The text wraps inside the box, takes every formatting
+above, and the box grows to fit what you type. A text box you empty is deleted.
+Under the hood it is a zone of its own (a `zone-text` rect), so its Markdown lives
+with the slide's other text. Where there is nowhere to keep Markdown (a slide list
+built in code, or while editing a layout), the tool places a plain SVG text line.
+
+Many slides are drawn directly by a shared layout (`Slide("content", md=...)`).
+The first time you draw on one, the editor gives it its own SVG in `slides/`, built
+on that same layout, and points the slide at it. Nothing changes visually, and the
+layout itself is left alone.
+
+## Pictures
+
+Select a picture and the panel offers:
+
+- **Crop**, or double-click the picture: the handles now trim its edges while the
+  picture stays put, and the part cut away shows faded around it. <kbd>Enter</kbd>
+  or <kbd>Esc</kbd> ends cropping, **Reset crop** shows the whole picture again.
+  In the SVG a cropped picture is a small `<svg>` frame around the `<image>`, which
+  Inkscape and browsers show the same way.
+- **Replace…** swaps in another file at the same size and place.
+- **Fit**: fit inside its box, fill it (cropping the edges), or stretch.
+- **Alt text**, for screen readers (any object has it, see below).
 
 ## Video
 
@@ -126,11 +180,6 @@ Select a video zone and the panel shows its settings: fit and anchor, controls,
 autoplay, loop, when to mute, a poster image and trim start / end in seconds. An
 image zone gets fit and anchor. To start a clip on a click rather than when the
 slide appears, add a **PlayVideo** animation to it.
-
-Many slides are drawn directly by a shared layout (`Slide("content", md=...)`).
-The first time you draw on one, the editor gives it its own SVG in `slides/`, built
-on that same layout, and points the slide at it. Nothing changes visually, and the
-layout itself is left alone.
 
 ## Layouts and overlays
 
@@ -152,7 +201,64 @@ of your project and stay read-only.
 - **An image or video zone:** its file, plus the settings above.
 - **Several objects:** align, distribute, a common size and style, group.
 
+Every object also has a **link** and **alt text**. A link is a web address or
+`slide:<id>` (the field suggests every slide; a slide number works too). In the
+presentation, clicking a linked object jumps to that slide, or opens the web page
+in a new tab. The editor writes the link as an SVG `<a>` around the object and
+keeps it with the object when it is moved, duplicated, reordered or deleted. Alt
+text is the object's `<title>`, which screen readers read and browsers show as a
+tooltip.
+
 Renaming an object keeps the slide's animations pointing at it.
+
+## Objects
+
+The **Objects** tab next to Properties lists every object on the slide, topmost
+first, like PowerPoint's selection pane: layers and groups fold open, and objects
+from layouts and overlays are listed dimmed. Click a name to select it (also one
+hidden under others), double-click to rename it, and use the two buttons on each
+row to:
+
+- **hide** it: `display:none` in the SVG, so it is hidden in the presentation too;
+- **lock** it: `inkflow:locked="true"`, which only the editor reads. A locked
+  object, or anything in a locked layer or group, cannot be selected on the slide,
+  so a background stays put while you work on top of it.
+
+## Theme
+
+**Theme** in the toolbar sets the look of the whole deck: every colour of the
+active theme, for dark and for light mode, the body, heading and code fonts, the
+base font size and whether the deck shows in dark or light mode. Colours preview
+while you drag the picker; the open presenter windows restyle as soon as the change
+is saved. ↺ returns a colour or font to the theme's own.
+
+Colours and fonts are written as one marked block in the project's `styles.css`,
+which overrides the theme without changing it, and the rest of that file is left
+alone. Fonts found in `fonts/`, in the theme or on your computer are embedded in
+the deck, so a build carries them.
+
+## Find and replace
+
+<kbd>Ctrl</kbd>+<kbd>F</kbd> (or <kbd>Ctrl</kbd>+<kbd>H</kbd> to start in the
+replace field) searches the whole deck: text on the slides, their Markdown and
+speaker notes, and the text in `deck.py` (titles and zone text, never code).
+Matches are listed by slide; click one to go there. Match case, whole words and
+regular expressions are toggles, and the search can be limited to the current
+slide. **Replace** changes the chosen match, **All** every match, as one undo step.
+
+## Export
+
+**Export** in the toolbar builds the deck the way the command line does, and saves
+the result next to `deck.py` (the path can be changed):
+
+| Format | Like | Result |
+|---|---|---|
+| Web page | `inkflow build` | `build/`, a folder with `index.html` and the deck's media; opens offline |
+| Single HTML file | `inkflow build --inline-assets` | one `.html` file with everything inside, easy to send |
+| PDF | `inkflow export` | one page per slide (needs Chromium or Chrome) |
+
+Each result can also be downloaded straight from the dialog (the web page as a
+`.zip`).
 
 ## Keyboard
 
@@ -165,7 +271,11 @@ Renaming an object keeps the slide's animations pointing at it.
 | <kbd>Delete</kbd> | Delete the selection (or clear a zone; in the slide list, the selected slides) |
 | <kbd>Ctrl</kbd>+<kbd>G</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> | Group / ungroup |
 | <kbd>Ctrl</kbd>+<kbd>↑</kbd> <kbd>↓</kbd> (+<kbd>Shift</kbd>) | Forward / backward (to front / back) |
-| <kbd>Enter</kbd> | Edit the selected text or zone |
+| <kbd>Enter</kbd> | Edit the selected text or zone (when cropping: done) |
+| Middle-click, <kbd>Alt</kbd>+click | Select the next object under the pointer |
+| <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>H</kbd> | Find / replace |
+| <kbd>Ctrl</kbd>+<kbd>B</kbd> <kbd>I</kbd> <kbd>K</kbd> (in text) | Bold, italic, link |
+| <kbd>Tab</kbd> (in a table) | Next cell |
 | <kbd>PageUp</kbd> <kbd>PageDown</kbd> | Previous / next slide |
 | <kbd>Ctrl</kbd>+<kbd>M</kbd> | New slide |
 | <kbd>Ctrl</kbd>+<kbd>Enter</kbd> | Present from this slide |

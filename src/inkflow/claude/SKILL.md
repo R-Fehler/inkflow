@@ -82,6 +82,20 @@ Slide(
 
 Paths are relative to `deck.py`; keep media files in `assets/`.
 
+## Text boxes, colours and links
+
+- A free text box is a zone too: a `<rect id="zone-text">` (or `zone-text-2`, …) in
+  the slide's own SVG, filled by a `::text::` section in the slide's `.md` (or
+  `zones={"text": "..."}`). Its text wraps; SVG `<text>` does not.
+- Colour a few words with the theme palette:
+  `<span class="inkflow-color-accent">words</span>` (any colour token).
+- Link to another slide with `[label](slide:<id>)` in Markdown, or wrap an SVG
+  object in `<a href="slide:<id>">`; web links open in a new tab.
+- Deck-wide colours and fonts: override `--inkflow-*` tokens in the project's
+  `styles.css` (the editor's Theme dialog keeps them in one marked
+  `/* inkflow:theme */` block; leave that block's markers intact).
+- `inkflow:locked="true"` on an object keeps the visual editor from selecting it.
+
 ## Check your work
 
 1. `inkflow verify` for authoring mistakes (missing ids, zones, layouts).

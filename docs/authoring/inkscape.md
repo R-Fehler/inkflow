@@ -200,6 +200,15 @@ or layout layers that are stale and need `inkflow sync`.
 
 Hidden slides (`visible=False`) are skipped unless you pass `--all`.
 
+## Locking objects for the visual editor
+
+`inkflow:locked="true"` on an object or a layer makes the
+[visual editor](../editor/index.md) leave it alone: it cannot be selected on the
+slide (it still renders, and the Objects tab can unlock it). Unlike Inkscape's own
+lock (`sodipodi:insensitive`), it survives the pre-commit cleanup, so a locked
+background stays locked for everyone working on the deck. Inkscape layer locks are
+honoured by the editor too.
+
 ## Keeping SVGs clean in git
 
 Inkscape stores viewport position, zoom level and window size inside the file,
