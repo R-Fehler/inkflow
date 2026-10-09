@@ -6345,6 +6345,8 @@
       }
       case "span": {
         const cls = el2.getAttribute("class") ?? "";
+        const latex = formula(el2, "inline");
+        if (latex !== null) return `$${latex}$`;
         if (!cls && plain(el2)) return inline(el2);
         if (COLOR_CLASS.test(cls) && plain(el2, ["class"])) {
           return `<span class="${cls}">${inline(el2)}</span>`;
@@ -6359,6 +6361,13 @@
         }
         throw new Unsupported(tag);
     }
+  }
+  function formula(el2, kind) {
+    const cls = (el2.getAttribute("class") ?? "").split(/\s+/);
+    if (!cls.includes("math") || !cls.includes(kind)) return null;
+    const latex = el2.querySelector("math")?.getAttribute("data-latex");
+    if (latex == null) throw new Unsupported("math without its LaTeX");
+    return latex.trim();
   }
   var BLOCK = /* @__PURE__ */ new Set([
     "p",
@@ -6454,6 +6463,10 @@ ${pad}`);
       if (!plain(el2)) throw new Unsupported(tag);
       return `${"#".repeat(Number(tag[1]))} ${inline(el2).trim()}`;
     }
+    const latex = formula(el2, "block");
+    if (latex !== null) return `$$
+${latex}
+$$`;
     switch (tag) {
       case "p":
       case "div":
@@ -6841,6 +6854,7 @@ ${area2.value.slice(pos)}`;
     layer.append(bar);
     positionBar(bar, fo);
     const cleanup = () => {
+      closeFormula(false, false);
       richHost = null;
       content2.contentEditable = "false";
       fo.classList.remove("rich-editing");
@@ -6918,9 +6932,18 @@ ${area2.value.slice(pos)}`;
     });
     content2.addEventListener("focusout", (e) => {
       const next = e.relatedTarget;
-      if (next && (bar.contains(next) || content2.contains(next))) return;
+      if (next && (layer.contains(next) || content2.contains(next))) return;
       if (bar.matches(":hover")) return;
       void finishTextEdit();
+    });
+    for (const m of content2.querySelectorAll(".math")) {
+      makeChip(m);
+    }
+    content2.addEventListener("click", (e) => {
+      const chip = e.target.closest?.(".math");
+      if (chip && content2.contains(chip)) {
+        openFormula(content2, chip);
+      }
     });
     return true;
   }
@@ -7161,6 +7184,164 @@ ${area2.value.slice(pos)}`;
       if (c) c.style.textAlign = align2;
     }
   }
+  function makeChip(el2) {
+    el2.contentEditable = "false";
+    el2.classList.add("math-chip");
+  }
+  var formula2 = null;
+  function closeFormula(revert, refocus = true) {
+    if (!formula2) return;
+    const f = formula2;
+    formula2 = null;
+    f.pop.remove();
+    f.chip.classList.remove("editing");
+    if (revert) f.revert();
+    if (refocus && f.chip.isConnected) f.done();
+  }
+  function insertFormula(content2) {
+    const range = selectionRange(content2);
+    const chip = h("span", { class: "math inline" });
+    chip.innerHTML = '<math data-latex=""></math>';
+    makeChip(chip);
+    if (range) {
+      range.deleteContents();
+      range.insertNode(chip);
+    } else {
+      content2.append(chip);
+    }
+    openFormula(content2, chip, true);
+  }
+  function openFormula(content2, chip, isNew = false) {
+    closeFormula(false);
+    const original = chip.querySelector("math")?.getAttribute("data-latex") ?? "";
+    const before = chip.cloneNode(true);
+    const field = h("textarea", {
+      class: "formula-input",
+      rows: 2,
+      spellcheck: "false",
+      placeholder: "LaTeX, e.g. \\frac{a}{b}"
+    });
+    field.value = original || (isNew ? "x" : "");
+    const block = h("input", { type: "checkbox" });
+    block.checked = chip.classList.contains("block");
+    const status = h("span", { class: "formula-status" });
+    const pop = h(
+      "div",
+      { class: "formula-pop" },
+      field,
+      h(
+        "div",
+        { class: "formula-row" },
+        h("label", {}, block, " On its own line"),
+        status,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "fmt-btn done",
+            onmousedown: (e) => {
+              e.preventDefault();
+              closeFormula(false);
+            }
+          },
+          "Done"
+        )
+      )
+    );
+    const self = {
+      pop,
+      chip,
+      revert: () => {
+        if (isNew) self.chip.remove();
+        else self.chip.replaceWith(before);
+        changed(content2);
+      },
+      done: () => {
+        content2.focus();
+        const range = document.createRange();
+        range.setStartAfter(self.chip);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+    };
+    pop.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeFormula(true);
+      } else if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        closeFormula(false);
+      }
+    });
+    let timer4 = 0;
+    let seq = 0;
+    const renderNow = async () => {
+      window.clearTimeout(timer4);
+      const latex = field.value.trim();
+      if (!latex) return;
+      const mine = ++seq;
+      const wantBlock = block.checked;
+      const result = await request({
+        action: "math",
+        latex,
+        block: wantBlock
+      });
+      if (mine !== seq || formula2 !== self) return;
+      if (!result.ok) {
+        status.textContent = result.error ?? "cannot render";
+        pop.classList.add("error");
+        return;
+      }
+      status.textContent = "";
+      pop.classList.remove("error");
+      if (wantBlock !== self.chip.classList.contains("block")) {
+        self.chip = swapKind(content2, self.chip, wantBlock);
+      }
+      self.chip.innerHTML = String(
+        result.mathml
+      );
+      changed(content2);
+      placePop(pop, self.chip);
+    };
+    field.addEventListener("input", () => {
+      window.clearTimeout(timer4);
+      timer4 = window.setTimeout(() => void renderNow(), 250);
+    });
+    block.addEventListener("change", () => void renderNow());
+    chip.classList.add("editing");
+    layer.append(pop);
+    placePop(pop, chip);
+    formula2 = self;
+    field.focus();
+    field.select();
+    if (isNew) void renderNow();
+  }
+  function swapKind(content2, chip, block) {
+    const next = h(block ? "div" : "span", {
+      class: `math ${block ? "block" : "inline"}`
+    });
+    makeChip(next);
+    next.classList.add("editing");
+    if (block) {
+      const para = chip.closest("p, li, h1, h2, h3, h4, h5, h6, blockquote");
+      chip.remove();
+      if (para && content2.contains(para)) para.after(next);
+      else content2.append(next);
+    } else {
+      const p = h("p", {});
+      chip.replaceWith(p);
+      p.append(next);
+    }
+    return next;
+  }
+  function placePop(pop, chip) {
+    const r = chip.getBoundingClientRect();
+    pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 420))}px`;
+    pop.style.top = `${Math.min(r.bottom + 8, window.innerHeight - 140)}px`;
+  }
   function checkbox() {
     const box = h("input", {
       type: "checkbox",
@@ -7347,6 +7528,7 @@ ${area2.value.slice(pos)}`;
       btn("\u2022", "Bullet list", exec("insertUnorderedList"), "fmt-ul"),
       btn("1.", "Numbered list", exec("insertOrderedList"), "fmt-ol"),
       btn("\u2611", "Checklist", () => toggleChecklist(content2), "fmt-task"),
+      btn("\u2211", "Formula (LaTeX)", () => insertFormula(content2)),
       btn("\u25A6", "Insert a table", () => insertTable(content2)),
       tableTools,
       h("span", { class: "fmt-sep" }),

@@ -12,7 +12,7 @@
 // where the slide re-renders live as you type.
 
 import { clear, h, icon, toast } from "./dom";
-import { edit } from "./net";
+import { edit, request } from "./net";
 import { htmlToMarkdown, sameMarkdown, Unsupported } from "./richtext";
 import { currentSlide, ed, emit } from "./state";
 
@@ -391,6 +391,7 @@ function editZoneRich(
     positionBar(bar, fo);
 
     const cleanup = () => {
+        closeFormula(false, false);
         richHost = null;
         content.contentEditable = "false";
         fo.classList.remove("rich-editing");
@@ -472,9 +473,20 @@ function editZoneRich(
     });
     content.addEventListener("focusout", (e) => {
         const next = e.relatedTarget as Node | null;
-        if (next && (bar.contains(next) || content.contains(next))) return;
+        // The bar and the formula field live in the text layer.
+        if (next && (layer.contains(next) || content.contains(next))) return;
         if (bar.matches(":hover")) return;
         void finishTextEdit();
+    });
+    // Formulas are edited as LaTeX in a small field, not as MathML.
+    for (const m of content.querySelectorAll<HTMLElement>(".math")) {
+        makeChip(m);
+    }
+    content.addEventListener("click", (e) => {
+        const chip = (e.target as Element).closest?.(".math");
+        if (chip && content.contains(chip)) {
+            openFormula(content, chip as HTMLElement);
+        }
     });
     return true;
 }
@@ -764,6 +776,193 @@ function alignColumn(cell: HTMLTableCellElement, align: string): void {
     }
 }
 
+// ── Formulas ──
+
+function makeChip(el: HTMLElement): void {
+    el.contentEditable = "false";
+    el.classList.add("math-chip");
+}
+
+let formula: {
+    pop: HTMLElement;
+    chip: HTMLElement;
+    revert: () => void;
+    done: () => void;
+} | null = null;
+
+function closeFormula(revert: boolean, refocus = true): void {
+    if (!formula) return;
+    const f = formula;
+    formula = null;
+    f.pop.remove();
+    f.chip.classList.remove("editing");
+    if (revert) f.revert();
+    if (refocus && f.chip.isConnected) f.done();
+}
+
+function insertFormula(content: HTMLElement): void {
+    const range = selectionRange(content);
+    const chip = h("span", { class: "math inline" });
+    chip.innerHTML = '<math data-latex=""></math>';
+    makeChip(chip);
+    if (range) {
+        range.deleteContents();
+        range.insertNode(chip);
+    } else {
+        content.append(chip);
+    }
+    openFormula(content, chip, true);
+}
+
+// The LaTeX field under a formula: typing re-renders it through the server
+// (the same converter the build uses), Enter or a click elsewhere keeps it,
+// Esc puts back what it was.
+function openFormula(
+    content: HTMLElement,
+    chip: HTMLElement,
+    isNew = false,
+): void {
+    closeFormula(false);
+    const original =
+        chip.querySelector("math")?.getAttribute("data-latex") ?? "";
+    const before = chip.cloneNode(true) as HTMLElement;
+    const field = h("textarea", {
+        class: "formula-input",
+        rows: 2,
+        spellcheck: "false",
+        placeholder: "LaTeX, e.g. \\frac{a}{b}",
+    });
+    field.value = original || (isNew ? "x" : "");
+    const block = h("input", { type: "checkbox" });
+    block.checked = chip.classList.contains("block");
+    const status = h("span", { class: "formula-status" });
+    const pop = h(
+        "div",
+        { class: "formula-pop" },
+        field,
+        h(
+            "div",
+            { class: "formula-row" },
+            h("label", {}, block, " On its own line"),
+            status,
+            h(
+                "button",
+                {
+                    type: "button",
+                    class: "fmt-btn done",
+                    onmousedown: (e: Event) => {
+                        e.preventDefault();
+                        closeFormula(false);
+                    },
+                },
+                "Done",
+            ),
+        ),
+    );
+    // The chip being edited: a swap between inline and block replaces it.
+    const self = {
+        pop,
+        chip,
+        revert: () => {
+            if (isNew) self.chip.remove();
+            else self.chip.replaceWith(before);
+            changed(content);
+        },
+        done: () => {
+            // Back to typing, just after the formula.
+            content.focus();
+            const range = document.createRange();
+            range.setStartAfter(self.chip);
+            range.collapse(true);
+            const sel = window.getSelection();
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+        },
+    };
+    pop.addEventListener("keydown", (e) => {
+        e.stopPropagation();
+        if (e.key === "Escape") {
+            e.preventDefault();
+            closeFormula(true);
+        } else if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            closeFormula(false);
+        }
+    });
+    let timer = 0;
+    let seq = 0;
+    const renderNow = async () => {
+        window.clearTimeout(timer);
+        const latex = field.value.trim();
+        if (!latex) return;
+        const mine = ++seq;
+        const wantBlock = block.checked;
+        const result = await request({
+            action: "math",
+            latex,
+            block: wantBlock,
+        });
+        if (mine !== seq || formula !== self) return;
+        if (!result.ok) {
+            status.textContent = result.error ?? "cannot render";
+            pop.classList.add("error");
+            return;
+        }
+        status.textContent = "";
+        pop.classList.remove("error");
+        if (wantBlock !== self.chip.classList.contains("block")) {
+            self.chip = swapKind(content, self.chip, wantBlock);
+        }
+        self.chip.innerHTML = String(
+            (result as unknown as { mathml: string }).mathml,
+        );
+        changed(content);
+        placePop(pop, self.chip);
+    };
+    field.addEventListener("input", () => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => void renderNow(), 250);
+    });
+    block.addEventListener("change", () => void renderNow());
+    chip.classList.add("editing");
+    layer.append(pop);
+    placePop(pop, chip);
+    formula = self;
+    field.focus();
+    field.select();
+    if (isNew) void renderNow();
+}
+
+// An inline formula moves into its own block after its paragraph, and back.
+function swapKind(
+    content: HTMLElement,
+    chip: HTMLElement,
+    block: boolean,
+): HTMLElement {
+    const next = h(block ? "div" : "span", {
+        class: `math ${block ? "block" : "inline"}`,
+    });
+    makeChip(next);
+    next.classList.add("editing");
+    if (block) {
+        const para = chip.closest("p, li, h1, h2, h3, h4, h5, h6, blockquote");
+        chip.remove();
+        if (para && content.contains(para)) para.after(next);
+        else content.append(next);
+    } else {
+        const p = h("p", {});
+        chip.replaceWith(p);
+        p.append(next);
+    }
+    return next;
+}
+
+function placePop(pop: HTMLElement, chip: Element): void {
+    const r = chip.getBoundingClientRect();
+    pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 420))}px`;
+    pop.style.top = `${Math.min(r.bottom + 8, window.innerHeight - 140)}px`;
+}
+
 // ── Checklists and reveals ──
 
 function checkbox(): HTMLInputElement {
@@ -969,6 +1168,7 @@ function richToolbar(content: HTMLElement, toSource: () => void): HTMLElement {
         btn("•", "Bullet list", exec("insertUnorderedList"), "fmt-ul"),
         btn("1.", "Numbered list", exec("insertOrderedList"), "fmt-ol"),
         btn("☑", "Checklist", () => toggleChecklist(content), "fmt-task"),
+        btn("∑", "Formula (LaTeX)", () => insertFormula(content)),
         btn("▦", "Insert a table", () => insertTable(content)),
         tableTools,
         h("span", { class: "fmt-sep" }),

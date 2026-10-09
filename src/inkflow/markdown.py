@@ -5,7 +5,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TypeAlias, TypedDict, cast
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape, quoteattr
 
 from latex2mathml.converter import convert as _latex_to_mathml
 from lxml import etree
@@ -61,7 +61,11 @@ class _MathOpts(TypedDict, total=False):
 
 def _math_to_mathml(content: str, options: _MathOpts) -> str:
     display = "block" if options.get("display_mode") else "inline"
-    return _latex_to_mathml(content, display=display)
+    mathml = _latex_to_mathml(content, display=display)
+    # The LaTeX travels with its rendering: the visual editor edits a formula
+    # in place and writes this back as Markdown.
+    latex = quoteattr(content.strip())
+    return mathml.replace("<math ", f"<math data-latex={latex} ", 1)
 
 
 _md = (

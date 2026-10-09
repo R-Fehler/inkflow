@@ -307,6 +307,8 @@ class EditorSession:
                 else []
             )
             return {"ok": True, "files": export_assets(self.project_dir, names)}
+        if action == "math":
+            return self._math(msg)
         if action == "find":
             return {"ok": True, "hits": self._find(msg)}
         if deck is None:
@@ -808,6 +810,28 @@ class EditorSession:
             compile(code, str(self.deck_path), "exec")
         except SyntaxError as exc:
             raise EditError(f"the replacement would break deck.py: {exc}") from exc
+
+    # ── Formulas ──
+
+    def _math(self, msg: dict[str, object]) -> dict[str, object]:
+        """LaTeX rendered as the build renders it, for the editor's live preview."""
+        from inkflow.markdown import html_fragment_to_xml, markdown_to_html
+
+        latex = str(msg.get("latex") or "").strip()
+        if not latex:
+            raise EditError("an empty formula")
+        if "$" in latex:
+            raise EditError("a formula cannot contain $")
+        block = bool(msg.get("block"))
+        source = f"$$\n{latex}\n$$\n" if block else f"${latex}$"
+        try:
+            html = html_fragment_to_xml(markdown_to_html(source))
+        except Exception as exc:
+            raise EditError(f"cannot render this formula: {exc}") from exc
+        match = re.search(r"<math\b.*?</math>", html, re.S)
+        if match is None:
+            raise EditError("cannot render this formula")
+        return {"ok": True, "mathml": match.group(0)}
 
     # ── Theme panel ──
 

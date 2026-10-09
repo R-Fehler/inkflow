@@ -99,6 +99,8 @@ function inlineNode(node: Node): string {
         }
         case "span": {
             const cls = el.getAttribute("class") ?? "";
+            const latex = formula(el, "inline");
+            if (latex !== null) return `$${latex}$`;
             if (!cls && plain(el)) return inline(el);
             if (COLOR_CLASS.test(cls) && plain(el, ["class"])) {
                 return `<span class="${cls}">${inline(el)}</span>`;
@@ -114,6 +116,16 @@ function inlineNode(node: Node): string {
             }
             throw new Unsupported(tag);
     }
+}
+
+// A rendered formula (<span class="math inline"> / <div class="math block">
+// around MathML carrying data-latex): its LaTeX, or null when el is none.
+export function formula(el: Element, kind: "inline" | "block"): string | null {
+    const cls = (el.getAttribute("class") ?? "").split(/\s+/);
+    if (!cls.includes("math") || !cls.includes(kind)) return null;
+    const latex = el.querySelector("math")?.getAttribute("data-latex");
+    if (latex == null) throw new Unsupported("math without its LaTeX");
+    return latex.trim();
 }
 
 // ── Blocks ──
@@ -246,6 +258,8 @@ function blockMarkdown(el: Element): string {
         if (!plain(el)) throw new Unsupported(tag);
         return `${"#".repeat(Number(tag[1]))} ${inline(el).trim()}`;
     }
+    const latex = formula(el, "block");
+    if (latex !== null) return `$$\n${latex}\n$$`;
     switch (tag) {
         case "p":
         case "div":

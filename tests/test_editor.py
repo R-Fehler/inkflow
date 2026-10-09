@@ -1534,6 +1534,15 @@ def test_shape_text_turns_a_rectangle_into_a_styled_text_box(project: Path) -> N
         )
 
 
+def test_math_preview(project: Path) -> None:
+    session = EditorSession(project / "deck.py")
+    out = session.apply({"action": "math", "latex": "\\frac{a}{b}"}, None)
+    assert str(out["mathml"]).startswith("<math") and "mfrac" in str(out["mathml"])
+    assert 'data-latex="\\frac{a}{b}"' in str(out["mathml"])
+    with pytest.raises(EditError):
+        session.apply({"action": "math", "latex": " "}, None)
+
+
 # ── Model ────────────────────────────────────────────────────────────────────
 
 

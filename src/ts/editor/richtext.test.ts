@@ -86,6 +86,14 @@ describe("htmlToMarkdown", () => {
         ).toBe("typed\n\n**bold**\n\nx");
     });
 
+    it("writes formulas back as LaTeX", () => {
+        expect(
+            md(
+                '<p>Euler <span class="math inline"><math data-latex="e^{i\\pi}"><mi>e</mi></math></span> holds</p>\n<div class="math block">\n<math data-latex="\\frac{a}{b}" display="block"><mfrac/></math>\n</div>',
+            ),
+        ).toBe("Euler $e^{i\\pi}$ holds\n\n$$\n\\frac{a}{b}\n$$");
+    });
+
     it("refuses what it cannot write back", () => {
         expect(() =>
             md(
