@@ -471,9 +471,9 @@
     code: '<path d="M5.5 4 2 8l3.5 4M10.5 4 14 8l-3.5 4"/>',
     fit: '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>'
   };
-  function icon(name, size2 = 16) {
+  function icon(name, size3 = 16) {
     const wrap2 = document.createElement("span");
-    wrap2.innerHTML = `<svg viewBox="0 0 16 16" width="${size2}" height="${size2}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] ?? ""}</svg>`;
+    wrap2.innerHTML = `<svg viewBox="0 0 16 16" width="${size3}" height="${size3}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] ?? ""}</svg>`;
     return wrap2.firstElementChild;
   }
   var toastTimer = 0;
@@ -1122,19 +1122,19 @@
     return { dx: x.delta, dy: y.delta, guidesX: x.at, guidesY: y.at };
   }
   function distribute(boxes, axis) {
-    const size2 = axis === "x" ? "width" : "height";
+    const size3 = axis === "x" ? "width" : "height";
     const order2 = boxes.map((b, i) => ({ b, i })).sort((p, q) => p.b[axis] - q.b[axis]);
     const out = boxes.map((b) => b[axis]);
     if (order2.length < 3) return out;
     const first = order2[0].b;
     const last = order2[order2.length - 1].b;
-    const total = order2.reduce((s, o) => s + o.b[size2], 0);
-    const span = last[axis] + last[size2] - first[axis];
+    const total = order2.reduce((s, o) => s + o.b[size3], 0);
+    const span = last[axis] + last[size3] - first[axis];
     const gap = (span - total) / (order2.length - 1);
     let pos = first[axis];
     for (const o of order2) {
       out[o.i] = pos;
-      pos += o.b[size2] + gap;
+      pos += o.b[size3] + gap;
     }
     return out;
   }
@@ -3105,13 +3105,13 @@
     const src = ownSource();
     const slide = currentSlide();
     if (!up || !src || !slide) return;
-    const size2 = await videoSize(up.rel);
+    const size3 = await videoSize(up.rel);
     const vb = slideRoot()?.viewBox.baseVal;
     const vw = vb?.width || 1920;
     const vh = vb?.height || 1080;
-    const k = Math.min(vw * 0.6 / size2.w, vh * 0.6 / size2.h);
-    const w = size2.w * k;
-    const h2 = size2.h * k;
+    const k = Math.min(vw * 0.6 / size3.w, vh * 0.6 / size3.h);
+    const w = size3.w * k;
+    const h2 = size3.h * k;
     const cx = Math.min(Math.max(at?.x ?? vw / 2, w / 2), vw - w / 2);
     const cy = Math.min(Math.max(at?.y ?? vh / 2, h2 / 2), vh - h2 / 2);
     const parent = insertParent();
@@ -3153,14 +3153,14 @@
     const up = await upload(file);
     const src = ownSource();
     if (!up || !src) return;
-    const size2 = await naturalSize(up.rel);
+    const size3 = await naturalSize(up.rel);
     const svg = slideRoot();
     const vb = svg?.viewBox.baseVal;
     const maxW = (vb?.width || 1920) * 0.5;
     const maxH = (vb?.height || 1080) * 0.5;
-    const k = Math.min(1, maxW / size2.w, maxH / size2.h);
-    const w = size2.w * k;
-    const h2 = size2.h * k;
+    const k = Math.min(1, maxW / size3.w, maxH / size3.h);
+    const w = size3.w * k;
+    const h2 = size3.h * k;
     const cx = at?.x ?? (vb?.width || 1920) / 2;
     const cy = at?.y ?? (vb?.height || 1080) / 2;
     const parent = insertParent().el;
@@ -4295,6 +4295,7 @@ Decks: new, open, recent` : "Decks";
     );
     const git2 = h("input", { type: "checkbox" });
     git2.checked = true;
+    git2.addEventListener("change", () => update());
     const gitRow = h(
       "label",
       { class: "check-row" },
@@ -4302,6 +4303,19 @@ Decks: new, open, recent` : "Decks";
       "Create a git repository for this deck"
     );
     const gitNote = h("p", { class: "hint" });
+    const lfs = h("input", { type: "checkbox" });
+    lfs.checked = data.lfs;
+    const lfsRow = h(
+      "label",
+      { class: "check-row" },
+      lfs,
+      "Store videos, images and fonts with Git LFS"
+    );
+    const lfsNote = h(
+      "p",
+      { class: "hint" },
+      data.lfs ? "Untick for git only: media is kept in git itself, fine for a small repository." : "git-lfs is not installed, so this deck uses git only (its .gitattributes says so; install git-lfs to switch later)."
+    );
     const full = h("p", { class: "hint full-path" });
     const picker = folderPicker(data.parent, () => update());
     function update() {
@@ -4310,6 +4324,8 @@ Decks: new, open, recent` : "Decks";
       full.textContent = `New deck: ${join(parent, name.value || "\u2026")}`;
       const inRepo = !!folder?.repo;
       gitRow.hidden = inRepo || !data.git;
+      lfsRow.hidden = !data.git || !inRepo && !git2.checked;
+      lfsNote.hidden = lfsRow.hidden;
       gitNote.textContent = inRepo ? `It becomes a new folder of the git repository at ${folder?.repo}, versioned with it.` : data.git ? "" : "git is not installed, so the deck gets no repository.";
     }
     const create = h(
@@ -4330,7 +4346,8 @@ Decks: new, open, recent` : "Decks";
         path: join(folder.path, name.value.trim()),
         title: title.value,
         theme: look,
-        git: !folder.repo && git2.checked
+        git: !folder.repo && git2.checked,
+        lfs: lfs.checked
       });
       create.disabled = false;
       create.textContent = "Create and open";
@@ -4374,7 +4391,9 @@ Decks: new, open, recent` : "Decks";
             ),
             full,
             gitRow,
-            gitNote
+            gitNote,
+            lfsRow,
+            lfsNote
           )
         ),
         h("div", { class: "btn-row end" }, create)
@@ -4811,8 +4830,10 @@ Decks: new, open, recent` : "Decks";
     }
     label.textContent = status.branch ?? `@${status.detached ?? "?"}`;
     const n2 = status.changes?.length ?? 0;
-    badge.hidden = n2 === 0;
-    badge.textContent = String(n2);
+    const lfsIssues = lfsFiles().length;
+    button2.classList.toggle("warn", lfsIssues > 0);
+    badge.hidden = n2 === 0 && lfsIssues === 0;
+    badge.textContent = n2 ? String(n2) : "!";
     const sync = [
       status.ahead ? `${status.ahead} to push` : "",
       status.behind ? `${status.behind} to pull` : ""
@@ -4820,7 +4841,8 @@ Decks: new, open, recent` : "Decks";
     button2.title = [
       status.branch ? `Branch ${status.branch}` : `Viewing ${status.detached}`,
       n2 ? `${n2} changed file${n2 === 1 ? "" : "s"}` : "No changes",
-      sync
+      sync,
+      lfsIssues ? `${lfsIssues} media file${lfsIssues === 1 ? "" : "s"} not in Git LFS` : ""
     ].filter(Boolean).join(" \xB7 ");
   }
   async function refreshGit() {
@@ -4830,7 +4852,41 @@ Decks: new, open, recent` : "Decks";
     render2();
     return status;
   }
-  async function git(op, args = {}) {
+  var REWRITES = /* @__PURE__ */ new Set([
+    "discard",
+    "pull",
+    "switch",
+    "view",
+    "revert",
+    "restore",
+    "create-branch"
+  ]);
+  var NOTICE_KEY = "inkflow-git-undo-notice";
+  var noticeShown = false;
+  function undoNoticeDue() {
+    try {
+      return sessionStorage.getItem(NOTICE_KEY) !== "1" && !noticeShown;
+    } catch {
+      return !noticeShown;
+    }
+  }
+  function undoNoticeShown() {
+    noticeShown = true;
+    try {
+      sessionStorage.setItem(NOTICE_KEY, "1");
+    } catch {
+    }
+  }
+  var UNDO_NOTICE = "Note: git changes the deck's files on disk, so the editor's undo and redo history is cleared afterwards (Ctrl+Z cannot go back past this point). You are told this once per session.";
+  async function git(op, args = {}, question = "") {
+    const notice = REWRITES.has(op) && undoNoticeDue();
+    if (question || notice) {
+      const text = [question, notice ? UNDO_NOTICE : ""].filter(Boolean).join("\n\n");
+      if (!confirm(question ? text : `${text}
+
+Continue?`)) return null;
+      if (notice) undoNoticeShown();
+    }
     button2.classList.add("busy");
     const res = await request({ action: "git", op, ...args });
     button2.classList.remove("busy");
@@ -4843,6 +4899,11 @@ Decks: new, open, recent` : "Decks";
       return null;
     }
     if (typeof res.message === "string") toast(res.message, "ok");
+    if (res.historyCleared) {
+      ed.canUndo = false;
+      ed.canRedo = false;
+      emit("history");
+    }
     return res;
   }
   async function openMenu2() {
@@ -4853,6 +4914,10 @@ Decks: new, open, recent` : "Decks";
         h("div", { class: "menu-title" }, "Not versioned"),
         menuItem("Create a git repository", async () => {
           if (await git("init"))
+            toast("This deck is now versioned with git", "ok");
+        }),
+        menuItem("Create a git repository (git only, no LFS)", async () => {
+          if (await git("init", { lfs: false }))
             toast("This deck is now versioned with git", "ok");
         })
       );
@@ -4873,6 +4938,23 @@ Decks: new, open, recent` : "Decks";
             "div",
             { class: "menu-note" },
             `Last: ${status.last.subject} (${status.last.when})`
+          )
+        );
+      }
+      const lfsCount = lfsFiles().length;
+      if (lfsCount) {
+        const item = menuItem(
+          `\u26A0 ${lfsCount} media file${lfsCount === 1 ? "" : "s"} not in Git LFS\u2026`,
+          () => lfsDialog()
+        );
+        item.classList.add("warn");
+        menu3.append(item);
+      } else if (status.lfs?.mode === "on" && !status.lfs.installed) {
+        menu3.append(
+          h(
+            "div",
+            { class: "menu-note warn" },
+            "git-lfs is not installed: this deck's media needs it"
           )
         );
       }
@@ -4900,11 +4982,11 @@ Decks: new, open, recent` : "Decks";
         menuItem(
           "Undo last commit",
           async () => {
-            if (!confirm(
+            if (await git(
+              "undo-commit",
+              {},
               `Take back "${status.last?.subject}"? Its changes stay, uncommitted.`
             ))
-              return;
-            if (await git("undo-commit"))
               toast(
                 "Last commit taken back; its changes are kept",
                 "ok"
@@ -4927,6 +5009,91 @@ Decks: new, open, recent` : "Decks";
     }
     const r = button2.getBoundingClientRect();
     showMenu(Math.max(8, r.right - 260), r.bottom + 4);
+  }
+  function lfsFiles() {
+    const l = status.lfs;
+    return l ? [...l.uncovered, ...l.unconverted] : [];
+  }
+  function size2(bytes) {
+    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${bytes} B`;
+  }
+  function lfsList(files2) {
+    return h(
+      "div",
+      { class: "git-files" },
+      ...files2.map(
+        (f) => h(
+          "div",
+          { class: "git-file" },
+          h("span", { class: "git-status" }, f.kind),
+          h("code", { class: "git-path" }, f.path),
+          h("span", { class: "hint git-size" }, size2(f.size))
+        )
+      )
+    );
+  }
+  function lfsDialog() {
+    const l = status.lfs;
+    if (!l) return;
+    const paths = lfsFiles().map((f) => f.path);
+    openDialog(
+      "Large files and Git LFS",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "p",
+          { class: "hint" },
+          "Git keeps a full copy of a video or image in every version, so the repository grows with each change. Git LFS stores them outside the history; a small repository can do without it."
+        ),
+        l.uncovered.length > 0 && h("h3", {}, "No Git LFS rule covers these"),
+        l.uncovered.length > 0 && lfsList(l.uncovered),
+        l.unconverted.length > 0 && h("h3", {}, "Committed before Git LFS was set up"),
+        l.unconverted.length > 0 && lfsList(l.unconverted),
+        !l.installed && h(
+          "p",
+          { class: "hint warn" },
+          "git-lfs is not installed on this computer: install it (git-lfs.com) to track files with it."
+        ),
+        h(
+          "p",
+          { class: "hint" },
+          "Tracking adds rules to the deck's .gitattributes and stages the files again as LFS files; commit to keep it. Earlier commits keep their full copies (git lfs migrate rewrites history, for everyone with a clone)."
+        ),
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              title: "Record in .gitattributes that this deck stores media in git itself; no more warnings",
+              onclick: async () => {
+                if (await git("lfs-off")) closeDialog();
+              }
+            },
+            "Use git without LFS"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              disabled: !l.installed,
+              onclick: async () => {
+                if (await git("lfs-track", { paths }))
+                  closeDialog();
+              }
+            },
+            "Track with Git LFS"
+          )
+        )
+      ),
+      { wide: true }
+    );
   }
   function fileRow(change, checked) {
     const box = h("input", {
@@ -4990,6 +5157,22 @@ Decks: new, open, recent` : "Decks";
       if (push) await git("push");
     };
     const canPush = !!status.remotes?.length;
+    const changed2 = new Set(changes.map((c) => c.path));
+    const heavy = lfsFiles().filter((f) => changed2.has(f.path));
+    const lfsNote = heavy.length > 0 && h(
+      "p",
+      { class: "hint warn" },
+      `${heavy.length} of these ${heavy.length === 1 ? "is a media file" : "are media files"} git would store whole, not in Git LFS. `,
+      h(
+        "button",
+        {
+          type: "button",
+          class: "link-btn",
+          onclick: () => lfsDialog()
+        },
+        "Review\u2026"
+      )
+    );
     message.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
@@ -5022,6 +5205,7 @@ Decks: new, open, recent` : "Decks";
             )
           )
         ),
+        lfsNote,
         identity,
         h(
           "div",
@@ -5191,8 +5375,7 @@ Decks: new, open, recent` : "Decks";
     if (!res) return;
     const log = res.log;
     const act = async (op, c, question, done) => {
-      if (!confirm(question)) return;
-      if (await git(op, { sha: c.sha })) {
+      if (await git(op, { sha: c.sha }, question)) {
         closeDialog();
         toast(done, "ok");
       }
@@ -8904,16 +9087,16 @@ ${area2.value.slice(pos)}`;
       "change",
       () => void save2({ mode: mode.value || null }, "Colour mode")
     );
-    const size2 = h("input", {
+    const size3 = h("input", {
       type: "number",
       min: 8,
       max: 200,
       value: t.fontSize ?? "",
       placeholder: String(t.themeFontSize)
     });
-    size2.disabled = !ed.model?.deckEditable;
-    size2.addEventListener("change", () => {
-      const n2 = parseInt(size2.value, 10);
+    size3.disabled = !ed.model?.deckEditable;
+    size3.addEventListener("change", () => {
+      const n2 = parseInt(size3.value, 10);
       void save2({ fontSize: Number.isFinite(n2) ? n2 : null }, "Font size");
     });
     const list3 = h("datalist", { id: "theme-font-list" });
@@ -8925,7 +9108,7 @@ ${area2.value.slice(pos)}`;
         "div",
         { class: "theme-top" },
         h("label", {}, h("span", {}, "Colour mode"), mode),
-        h("label", {}, h("span", {}, "Base font size (px)"), size2)
+        h("label", {}, h("span", {}, "Base font size (px)"), size3)
       ),
       h("h3", {}, "Fonts"),
       list3,

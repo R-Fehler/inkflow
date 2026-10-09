@@ -1984,3 +1984,23 @@ foreignObject.rich-editing .math-chip.editing {
 .hint.warn {
   color: var(--yellow);
 }
+.git-btn.warn .git-badge {
+  background: var(--yellow);
+  color: #11111b;
+}
+.menu-item.warn,
+.menu-note.warn {
+  color: var(--yellow);
+}
+.git-size {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.link-btn {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--blue);
+  text-decoration: underline;
+  cursor: pointer;
+}

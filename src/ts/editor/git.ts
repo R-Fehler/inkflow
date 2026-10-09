@@ -10,7 +10,7 @@ import { closeDialog, openDialog } from "./dialog";
 import { clear, h, toast } from "./dom";
 import { connected, request } from "./net";
 import { menuItem, showMenu } from "./sorter";
-import { on } from "./state";
+import { ed, emit, on } from "./state";
 
 const menu = document.getElementById("context-menu")!;
 const button = document.getElementById("btn-git") as HTMLButtonElement;
@@ -39,7 +39,22 @@ interface Status {
     last?: { sha: string; subject: string; when: string } | null;
     identity?: boolean;
     canUndoCommit?: boolean;
+    lfs?: Lfs;
     suggestedMessage?: string;
+}
+
+interface LfsFile {
+    path: string;
+    size: number;
+    kind: string;
+}
+
+interface Lfs {
+    installed: boolean;
+    // "on": LFS rules apply to the deck; "off": it opted out (git only).
+    mode: "on" | "off" | "none";
+    uncovered: LfsFile[];
+    unconverted: LfsFile[];
 }
 
 interface Commit {
@@ -64,8 +79,10 @@ function render(): void {
     }
     label.textContent = status.branch ?? `@${status.detached ?? "?"}`;
     const n = status.changes?.length ?? 0;
-    badge.hidden = n === 0;
-    badge.textContent = String(n);
+    const lfsIssues = lfsFiles().length;
+    button.classList.toggle("warn", lfsIssues > 0);
+    badge.hidden = n === 0 && lfsIssues === 0;
+    badge.textContent = n ? String(n) : "!";
     const sync = [
         status.ahead ? `${status.ahead} to push` : "",
         status.behind ? `${status.behind} to pull` : "",
@@ -78,6 +95,9 @@ function render(): void {
             : `Viewing ${status.detached}`,
         n ? `${n} changed file${n === 1 ? "" : "s"}` : "No changes",
         sync,
+        lfsIssues
+            ? `${lfsIssues} media file${lfsIssues === 1 ? "" : "s"} not in Git LFS`
+            : "",
     ]
         .filter(Boolean)
         .join(" · ");
@@ -92,11 +112,56 @@ export async function refreshGit(): Promise<Status> {
     return status;
 }
 
-/** Run one git operation; returns its result (status refreshed) or null. */
+// Operations that change the deck's files on disk: afterwards the editor's
+// undo/redo history no longer matches them and starts over (the server says
+// so with `historyCleared`). The first one in a session says so first.
+const REWRITES = new Set([
+    "discard",
+    "pull",
+    "switch",
+    "view",
+    "revert",
+    "restore",
+    "create-branch",
+]);
+const NOTICE_KEY = "inkflow-git-undo-notice";
+let noticeShown = false;
+
+function undoNoticeDue(): boolean {
+    try {
+        return sessionStorage.getItem(NOTICE_KEY) !== "1" && !noticeShown;
+    } catch {
+        return !noticeShown;
+    }
+}
+
+function undoNoticeShown(): void {
+    noticeShown = true;
+    try {
+        sessionStorage.setItem(NOTICE_KEY, "1");
+    } catch {
+        // private mode: remembered for this page only
+    }
+}
+
+const UNDO_NOTICE =
+    "Note: git changes the deck's files on disk, so the editor's undo and redo history is cleared afterwards (Ctrl+Z cannot go back past this point). You are told this once per session.";
+
+/** Run one git operation; returns its result (status refreshed) or null.
+ * `question` is asked first (with the undo notice, when due). */
 async function git(
     op: string,
     args: Record<string, unknown> = {},
+    question = "",
 ): Promise<Record<string, unknown> | null> {
+    const notice = REWRITES.has(op) && undoNoticeDue();
+    if (question || notice) {
+        const text = [question, notice ? UNDO_NOTICE : ""]
+            .filter(Boolean)
+            .join("\n\n");
+        if (!confirm(question ? text : `${text}\n\nContinue?`)) return null;
+        if (notice) undoNoticeShown();
+    }
     button.classList.add("busy");
     const res = await request({ action: "git", op, ...args });
     button.classList.remove("busy");
@@ -109,6 +174,11 @@ async function git(
         return null;
     }
     if (typeof res.message === "string") toast(res.message, "ok");
+    if (res.historyCleared) {
+        ed.canUndo = false;
+        ed.canRedo = false;
+        emit("history");
+    }
     return res;
 }
 
@@ -122,6 +192,10 @@ async function openMenu(): Promise<void> {
             h("div", { class: "menu-title" }, "Not versioned"),
             menuItem("Create a git repository", async () => {
                 if (await git("init"))
+                    toast("This deck is now versioned with git", "ok");
+            }),
+            menuItem("Create a git repository (git only, no LFS)", async () => {
+                if (await git("init", { lfs: false }))
                     toast("This deck is now versioned with git", "ok");
             }),
         );
@@ -144,6 +218,23 @@ async function openMenu(): Promise<void> {
                     "div",
                     { class: "menu-note" },
                     `Last: ${status.last.subject} (${status.last.when})`,
+                ),
+            );
+        }
+        const lfsCount = lfsFiles().length;
+        if (lfsCount) {
+            const item = menuItem(
+                `⚠ ${lfsCount} media file${lfsCount === 1 ? "" : "s"} not in Git LFS…`,
+                () => lfsDialog(),
+            );
+            item.classList.add("warn");
+            menu.append(item);
+        } else if (status.lfs?.mode === "on" && !status.lfs.installed) {
+            menu.append(
+                h(
+                    "div",
+                    { class: "menu-note warn" },
+                    "git-lfs is not installed: this deck's media needs it",
                 ),
             );
         }
@@ -172,12 +263,12 @@ async function openMenu(): Promise<void> {
                 "Undo last commit",
                 async () => {
                     if (
-                        !confirm(
+                        await git(
+                            "undo-commit",
+                            {},
                             `Take back "${status.last?.subject}"? Its changes stay, uncommitted.`,
                         )
                     )
-                        return;
-                    if (await git("undo-commit"))
                         toast(
                             "Last commit taken back; its changes are kept",
                             "ok",
@@ -200,6 +291,102 @@ async function openMenu(): Promise<void> {
     }
     const r = button.getBoundingClientRect();
     showMenu(Math.max(8, r.right - 260), r.bottom + 4);
+}
+
+// ── Git LFS ──
+
+function lfsFiles(): LfsFile[] {
+    const l = status.lfs;
+    return l ? [...l.uncovered, ...l.unconverted] : [];
+}
+
+function size(bytes: number): string {
+    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${bytes} B`;
+}
+
+function lfsList(files: LfsFile[]): HTMLElement {
+    return h(
+        "div",
+        { class: "git-files" },
+        ...files.map((f) =>
+            h(
+                "div",
+                { class: "git-file" },
+                h("span", { class: "git-status" }, f.kind),
+                h("code", { class: "git-path" }, f.path),
+                h("span", { class: "hint git-size" }, size(f.size)),
+            ),
+        ),
+    );
+}
+
+// Videos, images and other large files git would keep whole in every version:
+// track them with Git LFS, or say this deck uses git alone.
+function lfsDialog(): void {
+    const l = status.lfs;
+    if (!l) return;
+    const paths = lfsFiles().map((f) => f.path);
+    openDialog(
+        "Large files and Git LFS",
+        h(
+            "div",
+            { class: "git-form" },
+            h(
+                "p",
+                { class: "hint" },
+                "Git keeps a full copy of a video or image in every version, so the repository grows with each change. Git LFS stores them outside the history; a small repository can do without it.",
+            ),
+            l.uncovered.length > 0 &&
+                h("h3", {}, "No Git LFS rule covers these"),
+            l.uncovered.length > 0 && lfsList(l.uncovered),
+            l.unconverted.length > 0 &&
+                h("h3", {}, "Committed before Git LFS was set up"),
+            l.unconverted.length > 0 && lfsList(l.unconverted),
+            !l.installed &&
+                h(
+                    "p",
+                    { class: "hint warn" },
+                    "git-lfs is not installed on this computer: install it (git-lfs.com) to track files with it.",
+                ),
+            h(
+                "p",
+                { class: "hint" },
+                "Tracking adds rules to the deck's .gitattributes and stages the files again as LFS files; commit to keep it. Earlier commits keep their full copies (git lfs migrate rewrites history, for everyone with a clone).",
+            ),
+            h(
+                "div",
+                { class: "btn-row end" },
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "pbtn",
+                        title: "Record in .gitattributes that this deck stores media in git itself; no more warnings",
+                        onclick: async () => {
+                            if (await git("lfs-off")) closeDialog();
+                        },
+                    },
+                    "Use git without LFS",
+                ),
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "pbtn primary",
+                        disabled: !l.installed,
+                        onclick: async () => {
+                            if (await git("lfs-track", { paths }))
+                                closeDialog();
+                        },
+                    },
+                    "Track with Git LFS",
+                ),
+            ),
+        ),
+        { wide: true },
+    );
 }
 
 // ── Commit ──
@@ -270,6 +457,24 @@ function commitDialog(): void {
         if (push) await git("push");
     };
     const canPush = !!status.remotes?.length;
+    const changed = new Set(changes.map((c) => c.path));
+    const heavy = lfsFiles().filter((f) => changed.has(f.path));
+    const lfsNote =
+        heavy.length > 0 &&
+        h(
+            "p",
+            { class: "hint warn" },
+            `${heavy.length} of these ${heavy.length === 1 ? "is a media file" : "are media files"} git would store whole, not in Git LFS. `,
+            h(
+                "button",
+                {
+                    type: "button",
+                    class: "link-btn",
+                    onclick: () => lfsDialog(),
+                },
+                "Review…",
+            ),
+        );
     message.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
@@ -303,6 +508,7 @@ function commitDialog(): void {
                         ),
                 ),
             ),
+            lfsNote,
             identity,
             h(
                 "div",
@@ -494,8 +700,7 @@ async function historyDialog(): Promise<void> {
         question: string,
         done: string,
     ) => {
-        if (!confirm(question)) return;
-        if (await git(op, { sha: c.sha })) {
+        if (await git(op, { sha: c.sha }, question)) {
             closeDialog();
             toast(done, "ok");
         }

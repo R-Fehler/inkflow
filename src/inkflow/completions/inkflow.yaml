@@ -22,6 +22,7 @@ commands:
     description: Scaffold a new presentation project.
     flags:
       --no-git: Skip git hook setup
+      --no-lfs: Git only, no Git LFS rules for media
       --force: Scaffold even into a non-empty directory
     completion:
       positional:

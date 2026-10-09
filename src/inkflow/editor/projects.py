@@ -31,6 +31,7 @@ from typing import cast
 import platformdirs
 
 from inkflow import init, sync
+from inkflow import lfs as lfs_rules
 from inkflow.assets import REFERENCE_PATTERNS, is_local_ref
 from inkflow.editor import gitops
 from inkflow.editor.codegen import Code
@@ -137,6 +138,7 @@ def new_deck_info(deck_path: Path, deck: Deck | None) -> dict[str, object]:
         "current": str(project_dir),
         "themes": [t for t in THEMES if t["id"] != "current" or can_reuse],
         "git": gitops.available(),
+        "lfs": lfs_rules.available(),
     }
 
 
@@ -156,9 +158,12 @@ def create_deck(
     title: str,
     theme: str,
     git: bool,
+    lfs: bool = True,
     current: Path | None = None,
 ) -> Path:
-    """Make a new deck in ``target``; returns its deck.py."""
+    """Make a new deck in ``target``; returns its deck.py. Its
+    ``.gitattributes`` sends media through Git LFS, or (``lfs=False``) records
+    that the deck uses git alone."""
     target = target.expanduser()
     if not target.is_absolute():
         raise ProjectError("give the new deck's folder as a full path")
@@ -184,13 +189,14 @@ def create_deck(
         elif theme == "current" and current is not None:
             _reuse(current, target)
         _set_title(target / "deck.py", title)
+        lfs_rules.ensure_attributes(target / ".gitattributes", lfs)
     except Exception:
         shutil.rmtree(target, ignore_errors=True)
         raise
     _sync_previews(target / "deck.py")
     if git and not in_repo and gitops.available():
         try:
-            gitops.init(target)
+            gitops.init(target, lfs=lfs)
         except gitops.GitError as exc:
             logger.warning(f"could not create a git repository: {exc}")
     remember(target / "deck.py")

@@ -9,6 +9,7 @@ from typing import cast
 
 import pytest
 
+from inkflow import lfs
 from inkflow.editor import gitops, projects
 from inkflow.editor.session import EditError, EditorSession
 
@@ -258,3 +259,100 @@ def test_browse_and_open_deck(repo: Path, tmp_path: Path) -> None:
         session.apply(
             {"action": "open-deck", "path": str(tmp_path), "_local": True}, None
         )
+
+
+# ── Git LFS ──
+
+
+needs_lfs = pytest.mark.skipif(not lfs.available(), reason="needs git-lfs")
+
+
+def test_lfs_attributes_block_and_rules(tmp_path: Path) -> None:
+    attrs = tmp_path / ".gitattributes"
+    attrs.write_text("*.svg diff=inkscape-svg", encoding="utf-8")
+    assert lfs.ensure_attributes(attrs, True) == "updated"
+    text = attrs.read_text()
+    assert text.startswith("*.svg diff=inkscape-svg\n")
+    assert "*.mp4 filter=lfs diff=lfs merge=lfs -text" in text
+    assert lfs.ensure_attributes(attrs, False) == "ok"  # one section only
+    assert lfs.mode(tmp_path, tmp_path) == "on"
+
+    off = tmp_path / "off"
+    off.mkdir()
+    lfs.ensure_attributes(off / ".gitattributes", False)
+    assert lfs.mode(tmp_path, off) == "off"  # the deck's own choice wins
+    assert lfs.add_rules(off / ".gitattributes", ["*.mp4", "/data.bin"]) == [
+        "*.mp4",
+        "/data.bin",
+    ]
+    assert lfs.mode(tmp_path, off) == "on"
+    assert lfs.OFF_MARKER not in (off / ".gitattributes").read_text()
+
+
+def test_lfs_status_reports_media_outside_lfs(repo: Path) -> None:
+    (repo / "assets").mkdir()
+    (repo / "assets" / "clip.mp4").write_bytes(b"\0" * 100)
+    (repo / "assets" / "notes.txt").write_text("small", encoding="utf-8")
+    (repo / "assets" / "dump.bin").write_bytes(b"\0" * lfs.LARGE_BYTES)
+    report = gitops.lfs_status(_repo(repo))
+    assert report["mode"] == "none"
+    assert [
+        (f["path"], f["kind"])
+        for f in cast("list[dict[str, object]]", report["uncovered"])
+    ] == [
+        ("talk/assets/clip.mp4", "video"),
+        ("talk/assets/dump.bin", "large"),
+    ]
+    gitops.lfs_off(_repo(repo))
+    report = gitops.lfs_status(_repo(repo))
+    assert report["mode"] == "off" and report["uncovered"] == []
+
+
+@needs_lfs
+def test_lfs_track_converts_files_and_finds_old_copies(repo: Path) -> None:
+    r = _repo(repo)
+    (repo / "assets").mkdir()
+    clip = repo / "assets" / "clip.mp4"
+    clip.write_bytes(b"\0" * 100)
+    gitops.commit(r, "Video, before LFS", None)
+
+    added = gitops.lfs_track(r, ["talk/assets/clip.mp4"])
+    assert added == ["*.mp4"]
+    assert "*.mp4 filter=lfs" in (repo / ".gitattributes").read_text()
+    gitops.commit(r, "Video in LFS", None)
+    pointers = _git(r.root, "lfs", "ls-files", "-n").split()
+    assert pointers == ["talk/assets/clip.mp4"]
+    report = gitops.lfs_status(r)
+    assert report["mode"] == "on"
+    assert report["uncovered"] == [] and report["unconverted"] == []
+
+    # Committed before a rule covered it: reported until it is converted.
+    (repo / "assets" / "still.png").write_bytes(b"\x89PNG" + b"\0" * 50)
+    gitops.commit(r, "Picture, no rule yet", None)
+    attrs = repo / ".gitattributes"
+    attrs.write_text(attrs.read_text() + lfs.rule("*.png") + "\n", encoding="utf-8")
+    gitops.commit(r, "PNGs in LFS", ["talk/.gitattributes"])
+    unconverted = cast("list[dict[str, object]]", gitops.lfs_status(r)["unconverted"])
+    assert [f["path"] for f in unconverted] == ["talk/assets/still.png"]
+
+
+def test_new_deck_gets_lfs_rules_or_git_only(tmp_path: Path) -> None:
+    on = projects.create_deck(tmp_path / "on", title="", theme="starter", git=True)
+    text = (on.parent / ".gitattributes").read_text()
+    assert "*.svg diff=inkscape-svg" in text and "*.mp4 filter=lfs" in text
+    off = projects.create_deck(
+        tmp_path / "off", title="", theme="starter", git=True, lfs=False
+    )
+    text = (off.parent / ".gitattributes").read_text()
+    assert lfs.OFF_MARKER in text and "filter=lfs" not in text
+
+
+def test_git_actions_that_rewrite_files_clear_the_undo_history(repo: Path) -> None:
+    session = EditorSession(repo / "deck.py")
+    (repo / "slides" / "intro.md").write_text("# Changed\n", encoding="utf-8")
+    out = session.apply(
+        {"action": "git", "op": "discard", "paths": ["talk/slides/intro.md"]}, None
+    )
+    assert out["historyCleared"] is True
+    out = session.apply({"action": "git", "op": "status"}, None)
+    assert "historyCleared" not in out

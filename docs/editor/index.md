@@ -96,6 +96,14 @@ branch and how many files changed. Its menu covers what a deck needs day to day:
   its upstream on `origin`.
 - **Discard changes…** puts the ticked files back as they were in the last commit
   and deletes new ones. It cannot be undone, so the dialog lists every file.
+- **⚠ media files not in Git LFS…** appears when videos, audio, images, fonts,
+  documents or any file over 5 MB in the deck would be stored whole in git: no
+  `.gitattributes` rule sends them to [Git LFS](https://git-lfs.com), or they were
+  committed before one did. **Track with Git LFS** adds the rules to the deck's
+  `.gitattributes` and stages the files again as LFS files (commit to keep it;
+  earlier commits keep their copies). **Use git without LFS** records in
+  `.gitattributes` that this deck stays git only, and the warning stops, for
+  everyone.
 - **Undo last commit** takes the last commit back while it has not been pushed;
   its changes stay as uncommitted edits.
 - **Branches…** switches branch or creates one from where you are (uncommitted
@@ -105,7 +113,16 @@ branch and how many files changed. Its menu covers what a deck needs day to day:
   deck's files what they were then as changes you can commit, and **Revert**
   undoes one commit with a new commit.
 
-Without a repository, the menu offers **Create a git repository**. Everything runs
+Discard, pull, switching or creating a branch, and View, Restore or Revert change
+the deck's files on disk, so the editor's undo and redo history starts over after
+them; the first of these in a session says so and asks before going ahead.
+
+New decks and new repositories get a `.gitattributes` sending media through Git
+LFS; untick **Store videos, images and fonts with Git LFS** in the New deck dialog
+(or `inkflow init --no-lfs`) for a git-only deck.
+
+Without a repository, the menu offers **Create a git repository** (or one
+without LFS). Everything runs
 the `git` on your computer, so your usual credentials and hooks apply; the editor
 never waits for a password prompt (a push that needs one fails with git's
 message). Files git changes are picked up like any other change, and the

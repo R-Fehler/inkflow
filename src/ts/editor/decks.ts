@@ -26,6 +26,7 @@ interface DeckInfo {
     current: string;
     themes: Look[];
     git: boolean;
+    lfs: boolean;
     recent: string[];
 }
 
@@ -252,6 +253,7 @@ function newDeckDialog(data: DeckInfo): void {
 
     const git = h("input", { type: "checkbox" }) as HTMLInputElement;
     git.checked = true;
+    git.addEventListener("change", () => update());
     const gitRow = h(
         "label",
         { class: "check-row" },
@@ -259,6 +261,22 @@ function newDeckDialog(data: DeckInfo): void {
         "Create a git repository for this deck",
     );
     const gitNote = h("p", { class: "hint" });
+    // Git LFS for videos, images and fonts, or git only (a small repository).
+    const lfs = h("input", { type: "checkbox" }) as HTMLInputElement;
+    lfs.checked = data.lfs;
+    const lfsRow = h(
+        "label",
+        { class: "check-row" },
+        lfs,
+        "Store videos, images and fonts with Git LFS",
+    );
+    const lfsNote = h(
+        "p",
+        { class: "hint" },
+        data.lfs
+            ? "Untick for git only: media is kept in git itself, fine for a small repository."
+            : "git-lfs is not installed, so this deck uses git only (its .gitattributes says so; install git-lfs to switch later).",
+    );
     const full = h("p", { class: "hint full-path" });
     const picker = folderPicker(data.parent, () => update());
 
@@ -268,6 +286,8 @@ function newDeckDialog(data: DeckInfo): void {
         full.textContent = `New deck: ${join(parent, name.value || "…")}`;
         const inRepo = !!folder?.repo;
         gitRow.hidden = inRepo || !data.git;
+        lfsRow.hidden = !data.git || (!inRepo && !git.checked);
+        lfsNote.hidden = lfsRow.hidden;
         gitNote.textContent = inRepo
             ? `It becomes a new folder of the git repository at ${folder?.repo}, versioned with it.`
             : data.git
@@ -294,6 +314,7 @@ function newDeckDialog(data: DeckInfo): void {
             title: title.value,
             theme: look,
             git: !folder.repo && git.checked,
+            lfs: lfs.checked,
         });
         create.disabled = false;
         create.textContent = "Create and open";
@@ -339,6 +360,8 @@ function newDeckDialog(data: DeckInfo): void {
                     full,
                     gitRow,
                     gitNote,
+                    lfsRow,
+                    lfsNote,
                 ),
             ),
             h("div", { class: "btn-row end" }, create),

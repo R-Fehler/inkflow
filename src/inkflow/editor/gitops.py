@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from inkflow import lfs
+
 MAX_LOG = 100
 _TIMEOUT = 60
 
@@ -184,6 +186,7 @@ def status(deck_dir: Path) -> dict[str, object]:
             and _try(repo.root, "config", "user.email")
         ),
         "canUndoCommit": _can_undo_commit(repo),
+        "lfs": lfs_status(repo),
         "suggestedMessage": default_message(),
     }
 
@@ -392,12 +395,134 @@ def log(repo: Repo, limit: int = MAX_LOG) -> list[dict[str, object]]:
     return items
 
 
-def init(directory: Path) -> None:
-    """A new repository for the deck, with the SVG hooks (see git_setup)."""
+def init(directory: Path, lfs: bool = True) -> None:
+    """A new repository for the deck, with the SVG hooks and its Git LFS rules
+    (or the git-only opt-out), see git_setup."""
     from inkflow.git_setup import init_project_git
 
     if repo_root(directory) is not None:
         raise GitError("this deck is already in a git repository")
-    init_project_git(directory)
+    init_project_git(directory, lfs=lfs)
     if repo_root(directory) is None:
         raise GitError("git init failed")
+
+
+# ── Git LFS ──
+
+
+def _lfs_candidates(repo: Repo) -> list[tuple[str, int, str]]:
+    """The deck's files that belong in LFS: (path, size, kind)."""
+    out = repo.git(
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        repo.scope or ".",
+    )
+    found: list[tuple[str, int, str]] = []
+    for path in sorted(_names(out)):
+        target = repo.root / path
+        try:
+            size = target.stat().st_size
+        except OSError:
+            continue  # deleted in the working tree
+        kind = lfs.KIND_OF.get(target.suffix.lower().lstrip("."))
+        if kind is None and size >= lfs.LARGE_BYTES:
+            kind = "large"
+        if kind is not None:
+            found.append((path, size, kind))
+    return found
+
+
+def _lfs_filtered(repo: Repo, paths: list[str]) -> set[str]:
+    """Which of ``paths`` an LFS rule covers (``filter=lfs`` in .gitattributes)."""
+    if not paths:
+        return set()
+    out = repo.git("check-attr", "-z", "filter", "--", *paths)
+    fields = out.split("\0")
+    return {fields[i] for i in range(0, len(fields) - 2, 3) if fields[i + 2] == "lfs"}
+
+
+def lfs_status(repo: Repo) -> dict[str, object]:
+    """Media in the deck that git stores whole instead of in Git LFS.
+
+    ``uncovered``: no LFS rule matches the file. ``unconverted``: a rule
+    matches, but the committed file is a full copy (it was committed before the
+    rule, or without git-lfs installed). Nothing is reported for a deck that
+    opted out (``mode`` ``off``).
+    """
+    installed = lfs.available()
+    deck_mode = lfs.mode(repo.root, repo.deck_dir)
+    report: dict[str, object] = {
+        "installed": installed,
+        "mode": deck_mode,
+        "uncovered": [],
+        "unconverted": [],
+    }
+    if deck_mode == "off":
+        return report
+    candidates = _lfs_candidates(repo)
+    covered = _lfs_filtered(repo, [p for p, _, _ in candidates])
+    report["uncovered"] = [
+        {"path": p, "size": size, "kind": kind}
+        for p, size, kind in candidates
+        if p not in covered
+    ]
+    if installed and covered:
+        # (``git lfs ls-files`` reads a path as a ref: list all, keep ours.)
+        pointers = set(repo.git("lfs", "ls-files", "-n").splitlines())
+        committed = _names(
+            _try(
+                repo.root, "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", *covered
+            )
+            or ""
+        )
+        report["unconverted"] = [
+            {"path": p, "size": size, "kind": kind}
+            for p, size, kind in candidates
+            if p in committed and p not in pointers
+        ]
+    return report
+
+
+def lfs_track(repo: Repo, paths: list[str]) -> list[str]:
+    """Put ``paths`` in Git LFS from now on: rules in the deck's
+    ``.gitattributes`` (by extension, or the path itself for a file without
+    one), ``git lfs install --local``, and the files staged again as LFS
+    pointers. Returns the rules added. Earlier commits keep their full copies;
+    rewriting history is ``git lfs migrate``'s job, not the editor's."""
+    if not lfs.available():
+        raise GitError("git-lfs is not installed (see https://git-lfs.com)")
+    patterns: list[str] = []
+    for path in paths:
+        suffix = Path(path).suffix.lower()
+        if suffix:
+            pattern = f"*{suffix}"
+        else:
+            rel = Path(path).relative_to(repo.scope) if repo.scope else Path(path)
+            pattern = f"/{rel.as_posix()}"
+        if pattern not in patterns:
+            patterns.append(pattern)
+    added = lfs.add_rules(repo.deck_dir / ".gitattributes", patterns)
+    if not lfs.install(repo.root):
+        raise GitError("git lfs install failed")
+    attrs = (repo.deck_dir / ".gitattributes").relative_to(repo.root).as_posix()
+    tracked: set[str] = set()
+    if paths:
+        tracked = _names(repo.git("ls-files", "-z", "--", *paths))
+    repo.git("add", "--", attrs)
+    if tracked:
+        repo.git("add", "--renormalize", "--", *sorted(tracked))
+    return added
+
+
+def lfs_off(repo: Repo) -> None:
+    """Git only for this deck: record the opt-out in its ``.gitattributes``."""
+    path = repo.deck_dir / ".gitattributes"
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    if lfs.OFF_MARKER in text:
+        return
+    gap = "" if not text or text.endswith("\n") else "\n"
+    path.write_text(f"{text}{gap}{lfs.block(False)}", encoding="utf-8")

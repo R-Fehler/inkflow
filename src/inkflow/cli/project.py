@@ -42,12 +42,18 @@ def _sync_layout_previews(target: Path) -> None:
     help="Skip git hook setup even when inside a git repository.",
 )
 @click.option(
+    "--no-lfs",
+    "no_lfs",
+    is_flag=True,
+    help="Git only: keep videos and images in git itself, without Git LFS rules.",
+)
+@click.option(
     "--force",
     "force",
     is_flag=True,
     help="Scaffold even into a non-empty directory.",
 )
-def init_cmd(directory: Path, no_git: bool, force: bool) -> None:
+def init_cmd(directory: Path, no_git: bool, no_lfs: bool, force: bool) -> None:
     """Scaffold a new presentation project in DIRECTORY (default: current).
 
     Writes a starter `deck.py`, slides, and a `pyproject.toml` declaring inkflow.
@@ -55,6 +61,10 @@ def init_cmd(directory: Path, no_git: bool, force: bool) -> None:
     writes a `.gitignore`, and configures the SVG git hooks. Inside an existing
     repository it leaves git alone and points you at `setup-git`. Skip all git steps
     with `--no-git`.
+
+    The deck's `.gitattributes` sends videos, audio, images, fonts and documents
+    through Git LFS (and a new repository gets `git lfs install --local`); with
+    `--no-lfs` it records a "git only" choice instead, for a minimal repository.
 
     Refuses to scaffold into a non-empty directory (dotfiles like `.git` are ignored)
     unless `--force` is given.
@@ -76,7 +86,7 @@ def init_cmd(directory: Path, no_git: bool, force: bool) -> None:
     report("Created", "pyproject.toml")
     _sync_layout_previews(target)
     if not no_git:
-        git_setup.init_project_git(target, verbose=False)
+        git_setup.init_project_git(target, verbose=False, lfs=not no_lfs)
     rel = str(directory) if str(directory) not in (".", "./") else None
     suffix = f"cd {rel} && inkflow serve" if rel else "inkflow serve"
     console.print(f"\nrun:  {suffix}", markup=False)

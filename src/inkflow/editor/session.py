@@ -907,7 +907,7 @@ class EditorSession:
         if op == "init":
             self._local_only(msg, "create a repository")
             try:
-                gitops.init(self.project_dir)
+                gitops.init(self.project_dir, lfs=msg.get("lfs") is not False)
             except gitops.GitError as exc:
                 raise EditError(str(exc)) from exc
             return {"ok": True, "git": gitops.status(self.project_dir)}
@@ -942,6 +942,21 @@ class EditorSession:
                 if not isinstance(raw, list):
                     raise EditError("choose the files to discard")
                 gitops.discard(repo, [str(p) for p in cast("list[object]", raw)])
+            elif op == "lfs-track":
+                raw = msg.get("paths")
+                if not isinstance(raw, list) or not raw:
+                    raise EditError("choose the files to keep in Git LFS")
+                added = gitops.lfs_track(
+                    repo, [str(p) for p in cast("list[object]", raw)]
+                )
+                extra["message"] = (
+                    f"Tracking {', '.join(added)} with Git LFS; commit to keep it"
+                    if added
+                    else "Converted to Git LFS; commit to keep it"
+                )
+            elif op == "lfs-off":
+                gitops.lfs_off(repo)
+                extra["message"] = "This deck uses git without LFS"
             elif op == "undo-commit":
                 gitops.undo_commit(repo)
             elif op == "branches":
@@ -963,7 +978,9 @@ class EditorSession:
         except gitops.GitError as exc:
             raise EditError(str(exc)) from exc
         if op in self._GIT_REWRITES:
+            # The editor says so before the first such action in a session.
             self.history = History()
+            extra["historyCleared"] = True
         return {"ok": True, **extra, "git": gitops.status(self.project_dir)}
 
     def _local_only(self, msg: dict[str, object], what: str) -> None:
@@ -999,6 +1016,7 @@ class EditorSession:
                     title=str(msg.get("title") or ""),
                     theme=str(msg.get("theme") or "starter"),
                     git=msg.get("git") is not False,
+                    lfs=msg.get("lfs") is not False,
                     current=self.deck_path,
                 )
             else:
