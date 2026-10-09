@@ -110,7 +110,7 @@ export async function duplicateSelection(): Promise<void> {
     );
 }
 
-async function groupSelection(): Promise<void> {
+export async function groupSelection(): Promise<void> {
     const sels = ed.selection.filter((s) => canTransform(s.el));
     if (sels.length < 2) return;
     const key = sels[0].key;
@@ -133,7 +133,7 @@ async function groupSelection(): Promise<void> {
     );
 }
 
-async function ungroupSelection(): Promise<void> {
+export async function ungroupSelection(): Promise<void> {
     const s = ed.selection[0];
     if (s?.el.localName !== "g" || !canTransform(s.el)) return;
     await sendSvgOps(
@@ -142,7 +142,7 @@ async function ungroupSelection(): Promise<void> {
     );
 }
 
-async function order(to: string): Promise<void> {
+export async function order(to: string): Promise<void> {
     const sels = ed.selection.filter((s) => canTransform(s.el));
     if (!sels.length) return;
     await sendSvgOps(

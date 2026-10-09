@@ -60,7 +60,7 @@ function label(el: Element): string {
     return id ?? kind;
 }
 
-function isHidden(el: Element): boolean {
+export function isHidden(el: Element): boolean {
     return (
         (el as SVGElement).style?.display === "none" ||
         el.getAttribute("display") === "none"
@@ -87,7 +87,7 @@ function selFor(el: Element): Selected {
     };
 }
 
-async function toggleHidden(el: Element): Promise<void> {
+export async function toggleHidden(el: Element): Promise<void> {
     await sendSvgOps(
         [
             {
@@ -105,7 +105,7 @@ async function toggleHidden(el: Element): Promise<void> {
     );
 }
 
-async function toggleLocked(el: Element): Promise<void> {
+export async function toggleLocked(el: Element): Promise<void> {
     const own = el.hasAttribute("data-ink-locked");
     if (!own && isLocked(el)) {
         toast("It is inside a locked layer or group: unlock that instead");

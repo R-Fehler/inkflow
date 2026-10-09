@@ -422,6 +422,7 @@ Each result can also be downloaded straight from the dialog (the web page as a
 | <kbd>Ctrl</kbd>+<kbd>↑</kbd> <kbd>↓</kbd> (+<kbd>Shift</kbd>) | Forward / backward (to front / back) |
 | <kbd>Enter</kbd> | Edit the selected text or zone, or type into a shape (when cropping: done) |
 | Middle-click, <kbd>Alt</kbd>+click | Select the next object under the pointer |
+| Right-click | The object's menu (edit, clipboard, arrange, group, align, crop, hide, lock, open its file), or on an empty spot paste and the slide's actions; <kbd>Shift</kbd>+right-click gives the browser's own menu |
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>H</kbd> | Find / replace |
 | <kbd>G</kbd> | Grid view of all slides |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> <kbd>I</kbd> <kbd>K</kbd> (in text) | Bold, italic, link |

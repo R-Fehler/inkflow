@@ -289,8 +289,8 @@
   function parseBend(value) {
     const m = /^([xy]):(-?\d*\.?\d+(?:e[-+]?\d+)?)$/i.exec(value ?? "");
     if (!m) return null;
-    const at = Number(m[2]);
-    return Number.isFinite(at) ? { axis: m[1], at } : null;
+    const at2 = Number(m[2]);
+    return Number.isFinite(at2) ? { axis: m[1], at: at2 } : null;
   }
   function formatBend(b) {
     return `${b.axis}:${Math.round(b.at * 100) / 100}`;
@@ -358,12 +358,12 @@
         mid: { x: (a.x + k) / 2, y: m }
       });
     }
-    const at = bend && bend.axis === axis ? bend.at : fallback;
-    const { pts, mid } = build2(at);
+    const at2 = bend && bend.axis === axis ? bend.at : fallback;
+    const { pts, mid } = build2(at2);
     return {
       curve: false,
       points: simplify(pts.map((p) => ({ x: p.x, y: p.y }))),
-      bend: { axis, at, mid }
+      bend: { axis, at: at2, mid }
     };
   }
   function simplify(pts) {
@@ -1095,13 +1095,13 @@
       }
     }
     if (dist > threshold) return { delta: 0, at: [] };
-    const at = /* @__PURE__ */ new Set();
+    const at2 = /* @__PURE__ */ new Set();
     for (const e of edges) {
       for (const t of targets) {
-        if (Math.abs(t - (e + delta)) < 1e-6) at.add(t);
+        if (Math.abs(t - (e + delta)) < 1e-6) at2.add(t);
       }
     }
-    return { delta, at: [...at] };
+    return { delta, at: [...at2] };
   }
   function snapBox(box, targets, threshold) {
     const x = best(
@@ -1843,9 +1843,9 @@
       });
       label4.textContent = text;
       g.append(label4);
-      const title = svgEl("title");
-      title.textContent = media ? `Add an image or video to the ${z.zone} zone` : `Add ${z.zone} text (Markdown)`;
-      g.append(title);
+      const title2 = svgEl("title");
+      title2.textContent = media ? `Add an image or video to the ${z.zone} zone` : `Add ${z.zone} text (Markdown)`;
+      g.append(title2);
       g.addEventListener("pointerdown", (e) => {
         e.stopPropagation();
         e.preventDefault();
@@ -3099,7 +3099,7 @@
   function isVideo(file) {
     return file.type.startsWith("video/") || /\.(mp4|webm|ogg|mov)$/i.test(file.name);
   }
-  async function insertVideoFile(file, at) {
+  async function insertVideoFile(file, at2) {
     if (!await ensureOwnDrawing()) return;
     const up = await upload(file);
     const src = ownSource();
@@ -3112,8 +3112,8 @@
     const k = Math.min(vw * 0.6 / size3.w, vh * 0.6 / size3.h);
     const w = size3.w * k;
     const h2 = size3.h * k;
-    const cx = Math.min(Math.max(at?.x ?? vw / 2, w / 2), vw - w / 2);
-    const cy = Math.min(Math.max(at?.y ?? vh / 2, h2 / 2), vh - h2 / 2);
+    const cx = Math.min(Math.max(at2?.x ?? vw / 2, w / 2), vw - w / 2);
+    const cy = Math.min(Math.max(at2?.y ?? vh / 2, h2 / 2), vh - h2 / 2);
     const parent = insertParent();
     const a = toParent(parent.el, cx - w / 2, cy - h2 / 2);
     const b = toParent(parent.el, cx + w / 2, cy + h2 / 2);
@@ -3138,17 +3138,17 @@
     );
     if (file) await insertVideoFile(file);
   }
-  async function insertFile(file, at) {
-    const zone = at ? mediaZoneAt(at.clientX, at.clientY) : null;
+  async function insertFile(file, at2) {
+    const zone = at2 ? mediaZoneAt(at2.clientX, at2.clientY) : null;
     if (zone) {
       await fillZone(zone, file);
       return;
     }
-    if (isVideo(file)) await insertVideoFile(file, at);
-    else if (file.type.startsWith("image/")) await insertImageFile(file, at);
+    if (isVideo(file)) await insertVideoFile(file, at2);
+    else if (file.type.startsWith("image/")) await insertImageFile(file, at2);
     else toast(`Cannot insert ${file.name}`, "error");
   }
-  async function insertImageFile(file, at) {
+  async function insertImageFile(file, at2) {
     if (!await ensureOwnDrawing()) return;
     const up = await upload(file);
     const src = ownSource();
@@ -3161,8 +3161,8 @@
     const k = Math.min(1, maxW / size3.w, maxH / size3.h);
     const w = size3.w * k;
     const h2 = size3.h * k;
-    const cx = at?.x ?? (vb?.width || 1920) / 2;
-    const cy = at?.y ?? (vb?.height || 1080) / 2;
+    const cx = at2?.x ?? (vb?.width || 1920) / 2;
+    const cy = at2?.y ?? (vb?.height || 1080) / 2;
     const parent = insertParent().el;
     const p = toParent(parent, cx - w / 2, cy - h2 / 2);
     const href = relativePath(src.path, up.path);
@@ -3262,149 +3262,6 @@
     });
   }
 
-  // src/ts/editor/clipboard.ts
-  var PREFIX = "inkflow-clipboard:";
-  var lastCopied = null;
-  async function put(payload) {
-    const text = PREFIX + JSON.stringify(payload);
-    lastCopied = text;
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      toast("Copied for this tab only: the browser blocked the clipboard");
-    }
-  }
-  function selectedSlides() {
-    const picked = [...ed.slideSelection].sort((a, b) => a - b);
-    return picked.length ? picked : [ed.current];
-  }
-  async function copySlides(indices = selectedSlides()) {
-    const result = await request({ action: "copy-slides", slides: indices });
-    if (!result.ok) {
-      toast(result.error ?? "could not copy", "error");
-      return false;
-    }
-    const bundle = result.bundle;
-    await put(bundle);
-    const dropped = bundle.dropped ?? [];
-    const n2 = indices.length;
-    toast(
-      `Copied ${n2} slide${n2 > 1 ? "s" : ""}` + (dropped.length ? `; left out ${dropped.join(", ")}` : "")
-    );
-    return true;
-  }
-  async function cutSlides() {
-    const indices = selectedSlides();
-    if (!await copySlides(indices)) return;
-    const result = await edit({
-      action: "slide",
-      op: "delete",
-      slides: indices
-    });
-    if (result.ok) {
-      ed.slideSelection.clear();
-      ed.current = Math.max(0, Math.min(...indices) - 1);
-      emit("slide");
-    }
-  }
-  function imageRefs(xml) {
-    const refs = /* @__PURE__ */ new Set();
-    for (const m of xml.matchAll(
-      /<image\b[^>]*?\b(?:xlink:)?href="([^"]*)"/g
-    )) {
-      if (!/^(data:|https?:|#|\/)/.test(m[1])) refs.add(m[1]);
-    }
-    return [...refs];
-  }
-  async function copyObjects(cut2 = false) {
-    const sels = ed.selection.filter((s) => s.el.localName !== "foreignObject");
-    if (!sels.length) return false;
-    const fragments = sels.map((s) => cleanForPaste(s.el));
-    const refs = fragments.flatMap(imageRefs);
-    let files2 = {};
-    if (refs.length) {
-      const result = await request({ action: "copy-assets", refs });
-      files2 = result.files ?? {};
-    }
-    await put({
-      type: "inkflow-objects",
-      version: 1,
-      project: ed.model?.projectDir,
-      sourceFile: currentSlide()?.sources?.[sels[0].key]?.path ?? "",
-      fragments,
-      files: files2
-    });
-    const n2 = sels.length;
-    toast(`${cut2 ? "Cut" : "Copied"} ${n2} object${n2 > 1 ? "s" : ""}`);
-    if (cut2) emit("delete");
-    return true;
-  }
-  function copy() {
-    if (ed.selection.length) void copyObjects();
-    else void copySlides();
-  }
-  function cut() {
-    if (ed.selection.some((s) => canTransform(s.el))) void copyObjects(true);
-    else void cutSlides();
-  }
-  async function pasteSlides(bundle) {
-    const after = ed.current;
-    const result = await edit({ action: "paste-slides", after, bundle });
-    if (!result.ok) return;
-    const n2 = result.pasted;
-    toast(`Pasted ${n2} slide${n2 > 1 ? "s" : ""}`, "ok");
-    ed.slideSelection.clear();
-    afterSlides = after + 1;
-  }
-  var afterSlides = null;
-  function followPastedSlides() {
-    if (afterSlides != null && afterSlides < (ed.model?.slides.length ?? 0)) {
-      const target = afterSlides;
-      afterSlides = null;
-      gotoSlide(target);
-    }
-  }
-  async function pasteObjects(bundle) {
-    if (!await ensureOwnDrawing()) return;
-    const src = ownSource();
-    if (!src) return;
-    const sameFile = bundle.sourceFile === src.path;
-    clearSelection();
-    const result = await edit({
-      action: "paste-objects",
-      file: src.path,
-      hash: src.hash,
-      parent: insertParent().loc,
-      fragments: bundle.fragments,
-      files: bundle.files,
-      // Copies on the same slide are offset so they do not hide the original.
-      offset: sameFile ? [24, 24] : null
-    });
-    if (result.ok && result.ids) afterRender.ids = Object.values(result.ids);
-  }
-  async function pasteText(text) {
-    const raw = text.startsWith(PREFIX) ? text : lastCopied;
-    if (!raw?.startsWith(PREFIX)) return;
-    let bundle;
-    try {
-      bundle = JSON.parse(raw.slice(PREFIX.length));
-    } catch {
-      toast("The clipboard holds damaged inkflow data", "error");
-      return;
-    }
-    if (bundle.type === "inkflow-slides") await pasteSlides(bundle);
-    else if (bundle.type === "inkflow-objects") await pasteObjects(bundle);
-  }
-  async function pasteFromClipboard() {
-    let text = "";
-    try {
-      text = await navigator.clipboard.readText();
-    } catch {
-      text = lastCopied ?? "";
-    }
-    await pasteText(text);
-  }
-
   // src/ts/editor/gallery.ts
   var LABELS = {
     numbered: ["Blank", "Background and slide number"],
@@ -3496,15 +3353,15 @@
       { class: "gallery-grid" },
       h("p", { class: "hint" }, "Rendering layouts\u2026")
     );
-    const title = opts2.mode === "insert" ? "New slide" : "Change layout";
+    const title2 = opts2.mode === "insert" ? "New slide" : "Change layout";
     root.append(
       h(
         "div",
-        { class: "gallery-box", role: "dialog", "aria-label": title },
+        { class: "gallery-box", role: "dialog", "aria-label": title2 },
         h(
           "div",
           { class: "gallery-head" },
-          h("h2", {}, title),
+          h("h2", {}, title2),
           h(
             "span",
             { class: "hint" },
@@ -3925,75 +3782,147 @@
     });
   }
 
-  // src/ts/editor/context.ts
-  var timer = 0;
-  function snapshot2() {
-    const slide = currentSlide();
-    const visible = ed.model?.slides.filter((s) => s.visible).length ?? 0;
-    return {
-      deck: ed.model?.deckPath,
-      slide: slide && {
-        number: (slide.visibleIndex ?? -1) + 1 || null,
-        total: visible,
-        deckIndex: slide.deckIndex,
-        id: slide.id ?? slide.explicitId,
-        title: slide.title,
-        svg: slide.srcRel,
-        sharedLayout: slide.srcShared,
-        md: slide.md?.rel ?? (slide.md ? "inline in deck.py" : null),
-        notes: slide.notes.rel
-      },
-      step: ed.step,
-      layoutMode: ed.layoutMode,
-      selection: ed.selection.map((s) => {
-        const box = slideBox(s.el);
-        const text = (s.el.textContent ?? "").replace(/\s+/g, " ").trim();
-        return {
-          id: s.el.getAttribute("id"),
-          tag: s.el.localName,
-          zone: isZone(s.el) ? zoneName(s.el) : null,
-          file: sourceOf(s.key)?.rel,
-          locator: s.loc,
-          box: box && {
-            x: Math.round(box.x),
-            y: Math.round(box.y),
-            width: Math.round(box.width),
-            height: Math.round(box.height)
-          },
-          text: text.slice(0, 200) || null
-        };
-      })
-    };
+  // src/ts/editor/clipboard.ts
+  var PREFIX = "inkflow-clipboard:";
+  var lastCopied = null;
+  async function put(payload) {
+    const text = PREFIX + JSON.stringify(payload);
+    lastCopied = text;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      toast("Copied for this tab only: the browser blocked the clipboard");
+    }
   }
-  function report() {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(() => {
-      sendRaw({ type: "editor-context", context: snapshot2() });
-    }, 250);
+  function selectedSlides() {
+    const picked = [...ed.slideSelection].sort((a, b) => a - b);
+    return picked.length ? picked : [ed.current];
   }
-  function initContext() {
-    on("selection", report);
-    on("slide", report);
-    on("model", report);
-    on("step", report);
-    onCommand((msg) => {
-      if (msg.command === "goto") {
-        const n2 = Number(msg.slide);
-        const slides = ed.model?.slides ?? [];
-        const target = slides.find((s) => s.visibleIndex === n2 - 1);
-        if (target) gotoSlide(target.deckIndex);
-      } else if (msg.command === "select") {
-        const ids = msg.ids ?? [];
-        const svg = slideRoot();
-        if (!svg) return;
-        const els = ids.map((id) => svg.querySelector(`[id="${CSS.escape(id)}"]`)).filter(
-          (el2) => el2 instanceof SVGGraphicsElement
-        );
-        enterGroup(null);
-        select(els);
-        emit("flash");
-      }
+  async function copySlides(indices = selectedSlides()) {
+    const result = await request({ action: "copy-slides", slides: indices });
+    if (!result.ok) {
+      toast(result.error ?? "could not copy", "error");
+      return false;
+    }
+    const bundle = result.bundle;
+    await put(bundle);
+    const dropped = bundle.dropped ?? [];
+    const n2 = indices.length;
+    toast(
+      `Copied ${n2} slide${n2 > 1 ? "s" : ""}` + (dropped.length ? `; left out ${dropped.join(", ")}` : "")
+    );
+    return true;
+  }
+  async function cutSlides() {
+    const indices = selectedSlides();
+    if (!await copySlides(indices)) return;
+    const result = await edit({
+      action: "slide",
+      op: "delete",
+      slides: indices
     });
+    if (result.ok) {
+      ed.slideSelection.clear();
+      ed.current = Math.max(0, Math.min(...indices) - 1);
+      emit("slide");
+    }
+  }
+  function imageRefs(xml) {
+    const refs = /* @__PURE__ */ new Set();
+    for (const m of xml.matchAll(
+      /<image\b[^>]*?\b(?:xlink:)?href="([^"]*)"/g
+    )) {
+      if (!/^(data:|https?:|#|\/)/.test(m[1])) refs.add(m[1]);
+    }
+    return [...refs];
+  }
+  async function copyObjects(cut2 = false) {
+    const sels = ed.selection.filter((s) => s.el.localName !== "foreignObject");
+    if (!sels.length) return false;
+    const fragments = sels.map((s) => cleanForPaste(s.el));
+    const refs = fragments.flatMap(imageRefs);
+    let files2 = {};
+    if (refs.length) {
+      const result = await request({ action: "copy-assets", refs });
+      files2 = result.files ?? {};
+    }
+    await put({
+      type: "inkflow-objects",
+      version: 1,
+      project: ed.model?.projectDir,
+      sourceFile: currentSlide()?.sources?.[sels[0].key]?.path ?? "",
+      fragments,
+      files: files2
+    });
+    const n2 = sels.length;
+    toast(`${cut2 ? "Cut" : "Copied"} ${n2} object${n2 > 1 ? "s" : ""}`);
+    if (cut2) emit("delete");
+    return true;
+  }
+  function copy() {
+    if (ed.selection.length) void copyObjects();
+    else void copySlides();
+  }
+  function cut() {
+    if (ed.selection.some((s) => canTransform(s.el))) void copyObjects(true);
+    else void cutSlides();
+  }
+  async function pasteSlides(bundle) {
+    const after = ed.current;
+    const result = await edit({ action: "paste-slides", after, bundle });
+    if (!result.ok) return;
+    const n2 = result.pasted;
+    toast(`Pasted ${n2} slide${n2 > 1 ? "s" : ""}`, "ok");
+    ed.slideSelection.clear();
+    afterSlides = after + 1;
+  }
+  var afterSlides = null;
+  function followPastedSlides() {
+    if (afterSlides != null && afterSlides < (ed.model?.slides.length ?? 0)) {
+      const target = afterSlides;
+      afterSlides = null;
+      gotoSlide(target);
+    }
+  }
+  async function pasteObjects(bundle) {
+    if (!await ensureOwnDrawing()) return;
+    const src = ownSource();
+    if (!src) return;
+    const sameFile = bundle.sourceFile === src.path;
+    clearSelection();
+    const result = await edit({
+      action: "paste-objects",
+      file: src.path,
+      hash: src.hash,
+      parent: insertParent().loc,
+      fragments: bundle.fragments,
+      files: bundle.files,
+      // Copies on the same slide are offset so they do not hide the original.
+      offset: sameFile ? [24, 24] : null
+    });
+    if (result.ok && result.ids) afterRender.ids = Object.values(result.ids);
+  }
+  async function pasteText(text) {
+    const raw = text.startsWith(PREFIX) ? text : lastCopied;
+    if (!raw?.startsWith(PREFIX)) return;
+    let bundle;
+    try {
+      bundle = JSON.parse(raw.slice(PREFIX.length));
+    } catch {
+      toast("The clipboard holds damaged inkflow data", "error");
+      return;
+    }
+    if (bundle.type === "inkflow-slides") await pasteSlides(bundle);
+    else if (bundle.type === "inkflow-objects") await pasteObjects(bundle);
+  }
+  async function pasteFromClipboard() {
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      text = lastCopied ?? "";
+    }
+    await pasteText(text);
   }
 
   // src/ts/editor/crop.ts
@@ -4048,1669 +3977,8 @@
     );
   }
 
-  // src/ts/editor/dialog.ts
-  var host2 = document.getElementById("dialog");
-  var onClose = null;
-  function openDialog(title, body2, opts2 = {}) {
-    closeDialog();
-    onClose = opts2.onClose ?? null;
-    const box = h(
-      "div",
-      { class: `dialog-box${opts2.wide ? " wide" : ""}`, role: "dialog" },
-      h(
-        "div",
-        { class: "dialog-head" },
-        h("h2", {}, title),
-        opts2.hint ? h("span", { class: "hint" }, opts2.hint) : null,
-        h(
-          "button",
-          {
-            type: "button",
-            class: "dialog-close",
-            title: "Close (Esc)",
-            onclick: () => closeDialog()
-          },
-          "\xD7"
-        )
-      ),
-      h("div", { class: "dialog-body" }, body2)
-    );
-    host2.append(box);
-    host2.classList.add("open");
-    return box;
-  }
-  function closeDialog() {
-    if (!host2.classList.contains("open")) return;
-    host2.classList.remove("open");
-    clear(host2);
-    const fn = onClose;
-    onClose = null;
-    fn?.();
-  }
-  function dialogOpen() {
-    return host2.classList.contains("open");
-  }
-  function initDialog() {
-    host2.addEventListener("pointerdown", (e) => {
-      if (e.target === host2) closeDialog();
-    });
-    document.addEventListener(
-      "keydown",
-      (e) => {
-        if (e.key === "Escape" && dialogOpen()) {
-          e.preventDefault();
-          e.stopPropagation();
-          closeDialog();
-        }
-      },
-      true
-    );
-    host2.addEventListener("keydown", (e) => {
-      if (e.key !== "Escape") e.stopPropagation();
-    });
-  }
-
-  // src/ts/editor/decks.ts
-  var menu2 = document.getElementById("context-menu");
-  var button = document.getElementById("btn-deck");
-  function baseName(path) {
-    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
-  }
-  function join(dir, name) {
-    return `${dir.replace(/[\\/]+$/, "")}/${name}`;
-  }
-  function slug(text) {
-    return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "my-deck";
-  }
-  function renderButton() {
-    const dir = ed.model?.projectDir;
-    button.textContent = `${dir ? baseName(dir) : "deck"} \u25BE`;
-    button.title = dir ? `${dir}
-Decks: new, open, recent` : "Decks";
-  }
-  async function info() {
-    const res = await request({ action: "project-info" });
-    if (!res.ok) {
-      toast(res.error ?? "Cannot read the deck's folder", "error");
-      return null;
-    }
-    return res;
-  }
-  async function openMenu() {
-    const data = await info();
-    if (!data) return;
-    clear(menu2);
-    menu2.append(
-      menuItem("New deck\u2026", () => newDeckDialog(data)),
-      menuItem("Open deck\u2026", () => openDeckDialog(data))
-    );
-    if (data.recent.length) {
-      menu2.append(h("div", { class: "menu-title" }, "Recent decks"));
-      for (const path of data.recent) {
-        const dir = path.replace(/[\\/]deck\.py$/, "");
-        const item = menuItem(baseName(dir), () => void openDeck(path));
-        item.title = dir;
-        menu2.append(item);
-      }
-    }
-    const r = button.getBoundingClientRect();
-    showMenu(r.left, r.bottom + 4);
-  }
-  async function openDeck(path) {
-    const res = await request({ action: "open-deck", path });
-    if (!res.ok) {
-      toast(res.error ?? "Cannot open that deck", "error");
-      return false;
-    }
-    closeDialog();
-    toast(
-      `Opening ${baseName(String(res.deck ?? path).replace(/[\\/]deck\.py$/, ""))}\u2026`
-    );
-    return true;
-  }
-  function folderPicker(start, onChange) {
-    let folder = null;
-    const path = h("input", {
-      type: "text",
-      class: "folder-path",
-      spellcheck: "false"
-    });
-    const list3 = h("div", { class: "folder-list" });
-    const where = h("div", { class: "hint folder-where" });
-    const go = async (target) => {
-      const res = await request({ action: "browse", path: target });
-      if (!res.ok) {
-        where.textContent = res.error ?? "Cannot open that folder";
-        return;
-      }
-      folder = res;
-      path.value = folder.path;
-      clear(list3);
-      if (folder.parent) {
-        list3.append(
-          h(
-            "button",
-            {
-              type: "button",
-              class: "folder up",
-              onclick: () => void go(folder?.parent ?? "")
-            },
-            "\u2191 .."
-          )
-        );
-      }
-      for (const name of folder.dirs) {
-        list3.append(
-          h(
-            "button",
-            {
-              type: "button",
-              class: "folder",
-              onclick: () => void go(join(folder?.path ?? "", name))
-            },
-            `\u{1F4C1} ${name}`
-          )
-        );
-      }
-      if (!folder.dirs.length && !folder.parent) {
-        list3.append(h("p", { class: "hint" }, "No folders here."));
-      }
-      where.textContent = folder.repo ? `In the git repository at ${folder.repo}` : "Not in a git repository";
-      onChange(folder);
-    };
-    path.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        void go(path.value);
-      }
-    });
-    const el2 = h(
-      "div",
-      { class: "folder-picker" },
-      h(
-        "div",
-        { class: "folder-bar" },
-        path,
-        h(
-          "button",
-          {
-            type: "button",
-            class: "pbtn",
-            title: "Your home folder",
-            onclick: () => void go(folder?.home ?? "~")
-          },
-          "Home"
-        )
-      ),
-      list3,
-      where
-    );
-    void go(start);
-    return { el: el2, current: () => folder };
-  }
-  function newDeckDialog(data) {
-    const title = h("input", {
-      type: "text",
-      value: "My presentation"
-    });
-    const name = h("input", {
-      type: "text",
-      value: data.name
-    });
-    let nameEdited = false;
-    name.addEventListener("input", () => {
-      nameEdited = true;
-      update();
-    });
-    title.addEventListener("input", () => {
-      if (!nameEdited) name.value = slug(title.value);
-      update();
-    });
-    let look = data.themes.some((t) => t.id === "current") ? "current" : "starter";
-    const looks = h(
-      "div",
-      { class: "look-list" },
-      ...data.themes.map((t) => {
-        const radio = h("input", {
-          type: "radio",
-          name: "deck-look",
-          value: t.id
-        });
-        radio.checked = t.id === look;
-        radio.addEventListener("change", () => {
-          look = t.id;
-        });
-        return h(
-          "label",
-          { class: "look" },
-          radio,
-          h(
-            "span",
-            { class: "look-text" },
-            h("strong", {}, t.label),
-            h("span", { class: "hint" }, t.description)
-          )
-        );
-      })
-    );
-    const git2 = h("input", { type: "checkbox" });
-    git2.checked = true;
-    git2.addEventListener("change", () => update());
-    const gitRow = h(
-      "label",
-      { class: "check-row" },
-      git2,
-      "Create a git repository for this deck"
-    );
-    const gitNote = h("p", { class: "hint" });
-    const lfs = h("input", { type: "checkbox" });
-    lfs.checked = data.lfs;
-    const lfsRow = h(
-      "label",
-      { class: "check-row" },
-      lfs,
-      "Store videos, images and fonts with Git LFS"
-    );
-    const lfsNote = h(
-      "p",
-      { class: "hint" },
-      data.lfs ? "Untick for git only: media is kept in git itself, fine for a small repository." : "git-lfs is not installed, so this deck uses git only (its .gitattributes says so; install git-lfs to switch later)."
-    );
-    const full = h("p", { class: "hint full-path" });
-    const picker = folderPicker(data.parent, () => update());
-    function update() {
-      const folder = picker.current();
-      const parent = folder?.path ?? data.parent;
-      full.textContent = `New deck: ${join(parent, name.value || "\u2026")}`;
-      const inRepo = !!folder?.repo;
-      gitRow.hidden = inRepo || !data.git;
-      lfsRow.hidden = !data.git || !inRepo && !git2.checked;
-      lfsNote.hidden = lfsRow.hidden;
-      gitNote.textContent = inRepo ? `It becomes a new folder of the git repository at ${folder?.repo}, versioned with it.` : data.git ? "" : "git is not installed, so the deck gets no repository.";
-    }
-    const create = h(
-      "button",
-      { type: "button", class: "pbtn primary" },
-      "Create and open"
-    );
-    create.addEventListener("click", async () => {
-      const folder = picker.current();
-      if (!folder || !name.value.trim()) {
-        toast("Choose a folder and a name for the deck", "error");
-        return;
-      }
-      create.disabled = true;
-      create.textContent = "Creating\u2026";
-      const res = await request({
-        action: "new-deck",
-        path: join(folder.path, name.value.trim()),
-        title: title.value,
-        theme: look,
-        git: !folder.repo && git2.checked,
-        lfs: lfs.checked
-      });
-      create.disabled = false;
-      create.textContent = "Create and open";
-      if (!res.ok) {
-        toast(res.error ?? "Could not create the deck", "error");
-        return;
-      }
-      closeDialog();
-      toast(`Created ${name.value.trim()}; opening it\u2026`, "ok");
-    });
-    openDialog(
-      "New deck",
-      h(
-        "div",
-        { class: "deck-form" },
-        h(
-          "label",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Title"),
-          title
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Look"),
-          looks
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Where"),
-          h(
-            "div",
-            {},
-            picker.el,
-            h(
-              "label",
-              { class: "field inline" },
-              h("span", { class: "field-label" }, "Folder name"),
-              name
-            ),
-            full,
-            gitRow,
-            gitNote,
-            lfsRow,
-            lfsNote
-          )
-        ),
-        h("div", { class: "btn-row end" }, create)
-      ),
-      { wide: true }
-    );
-    update();
-    title.select();
-  }
-  function openDeckDialog(data) {
-    const open3 = h(
-      "button",
-      { type: "button", class: "pbtn primary", disabled: true },
-      "Open this deck"
-    );
-    const picker = folderPicker(
-      data.current.replace(/[\\/][^\\/]*$/, ""),
-      (f) => {
-        open3.disabled = !f.isDeck;
-        open3.textContent = f.isDeck ? `Open ${baseName(f.path)}` : "No deck.py in this folder";
-      }
-    );
-    open3.addEventListener("click", () => {
-      const f = picker.current();
-      if (f?.isDeck) void openDeck(join(f.path, "deck.py"));
-    });
-    openDialog(
-      "Open deck",
-      h(
-        "div",
-        { class: "deck-form" },
-        h("p", { class: "hint" }, "Go to a folder with a deck.py in it."),
-        picker.el,
-        h("div", { class: "btn-row end" }, open3)
-      ),
-      { wide: true }
-    );
-  }
-  function initDecks() {
-    button.addEventListener("click", () => void openMenu());
-    on("model", renderButton);
-    renderButton();
-  }
-
-  // src/ts/editor/exportdlg.ts
-  var FORMATS = [
-    {
-      format: "html",
-      title: "Web page",
-      text: "A folder with index.html and the deck's images and videos. Opens offline in any browser, or upload it to any web host.",
-      placeholder: () => "build"
-    },
-    {
-      format: "single",
-      title: "Single HTML file",
-      text: "Everything in one file, images included: easy to email or share. Larger than the folder.",
-      placeholder: (stem) => `${stem}.html`
-    },
-    {
-      format: "pdf",
-      title: "PDF",
-      text: "One page per slide, every build step shown. Needs Chromium or Chrome on this computer.",
-      placeholder: (stem) => `${stem}.pdf`
-    }
-  ];
-  function size(bytes) {
-    if (bytes > 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
-    return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
-  }
-  function option(f, stem) {
-    const output = h("input", {
-      type: "text",
-      placeholder: f.placeholder(stem),
-      spellcheck: "false",
-      title: "Where to save it, relative to deck.py"
-    });
-    const status2 = h("div", { class: "export-status" });
-    const go = h("button", { type: "button", class: "pbtn primary" }, "Export");
-    go.addEventListener("click", async () => {
-      go.disabled = true;
-      status2.textContent = f.format === "pdf" ? "Rendering pages\u2026" : "Building\u2026";
-      status2.className = "export-status busy";
-      const result = await request({
-        action: "export",
-        format: f.format,
-        output: output.value.trim() || null
-      });
-      go.disabled = false;
-      if (!result.ok) {
-        status2.className = "export-status error";
-        status2.textContent = result.error ?? "export failed";
-        return;
-      }
-      const r = result;
-      status2.className = "export-status done";
-      status2.replaceChildren(
-        h("span", {}, `Saved to ${r.rel} \xB7 ${size(r.size)}`),
-        h(
-          "a",
-          { href: r.download, class: "pbtn", download: "" },
-          f.format === "html" ? "Download .zip" : "Download"
-        )
-      );
-    });
-    return h(
-      "div",
-      { class: "export-option" },
-      h(
-        "div",
-        { class: "export-text" },
-        h("strong", {}, f.title),
-        h("p", { class: "hint" }, f.text)
-      ),
-      h("div", { class: "export-row" }, output, go),
-      status2
-    );
-  }
-  function openExport() {
-    const stem = ed.model?.deckPath.split(/[\\/]/).pop()?.replace(/\.py$/, "") ?? "deck";
-    openDialog(
-      "Export",
-      h(
-        "div",
-        { class: "export-body" },
-        ...FORMATS.map((f) => option(f, stem))
-      ),
-      { hint: "Saved next to deck.py; the paths can be changed" }
-    );
-  }
-  function initExport() {
-    document.getElementById("btn-export")?.addEventListener("click", openExport);
-  }
-
-  // src/ts/editor/find.ts
-  var panel = document.getElementById("find-panel");
-  var hits = [];
-  var active = -1;
-  var timer2 = 0;
-  var opts = { matchCase: false, wholeWord: false, regex: false };
-  var scope = "deck";
-  function el(sel) {
-    return panel.querySelector(sel);
-  }
-  function slideFiles(s) {
-    const out = (s.sources ?? []).filter((src) => src.writable).map((src) => src.path);
-    if (s.srcPath) out.push(s.srcPath);
-    if (s.md?.path) out.push(s.md.path);
-    if (s.notes?.path) out.push(s.notes.path);
-    return out;
-  }
-  function files() {
-    const slides = scope === "slide" ? [currentSlide()].filter((s) => !!s) : ed.model?.slides ?? [];
-    return [...new Set(slides.flatMap(slideFiles))];
-  }
-  function slidesOf(hit) {
-    if (hit.kind === "deck") return hit.slide != null ? [hit.slide] : [];
-    return (ed.model?.slides ?? []).filter((s) => slideFiles(s).includes(hit.file)).map((s) => s.deckIndex);
-  }
-  function query() {
-    return el(".find-input").value;
-  }
-  function base() {
-    return { query: query(), files: files(), ...opts };
-  }
-  async function search() {
-    const q = query();
-    if (!q) {
-      hits = [];
-      renderResults();
-      return;
-    }
-    const result = await request({ action: "find", ...base() });
-    if (q !== query()) return;
-    if (!result.ok) {
-      hits = [];
-      renderResults(result.error ?? "search failed");
-      return;
-    }
-    hits = result.hits;
-    if (scope === "slide") {
-      const cur = currentSlide()?.deckIndex;
-      hits = hits.filter((h2) => h2.kind !== "deck" || h2.slide === cur);
-    }
-    active = Math.min(active, hits.length - 1);
-    renderResults();
-  }
-  function schedule() {
-    window.clearTimeout(timer2);
-    timer2 = window.setTimeout(() => void search(), 220);
-  }
-  function fileLabel(path) {
-    const root2 = ed.model?.projectDir ?? "";
-    return path.startsWith(root2) ? path.slice(root2.length + 1) : path;
-  }
-  function renderResults(error) {
-    const list3 = el(".find-results");
-    const status2 = el(".find-status");
-    clear(list3);
-    if (error) {
-      status2.textContent = error;
-      return;
-    }
-    if (!query()) {
-      status2.textContent = "";
-      return;
-    }
-    const slides = new Set(hits.flatMap(slidesOf));
-    status2.textContent = hits.length ? `${hits.length}${hits.length >= 500 ? "+" : ""} match${hits.length === 1 ? "" : "es"} on ${slides.size} slide${slides.size === 1 ? "" : "s"}` : "No matches";
-    let lastGroup = "";
-    hits.forEach((hit, i) => {
-      const on2 = slidesOf(hit);
-      const first = on2[0];
-      const slide = first != null ? ed.model?.slides[first] : null;
-      const group = slide != null ? `${first + 1} \xB7 ${slide.title ?? slide.id ?? ""}` : fileLabel(hit.file);
-      if (group !== lastGroup) {
-        list3.append(h("div", { class: "find-group" }, group));
-        lastGroup = group;
-      }
-      const where = hit.kind === "deck" ? "deck.py" : `${fileLabel(hit.file)}${on2.length > 1 ? ` \xB7 ${on2.length} slides` : ""}`;
-      const row3 = h(
-        "button",
-        {
-          type: "button",
-          class: `find-hit${i === active ? " on" : ""}`,
-          title: where,
-          onclick: () => goTo(i)
-        },
-        h(
-          "span",
-          { class: "find-snippet" },
-          hit.before,
-          h("mark", {}, hit.match),
-          hit.after
-        ),
-        h("span", { class: "find-where" }, where)
-      );
-      list3.append(row3);
-    });
-  }
-  function goTo(i) {
-    const hit = hits[i];
-    if (!hit) return;
-    active = i;
-    renderResults();
-    const on2 = slidesOf(hit);
-    const cur = currentSlide()?.deckIndex;
-    const target = cur != null && on2.includes(cur) ? cur : on2[0];
-    if (target != null) gotoSlide(target);
-    if (hit.kind === "svg" && hit.loc != null) {
-      const slide = currentSlide();
-      const key = slide?.sources?.findIndex((s) => s.path === hit.file) ?? -1;
-      const node = key >= 0 ? slideRoot()?.querySelector(`[data-ink="${key}:${hit.loc}"]`) : null;
-      if (node && selectable(node)) select([node]);
-    }
-    panel.querySelector(".find-hit.on")?.scrollIntoView({ block: "nearest" });
-  }
-  async function replace(all) {
-    const q = query();
-    if (!q) return;
-    if (!all && active < 0) {
-      goTo(0);
-      return;
-    }
-    const replacement = el(".replace-input").value;
-    const hit = hits[active];
-    if (all && hits.length > 1) {
-      const n2 = hits.length;
-      if (!window.confirm(
-        `Replace ${n2} matches of \u201C${q}\u201D with \u201C${replacement}\u201D?`
-      )) {
-        return;
-      }
-    }
-    const result = await edit({
-      action: "replace",
-      replacement,
-      ...base(),
-      only: all ? void 0 : { file: hit.file, index: hit.index }
-    });
-    if (result.ok) {
-      const n2 = result.replaced;
-      toast(`Replaced ${n2} match${n2 === 1 ? "" : "es"}`);
-    }
-  }
-  function toggle(name, btn) {
-    opts[name] = !opts[name];
-    btn.classList.toggle("on", opts[name]);
-    schedule();
-  }
-  function build() {
-    const flag = (label4, title, name) => {
-      const b = h(
-        "button",
-        { type: "button", class: "find-flag", title },
-        label4
-      );
-      b.addEventListener("click", () => toggle(name, b));
-      return b;
-    };
-    const find = h("input", {
-      type: "text",
-      class: "find-input",
-      placeholder: "Find in slides, notes and deck.py",
-      spellcheck: "false"
-    });
-    const repl = h("input", {
-      type: "text",
-      class: "replace-input",
-      placeholder: "Replace with",
-      spellcheck: "false"
-    });
-    const where = h("select", { class: "find-scope", title: "Where to look" });
-    where.append(
-      h("option", { value: "deck" }, "All slides"),
-      h("option", { value: "slide" }, "This slide")
-    );
-    where.addEventListener("change", () => {
-      scope = where.value === "slide" ? "slide" : "deck";
-      schedule();
-    });
-    find.addEventListener("input", () => {
-      active = -1;
-      schedule();
-    });
-    find.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        if (hits.length)
-          goTo(
-            (active + (e.shiftKey ? -1 : 1) + hits.length) % hits.length
-          );
-      }
-    });
-    repl.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        void replace(e.ctrlKey || e.metaKey);
-      }
-    });
-    panel.addEventListener("keydown", (e) => {
-      e.stopPropagation();
-      if (e.key === "Escape") closeFind();
-    });
-    panel.append(
-      h(
-        "div",
-        { class: "find-row" },
-        find,
-        flag("Aa", "Match case", "matchCase"),
-        flag("ab", "Whole words", "wholeWord"),
-        flag(".*", "Regular expression", "regex"),
-        h(
-          "button",
-          {
-            type: "button",
-            class: "find-close",
-            title: "Close (Esc)",
-            onclick: closeFind
-          },
-          "\xD7"
-        )
-      ),
-      h(
-        "div",
-        { class: "find-row" },
-        repl,
-        h(
-          "button",
-          {
-            type: "button",
-            class: "pbtn",
-            title: "Replace this match (Enter)",
-            onclick: () => void replace(false)
-          },
-          "Replace"
-        ),
-        h(
-          "button",
-          {
-            type: "button",
-            class: "pbtn",
-            title: "Replace every match (Ctrl+Enter)",
-            onclick: () => void replace(true)
-          },
-          "All"
-        )
-      ),
-      h(
-        "div",
-        { class: "find-row" },
-        where,
-        h("span", { class: "find-status" })
-      ),
-      h("div", { class: "find-results" })
-    );
-  }
-  function openFind(replaceMode = false) {
-    if (!panel.childElementCount) build();
-    panel.hidden = false;
-    const input = el(
-      replaceMode ? ".replace-input" : ".find-input"
-    );
-    const picked = window.getSelection()?.toString().trim();
-    if (picked && !picked.includes("\n")) {
-      el(".find-input").value = picked;
-    }
-    input.focus();
-    input.select();
-    schedule();
-  }
-  function closeFind() {
-    panel.hidden = true;
-  }
-  function initFind() {
-    document.getElementById("btn-find")?.addEventListener("click", () => openFind());
-    on("model", () => {
-      if (!panel.hidden && query()) schedule();
-    });
-  }
-
-  // src/ts/editor/git.ts
-  var menu3 = document.getElementById("context-menu");
-  var button2 = document.getElementById("btn-git");
-  var label = button2.querySelector(".git-label");
-  var badge = button2.querySelector(".git-badge");
-  var status = { repo: false, git: false };
-  function render2() {
-    button2.hidden = !status.git;
-    if (!status.repo) {
-      label.textContent = "Git";
-      badge.hidden = true;
-      button2.title = "Not versioned: create a git repository for this deck";
-      return;
-    }
-    label.textContent = status.branch ?? `@${status.detached ?? "?"}`;
-    const n2 = status.changes?.length ?? 0;
-    const lfsIssues = lfsFiles().length;
-    button2.classList.toggle("warn", lfsIssues > 0);
-    badge.hidden = n2 === 0 && lfsIssues === 0;
-    badge.textContent = n2 ? String(n2) : "!";
-    const sync = [
-      status.ahead ? `${status.ahead} to push` : "",
-      status.behind ? `${status.behind} to pull` : ""
-    ].filter(Boolean).join(", ");
-    button2.title = [
-      status.branch ? `Branch ${status.branch}` : `Viewing ${status.detached}`,
-      n2 ? `${n2} changed file${n2 === 1 ? "" : "s"}` : "No changes",
-      sync,
-      lfsIssues ? `${lfsIssues} media file${lfsIssues === 1 ? "" : "s"} not in Git LFS` : ""
-    ].filter(Boolean).join(" \xB7 ");
-  }
-  async function refreshGit() {
-    if (!connected()) return status;
-    const res = await request({ action: "git", op: "status" });
-    if (res.ok && res.git) status = res.git;
-    render2();
-    return status;
-  }
-  var REWRITES = /* @__PURE__ */ new Set([
-    "discard",
-    "pull",
-    "switch",
-    "view",
-    "revert",
-    "restore",
-    "create-branch"
-  ]);
-  var NOTICE_KEY = "inkflow-git-undo-notice";
-  var noticeShown = false;
-  function undoNoticeDue() {
-    try {
-      return sessionStorage.getItem(NOTICE_KEY) !== "1" && !noticeShown;
-    } catch {
-      return !noticeShown;
-    }
-  }
-  function undoNoticeShown() {
-    noticeShown = true;
-    try {
-      sessionStorage.setItem(NOTICE_KEY, "1");
-    } catch {
-    }
-  }
-  var UNDO_NOTICE = "Note: git changes the deck's files on disk, so the editor's undo and redo history is cleared afterwards (Ctrl+Z cannot go back past this point). You are told this once per session.";
-  async function git(op, args = {}, question = "") {
-    const notice = REWRITES.has(op) && undoNoticeDue();
-    if (question || notice) {
-      const text = [question, notice ? UNDO_NOTICE : ""].filter(Boolean).join("\n\n");
-      if (!confirm(question ? text : `${text}
-
-Continue?`)) return null;
-      if (notice) undoNoticeShown();
-    }
-    button2.classList.add("busy");
-    const res = await request({ action: "git", op, ...args });
-    button2.classList.remove("busy");
-    if (res.git) {
-      status = res.git;
-      render2();
-    }
-    if (!res.ok) {
-      toast(res.error ?? `git ${op} failed`, "error");
-      return null;
-    }
-    if (typeof res.message === "string") toast(res.message, "ok");
-    if (res.historyCleared) {
-      ed.canUndo = false;
-      ed.canRedo = false;
-      emit("history");
-    }
-    return res;
-  }
-  async function openMenu2() {
-    await refreshGit();
-    clear(menu3);
-    if (!status.repo) {
-      menu3.append(
-        h("div", { class: "menu-title" }, "Not versioned"),
-        menuItem("Create a git repository", async () => {
-          if (await git("init"))
-            toast("This deck is now versioned with git", "ok");
-        }),
-        menuItem("Create a git repository (git only, no LFS)", async () => {
-          if (await git("init", { lfs: false }))
-            toast("This deck is now versioned with git", "ok");
-        })
-      );
-    } else {
-      const n2 = status.changes?.length ?? 0;
-      const deckChanges = (status.changes ?? []).filter((c) => c.inDeck);
-      const where = status.branch ? `On ${status.branch}` : `Viewing ${status.detached} (no branch)`;
-      menu3.append(
-        h(
-          "div",
-          { class: "menu-title" },
-          `${where} \xB7 ${n2 ? `${n2} change${n2 === 1 ? "" : "s"}` : "no changes"}`
-        )
-      );
-      if (status.last) {
-        menu3.append(
-          h(
-            "div",
-            { class: "menu-note" },
-            `Last: ${status.last.subject} (${status.last.when})`
-          )
-        );
-      }
-      const lfsCount = lfsFiles().length;
-      if (lfsCount) {
-        const item = menuItem(
-          `\u26A0 ${lfsCount} media file${lfsCount === 1 ? "" : "s"} not in Git LFS\u2026`,
-          () => lfsDialog()
-        );
-        item.classList.add("warn");
-        menu3.append(item);
-      } else if (status.lfs?.mode === "on" && !status.lfs.installed) {
-        menu3.append(
-          h(
-            "div",
-            { class: "menu-note warn" },
-            "git-lfs is not installed: this deck's media needs it"
-          )
-        );
-      }
-      menu3.append(
-        menuItem(
-          "Commit\u2026",
-          () => commitDialog(),
-          n2 === 0 || !status.branch
-        ),
-        menuItem(
-          status.ahead ? `Push (${status.ahead})` : "Push",
-          () => void git("push"),
-          !status.remotes?.length || !status.branch
-        ),
-        menuItem(
-          status.behind ? `Pull (${status.behind})` : "Pull",
-          () => void git("pull"),
-          !status.upstream
-        ),
-        menuItem(
-          "Discard changes\u2026",
-          () => discardDialog(),
-          deckChanges.length === 0
-        ),
-        menuItem(
-          "Undo last commit",
-          async () => {
-            if (await git(
-              "undo-commit",
-              {},
-              `Take back "${status.last?.subject}"? Its changes stay, uncommitted.`
-            ))
-              toast(
-                "Last commit taken back; its changes are kept",
-                "ok"
-              );
-          },
-          !status.canUndoCommit
-        ),
-        h("div", { class: "menu-sep" }),
-        menuItem(
-          status.branch ? "Branches\u2026" : "Back to a branch\u2026",
-          () => void branchesDialog(),
-          !status.hasCommits
-        ),
-        menuItem(
-          "History\u2026",
-          () => void historyDialog(),
-          !status.hasCommits
-        )
-      );
-    }
-    const r = button2.getBoundingClientRect();
-    showMenu(Math.max(8, r.right - 260), r.bottom + 4);
-  }
-  function lfsFiles() {
-    const l = status.lfs;
-    return l ? [...l.uncovered, ...l.unconverted] : [];
-  }
-  function size2(bytes) {
-    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
-    return `${bytes} B`;
-  }
-  function lfsList(files2) {
-    return h(
-      "div",
-      { class: "git-files" },
-      ...files2.map(
-        (f) => h(
-          "div",
-          { class: "git-file" },
-          h("span", { class: "git-status" }, f.kind),
-          h("code", { class: "git-path" }, f.path),
-          h("span", { class: "hint git-size" }, size2(f.size))
-        )
-      )
-    );
-  }
-  function lfsDialog() {
-    const l = status.lfs;
-    if (!l) return;
-    const paths = lfsFiles().map((f) => f.path);
-    openDialog(
-      "Large files and Git LFS",
-      h(
-        "div",
-        { class: "git-form" },
-        h(
-          "p",
-          { class: "hint" },
-          "Git keeps a full copy of a video or image in every version, so the repository grows with each change. Git LFS stores them outside the history; a small repository can do without it."
-        ),
-        l.uncovered.length > 0 && h("h3", {}, "No Git LFS rule covers these"),
-        l.uncovered.length > 0 && lfsList(l.uncovered),
-        l.unconverted.length > 0 && h("h3", {}, "Committed before Git LFS was set up"),
-        l.unconverted.length > 0 && lfsList(l.unconverted),
-        !l.installed && h(
-          "p",
-          { class: "hint warn" },
-          "git-lfs is not installed on this computer: install it (git-lfs.com) to track files with it."
-        ),
-        h(
-          "p",
-          { class: "hint" },
-          "Tracking adds rules to the deck's .gitattributes and stages the files again as LFS files; commit to keep it. Earlier commits keep their full copies (git lfs migrate rewrites history, for everyone with a clone)."
-        ),
-        h(
-          "div",
-          { class: "btn-row end" },
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn",
-              title: "Record in .gitattributes that this deck stores media in git itself; no more warnings",
-              onclick: async () => {
-                if (await git("lfs-off")) closeDialog();
-              }
-            },
-            "Use git without LFS"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn primary",
-              disabled: !l.installed,
-              onclick: async () => {
-                if (await git("lfs-track", { paths }))
-                  closeDialog();
-              }
-            },
-            "Track with Git LFS"
-          )
-        )
-      ),
-      { wide: true }
-    );
-  }
-  function fileRow(change, checked) {
-    const box = h("input", {
-      type: "checkbox",
-      value: change.path
-    });
-    box.checked = checked;
-    return h(
-      "label",
-      { class: `git-file${change.inDeck ? "" : " outside"}` },
-      box,
-      h("span", { class: `git-status s-${change.status}` }, change.status),
-      h("code", { class: "git-path" }, change.path)
-    );
-  }
-  function checkedPaths(list3) {
-    return [...list3.querySelectorAll("input:checked")].map(
-      (b) => b.value
-    );
-  }
-  function commitDialog() {
-    const changes = status.changes ?? [];
-    const message = h("textarea", {
-      class: "git-message",
-      rows: "3"
-    });
-    message.value = status.suggestedMessage ?? "Update slides";
-    const files2 = h(
-      "div",
-      { class: "git-files" },
-      ...changes.map((c) => fileRow(c, c.inDeck))
-    );
-    const outside = changes.some((c) => !c.inDeck);
-    const name = h("input", {
-      type: "text",
-      placeholder: "Your name"
-    });
-    const email = h("input", {
-      type: "email",
-      placeholder: "you@example.com"
-    });
-    const identity = status.identity ? null : h(
-      "div",
-      { class: "git-identity" },
-      h(
-        "p",
-        { class: "hint" },
-        "git needs to know who commits (kept in this repository only):"
-      ),
-      h("div", { class: "btn-row" }, name, email)
-    );
-    const run = async (push) => {
-      const paths = checkedPaths(files2);
-      const res = await git("commit", {
-        message: message.value,
-        paths,
-        ...identity ? { name: name.value, email: email.value } : {}
-      });
-      if (!res) return;
-      closeDialog();
-      if (push) await git("push");
-    };
-    const canPush = !!status.remotes?.length;
-    const changed2 = new Set(changes.map((c) => c.path));
-    const heavy = lfsFiles().filter((f) => changed2.has(f.path));
-    const lfsNote = heavy.length > 0 && h(
-      "p",
-      { class: "hint warn" },
-      `${heavy.length} of these ${heavy.length === 1 ? "is a media file" : "are media files"} git would store whole, not in Git LFS. `,
-      h(
-        "button",
-        {
-          type: "button",
-          class: "link-btn",
-          onclick: () => lfsDialog()
-        },
-        "Review\u2026"
-      )
-    );
-    message.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        void run(false);
-      }
-    });
-    openDialog(
-      "Commit",
-      h(
-        "div",
-        { class: "git-form" },
-        h(
-          "label",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Message"),
-          message
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Files"),
-          h(
-            "div",
-            {},
-            files2,
-            outside && h(
-              "p",
-              { class: "hint" },
-              "Files outside this deck are left out unless you tick them."
-            )
-          )
-        ),
-        lfsNote,
-        identity,
-        h(
-          "div",
-          { class: "btn-row end" },
-          canPush && h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn",
-              onclick: () => void run(true)
-            },
-            "Commit and push"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn primary",
-              title: "Ctrl+Enter",
-              onclick: () => void run(false)
-            },
-            "Commit"
-          )
-        )
-      ),
-      { wide: true, hint: status.branch ? `on ${status.branch}` : void 0 }
-    );
-    message.focus();
-    message.select();
-  }
-  function discardDialog() {
-    const changes = (status.changes ?? []).filter((c) => c.inDeck);
-    const files2 = h(
-      "div",
-      { class: "git-files" },
-      ...changes.map((c) => fileRow(c, true))
-    );
-    openDialog(
-      "Discard changes",
-      h(
-        "div",
-        { class: "git-form" },
-        h(
-          "p",
-          { class: "hint warn" },
-          "The ticked files go back to how they were in the last commit; new files are deleted. This cannot be undone."
-        ),
-        files2,
-        h(
-          "div",
-          { class: "btn-row end" },
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn danger",
-              onclick: async () => {
-                const paths = checkedPaths(files2);
-                if (!paths.length) return;
-                if (await git("discard", { paths })) {
-                  closeDialog();
-                  toast(
-                    `Discarded changes to ${paths.length} file${paths.length === 1 ? "" : "s"}`,
-                    "ok"
-                  );
-                }
-              }
-            },
-            "Discard"
-          )
-        )
-      ),
-      { wide: true }
-    );
-  }
-  async function branchesDialog() {
-    const res = await git("branches");
-    if (!res) return;
-    const branches = res.branches;
-    const name = h("input", {
-      type: "text",
-      placeholder: "new-branch-name"
-    });
-    const create = async () => {
-      if (!name.value.trim()) return;
-      if (await git("create-branch", { name: name.value.trim() })) {
-        closeDialog();
-        toast(`Created and switched to ${name.value.trim()}`, "ok");
-      }
-    };
-    name.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        void create();
-      }
-    });
-    openDialog(
-      "Branches",
-      h(
-        "div",
-        { class: "git-form" },
-        h(
-          "div",
-          { class: "git-list" },
-          ...branches.map(
-            (b) => h(
-              "div",
-              { class: `git-row${b.current ? " current" : ""}` },
-              h("strong", {}, b.name),
-              h(
-                "span",
-                { class: "hint" },
-                b.current ? "current" : b.when
-              ),
-              !b.current && h(
-                "button",
-                {
-                  type: "button",
-                  class: "pbtn",
-                  onclick: async () => {
-                    if (await git("switch", {
-                      name: b.name
-                    })) {
-                      closeDialog();
-                      toast(
-                        `Switched to ${b.name}`,
-                        "ok"
-                      );
-                    }
-                  }
-                },
-                "Switch"
-              )
-            )
-          )
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "New branch"),
-          h(
-            "div",
-            { class: "btn-row" },
-            name,
-            h(
-              "button",
-              {
-                type: "button",
-                class: "pbtn primary",
-                onclick: create
-              },
-              "Create and switch"
-            )
-          )
-        ),
-        h(
-          "p",
-          { class: "hint" },
-          "Uncommitted changes come along to the branch you switch to; git refuses a switch that would overwrite them."
-        )
-      ),
-      { wide: true }
-    );
-  }
-  async function historyDialog() {
-    const res = await git("log");
-    if (!res) return;
-    const log = res.log;
-    const act = async (op, c, question, done) => {
-      if (await git(op, { sha: c.sha }, question)) {
-        closeDialog();
-        toast(done, "ok");
-      }
-    };
-    openDialog(
-      "History",
-      h(
-        "div",
-        { class: "git-form" },
-        log.length ? h(
-          "div",
-          { class: "git-list history" },
-          ...log.map(
-            (c) => h(
-              "div",
-              { class: `git-row${c.head ? " current" : ""}` },
-              h(
-                "div",
-                { class: "git-commit" },
-                h("strong", {}, c.subject),
-                h(
-                  "span",
-                  { class: "hint" },
-                  `${c.short} \xB7 ${c.author} \xB7 ${c.when}${c.refs.length ? ` \xB7 ${c.refs.join(", ")}` : ""}`
-                )
-              ),
-              h(
-                "div",
-                { class: "btn-row" },
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "pbtn",
-                    title: "Show the deck as it was then (switch back with Branches)",
-                    onclick: () => void act(
-                      "view",
-                      c,
-                      `Show the deck as it was at "${c.subject}"? Edits there are not on any branch until you create one.`,
-                      `Viewing ${c.short}; switch back to a branch from the git menu`
-                    )
-                  },
-                  "View"
-                ),
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "pbtn",
-                    title: "Make the deck's files what they were then, as uncommitted changes",
-                    onclick: () => void act(
-                      "restore",
-                      c,
-                      `Restore the deck's files to "${c.subject}"? Your current files are replaced (commit first to keep them).`,
-                      `Restored the deck to ${c.short}; commit to keep it`
-                    )
-                  },
-                  "Restore"
-                ),
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "pbtn",
-                    title: "A new commit that undoes this one",
-                    onclick: () => void act(
-                      "revert",
-                      c,
-                      `Undo "${c.subject}" with a new commit?`,
-                      `Reverted ${c.short}`
-                    )
-                  },
-                  "Revert"
-                )
-              )
-            )
-          )
-        ) : h("p", { class: "hint" }, "No commits touch this deck yet."),
-        h(
-          "p",
-          { class: "hint" },
-          "View: look at an old version (no branch). Restore: bring the deck back to it as changes you can commit. Revert: undo one commit with a new one."
-        )
-      ),
-      {
-        wide: true,
-        hint: status.scope ? `changes to ${status.scope}/` : void 0
-      }
-    );
-  }
-  var timer3 = 0;
-  function initGit() {
-    button2.addEventListener("click", () => void openMenu2());
-    on("model", () => {
-      window.clearTimeout(timer3);
-      timer3 = window.setTimeout(() => void refreshGit(), 600);
-    });
-  }
-
-  // src/ts/editor/grid.ts
-  var view = document.getElementById("grid-view");
-  var list2 = document.getElementById("grid-list");
-  var sizeInput = document.getElementById("grid-size");
-  var thumbs2 = new Thumbs();
-  var dragFrom2 = null;
-  function toggleGrid(on2 = view.hidden === true) {
-    view.hidden = !on2;
-    document.body.classList.toggle("grid-mode", on2);
-    document.getElementById("btn-grid")?.classList.toggle("on", on2);
-    if (on2) {
-      ed.focus = "sorter";
-      renderGrid();
-      view.focus();
-    } else {
-      ed.focus = "canvas";
-      emit("slide");
-    }
-  }
-  function open(i) {
-    ed.slideSelection.clear();
-    toggleGrid(false);
-    gotoSlide(i);
-  }
-  function renderGrid() {
-    if (view.hidden) return;
-    clear(list2);
-    thumbs2.begin();
-    const slides = ed.model?.slides ?? [];
-    slides.forEach((slide, i) => {
-      const item = h(
-        "div",
-        {
-          class: `grid-item${i === ed.current ? " active" : ""}${ed.slideSelection.has(i) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
-          draggable: ed.model?.deckEditable ? "true" : null,
-          "data-index": i
-        },
-        thumbs2.thumb(slide),
-        h(
-          "div",
-          { class: "grid-caption" },
-          h("span", { class: "grid-num" }, String(i + 1)),
-          h(
-            "span",
-            { class: "grid-title" },
-            slide.title ?? slide.id ?? slide.src
-          ),
-          slide.animations.length ? h(
-            "span",
-            {
-              class: "grid-badge",
-              title: `${slide.animations.length} animation(s)`
-            },
-            "\u2726"
-          ) : null
-        )
-      );
-      item.addEventListener("click", (e) => {
-        pickSlide(i, e);
-        ed.focus = "sorter";
-      });
-      item.addEventListener("dblclick", () => open(i));
-      item.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        if (!ed.slideSelection.has(i)) {
-          ed.slideSelection.clear();
-          gotoSlide(i);
-        }
-        ed.focus = "sorter";
-        openSlideMenu(e.clientX, e.clientY, i);
-      });
-      item.addEventListener("dragstart", (e) => {
-        dragFrom2 = i;
-        e.dataTransfer?.setData("text/plain", String(i));
-        item.classList.add("dragging");
-      });
-      item.addEventListener("dragend", () => {
-        dragFrom2 = null;
-        list2.querySelectorAll(".drop-before, .drop-after").forEach((el2) => {
-          el2.classList.remove("drop-before", "drop-after");
-        });
-        item.classList.remove("dragging");
-      });
-      item.addEventListener("dragover", (e) => {
-        if (dragFrom2 == null) return;
-        e.preventDefault();
-        const r = item.getBoundingClientRect();
-        const after = e.clientX > r.left + r.width / 2;
-        item.classList.toggle("drop-after", after);
-        item.classList.toggle("drop-before", !after);
-      });
-      item.addEventListener("dragleave", () => {
-        item.classList.remove("drop-before", "drop-after");
-      });
-      item.addEventListener("drop", (e) => {
-        e.preventDefault();
-        if (dragFrom2 == null) return;
-        const r = item.getBoundingClientRect();
-        let to = e.clientX > r.left + r.width / 2 ? i + 1 : i;
-        if (dragFrom2 < to) to -= 1;
-        void moveSlide(dragFrom2, to);
-      });
-      list2.append(item);
-    });
-    thumbs2.end();
-    list2.querySelector(".active")?.scrollIntoView({ block: "nearest" });
-  }
-  function columns() {
-    const items = [...list2.children];
-    if (items.length < 2) return 1;
-    const top = items[0].offsetTop;
-    const n2 = items.findIndex((el2) => el2.offsetTop !== top);
-    return n2 === -1 ? items.length : n2;
-  }
-  function onKey(e) {
-    if (view.hidden) return;
-    const target = e.target;
-    if (target.closest("input, textarea, select, #dialog, #find-panel")) return;
-    const n2 = ed.model?.slides.length ?? 0;
-    const move = (to) => {
-      e.preventDefault();
-      e.stopPropagation();
-      ed.slideSelection.clear();
-      gotoSlide(Math.max(0, Math.min(n2 - 1, to)));
-    };
-    switch (e.key) {
-      case "ArrowLeft":
-        move(ed.current - 1);
-        break;
-      case "ArrowRight":
-        move(ed.current + 1);
-        break;
-      case "ArrowUp":
-        move(ed.current - columns());
-        break;
-      case "ArrowDown":
-        move(ed.current + columns());
-        break;
-      case "Home":
-        move(0);
-        break;
-      case "End":
-        move(n2 - 1);
-        break;
-      case "Enter":
-        e.preventDefault();
-        e.stopPropagation();
-        open(ed.current);
-        break;
-      case "Escape":
-        e.preventDefault();
-        e.stopPropagation();
-        toggleGrid(false);
-        break;
-    }
-  }
-  function setSize(px) {
-    view.style.setProperty("--grid-w", `${px}px`);
-    try {
-      localStorage.setItem("inkflow-editor-grid", String(px));
-    } catch {
-    }
-  }
-  function initGrid() {
-    document.getElementById("btn-grid")?.addEventListener("click", () => toggleGrid());
-    document.getElementById("grid-close")?.addEventListener("click", () => toggleGrid(false));
-    document.addEventListener("keydown", onKey, true);
-    let saved = 280;
-    try {
-      saved = Number(localStorage.getItem("inkflow-editor-grid")) || 280;
-    } catch {
-    }
-    sizeInput.value = String(saved);
-    setSize(saved);
-    sizeInput.addEventListener("input", () => setSize(Number(sizeInput.value)));
-    on("model", renderGrid);
-    on("slide", renderGrid);
-    on("slide-selection", renderGrid);
-  }
-
-  // src/ts/editor/notes.ts
-  var area = document.getElementById("notes-input");
-  var label2 = document.getElementById("notes-file");
-  var timer4 = 0;
-  var slideIndex = -1;
-  var sent = "";
-  var burst = "";
-  async function save() {
-    window.clearTimeout(timer4);
-    const slide = ed.model?.slides[slideIndex];
-    if (!slide || area.value === sent) return;
-    const before = sent;
-    sent = area.value;
-    const result = await edit(
-      {
-        action: "notes",
-        slide: slide.deckIndex,
-        text: area.value,
-        name: slide.id ?? "slide",
-        coalesce: burst
-      },
-      { retrying: true }
-    );
-    if (!result.ok) {
-      sent = before;
-      timer4 = window.setTimeout(() => void save(), 800);
-    }
-  }
-  function load() {
-    const slide = currentSlide();
-    if (!slide) return;
-    if (document.activeElement === area && slideIndex === slide.deckIndex)
-      return;
-    slideIndex = slide.deckIndex;
-    area.value = slide.notes.text;
-    sent = area.value;
-    label2.textContent = slide.notes.kind === "file" ? slide.notes.rel ?? "" : slide.notes.kind === "inline" ? "inline in deck.py" : "new notes file on first edit";
-  }
-  function initNotes() {
-    area.addEventListener("focus", () => {
-      burst = `notes-${Date.now()}`;
-    });
-    area.addEventListener("input", () => {
-      window.clearTimeout(timer4);
-      timer4 = window.setTimeout(() => void save(), 600);
-    });
-    area.addEventListener("blur", () => void save());
-    area.addEventListener("keydown", (e) => e.stopPropagation());
-    on("slide", () => {
-      void save().then(load);
-    });
-    on("model", load);
-  }
-
   // src/ts/editor/objects.ts
-  var host3 = document.getElementById("objects");
+  var host2 = document.getElementById("objects");
   var body = document.getElementById("props-body");
   var tabs = document.getElementById("panel-tabs");
   var NAMES = {
@@ -5730,7 +3998,7 @@ Continue?`)) return null;
     a: "Link"
   };
   var collapsed = /* @__PURE__ */ new Set();
-  function label3(el2) {
+  function label(el2) {
     if (isZone(el2)) return `Zone \xB7 ${zoneName(el2)}`;
     const id = el2.getAttribute("id");
     const kind = el2.hasAttribute("data-ink-layer") ? "Layer" : NAMES[el2.localName] ?? el2.localName;
@@ -5864,13 +4132,13 @@ Continue?`)) return null;
     const selected = ed.selection.some((s) => s.el === el2);
     const locked = el2.hasAttribute("data-ink-locked");
     const hidden = isHidden(el2);
-    const name = h("span", { class: "obj-name" }, label3(el2));
+    const name = h("span", { class: "obj-name" }, label(el2));
     const out = [];
     const item = h(
       "div",
       {
         class: `obj-row${selected ? " on" : ""}${writable ? "" : " foreign"}${hidden ? " hidden-obj" : ""}`,
-        title: src ? `${label3(el2)} \xB7 ${src.rel}` : label3(el2),
+        title: src ? `${label(el2)} \xB7 ${src.rel}` : label(el2),
         style: `padding-left:${8 + depth * 14}px`
       },
       h(
@@ -5931,8 +4199,8 @@ Continue?`)) return null;
     return !!src && src.role === "slide" && src.writable;
   }
   function renderObjects() {
-    if (host3.hidden) return;
-    clear(host3);
+    if (host2.hidden) return;
+    clear(host2);
     const svg = slideRoot();
     if (!svg) return;
     const top = [...svg.querySelectorAll("[data-ink-top], [data-ink-layer]")].filter((el2) => {
@@ -5942,24 +4210,24 @@ Continue?`)) return null;
       return !parent || !svg.contains(parent);
     }).reverse();
     if (!top.length) {
-      host3.append(h("p", { class: "hint" }, "No objects on this slide."));
+      host2.append(h("p", { class: "hint" }, "No objects on this slide."));
       return;
     }
-    host3.append(
+    host2.append(
       h(
         "p",
         { class: "hint" },
         "Top of the stack first. Middle-click (or Alt+click) on the slide steps through overlapping objects."
       )
     );
-    for (const el2 of top) host3.append(...row(el2, 0));
+    for (const el2 of top) host2.append(...row(el2, 0));
   }
   function showTab(tab) {
     for (const b of tabs.querySelectorAll("[data-tab]")) {
       b.classList.toggle("on", b.dataset.tab === tab);
       b.setAttribute("aria-selected", String(b.dataset.tab === tab));
     }
-    host3.hidden = tab !== "objects";
+    host2.hidden = tab !== "objects";
     body.hidden = tab === "objects";
     try {
       localStorage.setItem("inkflow-editor-tab", tab);
@@ -5983,7 +4251,7 @@ Continue?`)) return null;
   }
 
   // src/ts/editor/openwith.ts
-  var menu4 = document.getElementById("context-menu");
+  var menu2 = document.getElementById("context-menu");
   function fileName(path) {
     return path.split(/[\\/]/).pop() ?? path;
   }
@@ -5992,19 +4260,19 @@ Continue?`)) return null;
     if (!path.startsWith("/")) return !path.split("/").includes("..");
     return !!root2 && path.startsWith(`${root2}/`);
   }
-  async function openMenu3(path, x, y) {
+  async function openMenu(path, x, y) {
     const res = await request({ action: "open-apps", path });
     if (!res.ok) {
       toast(res.error ?? "Cannot open this file", "error");
       return;
     }
     const apps = res.apps ?? [];
-    clear(menu4);
-    menu4.append(h("div", { class: "menu-title" }, `Open ${fileName(path)} in`));
+    clear(menu2);
+    menu2.append(h("div", { class: "menu-title" }, `Open ${fileName(path)} in`));
     for (const app of apps) {
-      menu4.append(menuItem(app.label, () => void open2(path, app)));
+      menu2.append(menuItem(app.label, () => void open(path, app)));
     }
-    menu4.append(
+    menu2.append(
       menuItem("Copy path", () => {
         const root2 = ed.model?.projectDir ?? "";
         const full = path.startsWith("/") ? path : `${root2}/${path}`;
@@ -6016,7 +4284,7 @@ Continue?`)) return null;
     );
     showMenu(x, y);
   }
-  async function open2(path, app) {
+  async function open(path, app) {
     const res = await request({ action: "open-file", path, app: app.id });
     if (res.ok) toast(`Opened ${fileName(path)} in ${app.label}`, "ok");
     else toast(res.error ?? "Could not open the file", "error");
@@ -6031,7 +4299,7 @@ Continue?`)) return null;
         title: `Open ${fileName(path)} in another program`,
         onclick: (e) => {
           const r = e.currentTarget.getBoundingClientRect();
-          void openMenu3(path, r.left, r.bottom + 4);
+          void openMenu(path, r.left, r.bottom + 4);
         }
       },
       `${label4} \u25BE`
@@ -6039,12 +4307,12 @@ Continue?`)) return null;
   }
 
   // src/ts/editor/props.ts
-  var panel2 = document.getElementById("props-body");
-  function section(title, ...body2) {
+  var panel = document.getElementById("props-body");
+  function section(title2, ...body2) {
     return h(
       "section",
       { class: "props-section" },
-      h("h3", {}, title),
+      h("h3", {}, title2),
       ...body2.filter((b) => !!b)
     );
   }
@@ -6096,10 +4364,10 @@ Continue?`)) return null;
     sel.addEventListener("change", () => commit(sel.value));
     return sel;
   }
-  function button3(label4, title, fn, cls = "") {
+  function button(label4, title2, fn, cls = "") {
     return h(
       "button",
-      { type: "button", class: `pbtn ${cls}`, title, onclick: fn },
+      { type: "button", class: `pbtn ${cls}`, title: title2, onclick: fn },
       label4
     );
   }
@@ -6201,7 +4469,7 @@ Continue?`)) return null;
               { class: "media-poster" },
               poster ? String(poster).split("/").pop() : "None"
             ),
-            button3(
+            button(
               poster ? "Change\u2026" : "Pick\u2026",
               poster ? `Poster: ${poster}` : "Still image shown before playback",
               async () => {
@@ -6210,7 +4478,7 @@ Continue?`)) return null;
                 if (up) commit("poster", up.path);
               }
             ),
-            poster ? button3(
+            poster ? button(
               "\u2715",
               "Remove the poster",
               () => commit("poster", null)
@@ -6290,7 +4558,7 @@ Continue?`)) return null;
     const root2 = slideRoot();
     const parent = root2?.getAttribute("inkflow:parent") ?? null;
     const currentLayout = slide.srcShared ? slide.src.replace(/\.svg$/, "") : parent;
-    panel2.append(
+    panel.append(
       section(
         "Slide",
         row2(
@@ -6306,7 +4574,7 @@ Continue?`)) return null;
         ),
         row2(
           "Layout",
-          button3(
+          button(
             `${currentLayout ? layoutLabel(currentLayout) : "None"} \u25BE`,
             "Pick a layout from previews",
             () => void openGallery({
@@ -6353,8 +4621,8 @@ Continue?`)) return null;
         )
       )
     );
-    panel2.append(transitionSection(slide.transition, di));
-    panel2.append(animationList(slide.animations, slide.animationsEditable, di));
+    panel.append(transitionSection(slide.transition, di));
+    panel.append(animationList(slide.animations, slide.animationsEditable, di));
     const files2 = h("div", { class: "files" });
     const addFile = (label4, rel, path) => {
       if (rel)
@@ -6377,16 +4645,16 @@ Continue?`)) return null;
     const textInDeck = slide.md?.kind !== "file" && (slide.md?.kind === "inline" || Object.values(slide.zones).some((z) => z.kind === "text"));
     if (textInDeck && editable)
       files2.append(
-        button3(
+        button(
           "Move text to Markdown",
           "Move this slide's text out of deck.py into its own .md file",
           () => void edit({ action: "to-markdown", slide: di })
         )
       );
-    panel2.append(section("Files", files2));
+    panel.append(section("Files", files2));
     const arrows = attachedConnectors();
     if (arrows.length) {
-      panel2.append(
+      panel.append(
         section(
           "Arrows",
           h(
@@ -6394,7 +4662,7 @@ Continue?`)) return null;
             { class: "hint" },
             `${arrows.length} arrow${arrows.length === 1 ? " is" : "s are"} attached to shapes and follow them when they move here. After moving shapes in another editor, re-route them:`
           ),
-          button3(
+          button(
             "Re-route all",
             "Re-attach every arrow to its shapes",
             () => reroute(arrows)
@@ -6403,7 +4671,7 @@ Continue?`)) return null;
       );
     }
     if (slide.srcShared) {
-      panel2.append(
+      panel.append(
         h(
           "p",
           { class: "hint" },
@@ -6475,7 +4743,7 @@ Continue?`)) return null;
           { class: "anim-trigger" },
           triggerLabel(cue.fields.trigger ?? null)
         ),
-        editable && button3(icon("up", 12), "Earlier", () => {
+        editable && button(icon("up", 12), "Earlier", () => {
           if (i > 0)
             void edit({
               action: "anim",
@@ -6485,7 +4753,7 @@ Continue?`)) return null;
               to: i - 1
             });
         }),
-        editable && button3(icon("down", 12), "Later", () => {
+        editable && button(icon("down", 12), "Later", () => {
           if (i < cues.length - 1) {
             void edit({
               action: "anim",
@@ -6496,7 +4764,7 @@ Continue?`)) return null;
             });
           }
         }),
-        editable && button3(icon("trash", 12), "Remove", () => {
+        editable && button(icon("trash", 12), "Remove", () => {
           void edit({
             action: "anim",
             slide: di,
@@ -6559,7 +4827,7 @@ Continue?`)) return null;
             trigger: cue.fields.trigger ?? "on-click"
           })
         ) : h("span", {}, cue.type),
-        editable && button3(icon("trash", 12), "Remove", () => {
+        editable && button(icon("trash", 12), "Remove", () => {
           void edit({
             action: "anim",
             slide: di,
@@ -6695,7 +4963,7 @@ Continue?`)) return null;
     custom.addEventListener("change", () => send({ color: custom.value }));
     swatches.append(custom);
     swatches.append(
-      button3("\u2205", "None", () => send({ color: "none" }), "none-btn")
+      button("\u2205", "None", () => send({ color: "none" }), "none-btn")
     );
     return row2(prop === "fill" ? "Fill" : "Stroke", swatches);
   }
@@ -6715,7 +4983,7 @@ Continue?`)) return null;
     const movable = canTransform(el2);
     const id = el2.getAttribute("id") ?? "";
     const tag = zone ? `Zone \xB7 ${zoneName(el2)}` : TAG_NAMES[el2.localName] ?? el2.localName;
-    panel2.append(
+    panel.append(
       section(
         tag,
         row2(
@@ -6778,12 +5046,12 @@ Continue?`)) return null;
             h("p", { class: "hint media-src" }, media.src ?? ""),
             openButton(projectFile(media.src))
           ),
-          button3(
+          button(
             "Replace media\u2026",
             "Pick another image or video",
             () => void zoneMedia(name)
           ),
-          button3("Clear", "Empty this zone", () => {
+          button("Clear", "Empty this zone", () => {
             void edit({
               action: "zone-media",
               slide: slide.deckIndex,
@@ -6794,7 +5062,7 @@ Continue?`)) return null;
         );
       } else {
         body2.push(
-          button3(
+          button(
             "Edit text",
             "Edit this zone's Markdown (double-click)",
             () => {
@@ -6803,12 +5071,12 @@ Continue?`)) return null;
           )
         );
       }
-      panel2.append(section("Content", ...body2));
+      panel.append(section("Content", ...body2));
       if (media && (media.kind === "image" || media.kind === "video")) {
-        panel2.append(mediaSection(slide, name, media));
+        panel.append(mediaSection(slide, name, media));
       }
     }
-    if (movable) panel2.append(geometrySection([sel]));
+    if (movable) panel.append(geometrySection([sel]));
     const textZone = zone && el2.localName === "foreignObject" && !!el2.querySelector(".inkflow-content");
     const shapeTag = textZone ? el2.getAttribute("data-ink-tag") ?? "rect" : el2.localName;
     if ((!zone || textZone) && src?.writable && (movable || ed.layoutMode)) {
@@ -6821,7 +5089,7 @@ Continue?`)) return null;
       ].includes(shapeTag);
       const strokeWidth = parseFloat(getComputedStyle(el2).strokeWidth) || 0;
       const opacity = parseFloat(getComputedStyle(el2).opacity);
-      panel2.append(
+      panel.append(
         section(
           "Style",
           fills && !pictureOf(el2) && paintRow([sel], "fill"),
@@ -6889,23 +5157,23 @@ Continue?`)) return null;
           )
         )
       );
-      if (el2.localName === "text") panel2.append(textSection(sel));
-      if (textZone) panel2.append(textBoxSection(sel));
+      if (el2.localName === "text") panel.append(textSection(sel));
+      if (textZone) panel.append(textBoxSection(sel));
     }
     if (!zone && src?.writable && movable && isConnector(el2)) {
-      panel2.append(connectorSection(sel));
+      panel.append(connectorSection(sel));
     }
     if (src?.writable && (movable || ed.layoutMode) && !isConnector(el2) && el2.localName !== "line") {
-      panel2.append(connectionPointsSection(sel));
+      panel.append(connectionPointsSection(sel));
     }
     if (!zone && src?.writable && pictureOf(el2)) {
-      panel2.append(pictureSection(sel));
+      panel.append(pictureSection(sel));
     }
     if (!zone && src?.writable && (movable || ed.layoutMode)) {
-      panel2.append(detailsSection(sel));
+      panel.append(detailsSection(sel));
     }
-    if (movable) panel2.append(arrangeSection([sel]));
-    if (id || zone || src?.writable) panel2.append(elementAnimations(sel));
+    if (movable) panel.append(arrangeSection([sel]));
+    if (id || zone || src?.writable) panel.append(elementAnimations(sel));
   }
   var ARROW = "url(#inkflow-arrow)";
   function attachedConnectors() {
@@ -7002,12 +5270,12 @@ Continue?`)) return null;
       h(
         "div",
         { class: "btn-row" },
-        button3(
+        button(
           "Re-route",
           "Re-attach to the shapes where they are now",
           () => reroute([sel])
         ),
-        el2.hasAttribute("inkflow:bend") && button3(
+        el2.hasAttribute("inkflow:bend") && button(
           "Reset bend",
           "Put the elbow's middle segment back where it goes by default",
           () => {
@@ -7018,7 +5286,7 @@ Continue?`)) return null;
             );
           }
         ),
-        button3(
+        button(
           "Detach",
           "Free both ends",
           () => send(
@@ -7180,7 +5448,7 @@ Continue?`)) return null;
       h(
         "div",
         { class: "btn-row" },
-        button3(
+        button(
           "Replace\u2026",
           "Pick another picture; it keeps this size and place",
           async () => {
@@ -7196,17 +5464,17 @@ Continue?`)) return null;
             );
           }
         ),
-        ed.cropMode ? button3(
+        ed.cropMode ? button(
           "Done cropping",
           "Enter",
           () => setCropMode(false),
           "on"
-        ) : button3(
+        ) : button(
           "Crop",
           "Crop (double-click the picture)",
           () => void startCrop(sel)
         ),
-        cropped ? button3(
+        cropped ? button(
           "Reset crop",
           "Show the whole picture again",
           () => void resetCrop(sel)
@@ -7247,7 +5515,7 @@ Continue?`)) return null;
     return list3;
   }
   function detailsSection(sel) {
-    const title = [...sel.el.children].find((c) => c.localName === "title")?.textContent ?? "";
+    const title2 = [...sel.el.children].find((c) => c.localName === "title")?.textContent ?? "";
     const link = textInput(
       linkOf(sel.el),
       (v) => void sendSvgOps(
@@ -7275,7 +5543,7 @@ Continue?`)) return null;
       row2(
         "Alt text",
         textInput(
-          title,
+          title2,
           (v) => void sendSvgOps(
             [
               {
@@ -7333,13 +5601,13 @@ Continue?`)) return null;
       h(
         "div",
         { class: "btn-row" },
-        button3(
+        button(
           h("b", {}, "B"),
           "Bold",
           () => setAll({ "font-weight": bold ? null : "bold" }, "Bold"),
           bold ? "on" : ""
         ),
-        button3(
+        button(
           h("i", {}, "I"),
           "Italic",
           () => setAll(
@@ -7348,25 +5616,25 @@ Continue?`)) return null;
           ),
           italic ? "on" : ""
         ),
-        button3(
+        button(
           "\u27F8",
           "Align start",
           () => setAll({ "text-anchor": null }, "Align"),
           anchor === "start" ? "on" : ""
         ),
-        button3(
+        button(
           "\u21D4",
           "Align middle",
           () => setAll({ "text-anchor": "middle" }, "Align"),
           anchor === "middle" ? "on" : ""
         ),
-        button3(
+        button(
           "\u27F9",
           "Align end",
           () => setAll({ "text-anchor": "end" }, "Align"),
           anchor === "end" ? "on" : ""
         ),
-        button3("Edit", "Edit text (double-click)", () => emit("edit-text"))
+        button("Edit", "Edit text (double-click)", () => emit("edit-text"))
       )
     );
   }
@@ -7473,26 +5741,26 @@ Continue?`)) return null;
       h(
         "div",
         { class: "btn-row" },
-        button3("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
-        button3("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
-        button3("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
-        button3("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
-        button3(
+        button("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
+        button("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
+        button("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
+        button("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
+        button(
           icon("copy", 14),
           "Duplicate (Ctrl+D)",
           () => emit("duplicate")
         ),
-        sels.length > 1 && button3(
+        sels.length > 1 && button(
           icon("group", 14),
           "Group (Ctrl+G)",
           () => emit("group")
         ),
-        isGroup && button3(
+        isGroup && button(
           "Ungroup",
           "Ungroup (Ctrl+Shift+G)",
           () => emit("ungroup")
         ),
-        button3(
+        button(
           icon("trash", 14),
           "Delete (Del)",
           () => emit("delete"),
@@ -7543,10 +5811,10 @@ Continue?`)) return null;
   function renderMultiPanel() {
     const sels = ed.selection;
     const movable = sels.every((s) => canTransform(s.el));
-    panel2.append(section(`${sels.length} objects`));
+    panel.append(section(`${sels.length} objects`));
     if (movable) {
-      const a = (label4, title, how) => button3(label4, title, () => alignSelection(how));
-      panel2.append(
+      const a = (label4, title2, how) => button(label4, title2, () => alignSelection(how));
+      panel.append(
         section(
           "Align",
           h(
@@ -7567,12 +5835,12 @@ Continue?`)) return null;
           )
         )
       );
-      panel2.append(geometrySection(sels));
+      panel.append(geometrySection(sels));
       const styleable = sels.filter(
         (s) => !isZone(s.el) && s.el.localName !== "image"
       );
       if (styleable.length === sels.length) {
-        panel2.append(
+        panel.append(
           section(
             "Style",
             paintRow(sels, "fill"),
@@ -7580,15 +5848,15 @@ Continue?`)) return null;
           )
         );
       }
-      panel2.append(arrangeSection(sels));
+      panel.append(arrangeSection(sels));
     }
   }
   function renderProps() {
-    if (document.activeElement && panel2.contains(document.activeElement)) {
+    if (document.activeElement && panel.contains(document.activeElement)) {
       refreshOnBlur = true;
       return;
     }
-    clear(panel2);
+    clear(panel);
     if (!ed.model) return;
     if (ed.selection.length === 0) renderSlidePanel();
     else if (ed.selection.length === 1) renderObjectPanel(ed.selection[0]);
@@ -7598,14 +5866,481 @@ Continue?`)) return null;
   function initProps() {
     on("selection", renderProps);
     on("render", renderProps);
-    panel2.addEventListener("focusout", () => {
+    panel.addEventListener("focusout", () => {
       window.setTimeout(() => {
-        if (refreshOnBlur && !panel2.contains(document.activeElement)) {
+        if (refreshOnBlur && !panel.contains(document.activeElement)) {
           refreshOnBlur = false;
           renderProps();
         }
       }, 0);
     });
+  }
+
+  // src/ts/editor/find.ts
+  var panel2 = document.getElementById("find-panel");
+  var hits = [];
+  var active = -1;
+  var timer = 0;
+  var opts = { matchCase: false, wholeWord: false, regex: false };
+  var scope = "deck";
+  function el(sel) {
+    return panel2.querySelector(sel);
+  }
+  function slideFiles(s) {
+    const out = (s.sources ?? []).filter((src) => src.writable).map((src) => src.path);
+    if (s.srcPath) out.push(s.srcPath);
+    if (s.md?.path) out.push(s.md.path);
+    if (s.notes?.path) out.push(s.notes.path);
+    return out;
+  }
+  function files() {
+    const slides = scope === "slide" ? [currentSlide()].filter((s) => !!s) : ed.model?.slides ?? [];
+    return [...new Set(slides.flatMap(slideFiles))];
+  }
+  function slidesOf(hit) {
+    if (hit.kind === "deck") return hit.slide != null ? [hit.slide] : [];
+    return (ed.model?.slides ?? []).filter((s) => slideFiles(s).includes(hit.file)).map((s) => s.deckIndex);
+  }
+  function query() {
+    return el(".find-input").value;
+  }
+  function base() {
+    return { query: query(), files: files(), ...opts };
+  }
+  async function search() {
+    const q = query();
+    if (!q) {
+      hits = [];
+      renderResults();
+      return;
+    }
+    const result = await request({ action: "find", ...base() });
+    if (q !== query()) return;
+    if (!result.ok) {
+      hits = [];
+      renderResults(result.error ?? "search failed");
+      return;
+    }
+    hits = result.hits;
+    if (scope === "slide") {
+      const cur = currentSlide()?.deckIndex;
+      hits = hits.filter((h2) => h2.kind !== "deck" || h2.slide === cur);
+    }
+    active = Math.min(active, hits.length - 1);
+    renderResults();
+  }
+  function schedule() {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => void search(), 220);
+  }
+  function fileLabel(path) {
+    const root2 = ed.model?.projectDir ?? "";
+    return path.startsWith(root2) ? path.slice(root2.length + 1) : path;
+  }
+  function renderResults(error) {
+    const list3 = el(".find-results");
+    const status2 = el(".find-status");
+    clear(list3);
+    if (error) {
+      status2.textContent = error;
+      return;
+    }
+    if (!query()) {
+      status2.textContent = "";
+      return;
+    }
+    const slides = new Set(hits.flatMap(slidesOf));
+    status2.textContent = hits.length ? `${hits.length}${hits.length >= 500 ? "+" : ""} match${hits.length === 1 ? "" : "es"} on ${slides.size} slide${slides.size === 1 ? "" : "s"}` : "No matches";
+    let lastGroup = "";
+    hits.forEach((hit, i) => {
+      const on2 = slidesOf(hit);
+      const first = on2[0];
+      const slide = first != null ? ed.model?.slides[first] : null;
+      const group = slide != null ? `${first + 1} \xB7 ${slide.title ?? slide.id ?? ""}` : fileLabel(hit.file);
+      if (group !== lastGroup) {
+        list3.append(h("div", { class: "find-group" }, group));
+        lastGroup = group;
+      }
+      const where = hit.kind === "deck" ? "deck.py" : `${fileLabel(hit.file)}${on2.length > 1 ? ` \xB7 ${on2.length} slides` : ""}`;
+      const row3 = h(
+        "button",
+        {
+          type: "button",
+          class: `find-hit${i === active ? " on" : ""}`,
+          title: where,
+          onclick: () => goTo(i)
+        },
+        h(
+          "span",
+          { class: "find-snippet" },
+          hit.before,
+          h("mark", {}, hit.match),
+          hit.after
+        ),
+        h("span", { class: "find-where" }, where)
+      );
+      list3.append(row3);
+    });
+  }
+  function goTo(i) {
+    const hit = hits[i];
+    if (!hit) return;
+    active = i;
+    renderResults();
+    const on2 = slidesOf(hit);
+    const cur = currentSlide()?.deckIndex;
+    const target = cur != null && on2.includes(cur) ? cur : on2[0];
+    if (target != null) gotoSlide(target);
+    if (hit.kind === "svg" && hit.loc != null) {
+      const slide = currentSlide();
+      const key = slide?.sources?.findIndex((s) => s.path === hit.file) ?? -1;
+      const node = key >= 0 ? slideRoot()?.querySelector(`[data-ink="${key}:${hit.loc}"]`) : null;
+      if (node && selectable(node)) select([node]);
+    }
+    panel2.querySelector(".find-hit.on")?.scrollIntoView({ block: "nearest" });
+  }
+  async function replace(all) {
+    const q = query();
+    if (!q) return;
+    if (!all && active < 0) {
+      goTo(0);
+      return;
+    }
+    const replacement = el(".replace-input").value;
+    const hit = hits[active];
+    if (all && hits.length > 1) {
+      const n2 = hits.length;
+      if (!window.confirm(
+        `Replace ${n2} matches of \u201C${q}\u201D with \u201C${replacement}\u201D?`
+      )) {
+        return;
+      }
+    }
+    const result = await edit({
+      action: "replace",
+      replacement,
+      ...base(),
+      only: all ? void 0 : { file: hit.file, index: hit.index }
+    });
+    if (result.ok) {
+      const n2 = result.replaced;
+      toast(`Replaced ${n2} match${n2 === 1 ? "" : "es"}`);
+    }
+  }
+  function toggle(name, btn) {
+    opts[name] = !opts[name];
+    btn.classList.toggle("on", opts[name]);
+    schedule();
+  }
+  function build() {
+    const flag = (label4, title2, name) => {
+      const b = h(
+        "button",
+        { type: "button", class: "find-flag", title: title2 },
+        label4
+      );
+      b.addEventListener("click", () => toggle(name, b));
+      return b;
+    };
+    const find = h("input", {
+      type: "text",
+      class: "find-input",
+      placeholder: "Find in slides, notes and deck.py",
+      spellcheck: "false"
+    });
+    const repl = h("input", {
+      type: "text",
+      class: "replace-input",
+      placeholder: "Replace with",
+      spellcheck: "false"
+    });
+    const where = h("select", { class: "find-scope", title: "Where to look" });
+    where.append(
+      h("option", { value: "deck" }, "All slides"),
+      h("option", { value: "slide" }, "This slide")
+    );
+    where.addEventListener("change", () => {
+      scope = where.value === "slide" ? "slide" : "deck";
+      schedule();
+    });
+    find.addEventListener("input", () => {
+      active = -1;
+      schedule();
+    });
+    find.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (hits.length)
+          goTo(
+            (active + (e.shiftKey ? -1 : 1) + hits.length) % hits.length
+          );
+      }
+    });
+    repl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        void replace(e.ctrlKey || e.metaKey);
+      }
+    });
+    panel2.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") closeFind();
+    });
+    panel2.append(
+      h(
+        "div",
+        { class: "find-row" },
+        find,
+        flag("Aa", "Match case", "matchCase"),
+        flag("ab", "Whole words", "wholeWord"),
+        flag(".*", "Regular expression", "regex"),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "find-close",
+            title: "Close (Esc)",
+            onclick: closeFind
+          },
+          "\xD7"
+        )
+      ),
+      h(
+        "div",
+        { class: "find-row" },
+        repl,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            title: "Replace this match (Enter)",
+            onclick: () => void replace(false)
+          },
+          "Replace"
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            title: "Replace every match (Ctrl+Enter)",
+            onclick: () => void replace(true)
+          },
+          "All"
+        )
+      ),
+      h(
+        "div",
+        { class: "find-row" },
+        where,
+        h("span", { class: "find-status" })
+      ),
+      h("div", { class: "find-results" })
+    );
+  }
+  function openFind(replaceMode = false) {
+    if (!panel2.childElementCount) build();
+    panel2.hidden = false;
+    const input = el(
+      replaceMode ? ".replace-input" : ".find-input"
+    );
+    const picked = window.getSelection()?.toString().trim();
+    if (picked && !picked.includes("\n")) {
+      el(".find-input").value = picked;
+    }
+    input.focus();
+    input.select();
+    schedule();
+  }
+  function closeFind() {
+    panel2.hidden = true;
+  }
+  function initFind() {
+    document.getElementById("btn-find")?.addEventListener("click", () => openFind());
+    on("model", () => {
+      if (!panel2.hidden && query()) schedule();
+    });
+  }
+
+  // src/ts/editor/grid.ts
+  var view = document.getElementById("grid-view");
+  var list2 = document.getElementById("grid-list");
+  var sizeInput = document.getElementById("grid-size");
+  var thumbs2 = new Thumbs();
+  var dragFrom2 = null;
+  function toggleGrid(on2 = view.hidden === true) {
+    view.hidden = !on2;
+    document.body.classList.toggle("grid-mode", on2);
+    document.getElementById("btn-grid")?.classList.toggle("on", on2);
+    if (on2) {
+      ed.focus = "sorter";
+      renderGrid();
+      view.focus();
+    } else {
+      ed.focus = "canvas";
+      emit("slide");
+    }
+  }
+  function open2(i) {
+    ed.slideSelection.clear();
+    toggleGrid(false);
+    gotoSlide(i);
+  }
+  function renderGrid() {
+    if (view.hidden) return;
+    clear(list2);
+    thumbs2.begin();
+    const slides = ed.model?.slides ?? [];
+    slides.forEach((slide, i) => {
+      const item = h(
+        "div",
+        {
+          class: `grid-item${i === ed.current ? " active" : ""}${ed.slideSelection.has(i) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
+          draggable: ed.model?.deckEditable ? "true" : null,
+          "data-index": i
+        },
+        thumbs2.thumb(slide),
+        h(
+          "div",
+          { class: "grid-caption" },
+          h("span", { class: "grid-num" }, String(i + 1)),
+          h(
+            "span",
+            { class: "grid-title" },
+            slide.title ?? slide.id ?? slide.src
+          ),
+          slide.animations.length ? h(
+            "span",
+            {
+              class: "grid-badge",
+              title: `${slide.animations.length} animation(s)`
+            },
+            "\u2726"
+          ) : null
+        )
+      );
+      item.addEventListener("click", (e) => {
+        pickSlide(i, e);
+        ed.focus = "sorter";
+      });
+      item.addEventListener("dblclick", () => open2(i));
+      item.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (!ed.slideSelection.has(i)) {
+          ed.slideSelection.clear();
+          gotoSlide(i);
+        }
+        ed.focus = "sorter";
+        openSlideMenu(e.clientX, e.clientY, i);
+      });
+      item.addEventListener("dragstart", (e) => {
+        dragFrom2 = i;
+        e.dataTransfer?.setData("text/plain", String(i));
+        item.classList.add("dragging");
+      });
+      item.addEventListener("dragend", () => {
+        dragFrom2 = null;
+        list2.querySelectorAll(".drop-before, .drop-after").forEach((el2) => {
+          el2.classList.remove("drop-before", "drop-after");
+        });
+        item.classList.remove("dragging");
+      });
+      item.addEventListener("dragover", (e) => {
+        if (dragFrom2 == null) return;
+        e.preventDefault();
+        const r = item.getBoundingClientRect();
+        const after = e.clientX > r.left + r.width / 2;
+        item.classList.toggle("drop-after", after);
+        item.classList.toggle("drop-before", !after);
+      });
+      item.addEventListener("dragleave", () => {
+        item.classList.remove("drop-before", "drop-after");
+      });
+      item.addEventListener("drop", (e) => {
+        e.preventDefault();
+        if (dragFrom2 == null) return;
+        const r = item.getBoundingClientRect();
+        let to = e.clientX > r.left + r.width / 2 ? i + 1 : i;
+        if (dragFrom2 < to) to -= 1;
+        void moveSlide(dragFrom2, to);
+      });
+      list2.append(item);
+    });
+    thumbs2.end();
+    list2.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+  }
+  function columns() {
+    const items = [...list2.children];
+    if (items.length < 2) return 1;
+    const top = items[0].offsetTop;
+    const n2 = items.findIndex((el2) => el2.offsetTop !== top);
+    return n2 === -1 ? items.length : n2;
+  }
+  function onKey(e) {
+    if (view.hidden) return;
+    const target = e.target;
+    if (target.closest("input, textarea, select, #dialog, #find-panel")) return;
+    const n2 = ed.model?.slides.length ?? 0;
+    const move = (to) => {
+      e.preventDefault();
+      e.stopPropagation();
+      ed.slideSelection.clear();
+      gotoSlide(Math.max(0, Math.min(n2 - 1, to)));
+    };
+    switch (e.key) {
+      case "ArrowLeft":
+        move(ed.current - 1);
+        break;
+      case "ArrowRight":
+        move(ed.current + 1);
+        break;
+      case "ArrowUp":
+        move(ed.current - columns());
+        break;
+      case "ArrowDown":
+        move(ed.current + columns());
+        break;
+      case "Home":
+        move(0);
+        break;
+      case "End":
+        move(n2 - 1);
+        break;
+      case "Enter":
+        e.preventDefault();
+        e.stopPropagation();
+        open2(ed.current);
+        break;
+      case "Escape":
+        e.preventDefault();
+        e.stopPropagation();
+        toggleGrid(false);
+        break;
+    }
+  }
+  function setSize(px) {
+    view.style.setProperty("--grid-w", `${px}px`);
+    try {
+      localStorage.setItem("inkflow-editor-grid", String(px));
+    } catch {
+    }
+  }
+  function initGrid() {
+    document.getElementById("btn-grid")?.addEventListener("click", () => toggleGrid());
+    document.getElementById("grid-close")?.addEventListener("click", () => toggleGrid(false));
+    document.addEventListener("keydown", onKey, true);
+    let saved = 280;
+    try {
+      saved = Number(localStorage.getItem("inkflow-editor-grid")) || 280;
+    } catch {
+    }
+    sizeInput.value = String(saved);
+    setSize(saved);
+    sizeInput.addEventListener("input", () => setSize(Number(sizeInput.value)));
+    on("model", renderGrid);
+    on("slide", renderGrid);
+    on("slide-selection", renderGrid);
   }
 
   // src/ts/editor/richtext.ts
@@ -7674,8 +6409,8 @@ Continue?`)) return null;
         }
         if (!plain(el2, ["href", "title"])) throw new Unsupported(tag);
         const href = el2.getAttribute("href") ?? "";
-        const title = el2.getAttribute("title");
-        const t = title ? ` "${title.replace(/"/g, '\\"')}"` : "";
+        const title2 = el2.getAttribute("title");
+        const t = title2 ? ` "${title2.replace(/"/g, '\\"')}"` : "";
         return `[${inline(el2)}](${href.replace(/[()\s]/g, encodeURIComponent)}${t})`;
       }
       case "span": {
@@ -8044,12 +6779,12 @@ $$`;
       window.clearTimeout(timer5);
       timer5 = window.setTimeout(() => void send(), 450);
     });
-    const button4 = (name, title, fn) => h(
+    const button4 = (name, title2, fn) => h(
       "button",
       {
         type: "button",
         class: "fmt-btn",
-        title,
+        title: title2,
         onmousedown: (e) => {
           e.preventDefault();
           fn();
@@ -8756,12 +7491,12 @@ ${area2.value.slice(pos)}`;
     syncToolbar(document.querySelector(".rich-bar"), content2);
   }
   function richToolbar(content2, toSource) {
-    const btn = (label4, title, fn, cls = "") => h(
+    const btn = (label4, title2, fn, cls = "") => h(
       "button",
       {
         type: "button",
         class: `fmt-btn ${cls}`,
-        title,
+        title: title2,
         onmousedown: (e) => {
           e.preventDefault();
           fn();
@@ -8916,246 +7651,6 @@ ${area2.value.slice(pos)}`;
       "show",
       !!el2?.closest("td, th")
     );
-  }
-
-  // src/ts/editor/theme.ts
-  var SEMANTIC = [
-    ["bg", "Background"],
-    ["surface", "Surface (cards)"],
-    ["border", "Border"],
-    ["text", "Text"],
-    ["text_muted", "Muted text"],
-    ["heading", "Headings"],
-    ["accent", "Accent"],
-    ["accent_fg", "Text on accent"],
-    ["link", "Links"],
-    ["code_bg", "Code background"],
-    ["code_text", "Code text"],
-    ["blockquote", "Quote bar"]
-  ];
-  var NAMED = [
-    "red",
-    "orange",
-    "yellow",
-    "green",
-    "teal",
-    "blue",
-    "purple",
-    "pink",
-    "grey"
-  ];
-  var FONTS = [
-    ["body_font", "Body", "sans-serif"],
-    ["heading_font", "Headings", "sans-serif"],
-    ["mono_font", "Code", "monospace"]
-  ];
-  var info2 = null;
-  var content = null;
-  var cssVar = (name) => `--inkflow-${name.replace(/_/g, "-")}`;
-  function toHex(value) {
-    if (/^#[0-9a-f]{6}$/i.test(value)) return value.toLowerCase();
-    if (/^#[0-9a-f]{3}$/i.test(value)) {
-      return `#${[...value.slice(1)].map((c) => c + c).join("")}`.toLowerCase();
-    }
-    const probe = h("span", {});
-    probe.style.color = value;
-    document.body.append(probe);
-    const rgb = getComputedStyle(probe).color.match(/\d+/g) ?? ["0", "0", "0"];
-    probe.remove();
-    return `#${rgb.slice(0, 3).map((n2) => Number(n2).toString(16).padStart(2, "0")).join("")}`;
-  }
-  async function save2(body2, label4) {
-    await edit({ action: "theme-set", label: label4, ...body2 });
-  }
-  function setToken(group, name, value) {
-    void save2({ changes: { [group]: { [name]: value } } }, "Theme");
-  }
-  function colorCell(mode, name) {
-    const t = info2;
-    const own = t.overrides[mode][name];
-    const value = own ?? t.values[mode][name] ?? "#000000";
-    const input = h("input", {
-      type: "color",
-      value: toHex(value),
-      title: `${cssVar(name)} (${mode})${own ? " \xB7 changed" : ""}`
-    });
-    input.addEventListener("input", () => {
-      const showing = document.documentElement.dataset.theme === "light" ? "light" : "dark";
-      if (showing === mode) {
-        document.documentElement.style.setProperty(
-          cssVar(name),
-          input.value
-        );
-      }
-    });
-    input.addEventListener("change", () => setToken(mode, name, input.value));
-    return h(
-      "span",
-      { class: `theme-color${own ? " changed" : ""}` },
-      input,
-      own ? h(
-        "button",
-        {
-          type: "button",
-          class: "theme-reset",
-          title: "Back to the theme's colour",
-          onclick: () => setToken(mode, name, null)
-        },
-        "\u21BA"
-      ) : null
-    );
-  }
-  function colorsTable() {
-    const rows = [
-      h(
-        "div",
-        { class: "theme-row head" },
-        h("span", {}, ""),
-        h("span", {}, "Dark"),
-        h("span", {}, "Light")
-      )
-    ];
-    const add = (name, label4) => rows.push(
-      h(
-        "div",
-        { class: "theme-row" },
-        h("span", { class: "theme-label" }, label4),
-        colorCell("dark", name),
-        colorCell("light", name)
-      )
-    );
-    for (const [name, label4] of SEMANTIC) add(name, label4);
-    rows.push(h("div", { class: "theme-sub" }, "Named colours"));
-    for (const name of NAMED) add(name, name[0].toUpperCase() + name.slice(1));
-    return h("div", { class: "theme-colors" }, ...rows);
-  }
-  function fontRow(name, label4, generic) {
-    const t = info2;
-    const own = t.overrides.typography[name];
-    const value = own ?? t.values.typography[name] ?? generic;
-    const input = h("input", {
-      type: "text",
-      list: "theme-font-list",
-      value,
-      placeholder: generic,
-      spellcheck: "false"
-    });
-    input.addEventListener("change", () => {
-      const v = input.value.trim();
-      if (!v) {
-        setToken("typography", name, null);
-        return;
-      }
-      const withFallback = v.includes(",") || v === generic ? v : `${v}, ${generic}`;
-      setToken("typography", name, withFallback);
-    });
-    const sample = h("span", { class: "theme-font-sample" }, "Aa Bb 123");
-    sample.style.fontFamily = value;
-    return h(
-      "div",
-      { class: "theme-font" },
-      h("span", { class: "theme-label" }, label4),
-      input,
-      sample,
-      own ? h(
-        "button",
-        {
-          type: "button",
-          class: "theme-reset",
-          title: "Back to the theme's font",
-          onclick: () => setToken("typography", name, null)
-        },
-        "\u21BA"
-      ) : null
-    );
-  }
-  function render3() {
-    if (!content || !info2) return;
-    const t = info2;
-    clear(content);
-    const mode = h("select", {});
-    for (const [v, l] of [
-      ["", `Theme default (${t.themeMode})`],
-      ["dark", "Dark"],
-      ["light", "Light"]
-    ]) {
-      mode.append(h("option", { value: v }, l));
-    }
-    mode.value = t.deckMode ?? "";
-    mode.disabled = !ed.model?.deckEditable;
-    mode.addEventListener(
-      "change",
-      () => void save2({ mode: mode.value || null }, "Colour mode")
-    );
-    const size3 = h("input", {
-      type: "number",
-      min: 8,
-      max: 200,
-      value: t.fontSize ?? "",
-      placeholder: String(t.themeFontSize)
-    });
-    size3.disabled = !ed.model?.deckEditable;
-    size3.addEventListener("change", () => {
-      const n2 = parseInt(size3.value, 10);
-      void save2({ fontSize: Number.isFinite(n2) ? n2 : null }, "Font size");
-    });
-    const list3 = h("datalist", { id: "theme-font-list" });
-    for (const f of ["sans-serif", "serif", "monospace", ...t.fonts]) {
-      list3.append(h("option", { value: f }));
-    }
-    content.append(
-      h(
-        "div",
-        { class: "theme-top" },
-        h("label", {}, h("span", {}, "Colour mode"), mode),
-        h("label", {}, h("span", {}, "Base font size (px)"), size3)
-      ),
-      h("h3", {}, "Fonts"),
-      list3,
-      ...FONTS.map(([n2, l, g]) => fontRow(n2, l, g)),
-      h(
-        "p",
-        { class: "hint" },
-        "Fonts found in fonts/, the theme or this computer are embedded in the deck."
-      ),
-      h("h3", {}, "Colours"),
-      colorsTable(),
-      h(
-        "p",
-        { class: "hint" },
-        "Changes are written to styles.css (one marked block) and deck.py; \u21BA goes back to the theme."
-      )
-    );
-  }
-  async function refresh() {
-    const result = await request({ action: "theme-get" });
-    if (!result.ok) return;
-    info2 = result.theme;
-    render3();
-  }
-  async function openTheme() {
-    content = h(
-      "div",
-      { class: "theme-body" },
-      h("p", { class: "hint" }, "Loading\u2026")
-    );
-    openDialog("Theme", content, {
-      hint: "Colours, fonts and size for the whole deck",
-      onClose: () => {
-        content = null;
-        document.documentElement.removeAttribute("style");
-      }
-    });
-    await refresh();
-  }
-  function initTheme() {
-    document.getElementById("btn-theme-panel")?.addEventListener("click", () => {
-      void openTheme();
-    });
-    on("model", () => {
-      document.documentElement.removeAttribute("style");
-      if (content) void refresh();
-    });
   }
 
   // src/ts/editor/toolbar.ts
@@ -9461,6 +7956,1663 @@ ${area2.value.slice(pos)}`;
     updateTools();
   }
 
+  // src/ts/editor/canvasmenu.ts
+  var menu3 = document.getElementById("context-menu");
+  var at = { x: 0, y: 0 };
+  function sep() {
+    return h("div", { class: "menu-sep" });
+  }
+  function title(text) {
+    return h("div", { class: "menu-title" }, text);
+  }
+  function objectMenu() {
+    const sels = ed.selection.filter((s) => canTransform(s.el));
+    const one = sels.length === 1 ? sels[0] : null;
+    const el2 = one?.el ?? null;
+    const items = [];
+    if (el2) {
+      if (canTypeInto(el2)) {
+        items.push(menuItem("Type text into it", () => void typeInto(el2)));
+      } else if (isZone(el2)) {
+        items.push(menuItem("Edit text", () => emit("edit-zone")));
+      } else if (el2.localName === "text") {
+        items.push(menuItem("Edit text", () => emit("edit-text")));
+      } else if (el2.localName === "g") {
+        items.push(
+          menuItem(
+            "Enter group",
+            () => enterGroup(el2)
+          )
+        );
+      }
+      if (pictureOf(el2)) {
+        items.push(menuItem("Crop", () => void startCrop(one)));
+      }
+      if (items.length) items.push(sep());
+    }
+    items.push(
+      menuItem("Cut", () => cut()),
+      menuItem("Copy", () => copy()),
+      menuItem("Paste", () => void pasteFromClipboard()),
+      menuItem("Duplicate", () => void duplicateSelection(), !sels.length),
+      menuItem("Delete", () => void deleteSelection()),
+      sep(),
+      menuItem("Bring to front", () => void order("front"), !sels.length),
+      menuItem("Bring forward", () => void order("forward"), !sels.length),
+      menuItem("Send backward", () => void order("backward"), !sels.length),
+      menuItem("Send to back", () => void order("back"), !sels.length)
+    );
+    if (sels.length > 1) {
+      items.push(
+        sep(),
+        menuItem("Group", () => void groupSelection()),
+        title("Align"),
+        ...[
+          ["left", "Left edges"],
+          ["center", "Centres (horizontally)"],
+          ["right", "Right edges"],
+          ["top", "Top edges"],
+          ["middle", "Middles (vertically)"],
+          ["bottom", "Bottom edges"]
+        ].map(([how, label4]) => menuItem(label4, () => alignSelection(how)))
+      );
+    } else if (el2?.localName === "g") {
+      items.push(
+        sep(),
+        menuItem("Ungroup", () => void ungroupSelection())
+      );
+    }
+    if (el2 && one) {
+      const src = sourceOf(one.key);
+      items.push(
+        sep(),
+        menuItem(
+          isHidden(el2) ? "Show" : "Hide",
+          () => void toggleHidden2(el2)
+        ),
+        menuItem(
+          el2.hasAttribute("data-ink-locked") ? "Unlock" : "Lock",
+          () => void toggleLocked(el2)
+        )
+      );
+      if (src) {
+        const name = src.rel.split("/").pop() ?? src.rel;
+        items.push(
+          menuItem(`Open ${name} in\u2026`, () => {
+            void openMenu(src.path, at.x, at.y);
+          })
+        );
+      }
+    }
+    return items;
+  }
+  function slideMenu() {
+    const slide = currentSlide();
+    const editable = !!ed.model?.deckEditable;
+    const i = slide?.deckIndex ?? ed.current;
+    return [
+      menuItem("Paste", () => void pasteFromClipboard()),
+      menuItem("Select all", () => selectAll()),
+      sep(),
+      title("Slide"),
+      menuItem(
+        "New slide after\u2026",
+        () => void openGallery({ mode: "insert", after: ed.current }),
+        !editable
+      ),
+      menuItem(
+        "Change layout\u2026",
+        () => {
+          const parent = document.querySelector("#slide-host svg")?.getAttribute("inkflow:parent") ?? null;
+          void openGallery({ mode: "change", current: parent });
+        },
+        !editable
+      ),
+      menuItem(
+        "Duplicate slide",
+        () => void duplicateSlide(ed.current),
+        !editable
+      ),
+      menuItem(
+        slide?.visible === false ? "Show slide" : "Hide slide",
+        () => void edit({
+          action: "slide",
+          op: "hide",
+          slide: i,
+          hidden: slide?.visible !== false
+        }),
+        !editable
+      ),
+      menuItem("Delete slide", () => void deleteSlide(ed.current), !editable)
+    ];
+  }
+  function onContextMenu(e) {
+    const target = e.target;
+    if (e.shiftKey || target.closest("input, textarea, select, [contenteditable]")) {
+      return;
+    }
+    e.preventDefault();
+    ed.focus = "canvas";
+    at = { x: e.clientX, y: e.clientY };
+    const hit = pick(e.clientX, e.clientY);
+    if (hit) {
+      if (!ed.selection.some((s) => s.el === hit)) select([hit]);
+    } else {
+      clearSelection();
+    }
+    clear(menu3);
+    menu3.append(...hit ? objectMenu() : slideMenu());
+    showMenu(e.clientX, e.clientY);
+  }
+  function initCanvasMenu() {
+    document.getElementById("canvas")?.addEventListener("contextmenu", onContextMenu);
+  }
+
+  // src/ts/editor/context.ts
+  var timer2 = 0;
+  function snapshot2() {
+    const slide = currentSlide();
+    const visible = ed.model?.slides.filter((s) => s.visible).length ?? 0;
+    return {
+      deck: ed.model?.deckPath,
+      slide: slide && {
+        number: (slide.visibleIndex ?? -1) + 1 || null,
+        total: visible,
+        deckIndex: slide.deckIndex,
+        id: slide.id ?? slide.explicitId,
+        title: slide.title,
+        svg: slide.srcRel,
+        sharedLayout: slide.srcShared,
+        md: slide.md?.rel ?? (slide.md ? "inline in deck.py" : null),
+        notes: slide.notes.rel
+      },
+      step: ed.step,
+      layoutMode: ed.layoutMode,
+      selection: ed.selection.map((s) => {
+        const box = slideBox(s.el);
+        const text = (s.el.textContent ?? "").replace(/\s+/g, " ").trim();
+        return {
+          id: s.el.getAttribute("id"),
+          tag: s.el.localName,
+          zone: isZone(s.el) ? zoneName(s.el) : null,
+          file: sourceOf(s.key)?.rel,
+          locator: s.loc,
+          box: box && {
+            x: Math.round(box.x),
+            y: Math.round(box.y),
+            width: Math.round(box.width),
+            height: Math.round(box.height)
+          },
+          text: text.slice(0, 200) || null
+        };
+      })
+    };
+  }
+  function report() {
+    window.clearTimeout(timer2);
+    timer2 = window.setTimeout(() => {
+      sendRaw({ type: "editor-context", context: snapshot2() });
+    }, 250);
+  }
+  function initContext() {
+    on("selection", report);
+    on("slide", report);
+    on("model", report);
+    on("step", report);
+    onCommand((msg) => {
+      if (msg.command === "goto") {
+        const n2 = Number(msg.slide);
+        const slides = ed.model?.slides ?? [];
+        const target = slides.find((s) => s.visibleIndex === n2 - 1);
+        if (target) gotoSlide(target.deckIndex);
+      } else if (msg.command === "select") {
+        const ids = msg.ids ?? [];
+        const svg = slideRoot();
+        if (!svg) return;
+        const els = ids.map((id) => svg.querySelector(`[id="${CSS.escape(id)}"]`)).filter(
+          (el2) => el2 instanceof SVGGraphicsElement
+        );
+        enterGroup(null);
+        select(els);
+        emit("flash");
+      }
+    });
+  }
+
+  // src/ts/editor/dialog.ts
+  var host3 = document.getElementById("dialog");
+  var onClose = null;
+  function openDialog(title2, body2, opts2 = {}) {
+    closeDialog();
+    onClose = opts2.onClose ?? null;
+    const box = h(
+      "div",
+      { class: `dialog-box${opts2.wide ? " wide" : ""}`, role: "dialog" },
+      h(
+        "div",
+        { class: "dialog-head" },
+        h("h2", {}, title2),
+        opts2.hint ? h("span", { class: "hint" }, opts2.hint) : null,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "dialog-close",
+            title: "Close (Esc)",
+            onclick: () => closeDialog()
+          },
+          "\xD7"
+        )
+      ),
+      h("div", { class: "dialog-body" }, body2)
+    );
+    host3.append(box);
+    host3.classList.add("open");
+    return box;
+  }
+  function closeDialog() {
+    if (!host3.classList.contains("open")) return;
+    host3.classList.remove("open");
+    clear(host3);
+    const fn = onClose;
+    onClose = null;
+    fn?.();
+  }
+  function dialogOpen() {
+    return host3.classList.contains("open");
+  }
+  function initDialog() {
+    host3.addEventListener("pointerdown", (e) => {
+      if (e.target === host3) closeDialog();
+    });
+    document.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key === "Escape" && dialogOpen()) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeDialog();
+        }
+      },
+      true
+    );
+    host3.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") e.stopPropagation();
+    });
+  }
+
+  // src/ts/editor/decks.ts
+  var menu4 = document.getElementById("context-menu");
+  var button2 = document.getElementById("btn-deck");
+  function baseName(path) {
+    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
+  }
+  function join(dir, name) {
+    return `${dir.replace(/[\\/]+$/, "")}/${name}`;
+  }
+  function slug(text) {
+    return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "my-deck";
+  }
+  function renderButton() {
+    const dir = ed.model?.projectDir;
+    button2.textContent = `${dir ? baseName(dir) : "deck"} \u25BE`;
+    button2.title = dir ? `${dir}
+Decks: new, open, recent` : "Decks";
+  }
+  async function info() {
+    const res = await request({ action: "project-info" });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot read the deck's folder", "error");
+      return null;
+    }
+    return res;
+  }
+  async function openMenu2() {
+    const data = await info();
+    if (!data) return;
+    clear(menu4);
+    menu4.append(
+      menuItem("New deck\u2026", () => newDeckDialog(data)),
+      menuItem("Open deck\u2026", () => openDeckDialog(data))
+    );
+    if (data.recent.length) {
+      menu4.append(h("div", { class: "menu-title" }, "Recent decks"));
+      for (const path of data.recent) {
+        const dir = path.replace(/[\\/]deck\.py$/, "");
+        const item = menuItem(baseName(dir), () => void openDeck(path));
+        item.title = dir;
+        menu4.append(item);
+      }
+    }
+    const r = button2.getBoundingClientRect();
+    showMenu(r.left, r.bottom + 4);
+  }
+  async function openDeck(path) {
+    const res = await request({ action: "open-deck", path });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot open that deck", "error");
+      return false;
+    }
+    closeDialog();
+    toast(
+      `Opening ${baseName(String(res.deck ?? path).replace(/[\\/]deck\.py$/, ""))}\u2026`
+    );
+    return true;
+  }
+  function folderPicker(start, onChange) {
+    let folder = null;
+    const path = h("input", {
+      type: "text",
+      class: "folder-path",
+      spellcheck: "false"
+    });
+    const list3 = h("div", { class: "folder-list" });
+    const where = h("div", { class: "hint folder-where" });
+    const go = async (target) => {
+      const res = await request({ action: "browse", path: target });
+      if (!res.ok) {
+        where.textContent = res.error ?? "Cannot open that folder";
+        return;
+      }
+      folder = res;
+      path.value = folder.path;
+      clear(list3);
+      if (folder.parent) {
+        list3.append(
+          h(
+            "button",
+            {
+              type: "button",
+              class: "folder up",
+              onclick: () => void go(folder?.parent ?? "")
+            },
+            "\u2191 .."
+          )
+        );
+      }
+      for (const name of folder.dirs) {
+        list3.append(
+          h(
+            "button",
+            {
+              type: "button",
+              class: "folder",
+              onclick: () => void go(join(folder?.path ?? "", name))
+            },
+            `\u{1F4C1} ${name}`
+          )
+        );
+      }
+      if (!folder.dirs.length && !folder.parent) {
+        list3.append(h("p", { class: "hint" }, "No folders here."));
+      }
+      where.textContent = folder.repo ? `In the git repository at ${folder.repo}` : "Not in a git repository";
+      onChange(folder);
+    };
+    path.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        void go(path.value);
+      }
+    });
+    const el2 = h(
+      "div",
+      { class: "folder-picker" },
+      h(
+        "div",
+        { class: "folder-bar" },
+        path,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            title: "Your home folder",
+            onclick: () => void go(folder?.home ?? "~")
+          },
+          "Home"
+        )
+      ),
+      list3,
+      where
+    );
+    void go(start);
+    return { el: el2, current: () => folder };
+  }
+  function newDeckDialog(data) {
+    const title2 = h("input", {
+      type: "text",
+      value: "My presentation"
+    });
+    const name = h("input", {
+      type: "text",
+      value: data.name
+    });
+    let nameEdited = false;
+    name.addEventListener("input", () => {
+      nameEdited = true;
+      update();
+    });
+    title2.addEventListener("input", () => {
+      if (!nameEdited) name.value = slug(title2.value);
+      update();
+    });
+    let look = data.themes.some((t) => t.id === "current") ? "current" : "starter";
+    const looks = h(
+      "div",
+      { class: "look-list" },
+      ...data.themes.map((t) => {
+        const radio = h("input", {
+          type: "radio",
+          name: "deck-look",
+          value: t.id
+        });
+        radio.checked = t.id === look;
+        radio.addEventListener("change", () => {
+          look = t.id;
+        });
+        return h(
+          "label",
+          { class: "look" },
+          radio,
+          h(
+            "span",
+            { class: "look-text" },
+            h("strong", {}, t.label),
+            h("span", { class: "hint" }, t.description)
+          )
+        );
+      })
+    );
+    const git2 = h("input", { type: "checkbox" });
+    git2.checked = true;
+    git2.addEventListener("change", () => update());
+    const gitRow = h(
+      "label",
+      { class: "check-row" },
+      git2,
+      "Create a git repository for this deck"
+    );
+    const gitNote = h("p", { class: "hint" });
+    const lfs = h("input", { type: "checkbox" });
+    lfs.checked = data.lfs;
+    const lfsRow = h(
+      "label",
+      { class: "check-row" },
+      lfs,
+      "Store videos, images and fonts with Git LFS"
+    );
+    const lfsNote = h(
+      "p",
+      { class: "hint" },
+      data.lfs ? "Untick for git only: media is kept in git itself, fine for a small repository." : "git-lfs is not installed, so this deck uses git only (its .gitattributes says so; install git-lfs to switch later)."
+    );
+    const full = h("p", { class: "hint full-path" });
+    const picker = folderPicker(data.parent, () => update());
+    function update() {
+      const folder = picker.current();
+      const parent = folder?.path ?? data.parent;
+      full.textContent = `New deck: ${join(parent, name.value || "\u2026")}`;
+      const inRepo = !!folder?.repo;
+      gitRow.hidden = inRepo || !data.git;
+      lfsRow.hidden = !data.git || !inRepo && !git2.checked;
+      lfsNote.hidden = lfsRow.hidden;
+      gitNote.textContent = inRepo ? `It becomes a new folder of the git repository at ${folder?.repo}, versioned with it.` : data.git ? "" : "git is not installed, so the deck gets no repository.";
+    }
+    const create = h(
+      "button",
+      { type: "button", class: "pbtn primary" },
+      "Create and open"
+    );
+    create.addEventListener("click", async () => {
+      const folder = picker.current();
+      if (!folder || !name.value.trim()) {
+        toast("Choose a folder and a name for the deck", "error");
+        return;
+      }
+      create.disabled = true;
+      create.textContent = "Creating\u2026";
+      const res = await request({
+        action: "new-deck",
+        path: join(folder.path, name.value.trim()),
+        title: title2.value,
+        theme: look,
+        git: !folder.repo && git2.checked,
+        lfs: lfs.checked
+      });
+      create.disabled = false;
+      create.textContent = "Create and open";
+      if (!res.ok) {
+        toast(res.error ?? "Could not create the deck", "error");
+        return;
+      }
+      closeDialog();
+      toast(`Created ${name.value.trim()}; opening it\u2026`, "ok");
+    });
+    openDialog(
+      "New deck",
+      h(
+        "div",
+        { class: "deck-form" },
+        h(
+          "label",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Title"),
+          title2
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Look"),
+          looks
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Where"),
+          h(
+            "div",
+            {},
+            picker.el,
+            h(
+              "label",
+              { class: "field inline" },
+              h("span", { class: "field-label" }, "Folder name"),
+              name
+            ),
+            full,
+            gitRow,
+            gitNote,
+            lfsRow,
+            lfsNote
+          )
+        ),
+        h("div", { class: "btn-row end" }, create)
+      ),
+      { wide: true }
+    );
+    update();
+    title2.select();
+  }
+  function openDeckDialog(data) {
+    const open3 = h(
+      "button",
+      { type: "button", class: "pbtn primary", disabled: true },
+      "Open this deck"
+    );
+    const picker = folderPicker(
+      data.current.replace(/[\\/][^\\/]*$/, ""),
+      (f) => {
+        open3.disabled = !f.isDeck;
+        open3.textContent = f.isDeck ? `Open ${baseName(f.path)}` : "No deck.py in this folder";
+      }
+    );
+    open3.addEventListener("click", () => {
+      const f = picker.current();
+      if (f?.isDeck) void openDeck(join(f.path, "deck.py"));
+    });
+    openDialog(
+      "Open deck",
+      h(
+        "div",
+        { class: "deck-form" },
+        h("p", { class: "hint" }, "Go to a folder with a deck.py in it."),
+        picker.el,
+        h("div", { class: "btn-row end" }, open3)
+      ),
+      { wide: true }
+    );
+  }
+  function initDecks() {
+    button2.addEventListener("click", () => void openMenu2());
+    on("model", renderButton);
+    renderButton();
+  }
+
+  // src/ts/editor/exportdlg.ts
+  var FORMATS = [
+    {
+      format: "html",
+      title: "Web page",
+      text: "A folder with index.html and the deck's images and videos. Opens offline in any browser, or upload it to any web host.",
+      placeholder: () => "build"
+    },
+    {
+      format: "single",
+      title: "Single HTML file",
+      text: "Everything in one file, images included: easy to email or share. Larger than the folder.",
+      placeholder: (stem) => `${stem}.html`
+    },
+    {
+      format: "pdf",
+      title: "PDF",
+      text: "One page per slide, every build step shown. Needs Chromium or Chrome on this computer.",
+      placeholder: (stem) => `${stem}.pdf`
+    }
+  ];
+  function size(bytes) {
+    if (bytes > 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
+    return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+  }
+  function option(f, stem) {
+    const output = h("input", {
+      type: "text",
+      placeholder: f.placeholder(stem),
+      spellcheck: "false",
+      title: "Where to save it, relative to deck.py"
+    });
+    const status2 = h("div", { class: "export-status" });
+    const go = h("button", { type: "button", class: "pbtn primary" }, "Export");
+    go.addEventListener("click", async () => {
+      go.disabled = true;
+      status2.textContent = f.format === "pdf" ? "Rendering pages\u2026" : "Building\u2026";
+      status2.className = "export-status busy";
+      const result = await request({
+        action: "export",
+        format: f.format,
+        output: output.value.trim() || null
+      });
+      go.disabled = false;
+      if (!result.ok) {
+        status2.className = "export-status error";
+        status2.textContent = result.error ?? "export failed";
+        return;
+      }
+      const r = result;
+      status2.className = "export-status done";
+      status2.replaceChildren(
+        h("span", {}, `Saved to ${r.rel} \xB7 ${size(r.size)}`),
+        h(
+          "a",
+          { href: r.download, class: "pbtn", download: "" },
+          f.format === "html" ? "Download .zip" : "Download"
+        )
+      );
+    });
+    return h(
+      "div",
+      { class: "export-option" },
+      h(
+        "div",
+        { class: "export-text" },
+        h("strong", {}, f.title),
+        h("p", { class: "hint" }, f.text)
+      ),
+      h("div", { class: "export-row" }, output, go),
+      status2
+    );
+  }
+  function openExport() {
+    const stem = ed.model?.deckPath.split(/[\\/]/).pop()?.replace(/\.py$/, "") ?? "deck";
+    openDialog(
+      "Export",
+      h(
+        "div",
+        { class: "export-body" },
+        ...FORMATS.map((f) => option(f, stem))
+      ),
+      { hint: "Saved next to deck.py; the paths can be changed" }
+    );
+  }
+  function initExport() {
+    document.getElementById("btn-export")?.addEventListener("click", openExport);
+  }
+
+  // src/ts/editor/git.ts
+  var menu5 = document.getElementById("context-menu");
+  var button3 = document.getElementById("btn-git");
+  var label2 = button3.querySelector(".git-label");
+  var badge = button3.querySelector(".git-badge");
+  var status = { repo: false, git: false };
+  function render2() {
+    button3.hidden = !status.git;
+    if (!status.repo) {
+      label2.textContent = "Git";
+      badge.hidden = true;
+      button3.title = "Not versioned: create a git repository for this deck";
+      return;
+    }
+    label2.textContent = status.branch ?? `@${status.detached ?? "?"}`;
+    const n2 = status.changes?.length ?? 0;
+    const lfsIssues = lfsFiles().length;
+    button3.classList.toggle("warn", lfsIssues > 0);
+    badge.hidden = n2 === 0 && lfsIssues === 0;
+    badge.textContent = n2 ? String(n2) : "!";
+    const sync = [
+      status.ahead ? `${status.ahead} to push` : "",
+      status.behind ? `${status.behind} to pull` : ""
+    ].filter(Boolean).join(", ");
+    button3.title = [
+      status.branch ? `Branch ${status.branch}` : `Viewing ${status.detached}`,
+      n2 ? `${n2} changed file${n2 === 1 ? "" : "s"}` : "No changes",
+      sync,
+      lfsIssues ? `${lfsIssues} media file${lfsIssues === 1 ? "" : "s"} not in Git LFS` : ""
+    ].filter(Boolean).join(" \xB7 ");
+  }
+  async function refreshGit() {
+    if (!connected()) return status;
+    const res = await request({ action: "git", op: "status" });
+    if (res.ok && res.git) status = res.git;
+    render2();
+    return status;
+  }
+  var REWRITES = /* @__PURE__ */ new Set([
+    "discard",
+    "pull",
+    "switch",
+    "view",
+    "revert",
+    "restore",
+    "create-branch"
+  ]);
+  var NOTICE_KEY = "inkflow-git-undo-notice";
+  var noticeShown = false;
+  function undoNoticeDue() {
+    try {
+      return sessionStorage.getItem(NOTICE_KEY) !== "1" && !noticeShown;
+    } catch {
+      return !noticeShown;
+    }
+  }
+  function undoNoticeShown() {
+    noticeShown = true;
+    try {
+      sessionStorage.setItem(NOTICE_KEY, "1");
+    } catch {
+    }
+  }
+  var UNDO_NOTICE = "Note: git changes the deck's files on disk, so the editor's undo and redo history is cleared afterwards (Ctrl+Z cannot go back past this point). You are told this once per session.";
+  async function git(op, args = {}, question = "") {
+    const notice = REWRITES.has(op) && undoNoticeDue();
+    if (question || notice) {
+      const text = [question, notice ? UNDO_NOTICE : ""].filter(Boolean).join("\n\n");
+      if (!confirm(question ? text : `${text}
+
+Continue?`)) return null;
+      if (notice) undoNoticeShown();
+    }
+    button3.classList.add("busy");
+    const res = await request({ action: "git", op, ...args });
+    button3.classList.remove("busy");
+    if (res.git) {
+      status = res.git;
+      render2();
+    }
+    if (!res.ok) {
+      toast(res.error ?? `git ${op} failed`, "error");
+      return null;
+    }
+    if (typeof res.message === "string") toast(res.message, "ok");
+    if (res.historyCleared) {
+      ed.canUndo = false;
+      ed.canRedo = false;
+      emit("history");
+    }
+    return res;
+  }
+  async function openMenu3() {
+    await refreshGit();
+    clear(menu5);
+    if (!status.repo) {
+      menu5.append(
+        h("div", { class: "menu-title" }, "Not versioned"),
+        menuItem("Create a git repository", async () => {
+          if (await git("init"))
+            toast("This deck is now versioned with git", "ok");
+        }),
+        menuItem("Create a git repository (git only, no LFS)", async () => {
+          if (await git("init", { lfs: false }))
+            toast("This deck is now versioned with git", "ok");
+        })
+      );
+    } else {
+      const n2 = status.changes?.length ?? 0;
+      const deckChanges = (status.changes ?? []).filter((c) => c.inDeck);
+      const where = status.branch ? `On ${status.branch}` : `Viewing ${status.detached} (no branch)`;
+      menu5.append(
+        h(
+          "div",
+          { class: "menu-title" },
+          `${where} \xB7 ${n2 ? `${n2} change${n2 === 1 ? "" : "s"}` : "no changes"}`
+        )
+      );
+      if (status.last) {
+        menu5.append(
+          h(
+            "div",
+            { class: "menu-note" },
+            `Last: ${status.last.subject} (${status.last.when})`
+          )
+        );
+      }
+      const lfsCount = lfsFiles().length;
+      if (lfsCount) {
+        const item = menuItem(
+          `\u26A0 ${lfsCount} media file${lfsCount === 1 ? "" : "s"} not in Git LFS\u2026`,
+          () => lfsDialog()
+        );
+        item.classList.add("warn");
+        menu5.append(item);
+      } else if (status.lfs?.mode === "on" && !status.lfs.installed) {
+        menu5.append(
+          h(
+            "div",
+            { class: "menu-note warn" },
+            "git-lfs is not installed: this deck's media needs it"
+          )
+        );
+      }
+      menu5.append(
+        menuItem(
+          "Commit\u2026",
+          () => commitDialog(),
+          n2 === 0 || !status.branch
+        ),
+        menuItem(
+          status.ahead ? `Push (${status.ahead})` : "Push",
+          () => void git("push"),
+          !status.remotes?.length || !status.branch
+        ),
+        menuItem(
+          status.behind ? `Pull (${status.behind})` : "Pull",
+          () => void git("pull"),
+          !status.upstream
+        ),
+        menuItem(
+          "Discard changes\u2026",
+          () => discardDialog(),
+          deckChanges.length === 0
+        ),
+        menuItem(
+          "Undo last commit",
+          async () => {
+            if (await git(
+              "undo-commit",
+              {},
+              `Take back "${status.last?.subject}"? Its changes stay, uncommitted.`
+            ))
+              toast(
+                "Last commit taken back; its changes are kept",
+                "ok"
+              );
+          },
+          !status.canUndoCommit
+        ),
+        h("div", { class: "menu-sep" }),
+        menuItem(
+          status.branch ? "Branches\u2026" : "Back to a branch\u2026",
+          () => void branchesDialog(),
+          !status.hasCommits
+        ),
+        menuItem(
+          "History\u2026",
+          () => void historyDialog(),
+          !status.hasCommits
+        )
+      );
+    }
+    const r = button3.getBoundingClientRect();
+    showMenu(Math.max(8, r.right - 260), r.bottom + 4);
+  }
+  function lfsFiles() {
+    const l = status.lfs;
+    return l ? [...l.uncovered, ...l.unconverted] : [];
+  }
+  function size2(bytes) {
+    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${bytes} B`;
+  }
+  function lfsList(files2) {
+    return h(
+      "div",
+      { class: "git-files" },
+      ...files2.map(
+        (f) => h(
+          "div",
+          { class: "git-file" },
+          h("span", { class: "git-status" }, f.kind),
+          h("code", { class: "git-path" }, f.path),
+          h("span", { class: "hint git-size" }, size2(f.size))
+        )
+      )
+    );
+  }
+  function lfsDialog() {
+    const l = status.lfs;
+    if (!l) return;
+    const paths = lfsFiles().map((f) => f.path);
+    openDialog(
+      "Large files and Git LFS",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "p",
+          { class: "hint" },
+          "Git keeps a full copy of a video or image in every version, so the repository grows with each change. Git LFS stores them outside the history; a small repository can do without it."
+        ),
+        l.uncovered.length > 0 && h("h3", {}, "No Git LFS rule covers these"),
+        l.uncovered.length > 0 && lfsList(l.uncovered),
+        l.unconverted.length > 0 && h("h3", {}, "Committed before Git LFS was set up"),
+        l.unconverted.length > 0 && lfsList(l.unconverted),
+        !l.installed && h(
+          "p",
+          { class: "hint warn" },
+          "git-lfs is not installed on this computer: install it (git-lfs.com) to track files with it."
+        ),
+        h(
+          "p",
+          { class: "hint" },
+          "Tracking adds rules to the deck's .gitattributes and stages the files again as LFS files; commit to keep it. Earlier commits keep their full copies (git lfs migrate rewrites history, for everyone with a clone)."
+        ),
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              title: "Record in .gitattributes that this deck stores media in git itself; no more warnings",
+              onclick: async () => {
+                if (await git("lfs-off")) closeDialog();
+              }
+            },
+            "Use git without LFS"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              disabled: !l.installed,
+              onclick: async () => {
+                if (await git("lfs-track", { paths }))
+                  closeDialog();
+              }
+            },
+            "Track with Git LFS"
+          )
+        )
+      ),
+      { wide: true }
+    );
+  }
+  function fileRow(change, checked) {
+    const box = h("input", {
+      type: "checkbox",
+      value: change.path
+    });
+    box.checked = checked;
+    return h(
+      "label",
+      { class: `git-file${change.inDeck ? "" : " outside"}` },
+      box,
+      h("span", { class: `git-status s-${change.status}` }, change.status),
+      h("code", { class: "git-path" }, change.path)
+    );
+  }
+  function checkedPaths(list3) {
+    return [...list3.querySelectorAll("input:checked")].map(
+      (b) => b.value
+    );
+  }
+  function commitDialog() {
+    const changes = status.changes ?? [];
+    const message = h("textarea", {
+      class: "git-message",
+      rows: "3"
+    });
+    message.value = status.suggestedMessage ?? "Update slides";
+    const files2 = h(
+      "div",
+      { class: "git-files" },
+      ...changes.map((c) => fileRow(c, c.inDeck))
+    );
+    const outside = changes.some((c) => !c.inDeck);
+    const name = h("input", {
+      type: "text",
+      placeholder: "Your name"
+    });
+    const email = h("input", {
+      type: "email",
+      placeholder: "you@example.com"
+    });
+    const identity = status.identity ? null : h(
+      "div",
+      { class: "git-identity" },
+      h(
+        "p",
+        { class: "hint" },
+        "git needs to know who commits (kept in this repository only):"
+      ),
+      h("div", { class: "btn-row" }, name, email)
+    );
+    const run = async (push) => {
+      const paths = checkedPaths(files2);
+      const res = await git("commit", {
+        message: message.value,
+        paths,
+        ...identity ? { name: name.value, email: email.value } : {}
+      });
+      if (!res) return;
+      closeDialog();
+      if (push) await git("push");
+    };
+    const canPush = !!status.remotes?.length;
+    const changed2 = new Set(changes.map((c) => c.path));
+    const heavy = lfsFiles().filter((f) => changed2.has(f.path));
+    const lfsNote = heavy.length > 0 && h(
+      "p",
+      { class: "hint warn" },
+      `${heavy.length} of these ${heavy.length === 1 ? "is a media file" : "are media files"} git would store whole, not in Git LFS. `,
+      h(
+        "button",
+        {
+          type: "button",
+          class: "link-btn",
+          onclick: () => lfsDialog()
+        },
+        "Review\u2026"
+      )
+    );
+    message.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        void run(false);
+      }
+    });
+    openDialog(
+      "Commit",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "label",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Message"),
+          message
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Files"),
+          h(
+            "div",
+            {},
+            files2,
+            outside && h(
+              "p",
+              { class: "hint" },
+              "Files outside this deck are left out unless you tick them."
+            )
+          )
+        ),
+        lfsNote,
+        identity,
+        h(
+          "div",
+          { class: "btn-row end" },
+          canPush && h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => void run(true)
+            },
+            "Commit and push"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              title: "Ctrl+Enter",
+              onclick: () => void run(false)
+            },
+            "Commit"
+          )
+        )
+      ),
+      { wide: true, hint: status.branch ? `on ${status.branch}` : void 0 }
+    );
+    message.focus();
+    message.select();
+  }
+  function discardDialog() {
+    const changes = (status.changes ?? []).filter((c) => c.inDeck);
+    const files2 = h(
+      "div",
+      { class: "git-files" },
+      ...changes.map((c) => fileRow(c, true))
+    );
+    openDialog(
+      "Discard changes",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "p",
+          { class: "hint warn" },
+          "The ticked files go back to how they were in the last commit; new files are deleted. This cannot be undone."
+        ),
+        files2,
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn danger",
+              onclick: async () => {
+                const paths = checkedPaths(files2);
+                if (!paths.length) return;
+                if (await git("discard", { paths })) {
+                  closeDialog();
+                  toast(
+                    `Discarded changes to ${paths.length} file${paths.length === 1 ? "" : "s"}`,
+                    "ok"
+                  );
+                }
+              }
+            },
+            "Discard"
+          )
+        )
+      ),
+      { wide: true }
+    );
+  }
+  async function branchesDialog() {
+    const res = await git("branches");
+    if (!res) return;
+    const branches = res.branches;
+    const name = h("input", {
+      type: "text",
+      placeholder: "new-branch-name"
+    });
+    const create = async () => {
+      if (!name.value.trim()) return;
+      if (await git("create-branch", { name: name.value.trim() })) {
+        closeDialog();
+        toast(`Created and switched to ${name.value.trim()}`, "ok");
+      }
+    };
+    name.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        void create();
+      }
+    });
+    openDialog(
+      "Branches",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "div",
+          { class: "git-list" },
+          ...branches.map(
+            (b) => h(
+              "div",
+              { class: `git-row${b.current ? " current" : ""}` },
+              h("strong", {}, b.name),
+              h(
+                "span",
+                { class: "hint" },
+                b.current ? "current" : b.when
+              ),
+              !b.current && h(
+                "button",
+                {
+                  type: "button",
+                  class: "pbtn",
+                  onclick: async () => {
+                    if (await git("switch", {
+                      name: b.name
+                    })) {
+                      closeDialog();
+                      toast(
+                        `Switched to ${b.name}`,
+                        "ok"
+                      );
+                    }
+                  }
+                },
+                "Switch"
+              )
+            )
+          )
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "New branch"),
+          h(
+            "div",
+            { class: "btn-row" },
+            name,
+            h(
+              "button",
+              {
+                type: "button",
+                class: "pbtn primary",
+                onclick: create
+              },
+              "Create and switch"
+            )
+          )
+        ),
+        h(
+          "p",
+          { class: "hint" },
+          "Uncommitted changes come along to the branch you switch to; git refuses a switch that would overwrite them."
+        )
+      ),
+      { wide: true }
+    );
+  }
+  async function historyDialog() {
+    const res = await git("log");
+    if (!res) return;
+    const log = res.log;
+    const act = async (op, c, question, done) => {
+      if (await git(op, { sha: c.sha }, question)) {
+        closeDialog();
+        toast(done, "ok");
+      }
+    };
+    openDialog(
+      "History",
+      h(
+        "div",
+        { class: "git-form" },
+        log.length ? h(
+          "div",
+          { class: "git-list history" },
+          ...log.map(
+            (c) => h(
+              "div",
+              { class: `git-row${c.head ? " current" : ""}` },
+              h(
+                "div",
+                { class: "git-commit" },
+                h("strong", {}, c.subject),
+                h(
+                  "span",
+                  { class: "hint" },
+                  `${c.short} \xB7 ${c.author} \xB7 ${c.when}${c.refs.length ? ` \xB7 ${c.refs.join(", ")}` : ""}`
+                )
+              ),
+              h(
+                "div",
+                { class: "btn-row" },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    title: "Show the deck as it was then (switch back with Branches)",
+                    onclick: () => void act(
+                      "view",
+                      c,
+                      `Show the deck as it was at "${c.subject}"? Edits there are not on any branch until you create one.`,
+                      `Viewing ${c.short}; switch back to a branch from the git menu`
+                    )
+                  },
+                  "View"
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    title: "Make the deck's files what they were then, as uncommitted changes",
+                    onclick: () => void act(
+                      "restore",
+                      c,
+                      `Restore the deck's files to "${c.subject}"? Your current files are replaced (commit first to keep them).`,
+                      `Restored the deck to ${c.short}; commit to keep it`
+                    )
+                  },
+                  "Restore"
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    title: "A new commit that undoes this one",
+                    onclick: () => void act(
+                      "revert",
+                      c,
+                      `Undo "${c.subject}" with a new commit?`,
+                      `Reverted ${c.short}`
+                    )
+                  },
+                  "Revert"
+                )
+              )
+            )
+          )
+        ) : h("p", { class: "hint" }, "No commits touch this deck yet."),
+        h(
+          "p",
+          { class: "hint" },
+          "View: look at an old version (no branch). Restore: bring the deck back to it as changes you can commit. Revert: undo one commit with a new one."
+        )
+      ),
+      {
+        wide: true,
+        hint: status.scope ? `changes to ${status.scope}/` : void 0
+      }
+    );
+  }
+  var timer3 = 0;
+  function initGit() {
+    button3.addEventListener("click", () => void openMenu3());
+    on("model", () => {
+      window.clearTimeout(timer3);
+      timer3 = window.setTimeout(() => void refreshGit(), 600);
+    });
+  }
+
+  // src/ts/editor/notes.ts
+  var area = document.getElementById("notes-input");
+  var label3 = document.getElementById("notes-file");
+  var timer4 = 0;
+  var slideIndex = -1;
+  var sent = "";
+  var burst = "";
+  async function save() {
+    window.clearTimeout(timer4);
+    const slide = ed.model?.slides[slideIndex];
+    if (!slide || area.value === sent) return;
+    const before = sent;
+    sent = area.value;
+    const result = await edit(
+      {
+        action: "notes",
+        slide: slide.deckIndex,
+        text: area.value,
+        name: slide.id ?? "slide",
+        coalesce: burst
+      },
+      { retrying: true }
+    );
+    if (!result.ok) {
+      sent = before;
+      timer4 = window.setTimeout(() => void save(), 800);
+    }
+  }
+  function load() {
+    const slide = currentSlide();
+    if (!slide) return;
+    if (document.activeElement === area && slideIndex === slide.deckIndex)
+      return;
+    slideIndex = slide.deckIndex;
+    area.value = slide.notes.text;
+    sent = area.value;
+    label3.textContent = slide.notes.kind === "file" ? slide.notes.rel ?? "" : slide.notes.kind === "inline" ? "inline in deck.py" : "new notes file on first edit";
+  }
+  function initNotes() {
+    area.addEventListener("focus", () => {
+      burst = `notes-${Date.now()}`;
+    });
+    area.addEventListener("input", () => {
+      window.clearTimeout(timer4);
+      timer4 = window.setTimeout(() => void save(), 600);
+    });
+    area.addEventListener("blur", () => void save());
+    area.addEventListener("keydown", (e) => e.stopPropagation());
+    on("slide", () => {
+      void save().then(load);
+    });
+    on("model", load);
+  }
+
+  // src/ts/editor/theme.ts
+  var SEMANTIC = [
+    ["bg", "Background"],
+    ["surface", "Surface (cards)"],
+    ["border", "Border"],
+    ["text", "Text"],
+    ["text_muted", "Muted text"],
+    ["heading", "Headings"],
+    ["accent", "Accent"],
+    ["accent_fg", "Text on accent"],
+    ["link", "Links"],
+    ["code_bg", "Code background"],
+    ["code_text", "Code text"],
+    ["blockquote", "Quote bar"]
+  ];
+  var NAMED = [
+    "red",
+    "orange",
+    "yellow",
+    "green",
+    "teal",
+    "blue",
+    "purple",
+    "pink",
+    "grey"
+  ];
+  var FONTS = [
+    ["body_font", "Body", "sans-serif"],
+    ["heading_font", "Headings", "sans-serif"],
+    ["mono_font", "Code", "monospace"]
+  ];
+  var info2 = null;
+  var content = null;
+  var cssVar = (name) => `--inkflow-${name.replace(/_/g, "-")}`;
+  function toHex(value) {
+    if (/^#[0-9a-f]{6}$/i.test(value)) return value.toLowerCase();
+    if (/^#[0-9a-f]{3}$/i.test(value)) {
+      return `#${[...value.slice(1)].map((c) => c + c).join("")}`.toLowerCase();
+    }
+    const probe = h("span", {});
+    probe.style.color = value;
+    document.body.append(probe);
+    const rgb = getComputedStyle(probe).color.match(/\d+/g) ?? ["0", "0", "0"];
+    probe.remove();
+    return `#${rgb.slice(0, 3).map((n2) => Number(n2).toString(16).padStart(2, "0")).join("")}`;
+  }
+  async function save2(body2, label4) {
+    await edit({ action: "theme-set", label: label4, ...body2 });
+  }
+  function setToken(group, name, value) {
+    void save2({ changes: { [group]: { [name]: value } } }, "Theme");
+  }
+  function colorCell(mode, name) {
+    const t = info2;
+    const own = t.overrides[mode][name];
+    const value = own ?? t.values[mode][name] ?? "#000000";
+    const input = h("input", {
+      type: "color",
+      value: toHex(value),
+      title: `${cssVar(name)} (${mode})${own ? " \xB7 changed" : ""}`
+    });
+    input.addEventListener("input", () => {
+      const showing = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+      if (showing === mode) {
+        document.documentElement.style.setProperty(
+          cssVar(name),
+          input.value
+        );
+      }
+    });
+    input.addEventListener("change", () => setToken(mode, name, input.value));
+    return h(
+      "span",
+      { class: `theme-color${own ? " changed" : ""}` },
+      input,
+      own ? h(
+        "button",
+        {
+          type: "button",
+          class: "theme-reset",
+          title: "Back to the theme's colour",
+          onclick: () => setToken(mode, name, null)
+        },
+        "\u21BA"
+      ) : null
+    );
+  }
+  function colorsTable() {
+    const rows = [
+      h(
+        "div",
+        { class: "theme-row head" },
+        h("span", {}, ""),
+        h("span", {}, "Dark"),
+        h("span", {}, "Light")
+      )
+    ];
+    const add = (name, label4) => rows.push(
+      h(
+        "div",
+        { class: "theme-row" },
+        h("span", { class: "theme-label" }, label4),
+        colorCell("dark", name),
+        colorCell("light", name)
+      )
+    );
+    for (const [name, label4] of SEMANTIC) add(name, label4);
+    rows.push(h("div", { class: "theme-sub" }, "Named colours"));
+    for (const name of NAMED) add(name, name[0].toUpperCase() + name.slice(1));
+    return h("div", { class: "theme-colors" }, ...rows);
+  }
+  function fontRow(name, label4, generic) {
+    const t = info2;
+    const own = t.overrides.typography[name];
+    const value = own ?? t.values.typography[name] ?? generic;
+    const input = h("input", {
+      type: "text",
+      list: "theme-font-list",
+      value,
+      placeholder: generic,
+      spellcheck: "false"
+    });
+    input.addEventListener("change", () => {
+      const v = input.value.trim();
+      if (!v) {
+        setToken("typography", name, null);
+        return;
+      }
+      const withFallback = v.includes(",") || v === generic ? v : `${v}, ${generic}`;
+      setToken("typography", name, withFallback);
+    });
+    const sample = h("span", { class: "theme-font-sample" }, "Aa Bb 123");
+    sample.style.fontFamily = value;
+    return h(
+      "div",
+      { class: "theme-font" },
+      h("span", { class: "theme-label" }, label4),
+      input,
+      sample,
+      own ? h(
+        "button",
+        {
+          type: "button",
+          class: "theme-reset",
+          title: "Back to the theme's font",
+          onclick: () => setToken("typography", name, null)
+        },
+        "\u21BA"
+      ) : null
+    );
+  }
+  function render3() {
+    if (!content || !info2) return;
+    const t = info2;
+    clear(content);
+    const mode = h("select", {});
+    for (const [v, l] of [
+      ["", `Theme default (${t.themeMode})`],
+      ["dark", "Dark"],
+      ["light", "Light"]
+    ]) {
+      mode.append(h("option", { value: v }, l));
+    }
+    mode.value = t.deckMode ?? "";
+    mode.disabled = !ed.model?.deckEditable;
+    mode.addEventListener(
+      "change",
+      () => void save2({ mode: mode.value || null }, "Colour mode")
+    );
+    const size3 = h("input", {
+      type: "number",
+      min: 8,
+      max: 200,
+      value: t.fontSize ?? "",
+      placeholder: String(t.themeFontSize)
+    });
+    size3.disabled = !ed.model?.deckEditable;
+    size3.addEventListener("change", () => {
+      const n2 = parseInt(size3.value, 10);
+      void save2({ fontSize: Number.isFinite(n2) ? n2 : null }, "Font size");
+    });
+    const list3 = h("datalist", { id: "theme-font-list" });
+    for (const f of ["sans-serif", "serif", "monospace", ...t.fonts]) {
+      list3.append(h("option", { value: f }));
+    }
+    content.append(
+      h(
+        "div",
+        { class: "theme-top" },
+        h("label", {}, h("span", {}, "Colour mode"), mode),
+        h("label", {}, h("span", {}, "Base font size (px)"), size3)
+      ),
+      h("h3", {}, "Fonts"),
+      list3,
+      ...FONTS.map(([n2, l, g]) => fontRow(n2, l, g)),
+      h(
+        "p",
+        { class: "hint" },
+        "Fonts found in fonts/, the theme or this computer are embedded in the deck."
+      ),
+      h("h3", {}, "Colours"),
+      colorsTable(),
+      h(
+        "p",
+        { class: "hint" },
+        "Changes are written to styles.css (one marked block) and deck.py; \u21BA goes back to the theme."
+      )
+    );
+  }
+  async function refresh() {
+    const result = await request({ action: "theme-get" });
+    if (!result.ok) return;
+    info2 = result.theme;
+    render3();
+  }
+  async function openTheme() {
+    content = h(
+      "div",
+      { class: "theme-body" },
+      h("p", { class: "hint" }, "Loading\u2026")
+    );
+    openDialog("Theme", content, {
+      hint: "Colours, fonts and size for the whole deck",
+      onClose: () => {
+        content = null;
+        document.documentElement.removeAttribute("style");
+      }
+    });
+    await refresh();
+  }
+  function initTheme() {
+    document.getElementById("btn-theme-panel")?.addEventListener("click", () => {
+      void openTheme();
+    });
+    on("model", () => {
+      document.documentElement.removeAttribute("style");
+      if (content) void refresh();
+    });
+  }
+
   // src/ts/editor/main.ts
   var INITIAL_MODEL = __MODEL_JSON__;
   var INITIAL_SLIDES = __SLIDES_JSON__;
@@ -9527,7 +9679,7 @@ ${area2.value.slice(pos)}`;
     ed.error = INITIAL_ERROR;
     readHash();
     hooks.editText = editTextOf;
-    hooks.editZone = (zone, el2, at) => editZone(zone, el2, { at });
+    hooks.editZone = (zone, el2, at2) => editZone(zone, el2, { at: at2 });
     hooks.editingHost = editingHost;
     hooks.crop = (el2) => {
       const sel = ed.selection.find((s) => s.el === el2);
@@ -9550,6 +9702,7 @@ ${area2.value.slice(pos)}`;
     initTheme();
     initDecks();
     initGit();
+    initCanvasMenu();
     on("slide", () => {
       void finishTextEdit();
       render();

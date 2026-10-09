@@ -27,7 +27,11 @@ function inProject(path: string): boolean {
     return !!root && path.startsWith(`${root}/`);
 }
 
-async function openMenu(path: string, x: number, y: number): Promise<void> {
+export async function openMenu(
+    path: string,
+    x: number,
+    y: number,
+): Promise<void> {
     const res = await request({ action: "open-apps", path });
     if (!res.ok) {
         toast(res.error ?? "Cannot open this file", "error");

@@ -9,6 +9,7 @@ import {
     slideRoot,
     zoneName,
 } from "./canvas";
+import { initCanvasMenu } from "./canvasmenu";
 import { initContext } from "./context";
 import { isCropped, setCropMode, startCrop } from "./crop";
 import { initDecks } from "./decks";
@@ -131,6 +132,7 @@ function boot(): void {
     initTheme();
     initDecks();
     initGit();
+    initCanvasMenu();
 
     on("slide", () => {
         void finishTextEdit();

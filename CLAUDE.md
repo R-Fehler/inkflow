@@ -218,6 +218,8 @@ src/
                       shares sorter.ts's Thumbs cache class and slide menu), theme.ts,
                       find.ts, exportdlg.ts, openwith.ts ("Open ▾" in other programs),
                       decks.ts ("deck ▾": new/open/recent decks), git.ts (Git menu),
+                      canvasmenu.ts (right-click menu on the canvas; text fields and
+                      Shift+right-click keep the browser's),
                       dialog.ts (the one modal), connectors.ts (connection sites
                       and straight/elbow/curved routes, pure + tested)
     render/           the single-slide page behind `inkflow render`
