@@ -40,6 +40,7 @@ from inkflow.edit import (
 from inkflow.editor.context import write_context
 from inkflow.editor.model import build_model
 from inkflow.editor.session import EditError, EditorSession
+from inkflow.editor.svgops import file_hash
 from inkflow.enums import ColorMode
 from inkflow.fonts import embed_fonts_css
 from inkflow.loaders import load_deck_scripts, load_deck_styles
@@ -142,6 +143,7 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         # Collected, not printed, so records reach the TUI/browser without racing the
         # Live display. Floored at the lower surface level, then filtered per surface.
         with collect_logs(min(levels.console, levels.browser)) as entries:
+            deck_hash = file_hash(deck_path.read_bytes())
             deck = await asyncio.to_thread(load_deck, deck_path)
             project_dir = deck_path.parent
             # The editor build stamps source locators on every element; the
@@ -180,6 +182,8 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         _state["theme_dir"] = deck.theme.asset_dir()
         _editor["deck"] = deck
         _editor["model"] = model
+        if _editor["session"] is not None:
+            _editor["session"].built_hash = deck_hash
         _state["error"] = None
         _state["logs"] = browser_logs
         if slides:

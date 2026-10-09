@@ -190,15 +190,23 @@ export function editZoneText(zone: string, box: DOMRect): void {
     const send = async () => {
         window.clearTimeout(timer);
         if (area.value === sent) return;
+        const before = sent;
         sent = area.value;
-        await edit({
-            action: "zone-text",
-            slide: deckIndex,
-            zone,
-            text: area.value,
-            origin,
-            coalesce,
-        });
+        const result = await edit(
+            {
+                action: "zone-text",
+                slide: deckIndex,
+                zone,
+                text: area.value,
+                origin,
+                coalesce,
+            },
+            { retrying: true },
+        );
+        if (!result.ok) {
+            sent = before;
+            timer = window.setTimeout(() => void send(), 800);
+        }
     };
     area.addEventListener("input", () => {
         window.clearTimeout(timer);

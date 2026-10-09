@@ -103,10 +103,18 @@ export function request(req: EditRequest): Promise<EditResult> {
 }
 
 // A request whose failure is shown to the user; returns the result either way.
-export async function edit(req: EditRequest): Promise<EditResult> {
+// Refusals that only mean "the last edit has not rebuilt yet".
+const TRANSIENT = /since the last build|wait for the reload/;
+
+export async function edit(
+    req: EditRequest,
+    opts: { retrying?: boolean } = {},
+): Promise<EditResult> {
     const result = await request(req);
-    if (!result.ok) toast(result.error ?? "edit failed", "error");
-    else {
+    if (!result.ok && !(opts.retrying && TRANSIENT.test(result.error ?? ""))) {
+        toast(result.error ?? "edit failed", "error");
+    }
+    if (result.ok) {
         ed.canUndo = result.canUndo ?? ed.canUndo;
         ed.canRedo = result.canRedo ?? ed.canRedo;
         updateHashes(result.hashes ?? {});

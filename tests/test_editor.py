@@ -602,6 +602,16 @@ class TestSession:
                 _deck(project),
             )
 
+    def test_deck_edits_wait_for_the_rebuild(self, project: Path) -> None:
+        from inkflow.editor.svgops import file_hash
+
+        session = EditorSession(project / "deck.py")
+        session.built_hash = file_hash((project / "deck.py").read_bytes())
+        deck = _deck(project)
+        session.apply({"action": "slide", "op": "move", "from": 0, "to": 1}, deck)
+        with pytest.raises(EditError, match="since the last build"):
+            session.apply({"action": "slide", "op": "move", "from": 0, "to": 1}, deck)
+
     def test_files_outside_the_project_are_refused(
         self, project: Path, tmp_path_factory: pytest.TempPathFactory
     ) -> None:

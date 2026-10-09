@@ -723,10 +723,13 @@
       sock.send(JSON.stringify({ type: "edit-op", id, ...req }));
     });
   }
-  async function edit(req) {
+  var TRANSIENT = /since the last build|wait for the reload/;
+  async function edit(req, opts = {}) {
     const result = await request(req);
-    if (!result.ok) toast(result.error ?? "edit failed", "error");
-    else {
+    if (!result.ok && !(opts.retrying && TRANSIENT.test(result.error ?? ""))) {
+      toast(result.error ?? "edit failed", "error");
+    }
+    if (result.ok) {
       ed.canUndo = result.canUndo ?? ed.canUndo;
       ed.canRedo = result.canRedo ?? ed.canRedo;
       updateHashes(result.hashes ?? {});
@@ -2545,14 +2548,22 @@
     window.clearTimeout(timer2);
     const slide = ed.model?.slides[slideIndex];
     if (!slide || area.value === sent) return;
+    const before = sent;
     sent = area.value;
-    await edit({
-      action: "notes",
-      slide: slide.deckIndex,
-      text: area.value,
-      name: slide.id ?? "slide",
-      coalesce: burst
-    });
+    const result = await edit(
+      {
+        action: "notes",
+        slide: slide.deckIndex,
+        text: area.value,
+        name: slide.id ?? "slide",
+        coalesce: burst
+      },
+      { retrying: true }
+    );
+    if (!result.ok) {
+      sent = before;
+      timer2 = window.setTimeout(() => void save(), 800);
+    }
   }
   function load() {
     const slide = currentSlide();
@@ -3746,15 +3757,23 @@
     const send = async () => {
       window.clearTimeout(timer3);
       if (area2.value === sent2) return;
+      const before = sent2;
       sent2 = area2.value;
-      await edit({
-        action: "zone-text",
-        slide: deckIndex,
-        zone,
-        text: area2.value,
-        origin,
-        coalesce
-      });
+      const result = await edit(
+        {
+          action: "zone-text",
+          slide: deckIndex,
+          zone,
+          text: area2.value,
+          origin,
+          coalesce
+        },
+        { retrying: true }
+      );
+      if (!result.ok) {
+        sent2 = before;
+        timer3 = window.setTimeout(() => void send(), 800);
+      }
     };
     area2.addEventListener("input", () => {
       window.clearTimeout(timer3);

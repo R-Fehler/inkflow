@@ -17,14 +17,24 @@ async function save(): Promise<void> {
     window.clearTimeout(timer);
     const slide = ed.model?.slides[slideIndex];
     if (!slide || area.value === sent) return;
+    const before = sent;
     sent = area.value;
-    await edit({
-        action: "notes",
-        slide: slide.deckIndex,
-        text: area.value,
-        name: slide.id ?? "slide",
-        coalesce: burst,
-    });
+    const result = await edit(
+        {
+            action: "notes",
+            slide: slide.deckIndex,
+            text: area.value,
+            name: slide.id ?? "slide",
+            coalesce: burst,
+        },
+        { retrying: true },
+    );
+    if (!result.ok) {
+        // Most often deck.py has not rebuilt yet after the previous save
+        // (the first save of a new notes file); try again shortly.
+        sent = before;
+        timer = window.setTimeout(() => void save(), 800);
+    }
 }
 
 function load(): void {

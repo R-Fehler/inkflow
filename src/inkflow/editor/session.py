@@ -196,11 +196,14 @@ class EditorSession:
     deck_path: Path
     project_dir: Path
     history: History
+    built_hash: str | None
+    """Hash of the deck.py the current build came from (set by the server)."""
 
     def __init__(self, deck_path: Path) -> None:
         self.deck_path = deck_path.resolve()
         self.project_dir = self.deck_path.parent
         self.history = History()
+        self.built_hash = None
 
     # ── Entry point ──
 
@@ -262,7 +265,17 @@ class EditorSession:
         return index, deck.slides[index]
 
     def _deck_source(self, txn: _Txn) -> DeckSource:
-        return DeckSource(txn.read(self.deck_path).decode("utf-8"))
+        data = txn.read(self.deck_path)
+        fresh = self.deck_path.resolve() in txn.staged
+        # Slide indices in the request refer to the last build; a deck.py that
+        # changed since (an edit not yet rebuilt) may not match them.
+        if (
+            not fresh
+            and self.built_hash is not None
+            and file_hash(data) != self.built_hash
+        ):
+            raise EditError("deck.py changed since the last build; try again")
+        return DeckSource(data.decode("utf-8"))
 
     def _save_deck(self, txn: _Txn, source: DeckSource, imports: set[str]) -> None:
         if imports:
