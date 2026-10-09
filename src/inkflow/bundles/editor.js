@@ -1,0 +1,4165 @@
+"use strict";
+(() => {
+  // src/ts/shared/keyframes.ts
+  var templates = /* @__PURE__ */ new Map();
+  function parseOffsets(keyText) {
+    return keyText.split(",").map((part) => {
+      const t = part.trim();
+      if (t === "from") return 0;
+      if (t === "to") return 1;
+      return Number.parseFloat(t) / 100;
+    }).filter((n) => Number.isFinite(n));
+  }
+  function kebabToCamel(prop) {
+    return prop.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  }
+  function ruleToKeyframes(rule) {
+    const frames = [];
+    for (const raw of Array.from(rule.cssRules)) {
+      const kf = raw;
+      const style = kf.style;
+      const props = {};
+      for (let i = 0; i < style.length; i++) {
+        const name = style[i];
+        props[kebabToCamel(name)] = style.getPropertyValue(name).trim();
+      }
+      for (const offset of parseOffsets(kf.keyText)) {
+        frames.push({ offset, ...props });
+      }
+    }
+    frames.sort((a, b) => a.offset - b.offset);
+    return frames;
+  }
+  function findKeyframes(name, rules) {
+    for (const rule of Array.from(rules)) {
+      if (rule instanceof CSSKeyframesRule) {
+        if (rule.name === name) return rule;
+        continue;
+      }
+      const grouping = rule;
+      if (grouping.cssRules) {
+        const found = findKeyframes(name, grouping.cssRules);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  function templateFor(name) {
+    const cached = templates.get(name);
+    if (cached !== void 0) return cached;
+    let result = null;
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules;
+      try {
+        rules = sheet.cssRules;
+      } catch {
+        continue;
+      }
+      const rule = findKeyframes(name, rules);
+      if (rule) {
+        result = ruleToKeyframes(rule);
+        break;
+      }
+    }
+    templates.set(name, result);
+    return result;
+  }
+  var VAR_ANIM = /var\(\s*--anim-([\w-]+)\s*(?:,[^()]*)?\)/g;
+  function substituteVars(value, vars) {
+    return value.replace(
+      VAR_ANIM,
+      (match, key) => key in vars ? vars[key] : match
+    );
+  }
+  function buildKeyframes(name, vars) {
+    const template = templateFor(name);
+    if (!template) return [];
+    if (Object.keys(vars).length === 0) return template;
+    return template.map((frame) => {
+      const out = {};
+      for (const [k, v] of Object.entries(frame)) {
+        out[k] = typeof v === "string" ? substituteVars(v, vars) : v;
+      }
+      return out;
+    });
+  }
+
+  // src/ts/shared/step.ts
+  var elementCues = /* @__PURE__ */ new WeakMap();
+  var rootStep = /* @__PURE__ */ new WeakMap();
+  function parseCues(el) {
+    const raw = el.getAttribute("data-cues");
+    if (!raw) return [];
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  function cueStates(el) {
+    let states = elementCues.get(el);
+    if (!states) {
+      states = parseCues(el).map((cue) => ({ cue, anim: null }));
+      elementCues.set(el, states);
+    }
+    return states;
+  }
+  function ensureAnim(el, st) {
+    if (!st.anim) {
+      const { name, vars, opts } = st.cue;
+      const anim = el.animate(buildKeyframes(`anim-${name}`, vars), {
+        duration: Math.max(0, opts.duration * 1e3),
+        delay: Math.max(0, opts.delay * 1e3),
+        easing: opts.easing || "linear",
+        iterations: opts.iterations ?? 1,
+        fill: "both"
+      });
+      anim.pause();
+      st.anim = anim;
+    }
+    return st.anim;
+  }
+  function holdAtEnd(anim) {
+    anim.playbackRate = 1;
+    try {
+      anim.play();
+      anim.finish();
+    } catch {
+    }
+  }
+  function restingActions(cues, step) {
+    let gov = -1;
+    cues.forEach((c, i) => {
+      if (c.kind !== "emphasis" && c.step <= step) gov = i;
+    });
+    return cues.map((_, i) => i === gov ? "hold" : "cancel");
+  }
+  function applyCodeHighlights(root, step) {
+    root.querySelectorAll(
+      ".inkflow-codeblock[data-hl-spec][data-base-step]"
+    ).forEach((block) => {
+      const spec = JSON.parse(block.dataset.hlSpec);
+      const baseStep = +(block.dataset.baseStep ?? "0");
+      const specIdx = Math.min(Math.max(step - baseStep, 0), spec.length - 1);
+      const active2 = spec[specIdx];
+      const hasHL = active2 !== null;
+      block.querySelectorAll(".code-line").forEach((line) => {
+        const n = +(line.dataset.line ?? "0");
+        line.classList.toggle("hl-active", hasHL && active2.includes(n));
+        line.classList.toggle("hl-dim", hasHL && !active2.includes(n));
+        if (!hasHL) line.classList.remove("hl-active", "hl-dim");
+      });
+    });
+  }
+  function maxStep(root) {
+    let m = 0;
+    root.querySelectorAll("[data-cues]").forEach((el) => {
+      for (const c of parseCues(el)) if (c.step > m) m = c.step;
+    });
+    root.querySelectorAll("[data-play-on-step]").forEach((el) => {
+      const s = +(el.getAttribute("data-play-on-step") ?? "0");
+      if (s > m) m = s;
+    });
+    root.querySelectorAll(
+      ".inkflow-codeblock[data-hl-spec][data-base-step]"
+    ).forEach((block) => {
+      const spec = JSON.parse(block.dataset.hlSpec);
+      const baseStep = +(block.dataset.baseStep ?? "0");
+      const last = baseStep + spec.length - 1;
+      if (last > m) m = last;
+    });
+    return m;
+  }
+  function applyStepInstant(root, step) {
+    root.querySelectorAll("[data-cues]").forEach((el) => {
+      const states = cueStates(el);
+      const actions = restingActions(
+        states.map((s) => s.cue),
+        step
+      );
+      states.forEach((st, i) => {
+        if (actions[i] === "hold") holdAtEnd(ensureAnim(el, st));
+        else st.anim?.cancel();
+      });
+    });
+    applyCodeHighlights(root, step);
+    rootStep.set(root, step);
+  }
+
+  // src/ts/shared/viewbox.ts
+  var DEFAULT_VIEWBOX = "0 0 1920 1080";
+  function parseViewBox(attr, fallback = DEFAULT_VIEWBOX) {
+    const parts = (attr ?? "").trim().split(/[\s,]+/).map(Number);
+    const valid = parts.length === 4 && parts.every((n) => Number.isFinite(n)) && parts[2] > 0 && parts[3] > 0;
+    const [x, y, w, h2] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
+    return { x, y, w, h: h2 };
+  }
+
+  // src/ts/editor/dom.ts
+  function h(tag, attrs = {}, ...children) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v == null || v === false) continue;
+      if (k.startsWith("on") && typeof v === "function") {
+        el.addEventListener(k.slice(2), v);
+      } else if (k === "value" && "value" in el) {
+        el.value = String(v);
+      } else if (v === true) {
+        el.setAttribute(k, "");
+      } else {
+        el.setAttribute(k, String(v));
+      }
+    }
+    for (const c of children) {
+      if (c == null || c === false) continue;
+      el.append(typeof c === "string" ? document.createTextNode(c) : c);
+    }
+    return el;
+  }
+  function clear(el) {
+    while (el.firstChild) el.removeChild(el.firstChild);
+  }
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  function svgEl(tag, attrs = {}) {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+    return el;
+  }
+  var ICON_PATHS = {
+    undo: '<path d="M4 7h7a3.5 3.5 0 0 1 0 7H8"/><path d="M6.5 4.5 4 7l2.5 2.5"/>',
+    redo: '<path d="M12 7H5a3.5 3.5 0 0 0 0 7h3"/><path d="M9.5 4.5 12 7 9.5 9.5"/>',
+    select: '<path d="M3 2l9 5-4 1.2L6.5 12z"/>',
+    text: '<path d="M3 3.5h10M8 3.5V13M6 13h4"/>',
+    rect: '<rect x="2.5" y="4" width="11" height="8" rx="1.2"/>',
+    ellipse: '<ellipse cx="8" cy="8" rx="5.5" ry="4.2"/>',
+    line: '<path d="M3 13 13 3"/>',
+    arrow: '<path d="M3 13 13 3"/><path d="M7.5 3H13v5.5"/>',
+    image: '<rect x="2" y="3" width="12" height="10" rx="1.2"/><circle cx="5.8" cy="6.5" r="1.2"/><path d="m2.5 12 4-4 3 3 2-2 2.5 2.5"/>',
+    play: '<path d="M5 3.2 12.5 8 5 12.8Z"/>',
+    plus: '<path d="M8 3v10M3 8h10"/>',
+    minus: '<path d="M3 8h10"/>',
+    trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5"/>',
+    copy: '<rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 10.5V3h7.5"/>',
+    layers: '<path d="M8 2 14 5.5 8 9 2 5.5 8 2Z"/><path d="M2 9 8 12.5 14 9"/>',
+    sun: '<circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15"/>',
+    eye: '<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="2"/>',
+    eyeOff: '<path d="M2 2l12 12M6.5 4A6.6 6.6 0 0 1 14.5 8a9 9 0 0 1-1.8 2.3M9.9 11.9A6.3 6.3 0 0 1 1.5 8 9.5 9.5 0 0 1 4 5"/>',
+    up: '<path d="M4 10l4-4 4 4"/>',
+    down: '<path d="M4 6l4 4 4-4"/>',
+    front: '<rect x="5" y="5" width="8" height="8" rx="1" fill="currentColor"/><path d="M3 10.5V3h7.5"/>',
+    back: '<rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 10.5V3h7.5" /><rect x="3" y="3" width="7.5" height="7.5" fill="currentColor" opacity=".35" stroke="none"/>',
+    group: '<rect x="2" y="2" width="12" height="12" rx="1" stroke-dasharray="2 1.5"/><rect x="4.5" y="4.5" width="4" height="4"/><rect x="8" y="8" width="3.5" height="3.5"/>',
+    code: '<path d="M5.5 4 2 8l3.5 4M10.5 4 14 8l-3.5 4"/>',
+    fit: '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>'
+  };
+  function icon(name, size = 16) {
+    const wrap = document.createElement("span");
+    wrap.innerHTML = `<svg viewBox="0 0 16 16" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] ?? ""}</svg>`;
+    return wrap.firstElementChild;
+  }
+  var toastTimer = 0;
+  function toast(message, kind = "info") {
+    const el = document.getElementById("toast");
+    if (!el) return;
+    el.textContent = message;
+    el.className = `show ${kind}`;
+    window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(
+      () => {
+        el.className = "";
+      },
+      kind === "error" ? 6e3 : 2600
+    );
+  }
+
+  // src/ts/editor/geom.ts
+  var IDENTITY = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+  function mat(m) {
+    return { a: m.a, b: m.b, c: m.c, d: m.d, e: m.e, f: m.f };
+  }
+  function multiply(p, q) {
+    return {
+      a: p.a * q.a + p.c * q.b,
+      b: p.b * q.a + p.d * q.b,
+      c: p.a * q.c + p.c * q.d,
+      d: p.b * q.c + p.d * q.d,
+      e: p.a * q.e + p.c * q.f + p.e,
+      f: p.b * q.e + p.d * q.f + p.f
+    };
+  }
+  function invert(m) {
+    const det = m.a * m.d - m.b * m.c;
+    if (Math.abs(det) < 1e-12) return { ...IDENTITY };
+    return {
+      a: m.d / det,
+      b: -m.b / det,
+      c: -m.c / det,
+      d: m.a / det,
+      e: (m.c * m.f - m.d * m.e) / det,
+      f: (m.b * m.e - m.a * m.f) / det
+    };
+  }
+  function apply(m, p) {
+    return { x: m.a * p.x + m.c * p.y + m.e, y: m.b * p.x + m.d * p.y + m.f };
+  }
+  function applyVector(m, p) {
+    return { x: m.a * p.x + m.c * p.y, y: m.b * p.x + m.d * p.y };
+  }
+  function translate(x, y) {
+    return { a: 1, b: 0, c: 0, d: 1, e: x, f: y };
+  }
+  function scaleAbout(sx, sy, origin) {
+    return {
+      a: sx,
+      b: 0,
+      c: 0,
+      d: sy,
+      e: origin.x - sx * origin.x,
+      f: origin.y - sy * origin.y
+    };
+  }
+  function rotateAbout(degrees, origin) {
+    const r = degrees * Math.PI / 180;
+    const cos = Math.cos(r);
+    const sin = Math.sin(r);
+    return multiply(
+      translate(origin.x, origin.y),
+      multiply(
+        { a: cos, b: sin, c: -sin, d: cos, e: 0, f: 0 },
+        translate(-origin.x, -origin.y)
+      )
+    );
+  }
+  var EPS = 1e-6;
+  function isTranslateOnly(m) {
+    return Math.abs(m.a - 1) < EPS && Math.abs(m.d - 1) < EPS && Math.abs(m.b) < EPS && Math.abs(m.c) < EPS;
+  }
+  function isAxisAligned(m) {
+    return Math.abs(m.b) < EPS && Math.abs(m.c) < EPS;
+  }
+  function transformBox(m, box) {
+    const pts = [
+      apply(m, { x: box.x, y: box.y }),
+      apply(m, { x: box.x + box.width, y: box.y }),
+      apply(m, { x: box.x, y: box.y + box.height }),
+      apply(m, { x: box.x + box.width, y: box.y + box.height })
+    ];
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const x = Math.min(...xs);
+    const y = Math.min(...ys);
+    return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+  }
+  function unionBoxes(boxes) {
+    if (!boxes.length) return null;
+    const x = Math.min(...boxes.map((b) => b.x));
+    const y = Math.min(...boxes.map((b) => b.y));
+    const r = Math.max(...boxes.map((b) => b.x + b.width));
+    const btm = Math.max(...boxes.map((b) => b.y + b.height));
+    return { x, y, width: r - x, height: btm - y };
+  }
+  function fmt(n) {
+    const r = Math.round(n * 1e3) / 1e3;
+    return Object.is(r, -0) ? "0" : String(r);
+  }
+  function formatTransform(m) {
+    if (isTranslateOnly(m)) {
+      if (Math.abs(m.e) < EPS && Math.abs(m.f) < EPS) return null;
+      return `translate(${fmt(m.e)},${fmt(m.f)})`;
+    }
+    const r = (n) => String(Math.round(n * 1e6) / 1e6);
+    return `matrix(${r(m.a)},${r(m.b)},${r(m.c)},${r(m.d)},${fmt(m.e)},${fmt(m.f)})`;
+  }
+  var BOX_TAGS = /* @__PURE__ */ new Set(["rect", "image", "foreignObject", "use"]);
+  function num(v, fallback = 0) {
+    const n = parseFloat(v ?? "");
+    return Number.isFinite(n) ? n : fallback;
+  }
+  function usesBoxAttrs(g) {
+    return BOX_TAGS.has(g.sourceTag) && g.sourceTag !== "use" && g.attrs.width != null && g.attrs.height != null && isTranslateOnly(g.own);
+  }
+  function transformPlan(g, slideChange) {
+    const p = g.parentToSlide;
+    const inParent = multiply(invert(p), multiply(slideChange, p));
+    return { transform: formatTransform(multiply(inParent, g.own)) };
+  }
+  function shiftList(value, delta) {
+    if (value == null) return null;
+    const parts = value.trim().split(/[\s,]+/);
+    if (!parts.length || parts.some((p) => !Number.isFinite(parseFloat(p))))
+      return null;
+    return parts.map((p) => fmt(parseFloat(p) + delta)).join(" ");
+  }
+  function planMove(g, dx, dy, textChildren2 = []) {
+    const delta = applyVector(invert(g.parentToSlide), { x: dx, y: dy });
+    if (isTranslateOnly(g.own)) {
+      if (usesBoxAttrs(g)) {
+        return {
+          attrs: {
+            x: fmt(num(g.attrs.x) + delta.x),
+            y: fmt(num(g.attrs.y) + delta.y)
+          }
+        };
+      }
+      if (g.sourceTag === "circle" || g.sourceTag === "ellipse") {
+        return {
+          attrs: {
+            cx: fmt(num(g.attrs.cx) + delta.x),
+            cy: fmt(num(g.attrs.cy) + delta.y)
+          }
+        };
+      }
+      if (g.sourceTag === "line") {
+        return {
+          attrs: {
+            x1: fmt(num(g.attrs.x1) + delta.x),
+            y1: fmt(num(g.attrs.y1) + delta.y),
+            x2: fmt(num(g.attrs.x2) + delta.x),
+            y2: fmt(num(g.attrs.y2) + delta.y)
+          }
+        };
+      }
+      if (g.sourceTag === "text") {
+        const xs = shiftList(g.attrs.x ?? "0", delta.x);
+        const ys = shiftList(g.attrs.y ?? "0", delta.y);
+        const kids = textChildren2.map((c) => {
+          const plan = {};
+          const cx = shiftList(c.attrs.x, delta.x);
+          const cy = shiftList(c.attrs.y, delta.y);
+          if (cx != null) plan.x = cx;
+          if (cy != null) plan.y = cy;
+          return plan;
+        });
+        if (xs != null && ys != null) {
+          return { attrs: { x: xs, y: ys }, children: kids };
+        }
+      }
+    }
+    return { attrs: transformPlan(g, translate(dx, dy)) };
+  }
+  function planResize(g, from, to) {
+    const sx = from.width > EPS ? to.width / from.width : 1;
+    const sy = from.height > EPS ? to.height / from.height : 1;
+    const change = multiply(
+      translate(to.x, to.y),
+      multiply(
+        scaleAbout(sx, sy, { x: 0, y: 0 }),
+        translate(-from.x, -from.y)
+      )
+    );
+    const p = g.parentToSlide;
+    const inParent = multiply(invert(p), multiply(change, p));
+    if (isTranslateOnly(g.own) && isAxisAligned(inParent)) {
+      const t = { x: g.own.e, y: g.own.f };
+      const mapBox2 = (b) => {
+        const shifted = { ...b, x: b.x + t.x, y: b.y + t.y };
+        const out = transformBox(inParent, shifted);
+        return { ...out, x: out.x - t.x, y: out.y - t.y };
+      };
+      if (usesBoxAttrs(g)) {
+        const b = mapBox2({
+          x: num(g.attrs.x),
+          y: num(g.attrs.y),
+          width: num(g.attrs.width),
+          height: num(g.attrs.height)
+        });
+        return {
+          x: fmt(b.x),
+          y: fmt(b.y),
+          width: fmt(b.width),
+          height: fmt(b.height)
+        };
+      }
+      if (g.sourceTag === "ellipse" || g.sourceTag === "circle") {
+        const rx = num(g.attrs.rx ?? g.attrs.r);
+        const ry = num(g.attrs.ry ?? g.attrs.r);
+        const b = mapBox2({
+          x: num(g.attrs.cx) - rx,
+          y: num(g.attrs.cy) - ry,
+          width: 2 * rx,
+          height: 2 * ry
+        });
+        const cx = fmt(b.x + b.width / 2);
+        const cy = fmt(b.y + b.height / 2);
+        if (g.sourceTag === "circle") {
+          return { cx, cy, r: fmt((b.width + b.height) / 4) };
+        }
+        return { cx, cy, rx: fmt(b.width / 2), ry: fmt(b.height / 2) };
+      }
+      if (g.sourceTag === "line") {
+        const tt = translate(t.x, t.y);
+        const m = multiply(invert(tt), multiply(inParent, tt));
+        const p1 = apply(m, { x: num(g.attrs.x1), y: num(g.attrs.y1) });
+        const p2 = apply(m, { x: num(g.attrs.x2), y: num(g.attrs.y2) });
+        return {
+          x1: fmt(p1.x),
+          y1: fmt(p1.y),
+          x2: fmt(p2.x),
+          y2: fmt(p2.y)
+        };
+      }
+    }
+    return { transform: formatTransform(multiply(inParent, g.own)) };
+  }
+  function planRotate(g, degrees, center) {
+    return transformPlan(g, rotateAbout(degrees, center));
+  }
+  function parseTransform(value) {
+    if (!value) return { ...IDENTITY };
+    let m = { ...IDENTITY };
+    const re = /(matrix|translate|scale|rotate|skewX|skewY)\s*\(([^)]*)\)/g;
+    for (const match of value.matchAll(re)) {
+      const args = match[2].split(/[\s,]+/).filter(Boolean).map(Number);
+      let t = { ...IDENTITY };
+      switch (match[1]) {
+        case "matrix":
+          if (args.length === 6) {
+            t = {
+              a: args[0],
+              b: args[1],
+              c: args[2],
+              d: args[3],
+              e: args[4],
+              f: args[5]
+            };
+          }
+          break;
+        case "translate":
+          t = translate(args[0] ?? 0, args[1] ?? 0);
+          break;
+        case "scale":
+          t = scaleAbout(args[0] ?? 1, args[1] ?? args[0] ?? 1, {
+            x: 0,
+            y: 0
+          });
+          break;
+        case "rotate":
+          t = rotateAbout(args[0] ?? 0, {
+            x: args[1] ?? 0,
+            y: args[2] ?? 0
+          });
+          break;
+        case "skewX":
+          t = {
+            ...IDENTITY,
+            c: Math.tan((args[0] ?? 0) * Math.PI / 180)
+          };
+          break;
+        case "skewY":
+          t = {
+            ...IDENTITY,
+            b: Math.tan((args[0] ?? 0) * Math.PI / 180)
+          };
+          break;
+      }
+      m = multiply(m, t);
+    }
+    return m;
+  }
+  function rotationOf(m) {
+    return Math.atan2(m.b, m.a) * 180 / Math.PI;
+  }
+  function relativePath(fromFile, target) {
+    const from = fromFile.split("/").slice(0, -1).filter(Boolean);
+    const to = target.split("/").filter(Boolean);
+    let i = 0;
+    while (i < from.length && i < to.length - 1 && from[i] === to[i]) i++;
+    const up = from.slice(i).map(() => "..");
+    return [...up, ...to.slice(i)].join("/");
+  }
+
+  // src/ts/editor/state.ts
+  var ed = {
+    model: null,
+    slides: [],
+    // rendered SVG per *visible* slide
+    current: 0,
+    // deck index of the slide being edited
+    selection: [],
+    scope: null,
+    // group entered by double-click
+    layoutMode: false,
+    step: null,
+    // null: every element shown, no build state
+    zoom: 0,
+    // 0 = fit to window, else device px per slide unit
+    tool: "select",
+    interacting: false,
+    // a drag is in progress: defer re-renders
+    renderPending: false,
+    canUndo: false,
+    canRedo: false,
+    clip: null,
+    error: null
+  };
+  var listeners = /* @__PURE__ */ new Map();
+  function on(event, fn) {
+    let set = listeners.get(event);
+    if (!set) {
+      set = /* @__PURE__ */ new Set();
+      listeners.set(event, set);
+    }
+    set.add(fn);
+  }
+  function emit(event) {
+    for (const fn of [...listeners.get(event) ?? []]) fn();
+  }
+  function currentSlide() {
+    return ed.model?.slides[ed.current] ?? null;
+  }
+  function currentRendered() {
+    const s = currentSlide();
+    if (!s || s.visibleIndex == null) return null;
+    return ed.slides[s.visibleIndex] ?? null;
+  }
+  function sourceOf(key) {
+    return currentSlide()?.sources?.[key] ?? null;
+  }
+
+  // src/ts/editor/net.ts
+  var ws = null;
+  var nextId = 1;
+  var pending = /* @__PURE__ */ new Map();
+  var commandHandler = () => {
+  };
+  var pendingSlides = null;
+  function onCommand(fn) {
+    commandHandler = fn;
+  }
+  function connect(port) {
+    const host2 = location.hostname || "localhost";
+    const sock = new WebSocket(`ws://${host2}:${port}`);
+    ws = sock;
+    sock.onopen = () => {
+      sock.send(JSON.stringify({ type: "hello", role: "editor" }));
+      document.body.classList.remove("offline");
+    };
+    sock.onclose = () => {
+      document.body.classList.add("offline");
+      for (const resolve of pending.values()) {
+        resolve({ ok: false, error: "disconnected from the server" });
+      }
+      pending.clear();
+      window.setTimeout(() => connect(port), 1500);
+    };
+    sock.onmessage = (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      switch (msg.type) {
+        case "update":
+          pendingSlides = msg.slides;
+          ed.error = null;
+          emit("error");
+          break;
+        case "editor-model":
+          if (pendingSlides) {
+            ed.slides = pendingSlides;
+            pendingSlides = null;
+          }
+          ed.model = msg.model;
+          emit("model");
+          break;
+        case "error":
+          ed.error = String(msg.message ?? "build error");
+          emit("error");
+          break;
+        case "edit-result": {
+          const resolve = pending.get(msg.id);
+          pending.delete(msg.id);
+          resolve?.(msg);
+          break;
+        }
+        case "editor-command":
+          commandHandler(msg);
+          break;
+        case "notify":
+          toast(String(msg.message ?? ""));
+          break;
+      }
+    };
+  }
+  function request(req) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      toast("Not connected to the inkflow server", "error");
+      return Promise.resolve({ ok: false, error: "not connected" });
+    }
+    const id = nextId++;
+    const sock = ws;
+    return new Promise((resolve) => {
+      pending.set(id, resolve);
+      sock.send(JSON.stringify({ type: "edit-op", id, ...req }));
+    });
+  }
+  async function edit(req) {
+    const result = await request(req);
+    if (!result.ok) toast(result.error ?? "edit failed", "error");
+    else {
+      ed.canUndo = result.canUndo ?? ed.canUndo;
+      ed.canRedo = result.canRedo ?? ed.canRedo;
+      updateHashes(result.hashes ?? {});
+      emit("history");
+    }
+    return result;
+  }
+  function updateHashes(hashes) {
+    for (const slide of ed.model?.slides ?? []) {
+      for (const src of slide.sources ?? []) {
+        if (src.path in hashes) src.hash = hashes[src.path];
+      }
+    }
+  }
+  function sendRaw(payload) {
+    if (ws && ws.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify(payload));
+  }
+
+  // src/ts/editor/snap.ts
+  function targetsFor(slide, others) {
+    const xs = [slide.x, slide.x + slide.width / 2, slide.x + slide.width];
+    const ys = [slide.y, slide.y + slide.height / 2, slide.y + slide.height];
+    for (const b of others) {
+      xs.push(b.x, b.x + b.width / 2, b.x + b.width);
+      ys.push(b.y, b.y + b.height / 2, b.y + b.height);
+    }
+    return { xs, ys };
+  }
+  function best(edges, targets, threshold) {
+    let delta = 0;
+    let dist = threshold + 1;
+    for (const e of edges) {
+      for (const t of targets) {
+        const d = Math.abs(t - e);
+        if (d < dist - 1e-9) {
+          dist = d;
+          delta = t - e;
+        }
+      }
+    }
+    if (dist > threshold) return { delta: 0, at: [] };
+    const at = /* @__PURE__ */ new Set();
+    for (const e of edges) {
+      for (const t of targets) {
+        if (Math.abs(t - (e + delta)) < 1e-6) at.add(t);
+      }
+    }
+    return { delta, at: [...at] };
+  }
+  function snapBox(box, targets, threshold) {
+    const x = best(
+      [box.x, box.x + box.width / 2, box.x + box.width],
+      targets.xs,
+      threshold
+    );
+    const y = best(
+      [box.y, box.y + box.height / 2, box.y + box.height],
+      targets.ys,
+      threshold
+    );
+    return { dx: x.delta, dy: y.delta, guidesX: x.at, guidesY: y.at };
+  }
+  function snapEdges(edgesX, edgesY, targets, threshold) {
+    const x = best(edgesX, targets.xs, threshold);
+    const y = best(edgesY, targets.ys, threshold);
+    return { dx: x.delta, dy: y.delta, guidesX: x.at, guidesY: y.at };
+  }
+  function distribute(boxes, axis) {
+    const size = axis === "x" ? "width" : "height";
+    const order2 = boxes.map((b, i) => ({ b, i })).sort((p, q) => p.b[axis] - q.b[axis]);
+    const out = boxes.map((b) => b[axis]);
+    if (order2.length < 3) return out;
+    const first = order2[0].b;
+    const last = order2[order2.length - 1].b;
+    const total = order2.reduce((s, o) => s + o.b[size], 0);
+    const span = last[axis] + last[size] - first[axis];
+    const gap = (span - total) / (order2.length - 1);
+    let pos = first[axis];
+    for (const o of order2) {
+      out[o.i] = pos;
+      pos += o.b[size] + gap;
+    }
+    return out;
+  }
+
+  // src/ts/editor/canvas.ts
+  var canvas = document.getElementById("canvas");
+  var paper = document.getElementById("paper");
+  var host = document.getElementById("slide-host");
+  var overlay = document.getElementById("overlay");
+  var NON_ZONES = /* @__PURE__ */ new Set(["zone-slide-number", "zone-slide-total"]);
+  var DRAG_THRESHOLD = 3;
+  var SNAP_PX = 6;
+  var hooks = {
+    editText: (_el) => {
+    },
+    editZone: (_zone, _box) => {
+    },
+    zoneMedia: (_zone) => {
+    },
+    toolDown: (_e, _pt) => false
+  };
+  function slideRoot() {
+    return host.querySelector(":scope > svg");
+  }
+  function viewBoxSize() {
+    const svg = slideRoot();
+    const vb = parseViewBox(svg?.getAttribute("viewBox") ?? null);
+    return { w: vb.w || 1920, h: vb.h || 1080 };
+  }
+  function scale() {
+    const { w, h: h2 } = viewBoxSize();
+    if (ed.zoom > 0) return ed.zoom;
+    const pad = 48;
+    const availW = Math.max(100, canvas.clientWidth - pad);
+    const availH = Math.max(100, canvas.clientHeight - pad);
+    return Math.min(availW / w, availH / h2);
+  }
+  function layoutPaper() {
+    const svg = slideRoot();
+    if (!svg) return;
+    const { w, h: h2 } = viewBoxSize();
+    const s = scale();
+    const pw = Math.round(w * s);
+    const ph = Math.round(h2 * s);
+    paper.style.width = `${pw}px`;
+    paper.style.height = `${ph}px`;
+    svg.setAttribute("width", String(pw));
+    svg.setAttribute("height", String(ph));
+    overlay.setAttribute("width", String(pw));
+    overlay.setAttribute("height", String(ph));
+    overlay.setAttribute("viewBox", `0 0 ${pw} ${ph}`);
+    canvas.classList.toggle("zoomed", ed.zoom > 0);
+    drawOverlay();
+  }
+  function render() {
+    if (ed.interacting) {
+      ed.renderPending = true;
+      return;
+    }
+    ed.renderPending = false;
+    const keep = ed.selection.map((s) => ({
+      loc: s.loc,
+      id: s.el.getAttribute("id")
+    }));
+    const scopeKey = ed.scope?.getAttribute("data-ink") ?? null;
+    const data = currentRendered();
+    host.innerHTML = data ? data.svg : "";
+    const svg = slideRoot();
+    if (svg) {
+      svg.removeAttribute("width");
+      svg.removeAttribute("height");
+      svg.style.display = "block";
+      prepareForEditing(svg);
+    }
+    ed.scope = scopeKey ? host.querySelector(`[data-ink="${scopeKey}"]`) : null;
+    ed.selection = [];
+    for (const k of keep) {
+      const el = findElement(k);
+      if (el) addToSelection(el, false);
+    }
+    layoutPaper();
+    emit("render");
+    emit("selection");
+  }
+  function findElement(k) {
+    const svg = slideRoot();
+    if (!svg) return null;
+    if (k.id) {
+      const byId = svg.querySelector(`[id="${CSS.escape(k.id)}"]`);
+      if (byId?.hasAttribute("data-ink")) return byId;
+    }
+    return svg.querySelector(
+      `[data-ink="${k.loc}"]`
+    );
+  }
+  function prepareForEditing(svg) {
+    svg.querySelectorAll("video").forEach((v) => {
+      v.pause();
+      v.removeAttribute("autoplay");
+    });
+    if (ed.step == null) {
+      svg.querySelectorAll(".anim-pending").forEach((el) => {
+        el.classList.remove("anim-pending");
+      });
+    } else {
+      applyStepInstant(svg, ed.step);
+    }
+    svg.querySelectorAll("a").forEach((a) => {
+      a.addEventListener("click", (e) => e.preventDefault());
+    });
+  }
+  function rootCTM() {
+    const svg = slideRoot();
+    const m = svg?.getScreenCTM();
+    return m ? mat(m) : { ...IDENTITY };
+  }
+  function paperOrigin() {
+    const r = paper.getBoundingClientRect();
+    return { x: r.left, y: r.top };
+  }
+  function slideToPaper() {
+    const o = paperOrigin();
+    return multiply({ a: 1, b: 0, c: 0, d: 1, e: -o.x, f: -o.y }, rootCTM());
+  }
+  function clientToSlide(x, y) {
+    const inv = invert(rootCTM());
+    return {
+      x: inv.a * x + inv.c * y + inv.e,
+      y: inv.b * x + inv.d * y + inv.f
+    };
+  }
+  function slideBox(el) {
+    const g = el;
+    if (typeof g.getBBox !== "function") return null;
+    try {
+      const bbox = g.getBBox();
+      const ctm = g.getScreenCTM();
+      if (!ctm) return null;
+      const toSlide = multiply(invert(rootCTM()), mat(ctm));
+      return transformBox(toSlide, {
+        x: bbox.x,
+        y: bbox.y,
+        width: bbox.width,
+        height: bbox.height
+      });
+    } catch {
+      return null;
+    }
+  }
+  function slideSize() {
+    const svg = slideRoot();
+    const vb = parseViewBox(svg?.getAttribute("viewBox") ?? null);
+    return { x: vb.x, y: vb.y, width: vb.w || 1920, height: vb.h || 1080 };
+  }
+  var GEOM_ATTRS = [
+    "x",
+    "y",
+    "width",
+    "height",
+    "cx",
+    "cy",
+    "r",
+    "rx",
+    "ry",
+    "x1",
+    "y1",
+    "x2",
+    "y2",
+    "transform"
+  ];
+  function elementGeom(el) {
+    const parent = el.parentElement;
+    const parentCTM = parent?.getScreenCTM?.();
+    const attrs = {};
+    for (const a of GEOM_ATTRS) attrs[a] = el.getAttribute(a);
+    let box = { x: 0, y: 0, width: 0, height: 0 };
+    try {
+      const b = el.getBBox();
+      box = { x: b.x, y: b.y, width: b.width, height: b.height };
+    } catch {
+    }
+    return {
+      tag: el.localName,
+      sourceTag: el.getAttribute("data-ink-tag") ?? el.localName,
+      attrs,
+      own: parseTransform(el.getAttribute("transform")),
+      parentToSlide: parentCTM ? multiply(invert(rootCTM()), mat(parentCTM)) : { ...IDENTITY },
+      localBox: box
+    };
+  }
+  function isZone(el) {
+    const id = el.getAttribute("id") ?? "";
+    return id.startsWith("zone-") && !NON_ZONES.has(id);
+  }
+  function zoneName(el) {
+    return (el.getAttribute("id") ?? "").replace(/^zone-/, "");
+  }
+  function keyOf(el) {
+    const loc = el.getAttribute("data-ink") ?? "";
+    return parseInt(loc.split(":")[0] ?? "", 10);
+  }
+  function inLockedLayer(el) {
+    return el.closest("[data-ink-locked]") !== null;
+  }
+  function isOwn(el) {
+    const src = sourceOf(keyOf(el));
+    const slide = currentSlide();
+    return !!src && src.role === "slide" && !!slide && !slide.srcShared && src.writable;
+  }
+  function selectable(el) {
+    if (!el.hasAttribute("data-ink") || inLockedLayer(el)) return false;
+    const src = sourceOf(keyOf(el));
+    if (!src) return false;
+    if (ed.layoutMode) return src.writable;
+    return isOwn(el) || el.hasAttribute("data-ink-top") && isZone(el);
+  }
+  function canTransform(el) {
+    const src = sourceOf(keyOf(el));
+    if (!src?.writable) return false;
+    return ed.layoutMode || isOwn(el);
+  }
+  function pick(x, y) {
+    const svg = slideRoot();
+    if (!svg) return null;
+    for (const hit of document.elementsFromPoint(x, y)) {
+      if (!svg.contains(hit)) continue;
+      let node = hit;
+      if (!(node instanceof SVGElement)) node = node.closest("foreignObject");
+      while (node && node !== svg) {
+        if (ed.scope) {
+          if (node.parentElement === ed.scope && node.hasAttribute("data-ink")) {
+            return selectable(node) ? node : null;
+          }
+        } else if (node.hasAttribute("data-ink-top") && selectable(node)) {
+          return node;
+        }
+        node = node.parentElement;
+      }
+    }
+    return null;
+  }
+  function toSelected(el) {
+    const loc = el.getAttribute("data-ink") ?? "";
+    return { el, key: keyOf(el), loc };
+  }
+  function addToSelection(el, notify = true) {
+    if (ed.selection.some((s) => s.el === el)) return;
+    ed.selection.push(toSelected(el));
+    if (notify) {
+      drawOverlay();
+      emit("selection");
+    }
+  }
+  function select(els) {
+    ed.selection = els.map(toSelected);
+    drawOverlay();
+    emit("selection");
+  }
+  function clearSelection() {
+    if (!ed.selection.length) return;
+    ed.selection = [];
+    drawOverlay();
+    emit("selection");
+  }
+  function selectAll() {
+    const svg = slideRoot();
+    if (!svg) return;
+    const scope = ed.scope ?? svg;
+    const els = [...scope.querySelectorAll("[data-ink]")].filter(
+      (el) => (ed.scope ? el.parentElement === ed.scope : el.hasAttribute("data-ink-top")) && selectable(el) && (canTransform(el) || ed.scope !== null)
+    );
+    select(els);
+  }
+  function enterGroup(g) {
+    ed.scope = g;
+    clearSelection();
+    drawOverlay();
+    emit("selection");
+  }
+  var hoverEl = null;
+  var guides = { xs: [], ys: [] };
+  var marquee = null;
+  function poly(points, cls) {
+    return svgEl("polygon", {
+      points: points.map((p) => `${p.x},${p.y}`).join(" "),
+      class: cls
+    });
+  }
+  function elementCorners(el) {
+    try {
+      const b = el.getBBox();
+      const ctm = el.getScreenCTM();
+      if (!ctm) return null;
+      const o = paperOrigin();
+      const m = mat(ctm);
+      return [
+        { x: b.x, y: b.y },
+        { x: b.x + b.width, y: b.y },
+        { x: b.x + b.width, y: b.y + b.height },
+        { x: b.x, y: b.y + b.height }
+      ].map((p) => ({
+        x: m.a * p.x + m.c * p.y + m.e - o.x,
+        y: m.b * p.x + m.d * p.y + m.f - o.y
+      }));
+    } catch {
+      return null;
+    }
+  }
+  function toPaperBox(b) {
+    return transformBox(slideToPaper(), b);
+  }
+  function selectionBox() {
+    return unionBoxes(
+      ed.selection.map((s) => slideBox(s.el)).filter((b) => b !== null)
+    );
+  }
+  var HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+  function handlePoint(h2, b) {
+    const cx = b.x + b.width / 2;
+    const cy = b.y + b.height / 2;
+    const r = b.x + b.width;
+    const btm = b.y + b.height;
+    switch (h2) {
+      case "nw":
+        return { x: b.x, y: b.y };
+      case "n":
+        return { x: cx, y: b.y };
+      case "ne":
+        return { x: r, y: b.y };
+      case "e":
+        return { x: r, y: cy };
+      case "se":
+        return { x: r, y: btm };
+      case "s":
+        return { x: cx, y: btm };
+      case "sw":
+        return { x: b.x, y: btm };
+      case "w":
+        return { x: b.x, y: cy };
+      case "rot":
+        return { x: cx, y: b.y - 28 };
+    }
+  }
+  function drawOverlay() {
+    while (overlay.firstChild) overlay.removeChild(overlay.firstChild);
+    const svg = slideRoot();
+    if (!svg) return;
+    drawPlaceholders();
+    if (ed.scope) {
+      const c = elementCorners(ed.scope);
+      if (c) overlay.append(poly(c, "scope-outline"));
+    }
+    if (hoverEl && !ed.selection.some((s) => s.el === hoverEl)) {
+      const c = elementCorners(hoverEl);
+      if (c) overlay.append(poly(c, "hover-outline"));
+    }
+    for (const s of ed.selection) {
+      const c = elementCorners(s.el);
+      if (c) {
+        overlay.append(
+          poly(
+            c,
+            canTransform(s.el) ? "sel-outline" : "sel-outline content-only"
+          )
+        );
+      }
+    }
+    const transformable = ed.selection.filter((s) => canTransform(s.el));
+    const box = transformable.length === ed.selection.length ? selectionBox() : null;
+    if (box && ed.step == null) {
+      const pb = toPaperBox(box);
+      if (ed.selection.length > 1) {
+        overlay.append(
+          svgEl("rect", {
+            x: pb.x,
+            y: pb.y,
+            width: pb.width,
+            height: pb.height,
+            class: "group-outline"
+          })
+        );
+      }
+      const top = handlePoint("n", pb);
+      const rot = handlePoint("rot", pb);
+      overlay.append(
+        svgEl("line", {
+          x1: top.x,
+          y1: top.y,
+          x2: rot.x,
+          y2: rot.y,
+          class: "rot-stem"
+        })
+      );
+      const rh = svgEl("circle", {
+        cx: rot.x,
+        cy: rot.y,
+        r: 6,
+        class: "handle rot"
+      });
+      rh.dataset.handle = "rot";
+      overlay.append(rh);
+      for (const h2 of HANDLES) {
+        const p = handlePoint(h2, pb);
+        const r = svgEl("rect", {
+          x: p.x - 5,
+          y: p.y - 5,
+          width: 10,
+          height: 10,
+          class: `handle h-${h2}`
+        });
+        r.dataset.handle = h2;
+        overlay.append(r);
+      }
+    }
+    for (const x of guides.xs) {
+      const p = toPaperBox({ x, y: 0, width: 0, height: slideSize().height });
+      overlay.append(
+        svgEl("line", {
+          x1: p.x,
+          y1: p.y,
+          x2: p.x,
+          y2: p.y + p.height,
+          class: "guide"
+        })
+      );
+    }
+    for (const y of guides.ys) {
+      const p = toPaperBox({ x: 0, y, width: slideSize().width, height: 0 });
+      overlay.append(
+        svgEl("line", {
+          x1: p.x,
+          y1: p.y,
+          x2: p.x + p.width,
+          y2: p.y,
+          class: "guide"
+        })
+      );
+    }
+    if (marquee) {
+      const p = toPaperBox(marquee);
+      overlay.append(
+        svgEl("rect", {
+          x: p.x,
+          y: p.y,
+          width: p.width,
+          height: p.height,
+          class: "marquee"
+        })
+      );
+    }
+  }
+  var MEDIA_ZONES = /media|image|img|picture|photo|figure|video|logo/;
+  function drawPlaceholders() {
+    const slide = currentSlide();
+    if (!slide?.emptyZones || ed.step != null) return;
+    for (const z of slide.emptyZones) {
+      const key = parseInt(z.locator.split(":")[0] ?? "", 10);
+      const src = sourceOf(key);
+      if (!src || z.zone === "slide-number" || z.zone === "slide-total")
+        continue;
+      const own = parseTransform(z.transform);
+      const box = transformBox(own, z);
+      const pb = toPaperBox(box);
+      overlay.append(
+        svgEl("rect", {
+          x: pb.x,
+          y: pb.y,
+          width: pb.width,
+          height: pb.height,
+          rx: 4,
+          class: "placeholder-outline"
+        })
+      );
+      const media = MEDIA_ZONES.test(z.zone);
+      const g = svgEl("g", { class: "placeholder" });
+      const text = media ? `+ image \xB7 ${z.zone}` : `+ ${z.zone}`;
+      const w = 14 + text.length * 7.2;
+      const tx = pb.x + 6;
+      const ty = pb.y + 6;
+      g.append(svgEl("rect", { x: tx, y: ty, width: w, height: 22, rx: 11 }));
+      const label2 = svgEl("text", {
+        x: tx + w / 2,
+        y: ty + 15,
+        "text-anchor": "middle"
+      });
+      label2.textContent = text;
+      g.append(label2);
+      const title = svgEl("title");
+      title.textContent = media ? `Add an image to the ${z.zone} zone` : `Add ${z.zone} text (Markdown)`;
+      g.append(title);
+      g.addEventListener("pointerdown", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (media) hooks.zoneMedia(z.zone);
+        else {
+          const r = paper.getBoundingClientRect();
+          hooks.editZone(
+            z.zone,
+            new DOMRect(
+              r.left + pb.x,
+              r.top + pb.y,
+              pb.width,
+              pb.height
+            )
+          );
+        }
+      });
+      overlay.append(g);
+    }
+  }
+  function opsByFile(plans) {
+    const out = /* @__PURE__ */ new Map();
+    for (const { sel, ops } of plans) {
+      const src = sourceOf(sel.key);
+      if (!src) continue;
+      const list2 = out.get(src.path) ?? [];
+      list2.push(...ops);
+      out.set(src.path, list2);
+    }
+    return out;
+  }
+  async function sendSvgOps(plans, label2, coalesce) {
+    const slide = currentSlide();
+    if (!slide) return false;
+    let ok = true;
+    for (const [path, ops] of opsByFile(plans)) {
+      const src = slide.sources?.find((s) => s.path === path);
+      if (src && src.usedBy.length > 1 && ed.layoutMode) {
+        toast(`Edited ${src.rel}: affects ${src.usedBy.length} slides`);
+      }
+      const result = await edit({
+        action: "svg",
+        file: path,
+        hash: src?.hash ?? "",
+        ops,
+        label: label2,
+        coalesce
+      });
+      ok = ok && result.ok;
+    }
+    return ok;
+  }
+  function applyPlanToDom(el, plan) {
+    for (const [k, v] of Object.entries(plan)) {
+      if (v == null) el.removeAttribute(k);
+      else el.setAttribute(k, v);
+    }
+  }
+  function textChildren(el) {
+    return [...el.querySelectorAll("tspan")].filter(
+      (t) => t.hasAttribute("x") || t.hasAttribute("y")
+    );
+  }
+  function moveOps(sel, dx, dy) {
+    const kids = textChildren(sel.el);
+    const plan = planMove(
+      elementGeom(sel.el),
+      dx,
+      dy,
+      kids.map((k) => ({
+        attrs: { x: k.getAttribute("x"), y: k.getAttribute("y") }
+      }))
+    );
+    const ops = [{ kind: "attrs", loc: sel.loc, set: plan.attrs }];
+    applyPlanToDom(sel.el, plan.attrs);
+    plan.children?.forEach((p, i) => {
+      const loc = kids[i].getAttribute("data-ink");
+      if (loc && Object.keys(p).length) {
+        ops.push({ kind: "attrs", loc, set: p });
+        applyPlanToDom(kids[i], p);
+      }
+    });
+    return ops;
+  }
+  async function nudge(dx, dy) {
+    const sels = ed.selection.filter((s) => canTransform(s.el));
+    if (!sels.length) return;
+    const plans = sels.map((sel) => ({ sel, ops: moveOps(sel, dx, dy) }));
+    drawOverlay();
+    await sendSvgOps(plans, "Nudge", "nudge");
+  }
+  function snapshot(sel) {
+    const attrs = {};
+    for (const a of GEOM_ATTRS) attrs[a] = sel.el.getAttribute(a);
+    return {
+      sel,
+      attrs,
+      kids: textChildren(sel.el).map((el) => ({
+        el,
+        x: el.getAttribute("x"),
+        y: el.getAttribute("y")
+      })),
+      box: slideBox(sel.el) ?? { x: 0, y: 0, width: 0, height: 0 },
+      geom: elementGeom(sel.el)
+    };
+  }
+  function restore(snaps) {
+    for (const s of snaps) {
+      applyPlanToDom(s.sel.el, s.attrs);
+      for (const k of s.kids) {
+        applyPlanToDom(k.el, { x: k.x, y: k.y });
+      }
+    }
+  }
+  function snapTargets(exclude) {
+    const svg = slideRoot();
+    const boxes = [];
+    if (svg) {
+      for (const el of svg.querySelectorAll("[data-ink-top]")) {
+        if (exclude.has(el) || [...exclude].some((x) => x.contains(el)))
+          continue;
+        const b = slideBox(el);
+        if (b && b.width > 0 && b.height > 0) boxes.push(b);
+      }
+    }
+    return targetsFor(slideSize(), boxes);
+  }
+  var pointer = null;
+  function beginDrag(handle) {
+    const sels = ed.selection.filter((s) => canTransform(s.el));
+    if (!sels.length || sels.length !== ed.selection.length || ed.step != null)
+      return null;
+    const snaps = sels.map(snapshot);
+    const start = unionBoxes(snaps.map((s) => s.box));
+    if (!start) return null;
+    const targets = snapTargets(new Set(sels.map((s) => s.el)));
+    if (handle === "rot") {
+      return {
+        kind: "rotate",
+        snaps,
+        center: {
+          x: start.x + start.width / 2,
+          y: start.y + start.height / 2
+        }
+      };
+    }
+    if (handle) return { kind: "resize", handle, snaps, start, targets };
+    return { kind: "move", snaps, start, targets };
+  }
+  function resizedBox(start, handle, dx, dy, keepAspect) {
+    let { x, y, width, height } = start;
+    if (handle.includes("w")) {
+      x += dx;
+      width -= dx;
+    }
+    if (handle.includes("e")) width += dx;
+    if (handle.includes("n")) {
+      y += dy;
+      height -= dy;
+    }
+    if (handle.includes("s")) height += dy;
+    if (keepAspect && start.width > 0 && start.height > 0) {
+      const ratio = start.width / start.height;
+      const corner = handle.length === 2;
+      if (corner || handle === "e" || handle === "w") {
+        const h2 = width / ratio;
+        if (handle.includes("n")) y += height - h2;
+        else if (!corner) y = start.y + (start.height - h2) / 2;
+        height = h2;
+      } else {
+        const w2 = height * ratio;
+        x = start.x + (start.width - w2) / 2;
+        width = w2;
+      }
+    }
+    if (width < 0) {
+      x += width;
+      width = -width;
+    }
+    if (height < 0) {
+      y += height;
+      height = -height;
+    }
+    return { x, y, width: Math.max(width, 1), height: Math.max(height, 1) };
+  }
+  function keepsAspect(snaps, shift) {
+    const natural = snaps.some(
+      (s) => ["text", "image", "circle"].includes(s.geom.sourceTag)
+    );
+    return natural !== shift;
+  }
+  function mapBox(b, from, to) {
+    const sx = from.width ? to.width / from.width : 1;
+    const sy = from.height ? to.height / from.height : 1;
+    return {
+      x: to.x + (b.x - from.x) * sx,
+      y: to.y + (b.y - from.y) * sy,
+      width: b.width * sx,
+      height: b.height * sy
+    };
+  }
+  var lastPlans = [];
+  function updateDrag(drag, e) {
+    if (!pointer) return;
+    const p0 = clientToSlide(pointer.x, pointer.y);
+    const p1 = clientToSlide(e.clientX, e.clientY);
+    let dx = p1.x - p0.x;
+    let dy = p1.y - p0.y;
+    const threshold = SNAP_PX / scale();
+    guides = { xs: [], ys: [] };
+    if (drag.kind === "move") {
+      if (e.shiftKey) {
+        if (Math.abs(dx) > Math.abs(dy)) dy = 0;
+        else dx = 0;
+      }
+      if (!e.altKey) {
+        const moved = {
+          ...drag.start,
+          x: drag.start.x + dx,
+          y: drag.start.y + dy
+        };
+        const snap = snapBox(moved, drag.targets, threshold);
+        dx += snap.dx;
+        dy += snap.dy;
+        guides = { xs: snap.guidesX, ys: snap.guidesY };
+      }
+      restore(drag.snaps);
+      lastPlans = drag.snaps.map((s) => ({
+        sel: s.sel,
+        ops: moveOps(s.sel, dx, dy)
+      }));
+    } else if (drag.kind === "resize") {
+      if (!e.altKey) {
+        const h2 = drag.handle;
+        const edgesX = [];
+        const edgesY = [];
+        if (h2.includes("w")) edgesX.push(drag.start.x + dx);
+        if (h2.includes("e"))
+          edgesX.push(drag.start.x + drag.start.width + dx);
+        if (h2.includes("n")) edgesY.push(drag.start.y + dy);
+        if (h2.includes("s"))
+          edgesY.push(drag.start.y + drag.start.height + dy);
+        const snap = snapEdges(edgesX, edgesY, drag.targets, threshold);
+        dx += snap.dx;
+        dy += snap.dy;
+        guides = { xs: snap.guidesX, ys: snap.guidesY };
+      }
+      const to = resizedBox(
+        drag.start,
+        drag.handle,
+        dx,
+        dy,
+        keepsAspect(drag.snaps, e.shiftKey)
+      );
+      restore(drag.snaps);
+      lastPlans = drag.snaps.map((s) => {
+        const plan = planResize(
+          s.geom,
+          s.box,
+          mapBox(s.box, drag.start, to)
+        );
+        applyPlanToDom(s.sel.el, plan);
+        return {
+          sel: s.sel,
+          ops: [{ kind: "attrs", loc: s.sel.loc, set: plan }]
+        };
+      });
+    } else if (drag.kind === "rotate") {
+      const c = drag.center;
+      const a0 = Math.atan2(p0.y - c.y, p0.x - c.x);
+      const a1 = Math.atan2(p1.y - c.y, p1.x - c.x);
+      let deg = (a1 - a0) * 180 / Math.PI;
+      if (e.shiftKey) deg = Math.round(deg / 15) * 15;
+      restore(drag.snaps);
+      lastPlans = drag.snaps.map((s) => {
+        const plan = planRotate(s.geom, deg, c);
+        applyPlanToDom(s.sel.el, plan);
+        return {
+          sel: s.sel,
+          ops: [{ kind: "attrs", loc: s.sel.loc, set: plan }]
+        };
+      });
+    } else if (drag.kind === "marquee") {
+      marquee = {
+        x: Math.min(p0.x, p1.x),
+        y: Math.min(p0.y, p1.y),
+        width: Math.abs(p1.x - p0.x),
+        height: Math.abs(p1.y - p0.y)
+      };
+    }
+    drawOverlay();
+  }
+  async function endDrag(drag) {
+    guides = { xs: [], ys: [] };
+    if (drag.kind === "marquee") {
+      const m = marquee;
+      marquee = null;
+      if (!m) return;
+      const svg = slideRoot();
+      if (!svg) return;
+      const hits = [...svg.querySelectorAll("[data-ink-top]")].filter(
+        (el) => {
+          if (!selectable(el) || !canTransform(el)) return false;
+          const b = slideBox(el);
+          return !!b && b.x >= m.x && b.y >= m.y && b.x + b.width <= m.x + m.width && b.y + b.height <= m.y + m.height;
+        }
+      );
+      if (drag.additive) {
+        for (const el of hits) addToSelection(el, false);
+        select(ed.selection.map((s) => s.el));
+      } else select(hits);
+      return;
+    }
+    const plans = lastPlans;
+    lastPlans = [];
+    drawOverlay();
+    if (!plans.length) return;
+    const label2 = drag.kind === "move" ? "Move" : drag.kind === "resize" ? "Resize" : "Rotate";
+    const ok = await sendSvgOps(plans, label2);
+    if (!ok) restore(drag.snaps);
+    drawOverlay();
+  }
+  function onPointerDown(e) {
+    if (e.button !== 0 || !slideRoot()) return;
+    const target = e.target;
+    const handle = target.closest("[data-handle]")?.dataset.handle;
+    const pt = clientToSlide(e.clientX, e.clientY);
+    if (!handle && ed.tool !== "select") {
+      if (hooks.toolDown(e, pt)) return;
+    }
+    paper.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    ed.interacting = true;
+    let clickTarget = null;
+    let drag = null;
+    if (handle) {
+      drag = beginDrag(handle);
+    } else {
+      clickTarget = pick(e.clientX, e.clientY);
+      if (clickTarget) {
+        const already = ed.selection.some((s) => s.el === clickTarget);
+        if (e.shiftKey || e.metaKey || e.ctrlKey) {
+          if (already) {
+            ed.selection = ed.selection.filter(
+              (s) => s.el !== clickTarget
+            );
+            drawOverlay();
+            emit("selection");
+            clickTarget = null;
+          } else addToSelection(clickTarget);
+        } else if (!already) select([clickTarget]);
+      } else {
+        if (!e.shiftKey) {
+          if (ed.scope && !ed.scope.contains(target)) enterGroup(null);
+          clearSelection();
+        }
+        drag = { kind: "marquee", additive: e.shiftKey };
+      }
+    }
+    pointer = {
+      id: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      started: false,
+      drag,
+      clickTarget,
+      shift: e.shiftKey
+    };
+  }
+  function onPointerMove(e) {
+    if (!pointer) {
+      if (ed.tool === "select" && e.buttons === 0) {
+        const el = pick(e.clientX, e.clientY);
+        if (el !== hoverEl) {
+          hoverEl = el;
+          drawOverlay();
+        }
+      }
+      return;
+    }
+    if (e.pointerId !== pointer.id) return;
+    if (!pointer.started) {
+      const dist = Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y);
+      if (dist < DRAG_THRESHOLD) return;
+      pointer.started = true;
+      if (!pointer.drag && pointer.clickTarget)
+        pointer.drag = beginDrag(null);
+      if (pointer.drag?.kind === "move" && !canTransform(pointer.clickTarget)) {
+        pointer.drag = null;
+      }
+    }
+    if (pointer.drag) updateDrag(pointer.drag, e);
+  }
+  async function onPointerUp(e) {
+    if (!pointer || e.pointerId !== pointer.id) return;
+    const p = pointer;
+    pointer = null;
+    try {
+      if (p.drag && p.started) await endDrag(p.drag);
+      else if (p.drag?.kind === "marquee") marquee = null;
+    } finally {
+      ed.interacting = false;
+      if (ed.renderPending) render();
+      else drawOverlay();
+    }
+  }
+  function textUnder(x, y) {
+    const svg = slideRoot();
+    for (const hit of document.elementsFromPoint(x, y)) {
+      const t = hit.closest("text");
+      if (t && svg?.contains(t) && t.hasAttribute("data-ink")) {
+        return t;
+      }
+    }
+    return null;
+  }
+  function onDoubleClick(e) {
+    const el = pick(e.clientX, e.clientY);
+    if (!el) return;
+    if (isZone(el)) {
+      hooks.editZone(zoneName(el), el.getBoundingClientRect());
+      return;
+    }
+    const text = textUnder(e.clientX, e.clientY);
+    if (text && el.contains(text)) {
+      if (text !== el && !text.hasAttribute("data-ink-top")) {
+        enterGroup(text.parentElement);
+      }
+      select([text]);
+      hooks.editText(text);
+      return;
+    }
+    if (el.localName === "g") {
+      enterGroup(el);
+      const inner = pick(e.clientX, e.clientY);
+      if (inner) select([inner]);
+    }
+  }
+  function initCanvas() {
+    paper.addEventListener("pointerdown", onPointerDown);
+    paper.addEventListener("pointermove", onPointerMove);
+    paper.addEventListener("pointerup", (e) => void onPointerUp(e));
+    paper.addEventListener("pointercancel", (e) => void onPointerUp(e));
+    paper.addEventListener("dblclick", onDoubleClick);
+    paper.addEventListener("pointerleave", () => {
+      if (hoverEl) {
+        hoverEl = null;
+        drawOverlay();
+      }
+    });
+    new ResizeObserver(() => layoutPaper()).observe(canvas);
+    canvas.addEventListener(
+      "wheel",
+      (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        setZoom(scale() * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+      },
+      { passive: false }
+    );
+    canvas.addEventListener("pointerdown", (e) => {
+      if (e.target === canvas) {
+        enterGroup(null);
+        clearSelection();
+      }
+    });
+    on("model", render);
+  }
+  function setZoom(z) {
+    ed.zoom = z <= 0 ? 0 : Math.max(0.05, Math.min(z, 8));
+    layoutPaper();
+    emit("zoom");
+  }
+
+  // src/ts/editor/sorter.ts
+  var list = document.getElementById("sorter-list");
+  var addBtn = document.getElementById("sorter-add");
+  var menu = document.getElementById("context-menu");
+  var dragFrom = null;
+  function gotoSlide(deckIndex) {
+    const n = ed.model?.slides.length ?? 0;
+    if (!n) return;
+    const i = Math.max(0, Math.min(n - 1, deckIndex));
+    if (i === ed.current) return;
+    ed.current = i;
+    ed.selection = [];
+    ed.scope = null;
+    emit("slide");
+  }
+  function thumb(slide) {
+    const box = h("div", { class: "thumb" });
+    if (slide.visibleIndex == null) {
+      box.append(h("div", { class: "thumb-hidden" }, icon("eyeOff", 18)));
+      return box;
+    }
+    const data = ed.slides[slide.visibleIndex];
+    if (!data) return box;
+    box.innerHTML = data.svg;
+    const svg = box.querySelector("svg");
+    if (svg) {
+      const vb = parseViewBox(svg.getAttribute("viewBox"));
+      svg.setAttribute("width", "100%");
+      svg.setAttribute("height", "100%");
+      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+      svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
+      svg.querySelectorAll(".anim-pending").forEach((el) => {
+        el.classList.remove("anim-pending");
+      });
+      svg.querySelectorAll("video").forEach((v) => {
+        v.removeAttribute("autoplay");
+      });
+    }
+    return box;
+  }
+  function renderSorter() {
+    clear(list);
+    const slides = ed.model?.slides ?? [];
+    slides.forEach((slide, i) => {
+      const item = h(
+        "div",
+        {
+          class: `sorter-item${i === ed.current ? " active" : ""}${slide.visible ? "" : " hidden-slide"}`,
+          draggable: ed.model?.deckEditable ? "true" : null,
+          title: slide.title ?? slide.id ?? slide.src,
+          "data-index": i
+        },
+        h("span", { class: "sorter-num" }, String(i + 1)),
+        thumb(slide)
+      );
+      item.addEventListener("click", () => gotoSlide(i));
+      item.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        gotoSlide(i);
+        openMenu(e.clientX, e.clientY, i);
+      });
+      item.addEventListener("dragstart", (e) => {
+        dragFrom = i;
+        e.dataTransfer?.setData("text/plain", String(i));
+        item.classList.add("dragging");
+      });
+      item.addEventListener("dragend", () => {
+        dragFrom = null;
+        item.classList.remove("dragging");
+        list.querySelectorAll(".drop-before, .drop-after").forEach((el) => {
+          el.classList.remove("drop-before", "drop-after");
+        });
+      });
+      item.addEventListener("dragover", (e) => {
+        if (dragFrom == null) return;
+        e.preventDefault();
+        const r = item.getBoundingClientRect();
+        const after = e.clientY > r.top + r.height / 2;
+        item.classList.toggle("drop-after", after);
+        item.classList.toggle("drop-before", !after);
+      });
+      item.addEventListener("dragleave", () => {
+        item.classList.remove("drop-before", "drop-after");
+      });
+      item.addEventListener("drop", (e) => {
+        e.preventDefault();
+        if (dragFrom == null) return;
+        const r = item.getBoundingClientRect();
+        const after = e.clientY > r.top + r.height / 2;
+        let to = after ? i + 1 : i;
+        if (dragFrom < to) to -= 1;
+        void moveSlide(dragFrom, to);
+      });
+      list.append(item);
+    });
+    list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+  }
+  async function moveSlide(from, to) {
+    if (from === to) return;
+    const result = await edit({ action: "slide", op: "move", from, to });
+    if (result.ok) {
+      ed.current = to;
+      emit("slide");
+    }
+  }
+  async function newSlide(layout, after = ed.current) {
+    const result = await edit({
+      action: "slide",
+      op: "new",
+      after,
+      layout,
+      name: layout ?? "slide"
+    });
+    if (result.ok && result.select != null) pendingSelect = result.select;
+  }
+  async function duplicateSlide(i = ed.current) {
+    const result = await edit({ action: "slide", op: "duplicate", slide: i });
+    if (result.ok && result.select != null) pendingSelect = result.select;
+  }
+  async function deleteSlide(i = ed.current) {
+    const slide = ed.model?.slides[i];
+    if (!slide) return;
+    const name = slide.title ?? slide.id ?? `slide ${i + 1}`;
+    if (!window.confirm(
+      `Delete \u201C${name}\u201D from the deck? (Its files stay on disk.)`
+    )) {
+      return;
+    }
+    const result = await edit({ action: "slide", op: "delete", slide: i });
+    if (result.ok) {
+      ed.current = Math.max(0, i - 1);
+      emit("slide");
+    }
+  }
+  async function toggleHidden(i = ed.current) {
+    const slide = ed.model?.slides[i];
+    if (!slide) return;
+    await edit({
+      action: "slide",
+      op: "hide",
+      slide: i,
+      hidden: slide.visible
+    });
+  }
+  var pendingSelect = null;
+  function closeMenu() {
+    menu.classList.remove("open");
+    clear(menu);
+  }
+  function menuItem(label2, fn, disabled = false) {
+    return h(
+      "button",
+      {
+        type: "button",
+        class: "menu-item",
+        disabled,
+        onclick: () => {
+          closeMenu();
+          fn();
+        }
+      },
+      label2
+    );
+  }
+  function layoutMenu(x, y, after) {
+    clear(menu);
+    menu.append(h("div", { class: "menu-title" }, "New slide"));
+    menu.append(menuItem("Blank", () => void newSlide(null, after)));
+    for (const layout of ed.model?.layouts ?? []) {
+      menu.append(
+        menuItem(
+          `${layout.name}${layout.source === "local" ? "" : ` \xB7 ${layout.source}`}`,
+          () => void newSlide(layout.name, after)
+        )
+      );
+    }
+    showMenu(x, y);
+  }
+  function openMenu(x, y, i) {
+    const slide = ed.model?.slides[i];
+    const editable = !!ed.model?.deckEditable;
+    clear(menu);
+    menu.append(
+      menuItem("New slide after\u2026", () => layoutMenu(x, y, i), !editable)
+    );
+    menu.append(menuItem("Duplicate", () => void duplicateSlide(i), !editable));
+    menu.append(
+      menuItem(
+        slide?.visible ? "Hide (skip in presentation)" : "Show",
+        () => void toggleHidden(i),
+        !editable
+      )
+    );
+    menu.append(menuItem("Delete", () => void deleteSlide(i), !editable));
+    showMenu(x, y);
+  }
+  function showMenu(x, y) {
+    menu.classList.add("open");
+    const r = menu.getBoundingClientRect();
+    menu.style.left = `${Math.min(x, window.innerWidth - r.width - 8)}px`;
+    menu.style.top = `${Math.min(y, window.innerHeight - r.height - 8)}px`;
+  }
+  function initSorter() {
+    on("model", () => {
+      const n = ed.model?.slides.length ?? 0;
+      if (pendingSelect != null && pendingSelect < n) {
+        ed.current = pendingSelect;
+        pendingSelect = null;
+        emit("slide");
+      }
+      if (ed.current >= n) ed.current = Math.max(0, n - 1);
+      renderSorter();
+    });
+    on("slide", renderSorter);
+    addBtn.addEventListener("click", (e) => {
+      if (!ed.model?.deckEditable) {
+        toast(
+          "deck.py builds its slides in code; add slides there",
+          "error"
+        );
+        return;
+      }
+      const r = e.currentTarget.getBoundingClientRect();
+      layoutMenu(r.left, r.bottom + 4, ed.current);
+    });
+    document.addEventListener("pointerdown", (e) => {
+      if (!menu.contains(e.target)) closeMenu();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeMenu();
+    });
+  }
+
+  // src/ts/editor/context.ts
+  var timer = 0;
+  function snapshot2() {
+    const slide = currentSlide();
+    const visible = ed.model?.slides.filter((s) => s.visible).length ?? 0;
+    return {
+      deck: ed.model?.deckPath,
+      slide: slide && {
+        number: (slide.visibleIndex ?? -1) + 1 || null,
+        total: visible,
+        deckIndex: slide.deckIndex,
+        id: slide.id ?? slide.explicitId,
+        title: slide.title,
+        svg: slide.srcRel,
+        sharedLayout: slide.srcShared,
+        md: slide.md?.rel ?? (slide.md ? "inline in deck.py" : null),
+        notes: slide.notes.rel
+      },
+      step: ed.step,
+      layoutMode: ed.layoutMode,
+      selection: ed.selection.map((s) => {
+        const box = slideBox(s.el);
+        const text = (s.el.textContent ?? "").replace(/\s+/g, " ").trim();
+        return {
+          id: s.el.getAttribute("id"),
+          tag: s.el.localName,
+          zone: isZone(s.el) ? zoneName(s.el) : null,
+          file: sourceOf(s.key)?.rel,
+          locator: s.loc,
+          box: box && {
+            x: Math.round(box.x),
+            y: Math.round(box.y),
+            width: Math.round(box.width),
+            height: Math.round(box.height)
+          },
+          text: text.slice(0, 200) || null
+        };
+      })
+    };
+  }
+  function report() {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
+      sendRaw({ type: "editor-context", context: snapshot2() });
+    }, 250);
+  }
+  function initContext() {
+    on("selection", report);
+    on("slide", report);
+    on("model", report);
+    on("step", report);
+    onCommand((msg) => {
+      if (msg.command === "goto") {
+        const n = Number(msg.slide);
+        const slides = ed.model?.slides ?? [];
+        const target = slides.find((s) => s.visibleIndex === n - 1);
+        if (target) gotoSlide(target.deckIndex);
+      } else if (msg.command === "select") {
+        const ids = msg.ids ?? [];
+        const svg = slideRoot();
+        if (!svg) return;
+        const els = ids.map((id) => svg.querySelector(`[id="${CSS.escape(id)}"]`)).filter(
+          (el) => el instanceof SVGGraphicsElement
+        );
+        enterGroup(null);
+        select(els);
+        emit("flash");
+      }
+    });
+  }
+
+  // src/ts/editor/insert.ts
+  var overlay2 = document.getElementById("overlay");
+  var afterRender = {
+    ids: [],
+    editText: false
+  };
+  function setTool(tool) {
+    ed.tool = tool;
+    document.body.dataset.tool = tool;
+    emit("tool");
+  }
+  function waitForModel(pred, ms = 5e3) {
+    return new Promise((resolve) => {
+      const deadline = window.setTimeout(() => resolve(false), ms);
+      const check = () => {
+        const s = currentSlide();
+        if (s && pred(s)) {
+          window.clearTimeout(deadline);
+          resolve(true);
+        } else on("model", check);
+      };
+      on("model", check);
+    });
+  }
+  async function ensureOwnDrawing() {
+    const slide = currentSlide();
+    if (!slide) return false;
+    if (!slide.srcShared) return true;
+    if (!ed.model?.deckEditable) {
+      toast(
+        "deck.py builds its slides in code; cannot add a drawing here",
+        "error"
+      );
+      return false;
+    }
+    const deckIndex = slide.deckIndex;
+    const result = await edit({
+      action: "slide",
+      op: "detach",
+      slide: deckIndex
+    });
+    if (!result.ok) return false;
+    toast("This slide now has its own SVG (built on its layout)");
+    return waitForModel((s) => s.deckIndex === deckIndex && !s.srcShared);
+  }
+  function ownSource() {
+    return currentSlide()?.sources?.find((s) => s.role === "slide") ?? null;
+  }
+  function insertParent() {
+    const svg = slideRoot();
+    if (ed.scope?.getAttribute("data-ink")?.startsWith("0:")) {
+      return { loc: ed.scope.getAttribute("data-ink"), el: ed.scope };
+    }
+    const layers = svg ? [...svg.querySelectorAll('[data-ink-layer][data-ink^="0:"]')].filter(
+      (l) => !l.hasAttribute("data-ink-locked")
+    ) : [];
+    const layer2 = layers[layers.length - 1];
+    if (layer2) return { loc: layer2.getAttribute("data-ink"), el: layer2 };
+    return { loc: "0:", el: null };
+  }
+  function toParent(el, x, y) {
+    const svg = slideRoot();
+    if (!el || !svg) return { x, y };
+    const p = el.getScreenCTM?.();
+    const r = svg.getScreenCTM();
+    if (!p || !r) return { x, y };
+    const m = multiply(invert(mat(p)), mat(r));
+    return { x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f };
+  }
+  async function insertXml(xml, base, opts = {}) {
+    if (!await ensureOwnDrawing()) return false;
+    const src = ownSource();
+    if (!src) return false;
+    const parent = insertParent();
+    const ops = [];
+    if (opts.marker) ops.push({ kind: "ensure-marker" });
+    ops.push({ kind: "insert", parent: parent.loc, xml, base, key: "new" });
+    const result = await edit({
+      action: "svg",
+      file: src.path,
+      hash: src.hash,
+      ops: ops.map(
+        (o) => o.kind === "ensure-marker" ? { ...o, loc: void 0 } : o
+      ),
+      label: `Insert ${base}`
+    });
+    if (!result.ok) return false;
+    const id = result.ids?.new;
+    if (id) {
+      afterRender.ids = [id];
+      afterRender.editText = !!opts.editText;
+    }
+    return true;
+  }
+  var SHAPE_STYLE = {
+    rect: 'class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:4"',
+    ellipse: 'class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:4"',
+    line: 'class="inkflow-stroke-text" style="fill:none;stroke-width:6;stroke-linecap:round"'
+  };
+  function shapeXml(tool, a, b) {
+    const x = Math.min(a.x, b.x);
+    const y = Math.min(a.y, b.y);
+    const w = Math.abs(b.x - a.x);
+    const h2 = Math.abs(b.y - a.y);
+    switch (tool) {
+      case "rect":
+        return `<rect x="${fmt(x)}" y="${fmt(y)}" width="${fmt(w)}" height="${fmt(h2)}" rx="16" ${SHAPE_STYLE.rect}/>`;
+      case "ellipse":
+        return `<ellipse cx="${fmt(x + w / 2)}" cy="${fmt(y + h2 / 2)}" rx="${fmt(w / 2)}" ry="${fmt(h2 / 2)}" ${SHAPE_STYLE.ellipse}/>`;
+      case "arrow":
+        return `<line x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(b.x)}" y2="${fmt(b.y)}" ${SHAPE_STYLE.line} marker-end="url(#inkflow-arrow)"/>`;
+      default:
+        return `<line x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(b.x)}" y2="${fmt(b.y)}" ${SHAPE_STYLE.line}/>`;
+    }
+  }
+  function textXml(p) {
+    return `<text x="${fmt(p.x)}" y="${fmt(p.y)}" class="inkflow-fill-text" style="font-size:56px;font-family:var(--inkflow-body-font, sans-serif)">Text</text>`;
+  }
+  var draft = null;
+  function drawDraft(tool, a, b) {
+    draft?.remove();
+    const m = slideToPaper();
+    const pa = { x: m.a * a.x + m.e, y: m.d * a.y + m.f };
+    const pb = { x: m.a * b.x + m.e, y: m.d * b.y + m.f };
+    if (tool === "line" || tool === "arrow") {
+      draft = svgEl("line", {
+        x1: pa.x,
+        y1: pa.y,
+        x2: pb.x,
+        y2: pb.y,
+        class: "draft"
+      });
+    } else {
+      const box = transformBox(m, {
+        x: Math.min(a.x, b.x),
+        y: Math.min(a.y, b.y),
+        width: Math.abs(b.x - a.x),
+        height: Math.abs(b.y - a.y)
+      });
+      draft = tool === "ellipse" ? svgEl("ellipse", {
+        cx: box.x + box.width / 2,
+        cy: box.y + box.height / 2,
+        rx: box.width / 2,
+        ry: box.height / 2,
+        class: "draft"
+      }) : svgEl("rect", {
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height,
+        class: "draft"
+      });
+    }
+    overlay2.append(draft);
+  }
+  function onToolDown(e, start) {
+    const tool = ed.tool;
+    if (tool === "select") return false;
+    e.preventDefault();
+    clearSelection();
+    if (tool === "text") {
+      const p = toParent(insertParent().el, start.x, start.y);
+      void insertXml(textXml(p), "text", { editText: true });
+      setTool("select");
+      return true;
+    }
+    const paperEl = e.currentTarget;
+    paperEl.setPointerCapture(e.pointerId);
+    ed.interacting = true;
+    let end = start;
+    const move = (ev) => {
+      end = clientToSlide(ev.clientX, ev.clientY);
+      if (ev.shiftKey && (tool === "rect" || tool === "ellipse")) {
+        const d = Math.max(
+          Math.abs(end.x - start.x),
+          Math.abs(end.y - start.y)
+        );
+        end = {
+          x: start.x + Math.sign(end.x - start.x || 1) * d,
+          y: start.y + Math.sign(end.y - start.y || 1) * d
+        };
+      }
+      drawDraft(tool, start, end);
+    };
+    const up = () => {
+      paperEl.removeEventListener("pointermove", move);
+      paperEl.removeEventListener("pointerup", up);
+      draft?.remove();
+      draft = null;
+      ed.interacting = false;
+      let a = start;
+      let b = end;
+      if (Math.hypot(b.x - a.x, b.y - a.y) < 8) {
+        const w = tool === "line" || tool === "arrow" ? 300 : 360;
+        const h2 = tool === "line" || tool === "arrow" ? 0 : 220;
+        a = { x: start.x - w / 2, y: start.y - h2 / 2 };
+        b = { x: start.x + w / 2, y: start.y + h2 / 2 };
+      }
+      const parent = insertParent().el;
+      const pa = toParent(parent, a.x, a.y);
+      const pb = toParent(parent, b.x, b.y);
+      void insertXml(shapeXml(tool, pa, pb), tool, {
+        marker: tool === "arrow"
+      });
+      setTool("select");
+      if (ed.renderPending) emit("model");
+      drawOverlay();
+    };
+    paperEl.addEventListener("pointermove", move);
+    paperEl.addEventListener("pointerup", up);
+    return true;
+  }
+  function readBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = String(reader.result);
+        resolve(url.slice(url.indexOf(",") + 1));
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+  async function upload(file) {
+    const data = await readBase64(file);
+    const result = await request({ action: "upload", name: file.name, data });
+    if (!result.ok || !result.path || !result.rel) {
+      toast(result.error ?? "upload failed", "error");
+      return null;
+    }
+    return { path: result.path, rel: result.rel };
+  }
+  function naturalSize(rel) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({
+        w: img.naturalWidth || 400,
+        h: img.naturalHeight || 300
+      });
+      img.onerror = () => resolve({ w: 400, h: 300 });
+      img.src = `/${rel}`;
+    });
+  }
+  async function insertImageFile(file, at) {
+    if (/^video\//.test(file.type)) {
+      toast("Drop a video onto a media zone, or add it in deck.py", "error");
+      return;
+    }
+    if (!await ensureOwnDrawing()) return;
+    const up = await upload(file);
+    const src = ownSource();
+    if (!up || !src) return;
+    const size = await naturalSize(up.rel);
+    const svg = slideRoot();
+    const vb = svg?.viewBox.baseVal;
+    const maxW = (vb?.width || 1920) * 0.5;
+    const maxH = (vb?.height || 1080) * 0.5;
+    const k = Math.min(1, maxW / size.w, maxH / size.h);
+    const w = size.w * k;
+    const h2 = size.h * k;
+    const cx = at?.x ?? (vb?.width || 1920) / 2;
+    const cy = at?.y ?? (vb?.height || 1080) / 2;
+    const parent = insertParent().el;
+    const p = toParent(parent, cx - w / 2, cy - h2 / 2);
+    const href = relativePath(src.path, up.path);
+    await insertXml(
+      `<image href="${href}" x="${fmt(p.x)}" y="${fmt(p.y)}" width="${fmt(w)}" height="${fmt(h2)}" preserveAspectRatio="xMidYMid meet"/>`,
+      "image"
+    );
+  }
+  function pickFile(accept) {
+    return new Promise((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = accept;
+      input.onchange = () => resolve(input.files?.[0] ?? null);
+      input.click();
+    });
+  }
+  async function insertImage() {
+    const file = await pickFile("image/*");
+    if (file) await insertImageFile(file);
+  }
+  async function zoneMedia(zone) {
+    const slide = currentSlide();
+    if (!slide) return;
+    const file = await pickFile("image/*,video/mp4,video/webm");
+    if (!file) return;
+    const up = await upload(file);
+    if (!up) return;
+    await edit({
+      action: "zone-media",
+      slide: slide.deckIndex,
+      zone,
+      src: up.path,
+      fit: "cover"
+    });
+  }
+  function cleanForPaste(el) {
+    const copy = el.cloneNode(true);
+    for (const node of [copy, ...copy.querySelectorAll("*")]) {
+      for (const attr of [...node.attributes]) {
+        const name = attr.name;
+        if (name.startsWith("data-")) node.removeAttribute(name);
+        else if (name === "xlink:href") {
+          node.setAttribute("href", attr.value);
+          node.removeAttribute(name);
+        } else if (name.includes(":") && !name.startsWith("xml:")) {
+          node.removeAttribute(name);
+        } else if (name === "class") {
+          const kept = attr.value.split(/\s+/).filter((c) => c && !c.startsWith("anim-"));
+          if (kept.length) node.setAttribute("class", kept.join(" "));
+          else node.removeAttribute("class");
+        }
+      }
+      node.style?.removeProperty?.("visibility");
+    }
+    return new XMLSerializer().serializeToString(copy);
+  }
+  function copySelection() {
+    const own = ed.selection.filter((s) => s.el.localName !== "foreignObject");
+    if (!own.length) return false;
+    ed.clip = {
+      fragments: own.map((s) => cleanForPaste(s.el)),
+      sourceFile: currentSlide()?.sources?.[own[0].key]?.path ?? ""
+    };
+    toast(`Copied ${own.length} object${own.length > 1 ? "s" : ""}`);
+    return true;
+  }
+  function retarget(xml, targetFile) {
+    const projectDir = ed.model?.projectDir ?? "";
+    return xml.replace(/\shref="([^"]+)"/g, (whole, href) => {
+      if (/^(data:|https?:|#|\/)/.test(href)) return whole;
+      return ` href="${relativePath(targetFile, `${projectDir}/${href}`)}"`;
+    });
+  }
+  async function pasteClip() {
+    const clip = ed.clip;
+    if (!clip) return;
+    if (!await ensureOwnDrawing()) return;
+    const src = ownSource();
+    if (!src) return;
+    const sameFile = clip.sourceFile === src.path;
+    const parent = insertParent();
+    const result = await edit({
+      action: "svg",
+      file: src.path,
+      hash: src.hash,
+      // Copies on the same slide are offset so they do not hide the original.
+      ops: clip.fragments.map((xml, i) => {
+        const frag = retarget(xml, src.path);
+        return {
+          kind: "insert",
+          parent: parent.loc,
+          xml: sameFile ? offsetFragment(frag, 24) : frag,
+          key: `paste${i}`
+        };
+      }),
+      label: "Paste"
+    });
+    if (result.ok && result.ids) {
+      afterRender.ids = Object.values(result.ids);
+    }
+  }
+  function offsetFragment(xml, d) {
+    const m = xml.match(/^<(\w+)([^>]*)>/s) ?? xml.match(/^<(\w+)([^>]*)\/>/s);
+    if (!m) return xml;
+    const tagStart = `<${m[1]}`;
+    const attrs = m[2];
+    const t = attrs.match(/\stransform="([^"]*)"/);
+    const newAttrs = t ? attrs.replace(t[0], ` transform="translate(${d},${d}) ${t[1]}"`) : `${attrs} transform="translate(${d},${d})"`;
+    return tagStart + newAttrs + xml.slice(tagStart.length + attrs.length);
+  }
+  function initInsert() {
+    hooks.toolDown = onToolDown;
+    hooks.zoneMedia = (zone) => void zoneMedia(zone);
+    const canvas2 = document.getElementById("canvas");
+    canvas2.addEventListener("dragover", (e) => {
+      if (e.dataTransfer?.types.includes("Files")) {
+        e.preventDefault();
+        canvas2.classList.add("drop");
+      }
+    });
+    canvas2.addEventListener("dragleave", () => canvas2.classList.remove("drop"));
+    canvas2.addEventListener("drop", (e) => {
+      canvas2.classList.remove("drop");
+      const file = e.dataTransfer?.files?.[0];
+      if (!file) return;
+      e.preventDefault();
+      void insertImageFile(file, clientToSlide(e.clientX, e.clientY));
+    });
+    document.addEventListener("paste", (e) => {
+      const target = e.target;
+      if (target.closest("textarea, input")) return;
+      const file = [...e.clipboardData?.files ?? []].find(
+        (f) => f.type.startsWith("image/")
+      );
+      if (file) {
+        e.preventDefault();
+        void insertImageFile(file);
+      } else if (ed.clip) {
+        e.preventDefault();
+        void pasteClip();
+      }
+    });
+  }
+
+  // src/ts/editor/notes.ts
+  var area = document.getElementById("notes-input");
+  var label = document.getElementById("notes-file");
+  var timer2 = 0;
+  var slideIndex = -1;
+  var sent = "";
+  var burst = "";
+  async function save() {
+    window.clearTimeout(timer2);
+    const slide = ed.model?.slides[slideIndex];
+    if (!slide || area.value === sent) return;
+    sent = area.value;
+    await edit({
+      action: "notes",
+      slide: slide.deckIndex,
+      text: area.value,
+      name: slide.id ?? "slide",
+      coalesce: burst
+    });
+  }
+  function load() {
+    const slide = currentSlide();
+    if (!slide) return;
+    if (document.activeElement === area && slideIndex === slide.deckIndex)
+      return;
+    slideIndex = slide.deckIndex;
+    area.value = slide.notes.text;
+    sent = area.value;
+    label.textContent = slide.notes.kind === "file" ? slide.notes.rel ?? "" : slide.notes.kind === "inline" ? "inline in deck.py" : "new notes file on first edit";
+  }
+  function initNotes() {
+    area.addEventListener("focus", () => {
+      burst = `notes-${Date.now()}`;
+    });
+    area.addEventListener("input", () => {
+      window.clearTimeout(timer2);
+      timer2 = window.setTimeout(() => void save(), 600);
+    });
+    area.addEventListener("blur", () => void save());
+    area.addEventListener("keydown", (e) => e.stopPropagation());
+    on("slide", () => {
+      void save().then(load);
+    });
+    on("model", load);
+  }
+
+  // src/ts/editor/props.ts
+  var panel = document.getElementById("props");
+  function section(title, ...body) {
+    return h(
+      "section",
+      { class: "props-section" },
+      h("h3", {}, title),
+      ...body.filter((b) => !!b)
+    );
+  }
+  function row(label2, ...controls) {
+    return h(
+      "label",
+      { class: "prop-row" },
+      h("span", { class: "prop-label" }, label2),
+      ...controls
+    );
+  }
+  function numberInput(value, commit, opts = {}) {
+    const input = h("input", {
+      type: "number",
+      class: "num",
+      step: opts.step ?? 1,
+      min: opts.min ?? null,
+      placeholder: opts.placeholder ?? "",
+      value: value == null ? "" : String(Math.round(value * 100) / 100)
+    });
+    const fire = () => {
+      const v = parseFloat(input.value);
+      if (Number.isFinite(v)) commit(v);
+    };
+    input.addEventListener("change", fire);
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") input.blur();
+    });
+    return input;
+  }
+  function textInput(value, commit, placeholder = "") {
+    const input = h("input", { type: "text", value, placeholder });
+    input.addEventListener("change", () => commit(input.value));
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") input.blur();
+    });
+    return input;
+  }
+  function selectInput(options, value, commit) {
+    const sel = h("select", {});
+    for (const o of options) {
+      const opt = h("option", { value: o.value }, o.label);
+      if (o.value === value) opt.selected = true;
+      sel.append(opt);
+    }
+    sel.addEventListener("change", () => commit(sel.value));
+    return sel;
+  }
+  function button(label2, title, fn, cls = "") {
+    return h(
+      "button",
+      { type: "button", class: `pbtn ${cls}`, title, onclick: fn },
+      label2
+    );
+  }
+  function fieldControl(f, value, commit) {
+    switch (f.kind) {
+      case "trigger": {
+        const labels = {
+          "on-click": "On click",
+          "with-previous": "With previous",
+          "after-previous": "After previous"
+        };
+        const v = String(value ?? f.default ?? "on-click");
+        const opts = f.choices.map((c) => ({
+          value: c,
+          label: labels[c] ?? c
+        }));
+        if (!f.choices.includes(v))
+          opts.push({ value: v, label: `At step ${v}` });
+        return selectInput(opts, v, commit);
+      }
+      case "enum":
+      case "easing": {
+        const v = String(value ?? f.default ?? "");
+        const opts = f.choices.map((c) => ({ value: c, label: c }));
+        if (v && !f.choices.includes(v)) opts.push({ value: v, label: v });
+        return selectInput(opts, v, commit);
+      }
+      case "bool": {
+        const cb = h("input", { type: "checkbox" });
+        cb.checked = Boolean(value);
+        cb.addEventListener("change", () => commit(cb.checked));
+        return cb;
+      }
+      case "int":
+      case "float":
+        return numberInput(
+          typeof value === "number" ? value : null,
+          (v) => commit(f.kind === "int" ? Math.round(v) : v),
+          { step: f.kind === "int" ? 1 : 0.05 }
+        );
+      default:
+        return textInput(value == null ? "" : String(value), commit);
+    }
+  }
+  function fieldsEditor(schema, values, commit) {
+    const box = h("div", { class: "fields" });
+    for (const f of schema) {
+      const label2 = f.name.replace(/_/g, " ");
+      box.append(
+        row(
+          label2,
+          fieldControl(
+            f,
+            values[f.name] ?? f.default,
+            (v) => commit({ ...values, [f.name]: v })
+          )
+        )
+      );
+    }
+    return box;
+  }
+  function typeInfo(list2, type) {
+    return list2.find((t) => t.type === type) ?? null;
+  }
+  function renderSlidePanel() {
+    const slide = currentSlide();
+    const model = ed.model;
+    if (!slide || !model) return;
+    const editable = model.deckEditable;
+    const di = slide.deckIndex;
+    const root = slideRoot();
+    const parent = root?.getAttribute("inkflow:parent") ?? null;
+    const currentLayout = slide.srcShared ? slide.src.replace(/\.svg$/, "") : parent;
+    const layoutOptions = [
+      ...slide.srcShared ? [] : [{ value: "", label: "(none)" }],
+      ...model.layouts.map((l) => ({ value: l.name, label: l.name }))
+    ];
+    if (currentLayout && !layoutOptions.some((o) => o.value === currentLayout)) {
+      layoutOptions.unshift({ value: currentLayout, label: currentLayout });
+    }
+    panel.append(
+      section(
+        "Slide",
+        row(
+          "Title",
+          textInput(slide.title ?? "", (v) => {
+            void edit({
+              action: "slide",
+              op: "title",
+              slide: di,
+              title: v
+            });
+          })
+        ),
+        row(
+          "Layout",
+          selectInput(layoutOptions, currentLayout ?? "", (v) => {
+            if (!v) return;
+            void edit({
+              action: "slide",
+              op: "layout",
+              slide: di,
+              layout: v
+            });
+          })
+        ),
+        row(
+          "Font size",
+          numberInput(
+            slide.fontSize,
+            (v) => void edit({
+              action: "slide",
+              op: "font-size",
+              slide: di,
+              size: v
+            }),
+            { placeholder: "deck default" }
+          )
+        ),
+        row(
+          "Hidden",
+          (() => {
+            const cb = h("input", { type: "checkbox" });
+            cb.checked = !slide.visible;
+            cb.disabled = !editable;
+            cb.addEventListener("change", () => {
+              void edit({
+                action: "slide",
+                op: "hide",
+                slide: di,
+                hidden: cb.checked
+              });
+            });
+            return cb;
+          })()
+        ),
+        !editable && h(
+          "p",
+          { class: "hint" },
+          "deck.py builds its slide list in code, so slide-level settings are read-only here."
+        )
+      )
+    );
+    panel.append(transitionSection(slide.transition, di));
+    panel.append(animationList(slide.animations, slide.animationsEditable, di));
+    const files = h("div", { class: "files" });
+    const addFile = (label2, rel) => {
+      if (rel)
+        files.append(
+          h(
+            "div",
+            { class: "file" },
+            h("span", {}, label2),
+            h("code", {}, rel)
+          )
+        );
+    };
+    addFile("Drawing", slide.srcShared ? null : slide.srcRel);
+    addFile("Layout", slide.srcShared ? slide.srcRel : null);
+    addFile("Markdown", slide.md?.rel);
+    addFile("Notes", slide.notes.rel);
+    panel.append(section("Files", files));
+    if (slide.srcShared) {
+      panel.append(
+        h(
+          "p",
+          { class: "hint" },
+          "This slide is drawn by a shared layout. Draw on it (or insert anything) and it gets its own SVG built on that layout. Use \u201CEdit layout\u201D to change the layout itself."
+        )
+      );
+    }
+  }
+  function transitionSection(current, di) {
+    const model = ed.model;
+    const types = model.transitionTypes;
+    const value = current?.type ?? "";
+    const opts = [
+      { value: "", label: `Deck default (${model.defaultTransition.type})` },
+      ...types.map((t) => ({ value: t.type, label: t.type }))
+    ];
+    const send = (spec) => void edit({ action: "slide", op: "transition", slide: di, spec });
+    const body = [
+      row(
+        "Type",
+        selectInput(opts, value, (v) => {
+          if (!v) send(null);
+          else send({ type: v, fields: {} });
+        })
+      )
+    ];
+    if (current) {
+      const info = typeInfo(types, current.type);
+      if (info) {
+        body.push(
+          fieldsEditor(
+            info.fields,
+            current.fields,
+            (fields) => send({ type: current.type, fields })
+          )
+        );
+      }
+    }
+    return section("Transition into this slide", ...body);
+  }
+  function triggerLabel(t) {
+    if (t === "with-previous") return "with previous";
+    if (t === "after-previous") return "after previous";
+    if (t === "on-click" || t == null) return "on click";
+    return `step ${t}`;
+  }
+  function animationList(cues, editable, di) {
+    const list2 = h("div", { class: "anim-list" });
+    if (!cues.length)
+      list2.append(h("p", { class: "hint" }, "No animations on this slide."));
+    cues.forEach((cue, i) => {
+      const item = h(
+        "div",
+        { class: "anim-item" },
+        h("span", { class: `anim-kind k-${cue.kind}` }),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "anim-target",
+            title: "Select this element",
+            onclick: () => selectById(cue.element)
+          },
+          `#${cue.element}`
+        ),
+        h("span", { class: "anim-type" }, cue.type),
+        h(
+          "span",
+          { class: "anim-trigger" },
+          triggerLabel(cue.fields.trigger ?? null)
+        ),
+        editable && button(icon("up", 12), "Earlier", () => {
+          if (i > 0)
+            void edit({
+              action: "anim",
+              slide: di,
+              op: "move",
+              index: i,
+              to: i - 1
+            });
+        }),
+        editable && button(icon("down", 12), "Later", () => {
+          if (i < cues.length - 1) {
+            void edit({
+              action: "anim",
+              slide: di,
+              op: "move",
+              index: i,
+              to: i + 1
+            });
+          }
+        }),
+        editable && button(icon("trash", 12), "Remove", () => {
+          void edit({
+            action: "anim",
+            slide: di,
+            op: "remove",
+            index: i
+          });
+        })
+      );
+      list2.append(item);
+    });
+    if (!editable && cues.length) {
+      list2.append(
+        h(
+          "p",
+          { class: "hint" },
+          "Animations are built in code in deck.py; read-only."
+        )
+      );
+    }
+    return section("Animation order", list2);
+  }
+  function selectById(id) {
+    const svg = slideRoot();
+    const el = svg?.querySelector(`[id="${CSS.escape(id)}"]`);
+    if (el) {
+      enterGroup(null);
+      select([el]);
+    } else toast(`#${id} is not on this slide`, "error");
+  }
+  function elementAnimations(sel) {
+    const slide = currentSlide();
+    const model = ed.model;
+    const id = sel.el.getAttribute("id");
+    const di = slide.deckIndex;
+    const editable = slide.animationsEditable && model.deckEditable;
+    const body = h("div", { class: "anim-list" });
+    const elementName = isZone(sel.el) ? zoneName(sel.el) : id;
+    slide.animations.forEach((cue, index) => {
+      if (!elementName || cue.element !== (cue.kind === "video" ? zoneName(sel.el) : id))
+        return;
+      const info = typeInfo(model.animationTypes, cue.type);
+      const send = (type, fields) => void edit({
+        action: "anim",
+        slide: di,
+        op: "replace",
+        index,
+        spec: { type, element: cue.element, fields }
+      });
+      const header = h(
+        "div",
+        { class: "anim-head" },
+        h("span", { class: `anim-kind k-${cue.kind}` }),
+        editable ? selectInput(
+          model.animationTypes.map((t) => ({
+            value: t.type,
+            label: t.type
+          })),
+          cue.type,
+          (v) => send(v, {
+            trigger: cue.fields.trigger ?? "on-click"
+          })
+        ) : h("span", {}, cue.type),
+        editable && button(icon("trash", 12), "Remove", () => {
+          void edit({
+            action: "anim",
+            slide: di,
+            op: "remove",
+            index
+          });
+        })
+      );
+      body.append(
+        h(
+          "div",
+          { class: "anim-card" },
+          header,
+          info && editable ? fieldsEditor(
+            info.fields,
+            cue.fields,
+            (f) => send(cue.type, f)
+          ) : null
+        )
+      );
+    });
+    if (editable) {
+      const groups = {};
+      for (const t of model.animationTypes) {
+        if (t.kind === "video" && !isZone(sel.el)) continue;
+        const kind = t.kind ?? "other";
+        groups[kind] = [...groups[kind] ?? [], t];
+      }
+      const add = h("select", { class: "add-anim" });
+      add.append(h("option", { value: "" }, "+ Add animation\u2026"));
+      for (const [kind, types] of Object.entries(groups)) {
+        const og = h("optgroup", { label: kind });
+        for (const t of types)
+          og.append(h("option", { value: t.type }, t.type));
+        add.append(og);
+      }
+      add.addEventListener("change", () => {
+        const type = add.value;
+        if (!type) return;
+        const video = typeInfo(model.animationTypes, type)?.kind === "video";
+        const element = video ? zoneName(sel.el) : id;
+        const src = sourceOf(sel.key);
+        void edit({
+          action: "anim",
+          slide: di,
+          op: "insert",
+          index: slide.animations.length,
+          spec: { type, element: element ?? "", fields: {} },
+          target: element || !src ? void 0 : {
+            file: src.path,
+            loc: sel.loc,
+            base: sel.el.localName
+          }
+        });
+      });
+      body.append(add);
+    } else if (!slide.animationsEditable) {
+      body.append(
+        h(
+          "p",
+          { class: "hint" },
+          "This slide's animations are built in code."
+        )
+      );
+    }
+    return section("Animations", body);
+  }
+  var TAG_NAMES = {
+    g: "Group",
+    rect: "Rectangle",
+    circle: "Circle",
+    ellipse: "Ellipse",
+    line: "Line",
+    polyline: "Polyline",
+    polygon: "Polygon",
+    path: "Path",
+    text: "Text",
+    image: "Image",
+    use: "Clone",
+    foreignObject: "Embedded content"
+  };
+  function tokenOf(el, prop) {
+    for (const c of el.classList) {
+      const m = c.match(/^inkflow-(fill|stroke)-(.+)$/);
+      if (m && m[1] === prop) return m[2];
+    }
+    return null;
+  }
+  function rgbToHex(rgb) {
+    const m = rgb.match(/\d+(\.\d+)?/g);
+    if (!m || m.length < 3) return "#000000";
+    return `#${m.slice(0, 3).map((v) => Math.round(Number(v)).toString(16).padStart(2, "0")).join("")}`;
+  }
+  function paintRow(sel, prop) {
+    const first = sel[0].el;
+    const token = tokenOf(first, prop);
+    const computed = getComputedStyle(first)[prop];
+    const send = (paint) => {
+      const plans = sel.map((s) => ({
+        sel: s,
+        ops: [{ kind: "paint", loc: s.loc, prop, ...paint }]
+      }));
+      void sendSvgOps(plans, prop === "fill" ? "Fill" : "Stroke");
+    };
+    const swatches = h("div", { class: "swatches" });
+    for (const t of ed.model?.colorTokens ?? []) {
+      swatches.append(
+        h("button", {
+          type: "button",
+          class: `swatch${t === token ? " active" : ""}`,
+          title: t,
+          style: `background: var(--inkflow-${t})`,
+          onclick: () => send({ token: t })
+        })
+      );
+    }
+    const custom = h("input", {
+      type: "color",
+      value: computed && computed !== "none" ? rgbToHex(computed) : "#000000",
+      title: "Custom colour"
+    });
+    custom.addEventListener("change", () => send({ color: custom.value }));
+    swatches.append(custom);
+    swatches.append(
+      button("\u2205", "None", () => send({ color: "none" }), "none-btn")
+    );
+    return row(prop === "fill" ? "Fill" : "Stroke", swatches);
+  }
+  function styleOps(sel, set, label2) {
+    void sendSvgOps(
+      sel.map((s) => ({ sel: s, ops: [{ kind: "style", loc: s.loc, set }] })),
+      label2
+    );
+  }
+  function renderObjectPanel(sel) {
+    const el = sel.el;
+    const src = sourceOf(sel.key);
+    const zone = isZone(el);
+    const movable = canTransform(el);
+    const id = el.getAttribute("id") ?? "";
+    const tag = zone ? `Zone \xB7 ${zoneName(el)}` : TAG_NAMES[el.localName] ?? el.localName;
+    panel.append(
+      section(
+        tag,
+        row(
+          "Id",
+          zone ? h("code", {}, id) : textInput(
+            id,
+            (v) => {
+              if (!src || !v || v === id) return;
+              void edit({
+                action: "svg",
+                file: src.path,
+                hash: src.hash,
+                ops: [
+                  {
+                    kind: "id",
+                    loc: sel.loc,
+                    id: v,
+                    from: id
+                  }
+                ],
+                label: "Rename"
+              });
+            },
+            "no id"
+          )
+        ),
+        src && h(
+          "p",
+          { class: "hint" },
+          `In ${src.rel}${src.role !== "slide" || currentSlide()?.srcShared ? ` \xB7 shared by ${src.usedBy.length} slide${src.usedBy.length === 1 ? "" : "s"}` : ""}`
+        )
+      )
+    );
+    if (zone) {
+      const slide = currentSlide();
+      const name = zoneName(el);
+      const origin = slide.zoneOrigins?.[name];
+      const media = slide.zones[name];
+      const where = origin === "deck" ? "deck.py zones=" : origin === "md-file" ? `${slide.md?.rel ?? "Markdown"} (whole file)` : slide.md?.rel ? `${slide.md.rel} \xB7 ::${name}::` : "deck.py";
+      const body = [
+        h("p", { class: "hint" }, `Content from ${where}`)
+      ];
+      if (media && (media.kind === "image" || media.kind === "video")) {
+        body.push(
+          button(
+            "Replace media\u2026",
+            "Pick another image or video",
+            async () => {
+              const file = await pickFile(
+                "image/*,video/mp4,video/webm"
+              );
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = async () => {
+                const data = String(reader.result).split(",")[1] ?? "";
+                const up = await request({
+                  action: "upload",
+                  name: file.name,
+                  data
+                });
+                if (up.ok && up.path) {
+                  void edit({
+                    action: "zone-media",
+                    slide: slide.deckIndex,
+                    zone: name,
+                    src: up.path,
+                    fit: media.fit
+                  });
+                }
+              };
+              reader.readAsDataURL(file);
+            }
+          ),
+          button("Clear", "Empty this zone", () => {
+            void edit({
+              action: "zone-media",
+              slide: slide.deckIndex,
+              zone: name,
+              src: null
+            });
+          })
+        );
+      } else {
+        body.push(
+          button(
+            "Edit text",
+            "Edit this zone's Markdown (double-click)",
+            () => {
+              emit("edit-zone");
+            }
+          )
+        );
+      }
+      panel.append(section("Content", ...body));
+    }
+    if (movable) panel.append(geometrySection([sel]));
+    if (!zone && src?.writable && (movable || ed.layoutMode)) {
+      const fills = ![
+        "line",
+        "polyline",
+        "image",
+        "foreignObject",
+        "g"
+      ].includes(el.localName);
+      const strokeWidth = parseFloat(getComputedStyle(el).strokeWidth) || 0;
+      const opacity = parseFloat(getComputedStyle(el).opacity);
+      panel.append(
+        section(
+          "Style",
+          fills && el.localName !== "image" && paintRow([sel], "fill"),
+          el.localName !== "image" && el.localName !== "g" && paintRow([sel], "stroke"),
+          el.localName !== "image" && el.localName !== "g" && row(
+            "Stroke width",
+            numberInput(
+              strokeWidth,
+              (v) => styleOps(
+                [sel],
+                { "stroke-width": String(v) },
+                "Stroke width"
+              )
+            )
+          ),
+          row(
+            "Opacity",
+            (() => {
+              const r = h("input", {
+                type: "range",
+                min: 0,
+                max: 1,
+                step: 0.05,
+                value: String(
+                  Number.isFinite(opacity) ? opacity : 1
+                )
+              });
+              r.addEventListener(
+                "change",
+                () => styleOps(
+                  [sel],
+                  { opacity: r.value === "1" ? null : r.value },
+                  "Opacity"
+                )
+              );
+              return r;
+            })()
+          ),
+          el.localName === "rect" && row(
+            "Corner radius",
+            numberInput(
+              parseFloat(el.getAttribute("rx") ?? "0") || 0,
+              (v) => {
+                void sendSvgOps(
+                  [
+                    {
+                      sel,
+                      ops: [
+                        {
+                          kind: "attrs",
+                          loc: sel.loc,
+                          set: {
+                            rx: String(v),
+                            ry: null
+                          }
+                        }
+                      ]
+                    }
+                  ],
+                  "Corner radius"
+                );
+              }
+            )
+          )
+        )
+      );
+      if (el.localName === "text") panel.append(textSection(sel));
+    }
+    if (movable) panel.append(arrangeSection([sel]));
+    if (id || zone || src?.writable) panel.append(elementAnimations(sel));
+  }
+  function textSection(sel) {
+    const el = sel.el;
+    const cs = getComputedStyle(el);
+    const spans = [...el.querySelectorAll("tspan")];
+    const setAll = (set, label2) => {
+      const plans = [
+        { sel, ops: [{ kind: "style", loc: sel.loc, set }] }
+      ];
+      for (const t of spans) {
+        const loc = t.getAttribute("data-ink");
+        const style = t.getAttribute("style") ?? "";
+        const touched = Object.keys(set).some(
+          (k) => style.includes(`${k}:`) || t.hasAttribute(k)
+        );
+        if (loc && touched) {
+          plans[0].ops.push({ kind: "style", loc, set });
+        }
+      }
+      void sendSvgOps(plans, label2);
+    };
+    const bold = parseInt(cs.fontWeight, 10) >= 600;
+    const italic = cs.fontStyle === "italic";
+    const anchor = cs.textAnchor;
+    return section(
+      "Text",
+      row(
+        "Size",
+        numberInput(
+          parseFloat(cs.fontSize),
+          (v) => setAll({ "font-size": `${v}px` }, "Font size")
+        )
+      ),
+      row(
+        "Font",
+        textInput(
+          cs.fontFamily,
+          (v) => setAll({ "font-family": v || null }, "Font"),
+          "font-family"
+        )
+      ),
+      h(
+        "div",
+        { class: "btn-row" },
+        button(
+          h("b", {}, "B"),
+          "Bold",
+          () => setAll({ "font-weight": bold ? null : "bold" }, "Bold"),
+          bold ? "on" : ""
+        ),
+        button(
+          h("i", {}, "I"),
+          "Italic",
+          () => setAll(
+            { "font-style": italic ? null : "italic" },
+            "Italic"
+          ),
+          italic ? "on" : ""
+        ),
+        button(
+          "\u27F8",
+          "Align start",
+          () => setAll({ "text-anchor": null }, "Align"),
+          anchor === "start" ? "on" : ""
+        ),
+        button(
+          "\u21D4",
+          "Align middle",
+          () => setAll({ "text-anchor": "middle" }, "Align"),
+          anchor === "middle" ? "on" : ""
+        ),
+        button(
+          "\u27F9",
+          "Align end",
+          () => setAll({ "text-anchor": "end" }, "Align"),
+          anchor === "end" ? "on" : ""
+        ),
+        button("Edit", "Edit text (double-click)", () => emit("edit-text"))
+      )
+    );
+  }
+  function geometrySection(sels) {
+    const box = sels.length === 1 ? slideBox(sels[0].el) : selectionBox();
+    if (!box) return h("div");
+    const resizeTo = (to) => {
+      const plans = sels.map((s) => {
+        const b = slideBox(s.el);
+        const sx = box.width ? to.width / box.width : 1;
+        const sy = box.height ? to.height / box.height : 1;
+        const target = {
+          x: to.x + (b.x - box.x) * sx,
+          y: to.y + (b.y - box.y) * sy,
+          width: b.width * sx,
+          height: b.height * sy
+        };
+        const plan = planResize(elementGeom(s.el), b, target);
+        return {
+          sel: s,
+          ops: [{ kind: "attrs", loc: s.loc, set: plan }]
+        };
+      });
+      void sendSvgOps(plans, "Resize");
+    };
+    const rot = sels.length === 1 ? rotationOf(parseTransform(sels[0].el.getAttribute("transform"))) : 0;
+    return section(
+      "Position & size",
+      h(
+        "div",
+        { class: "grid2" },
+        row(
+          "X",
+          numberInput(box.x, (v) => resizeTo({ ...box, x: v }))
+        ),
+        row(
+          "Y",
+          numberInput(box.y, (v) => resizeTo({ ...box, y: v }))
+        ),
+        row(
+          "W",
+          numberInput(
+            box.width,
+            (v) => resizeTo({ ...box, width: Math.max(1, v) }),
+            { min: 1 }
+          )
+        ),
+        row(
+          "H",
+          numberInput(
+            box.height,
+            (v) => resizeTo({ ...box, height: Math.max(1, v) }),
+            { min: 1 }
+          )
+        )
+      ),
+      sels.length === 1 && row(
+        "Rotation",
+        numberInput(
+          rot,
+          (v) => {
+            const s = sels[0];
+            const center = {
+              x: box.x + box.width / 2,
+              y: box.y + box.height / 2
+            };
+            const plan = planRotate(
+              elementGeom(s.el),
+              v - rot,
+              center
+            );
+            void sendSvgOps(
+              [
+                {
+                  sel: s,
+                  ops: [
+                    {
+                      kind: "attrs",
+                      loc: s.loc,
+                      set: plan
+                    }
+                  ]
+                }
+              ],
+              "Rotate"
+            );
+          },
+          { step: 1 }
+        )
+      )
+    );
+  }
+  function arrangeSection(sels) {
+    const order2 = (to) => void sendSvgOps(
+      sels.map((s) => ({
+        sel: s,
+        ops: [{ kind: "order", loc: s.loc, to }]
+      })),
+      "Arrange"
+    );
+    const isGroup = sels.length === 1 && sels[0].el.localName === "g";
+    return section(
+      "Arrange",
+      h(
+        "div",
+        { class: "btn-row" },
+        button(
+          icon("front", 14),
+          "Bring to front (Ctrl+Shift+\u2191)",
+          () => order2("front")
+        ),
+        button(
+          icon("up", 14),
+          "Bring forward (Ctrl+\u2191)",
+          () => order2("forward")
+        ),
+        button(
+          icon("down", 14),
+          "Send backward (Ctrl+\u2193)",
+          () => order2("backward")
+        ),
+        button(
+          icon("back", 14),
+          "Send to back (Ctrl+Shift+\u2193)",
+          () => order2("back")
+        ),
+        button(
+          icon("copy", 14),
+          "Duplicate (Ctrl+D)",
+          () => emit("duplicate")
+        ),
+        sels.length > 1 && button(
+          icon("group", 14),
+          "Group (Ctrl+G)",
+          () => emit("group")
+        ),
+        isGroup && button(
+          "Ungroup",
+          "Ungroup (Ctrl+Shift+G)",
+          () => emit("ungroup")
+        ),
+        button(
+          icon("trash", 14),
+          "Delete (Del)",
+          () => emit("delete"),
+          "danger"
+        )
+      )
+    );
+  }
+  function alignSelection(how) {
+    const sels = ed.selection.filter((s) => canTransform(s.el));
+    if (!sels.length) return;
+    const boxes = sels.map((s) => slideBox(s.el));
+    const ref = sels.length === 1 ? slideSize() : selectionBox();
+    let targetsX = boxes.map((b) => b.x);
+    let targetsY = boxes.map((b) => b.y);
+    switch (how) {
+      case "left":
+        targetsX = boxes.map(() => ref.x);
+        break;
+      case "center":
+        targetsX = boxes.map((b) => ref.x + (ref.width - b.width) / 2);
+        break;
+      case "right":
+        targetsX = boxes.map((b) => ref.x + ref.width - b.width);
+        break;
+      case "top":
+        targetsY = boxes.map(() => ref.y);
+        break;
+      case "middle":
+        targetsY = boxes.map((b) => ref.y + (ref.height - b.height) / 2);
+        break;
+      case "bottom":
+        targetsY = boxes.map((b) => ref.y + ref.height - b.height);
+        break;
+      case "hspace":
+        targetsX = distribute(boxes, "x");
+        break;
+      case "vspace":
+        targetsY = distribute(boxes, "y");
+        break;
+    }
+    const plans = sels.map((s, i) => ({
+      sel: s,
+      ops: moveOps(s, targetsX[i] - boxes[i].x, targetsY[i] - boxes[i].y)
+    }));
+    void sendSvgOps(plans, "Align");
+  }
+  function renderMultiPanel() {
+    const sels = ed.selection;
+    const movable = sels.every((s) => canTransform(s.el));
+    panel.append(section(`${sels.length} objects`));
+    if (movable) {
+      const a = (label2, title, how) => button(label2, title, () => alignSelection(how));
+      panel.append(
+        section(
+          "Align",
+          h(
+            "div",
+            { class: "btn-row" },
+            a("\u21E4", "Align left", "left"),
+            a("\u2194", "Align centre", "center"),
+            a("\u21E5", "Align right", "right"),
+            a("\u2912", "Align top", "top"),
+            a("\u2195", "Align middle", "middle"),
+            a("\u2913", "Align bottom", "bottom")
+          ),
+          h(
+            "div",
+            { class: "btn-row" },
+            a("\u21F9 Distribute", "Distribute horizontally", "hspace"),
+            a("\u21F3 Distribute", "Distribute vertically", "vspace")
+          )
+        )
+      );
+      panel.append(geometrySection(sels));
+      const styleable = sels.filter(
+        (s) => !isZone(s.el) && s.el.localName !== "image"
+      );
+      if (styleable.length === sels.length) {
+        panel.append(
+          section(
+            "Style",
+            paintRow(sels, "fill"),
+            paintRow(sels, "stroke")
+          )
+        );
+      }
+      panel.append(arrangeSection(sels));
+    }
+  }
+  function renderProps() {
+    if (document.activeElement && panel.contains(document.activeElement)) {
+      refreshOnBlur = true;
+      return;
+    }
+    clear(panel);
+    if (!ed.model) return;
+    if (ed.selection.length === 0) renderSlidePanel();
+    else if (ed.selection.length === 1) renderObjectPanel(ed.selection[0]);
+    else renderMultiPanel();
+  }
+  var refreshOnBlur = false;
+  function initProps() {
+    on("selection", renderProps);
+    on("render", renderProps);
+    panel.addEventListener("focusout", () => {
+      window.setTimeout(() => {
+        if (refreshOnBlur && !panel.contains(document.activeElement)) {
+          refreshOnBlur = false;
+          renderProps();
+        }
+      }, 0);
+    });
+  }
+
+  // src/ts/editor/textedit.ts
+  var layer = document.getElementById("text-layer");
+  var dock = document.getElementById("zone-dock");
+  function closeDock() {
+    clear(dock);
+    document.body.classList.remove("editing-zone");
+  }
+  var active = null;
+  function isEditingText() {
+    return active !== null;
+  }
+  async function finishTextEdit() {
+    const a = active;
+    if (!a) return;
+    active = null;
+    clear(layer);
+    closeDock();
+    await a.commit();
+  }
+  function cancel() {
+    const a = active;
+    if (!a) return;
+    active = null;
+    clear(layer);
+    closeDock();
+    a.cancel();
+  }
+  function linesOf(el) {
+    const spans = [...el.children].filter((c) => c.localName === "tspan");
+    if (!spans.length) return [el.textContent ?? ""];
+    return spans.map((s) => s.textContent ?? "");
+  }
+  function editSvgText(el, sourcePath, hash, loc) {
+    void finishTextEdit();
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    const ctm = el.getScreenCTM();
+    const fontPx = parseFloat(style.fontSize) * (ctm ? Math.hypot(ctm.a, ctm.b) : 1);
+    const original = linesOf(el);
+    const area2 = h("textarea", {
+      class: "svg-text-editor",
+      spellcheck: "true"
+    });
+    area2.value = original.join("\n");
+    const anchor = style.textAnchor;
+    Object.assign(area2.style, {
+      left: `${rect.left - 6}px`,
+      top: `${rect.top - 4}px`,
+      minWidth: `${Math.max(rect.width + 24, 80)}px`,
+      minHeight: `${rect.height + 8}px`,
+      fontSize: `${fontPx}px`,
+      fontFamily: style.fontFamily,
+      fontWeight: style.fontWeight,
+      fontStyle: style.fontStyle,
+      lineHeight: "1.2",
+      color: style.fill.startsWith("rgb") ? style.fill : "inherit",
+      textAlign: anchor === "middle" ? "center" : anchor === "end" ? "right" : "left"
+    });
+    const autosize = () => {
+      area2.style.height = "auto";
+      area2.style.height = `${area2.scrollHeight}px`;
+      area2.style.width = "auto";
+      area2.style.width = `${Math.max(area2.scrollWidth + 8, rect.width + 24)}px`;
+    };
+    area2.addEventListener("input", autosize);
+    el.style.visibility = "hidden";
+    layer.append(area2);
+    autosize();
+    area2.focus();
+    area2.select();
+    active = {
+      commit: async () => {
+        el.style.visibility = "";
+        const lines = area2.value.replace(/\r/g, "").split("\n");
+        if (lines.join("\n") === original.join("\n")) return;
+        if (lines.length === 1 && !el.querySelector("tspan")) {
+          el.textContent = lines[0];
+        }
+        await edit({
+          action: "svg",
+          file: sourcePath,
+          hash: hash(),
+          ops: [{ kind: "text", loc, lines }],
+          label: "Edit text"
+        });
+      },
+      cancel: () => {
+        el.style.visibility = "";
+      }
+    };
+    area2.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancel();
+      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        void finishTextEdit();
+      }
+    });
+    area2.addEventListener("blur", () => void finishTextEdit());
+  }
+  function wrapSelection(area2, before, after = before) {
+    const { selectionStart: s, selectionEnd: e, value } = area2;
+    const inner = value.slice(s, e) || "text";
+    area2.value = value.slice(0, s) + before + inner + after + value.slice(e);
+    area2.selectionStart = s + before.length;
+    area2.selectionEnd = s + before.length + inner.length;
+    area2.dispatchEvent(new Event("input"));
+    area2.focus();
+  }
+  function prefixLines(area2, prefix) {
+    const { selectionStart: s, selectionEnd: e, value } = area2;
+    const start = value.lastIndexOf("\n", s - 1) + 1;
+    const end = value.indexOf("\n", e);
+    const stop = end === -1 ? value.length : end;
+    const block = value.slice(start, stop).split("\n").map(
+      (line) => line.startsWith(prefix) ? line.slice(prefix.length) : prefix + line
+    ).join("\n");
+    area2.value = value.slice(0, start) + block + value.slice(stop);
+    area2.selectionStart = start;
+    area2.selectionEnd = start + block.length;
+    area2.dispatchEvent(new Event("input"));
+    area2.focus();
+  }
+  function editZoneText(zone, box) {
+    void finishTextEdit();
+    const slide = currentSlide();
+    if (!slide) return;
+    const origin = slide.zoneOrigins?.[zone];
+    const original = slide.zoneText?.[zone] ?? "";
+    const deckIndex = slide.deckIndex;
+    if (!ed.model?.deckEditable && (origin === "deck" || !slide.md)) {
+      toast(
+        "deck.py builds its slides in code; edit this zone there",
+        "error"
+      );
+      return;
+    }
+    const area2 = h("textarea", { class: "zone-editor", spellcheck: "true" });
+    area2.value = original;
+    let sent2 = original;
+    let timer3 = 0;
+    const coalesce = `zone-${deckIndex}-${zone}-${Date.now()}`;
+    const send = async () => {
+      window.clearTimeout(timer3);
+      if (area2.value === sent2) return;
+      sent2 = area2.value;
+      await edit({
+        action: "zone-text",
+        slide: deckIndex,
+        zone,
+        text: area2.value,
+        origin,
+        coalesce
+      });
+    };
+    area2.addEventListener("input", () => {
+      window.clearTimeout(timer3);
+      timer3 = window.setTimeout(() => void send(), 450);
+    });
+    const button2 = (name, title, fn) => h(
+      "button",
+      {
+        type: "button",
+        class: "fmt-btn",
+        title,
+        onmousedown: (e) => {
+          e.preventDefault();
+          fn();
+        }
+      },
+      name
+    );
+    const bar = h(
+      "div",
+      { class: "zone-toolbar" },
+      h("span", { class: "zone-label" }, `${zone} \xB7 Markdown`),
+      button2("B", "Bold (Ctrl+B)", () => wrapSelection(area2, "**")),
+      button2("I", "Italic (Ctrl+I)", () => wrapSelection(area2, "*")),
+      button2("H", "Heading", () => prefixLines(area2, "## ")),
+      button2("\u2022", "Bullet list", () => prefixLines(area2, "- ")),
+      button2("1.", "Numbered list", () => prefixLines(area2, "1. ")),
+      button2("`", "Code", () => wrapSelection(area2, "`")),
+      button2("\u2211", "Math", () => wrapSelection(area2, "$")),
+      button2("\u23F5", "Reveal on click: insert a ::step:: marker", () => {
+        const pos = area2.selectionStart;
+        area2.value = `${area2.value.slice(0, pos)}
+::step::
+${area2.value.slice(pos)}`;
+        area2.dispatchEvent(new Event("input"));
+      }),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "fmt-btn done",
+          title: "Done (Ctrl+Enter)",
+          onmousedown: (e) => {
+            e.preventDefault();
+            void finishTextEdit();
+          }
+        },
+        icon("select", 13),
+        " Done"
+      )
+    );
+    void box;
+    const wrap = h("div", { class: "zone-edit-wrap" }, bar, area2);
+    dock.append(wrap);
+    document.body.classList.add("editing-zone");
+    area2.focus();
+    active = {
+      commit: async () => {
+        await send();
+      },
+      cancel: () => {
+        window.clearTimeout(timer3);
+        if (sent2 !== original) {
+          area2.value = original;
+          void send();
+        }
+      }
+    };
+    area2.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancel();
+      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        void finishTextEdit();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        wrapSelection(area2, "**");
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "i") {
+        e.preventDefault();
+        wrapSelection(area2, "*");
+      }
+    });
+    area2.addEventListener("blur", (e) => {
+      const next = e.relatedTarget;
+      if (next && wrap.contains(next)) return;
+      void finishTextEdit();
+    });
+  }
+
+  // src/ts/editor/toolbar.ts
+  var $ = (id) => document.getElementById(id);
+  async function undo() {
+    await edit({ action: "undo" });
+  }
+  async function redo() {
+    await edit({ action: "redo" });
+  }
+  async function deleteSelection() {
+    const slide = currentSlide();
+    if (!slide || !ed.selection.length) return;
+    const zones = ed.selection.filter(
+      (s) => isZone(s.el) && !canTransform(s.el)
+    );
+    const shapes = ed.selection.filter((s) => !zones.includes(s));
+    for (const z of zones) {
+      const name = zoneName(z.el);
+      const value = slide.zones[name];
+      if (value && (value.kind === "image" || value.kind === "video")) {
+        await edit({
+          action: "zone-media",
+          slide: slide.deckIndex,
+          zone: name,
+          src: null
+        });
+      } else {
+        await edit({
+          action: "zone-text",
+          slide: slide.deckIndex,
+          zone: name,
+          text: "",
+          origin: slide.zoneOrigins?.[name]
+        });
+      }
+    }
+    if (shapes.length) {
+      await sendSvgOps(
+        shapes.map((s) => ({
+          sel: s,
+          ops: [{ kind: "delete", loc: s.loc }]
+        })),
+        "Delete"
+      );
+    }
+    clearSelection();
+  }
+  async function duplicateSelection() {
+    const sels = ed.selection.filter((s) => canTransform(s.el));
+    if (!sels.length) return;
+    const k = 1 / (scale() || 1);
+    const off = Math.round(24 * Math.max(1, k * 0.5));
+    await sendSvgOps(
+      sels.map((s, i) => ({
+        sel: s,
+        ops: [
+          {
+            kind: "duplicate",
+            loc: s.loc,
+            offset: [off, off],
+            key: `dup${i}`
+          }
+        ]
+      })),
+      "Duplicate"
+    );
+  }
+  async function groupSelection() {
+    const sels = ed.selection.filter((s) => canTransform(s.el));
+    if (sels.length < 2) return;
+    const key = sels[0].key;
+    const parent = sels[0].el.parentElement;
+    if (sels.some((s) => s.key !== key || s.el.parentElement !== parent)) {
+      toast(
+        "Only objects side by side in the same file can be grouped",
+        "error"
+      );
+      return;
+    }
+    await sendSvgOps(
+      [
+        {
+          sel: sels[0],
+          ops: [{ kind: "group", locs: sels.map((s) => s.loc) }]
+        }
+      ],
+      "Group"
+    );
+  }
+  async function ungroupSelection() {
+    const s = ed.selection[0];
+    if (s?.el.localName !== "g" || !canTransform(s.el)) return;
+    await sendSvgOps(
+      [{ sel: s, ops: [{ kind: "ungroup", loc: s.loc }] }],
+      "Ungroup"
+    );
+  }
+  async function order(to) {
+    const sels = ed.selection.filter((s) => canTransform(s.el));
+    if (!sels.length) return;
+    await sendSvgOps(
+      sels.map((s) => ({ sel: s, ops: [{ kind: "order", loc: s.loc, to }] })),
+      "Arrange"
+    );
+  }
+  function present() {
+    const slide = currentSlide();
+    const n = (slide?.visibleIndex ?? 0) + 1;
+    window.open(`/#slide=${n}`, "inkflow-present");
+  }
+  function toggleTheme() {
+    const root = document.documentElement;
+    root.dataset.theme = root.dataset.theme === "light" ? "" : "light";
+    render();
+  }
+  function setLayoutMode(on2) {
+    ed.layoutMode = on2;
+    document.body.classList.toggle("layout-mode", on2);
+    $("btn-layout").classList.toggle("on", on2);
+    enterGroup(null);
+    clearSelection();
+    drawOverlay();
+    emit("layout-mode");
+    if (on2) toast("Layout mode: edits change the shared layout files");
+  }
+  function renderStepSelect() {
+    const sel = $("step-select");
+    const svg = slideRoot();
+    const max = svg ? maxStep(svg) : 0;
+    sel.innerHTML = "";
+    sel.append(new Option("All objects", ""));
+    for (let i = 0; i <= max; i++)
+      sel.append(new Option(`Build step ${i}`, String(i)));
+    sel.value = ed.step == null ? "" : String(Math.min(ed.step, max));
+    sel.disabled = max === 0 && ed.step == null;
+  }
+  function updateZoomLabel() {
+    $("zoom-label").textContent = `${Math.round(scale() * 100)}%`;
+  }
+  function updateHistory() {
+    $("btn-undo").disabled = !ed.canUndo;
+    $("btn-redo").disabled = !ed.canRedo;
+  }
+  function updateTools() {
+    document.querySelectorAll("[data-tool]").forEach((b) => {
+      b.classList.toggle("on", b.dataset.tool === ed.tool);
+    });
+  }
+  var TOOL_KEYS = {
+    v: "select",
+    t: "text",
+    r: "rect",
+    o: "ellipse",
+    l: "line",
+    a: "arrow"
+  };
+  function onKey(e) {
+    const target = e.target;
+    if (target.closest("input, textarea, select, [contenteditable]") || isEditingText()) {
+      return;
+    }
+    const mod = e.ctrlKey || e.metaKey;
+    const key = e.key;
+    const lower = key.toLowerCase();
+    const handled = () => e.preventDefault();
+    if (mod && lower === "z") {
+      handled();
+      void (e.shiftKey ? redo() : undo());
+    } else if (mod && lower === "y") {
+      handled();
+      void redo();
+    } else if (mod && lower === "a") {
+      handled();
+      selectAll();
+    } else if (mod && lower === "d") {
+      handled();
+      void duplicateSelection();
+    } else if (mod && lower === "c") {
+      if (copySelection()) handled();
+    } else if (mod && lower === "x") {
+      if (copySelection()) {
+        handled();
+        void deleteSelection();
+      }
+    } else if (mod && lower === "g") {
+      handled();
+      void (e.shiftKey ? ungroupSelection() : groupSelection());
+    } else if (mod && lower === "m") {
+      handled();
+      const r = $("sorter-add").getBoundingClientRect();
+      layoutMenu(r.left, r.bottom + 4, ed.current);
+    } else if (mod && key === "Enter") {
+      handled();
+      present();
+    } else if (mod && (key === "ArrowUp" || key === "ArrowDown")) {
+      handled();
+      const up = key === "ArrowUp";
+      void order(
+        e.shiftKey ? up ? "front" : "back" : up ? "forward" : "backward"
+      );
+    } else if (key === "Delete" || key === "Backspace") {
+      if (ed.selection.length) {
+        handled();
+        void deleteSelection();
+      }
+    } else if (key.startsWith("Arrow") && ed.selection.length) {
+      handled();
+      const d = e.shiftKey ? 10 : 1;
+      const dx = key === "ArrowLeft" ? -d : key === "ArrowRight" ? d : 0;
+      const dy = key === "ArrowUp" ? -d : key === "ArrowDown" ? d : 0;
+      void nudge(dx, dy);
+    } else if (key === "PageDown" || key === "ArrowDown" && !ed.selection.length) {
+      handled();
+      gotoSlide(ed.current + 1);
+    } else if (key === "PageUp" || key === "ArrowUp" && !ed.selection.length) {
+      handled();
+      gotoSlide(ed.current - 1);
+    } else if (key === "Escape") {
+      if (ed.tool !== "select") setTool("select");
+      else if (ed.scope) enterGroup(null);
+      else clearSelection();
+    } else if (key === "Enter" && ed.selection.length === 1) {
+      handled();
+      const el = ed.selection[0].el;
+      emit(
+        isZone(el) ? "edit-zone" : el.localName === "text" ? "edit-text" : "noop"
+      );
+      if (el.localName === "g") enterGroup(el);
+    } else if (!mod && (key === "+" || key === "=")) {
+      setZoom(scale() * 1.25);
+    } else if (!mod && key === "-") {
+      setZoom(scale() / 1.25);
+    } else if (!mod && key === "0") {
+      setZoom(0);
+    } else if (!mod && !e.altKey && lower in TOOL_KEYS) {
+      setTool(TOOL_KEYS[lower]);
+    } else if (!mod && lower === "i") {
+      void insertImage();
+    }
+  }
+  function initToolbar() {
+    $("btn-undo").addEventListener("click", () => void undo());
+    $("btn-redo").addEventListener("click", () => void redo());
+    document.querySelectorAll("[data-tool]").forEach((b) => {
+      b.addEventListener("click", () => setTool(b.dataset.tool));
+    });
+    $("btn-image").addEventListener("click", () => void insertImage());
+    $("zoom-in").addEventListener("click", () => setZoom(scale() * 1.25));
+    $("zoom-out").addEventListener("click", () => setZoom(scale() / 1.25));
+    $("zoom-fit").addEventListener("click", () => setZoom(0));
+    $("btn-layout").addEventListener(
+      "click",
+      () => setLayoutMode(!ed.layoutMode)
+    );
+    $("btn-theme").addEventListener("click", toggleTheme);
+    $("btn-present").addEventListener("click", present);
+    $("step-select").addEventListener("change", (e) => {
+      const v = e.target.value;
+      ed.step = v === "" ? null : Number(v);
+      document.body.classList.toggle("previewing", ed.step != null);
+      render();
+      emit("step");
+    });
+    document.addEventListener("keydown", onKey);
+    on("render", renderStepSelect);
+    on("render", updateZoomLabel);
+    on("zoom", updateZoomLabel);
+    on("history", updateHistory);
+    on("tool", updateTools);
+    on("delete", () => void deleteSelection());
+    on("duplicate", () => void duplicateSelection());
+    on("group", () => void groupSelection());
+    on("ungroup", () => void ungroupSelection());
+    on("align", () => alignSelection("center"));
+    on("slide-duplicate", () => void duplicateSlide());
+    on("slide-delete", () => void deleteSlide());
+    window.addEventListener("resize", layoutPaper);
+    updateHistory();
+    updateTools();
+  }
+
+  // src/ts/editor/main.ts
+  var INITIAL_MODEL = __MODEL_JSON__;
+  var INITIAL_SLIDES = __SLIDES_JSON__;
+  var WS_PORT = __WS_PORT__;
+  var INITIAL_ERROR = __ERROR_JSON__;
+  var errorBox = document.getElementById("build-error");
+  function showError() {
+    errorBox.textContent = ed.error ?? "";
+    errorBox.classList.toggle("show", !!ed.error);
+  }
+  function editTextOf(el) {
+    const slide = currentSlide();
+    const loc = el.getAttribute("data-ink");
+    if (!slide || !loc) return;
+    const key = parseInt(loc.split(":")[0] ?? "", 10);
+    const src = slide.sources?.[key];
+    if (!src?.writable) {
+      toast(
+        "This text lives in a layout; switch to layout mode to edit it",
+        "error"
+      );
+      return;
+    }
+    editSvgText(el, src.path, () => slide.sources?.[key]?.hash ?? "", loc);
+  }
+  function readHash() {
+    const m = location.hash.match(/slide=(\d+)/);
+    if (!m || !ed.model) return;
+    const n = Number(m[1]);
+    const s = ed.model.slides.find((x) => x.visibleIndex === n - 1);
+    if (s) ed.current = s.deckIndex;
+  }
+  function writeHash() {
+    const s = currentSlide();
+    if (s?.visibleIndex == null) return;
+    const hash = `#slide=${s.visibleIndex + 1}`;
+    if (location.hash !== hash) {
+      try {
+        history.replaceState(null, "", hash);
+      } catch {
+      }
+    }
+  }
+  function selectPending() {
+    if (!afterRender.ids.length) return;
+    const svg = slideRoot();
+    if (!svg) return;
+    const els = afterRender.ids.map((id) => svg.querySelector(`[id="${CSS.escape(id)}"]`)).filter(
+      (el) => el instanceof SVGGraphicsElement
+    );
+    if (!els.length) return;
+    const editText = afterRender.editText;
+    afterRender.ids = [];
+    afterRender.editText = false;
+    select(els);
+    if (editText && els[0].localName === "text") editTextOf(els[0]);
+  }
+  function boot() {
+    ed.model = INITIAL_MODEL;
+    ed.slides = INITIAL_SLIDES;
+    ed.error = INITIAL_ERROR;
+    readHash();
+    hooks.editText = editTextOf;
+    hooks.editZone = (zone, box) => editZoneText(zone, box);
+    initCanvas();
+    initInsert();
+    initSorter();
+    initProps();
+    initNotes();
+    initToolbar();
+    initContext();
+    on("slide", () => {
+      void finishTextEdit();
+      render();
+      writeHash();
+    });
+    on("render", selectPending);
+    on("error", showError);
+    on("edit-zone", () => {
+      const el = ed.selection[0]?.el;
+      if (el && isZone(el))
+        editZoneText(zoneName(el), el.getBoundingClientRect());
+    });
+    on("edit-text", () => {
+      const el = ed.selection[0]?.el;
+      if (el?.localName === "text") editTextOf(el);
+    });
+    window.addEventListener("hashchange", () => {
+      const before = ed.current;
+      readHash();
+      if (ed.current !== before) emit("slide");
+    });
+    showError();
+    renderSorter();
+    render();
+    writeHash();
+    if (WS_PORT != null) connect(WS_PORT);
+  }
+  boot();
+})();

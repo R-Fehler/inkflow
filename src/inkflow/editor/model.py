@@ -26,6 +26,7 @@ from inkflow.loaders import load_md
 from inkflow.manifest import Deck, Image, Inline, Slide, TextBox, Video
 from inkflow.pipeline import SlideData, resolve_slide_src
 from inkflow.transitions import Transition
+from inkflow.zones import zone_spans
 
 
 class SourceInfo(TypedDict):
@@ -125,7 +126,7 @@ def _zone_json(value: object) -> dict[str, object]:
     if isinstance(value, str):
         return {"kind": "text", "text": str(value)}
     if isinstance(value, TextBox):
-        return {"kind": "textbox", "text": value.text}
+        return {"kind": "textbox", "text": value.text or ""}
     if isinstance(value, Image | Video):
         return {
             "kind": "video" if isinstance(value, Video) else "image",
@@ -266,6 +267,7 @@ def build_model(
                 entry["sources"] = sources
                 entry["emptyZones"] = edit["emptyZones"]
                 entry["zoneOrigins"] = edit["zoneOrigins"]
+                entry["zoneText"] = _zone_text(entry, slide, edit["zoneOrigins"])
             visible_index += 1
         out_slides.append(entry)
 
@@ -287,6 +289,29 @@ def build_model(
         "layouts": _layouts(project_dir, deck),
         "colorTokens": list(SVG_TOKENS),
     }
+
+
+def _zone_text(
+    entry: dict[str, object], slide: Slide, origins: dict[str, str]
+) -> dict[str, str]:
+    """The source text of each zone, as the editor's text box shows it."""
+    md = cast("dict[str, object] | None", entry.get("md"))
+    md_text = str(md["text"]) if md else ""
+    spans = zone_spans(md_text) if md_text else {}
+    out: dict[str, str] = {}
+    for name, origin in origins.items():
+        value = slide.zones.get(name)
+        if origin == "deck":
+            if isinstance(value, str):
+                out[name] = str(value)
+            elif isinstance(value, TextBox):
+                out[name] = value.text or ""
+        elif origin == "md-file":
+            out[name] = md_text
+        elif name in spans:
+            start, end = spans[name]
+            out[name] = md_text[start:end]
+    return out
 
 
 def _mark_overlays(sources: list[SourceInfo]) -> None:

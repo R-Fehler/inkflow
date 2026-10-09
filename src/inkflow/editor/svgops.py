@@ -312,7 +312,10 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
         kind = op.get("kind")
         if kind == "insert":
             parent_loc = op.get("parent")
-            targets.append(root if not parent_loc else _resolve(root, parent_loc))
+            path = str(parent_loc).partition(":")[2] if parent_loc else ""
+            targets.append(root if not path else _resolve(root, parent_loc))
+        elif kind == "ensure-marker":
+            targets.append(root)
         else:
             targets.append(_resolve(root, op.get("loc")))
 
@@ -423,13 +426,22 @@ def ensure_arrow_marker(root: SvgElement) -> None:
 
 
 def _fix_tail(parent: SvgElement, new: SvgElement) -> None:
-    """Give an inserted element the same indentation as its siblings."""
-    siblings = [c for c in parent if c is not new and is_element(c)]
-    if siblings:
-        new.tail = siblings[0].tail
-        prev = new.getprevious()
-        if prev is not None and prev.tail is None:
-            prev.tail = new.tail
+    """Give an inserted element the same indentation as its siblings.
+
+    An element appended last takes over the whitespace before the closing tag,
+    and the element before it gets the usual between-siblings indentation.
+    """
+    # The whitespace before the first child is the children's indentation.
+    lead = parent.text if parent.text and "\n" in parent.text else None
+    indent = "\n" + lead.rsplit("\n", 1)[1] if lead else "\n"
+    prev = new.getprevious()
+    if new.getnext() is None and prev is not None:
+        new.tail = prev.tail
+        prev.tail = indent
+    else:
+        new.tail = indent
+        if prev is not None and not (prev.tail or "").strip("\n "):
+            prev.tail = prev.tail if prev.tail and "\n" in prev.tail else indent
 
 
 def _reorder(el: SvgElement, to: str) -> None:

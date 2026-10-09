@@ -1,3 +1,4 @@
+import type { EditorModel } from "./editor/types";
 import type { Render, TransitionFactory } from "./presenter/transitions";
 import type {
     EditCommandsConfig,
@@ -14,6 +15,7 @@ declare global {
     const __EDIT_COMMANDS_JSON__: EditCommandsConfig;
     const __ERROR_JSON__: string | null;
     const __LOGS_JSON__: LogEntry[];
+    const __MODEL_JSON__: EditorModel | null;
 
     interface Window {
         inkflow: {
