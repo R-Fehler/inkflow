@@ -140,6 +140,12 @@ describe("prependTranslate", () => {
         ).toBe("translate(11,22) scale(2)");
     });
 
+    test("folds into a lone matrix", () => {
+        expect(prependTranslate("matrix(2,0,0,2,10,20)", { x: 1, y: 2 })).toBe(
+            "matrix(2,0,0,2,11,22)",
+        );
+    });
+
     test("drops a translate that cancels out", () => {
         expect(
             prependTranslate("translate(-1,-2) rotate(5)", { x: 1, y: 2 }),

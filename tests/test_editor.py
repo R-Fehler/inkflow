@@ -278,6 +278,21 @@ class TestSvgOps:
         new = svg.root.find(".//*[@id='box-2']")
         assert new is not None and new.get("onclick") is None
 
+    def test_insert_renames_nested_ids(self) -> None:
+        svg = _svg()
+        apply_ops(
+            svg,
+            [
+                {
+                    "kind": "insert",
+                    "parent": "0:",
+                    "xml": '<g id="grp"><circle id="dot" r="1"/></g>',
+                }
+            ],
+        )
+        assert svg.root.find(".//*[@id='grp-2']") is not None
+        assert svg.root.find(".//*[@id='dot-2']") is not None
+
     def test_insert_refuses_scripts(self) -> None:
         svg = _svg()
         with pytest.raises(SvgOpError):

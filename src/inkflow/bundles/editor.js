@@ -449,6 +449,12 @@
       y += parseFloat(m[2] ?? "0");
       rest = m[3].trim();
     }
+    const mm = rest.match(/^matrix\(([^)]*)\)$/);
+    const nums = mm?.[1].split(/[\s,]+/).filter(Boolean).map(Number) ?? [];
+    if (!m && nums.length === 6 && nums.every(Number.isFinite)) {
+      const [a, b, c, dd, e, f] = nums;
+      return `matrix(${a},${b},${c},${dd},${fmt(e + x)},${fmt(f + y)})`;
+    }
     const zero = Math.abs(x) < EPS && Math.abs(y) < EPS;
     if (zero) return rest || null;
     const t = `translate(${fmt(x)},${fmt(y)})`;
@@ -678,6 +684,12 @@
             pendingSlides = null;
           }
           ed.model = msg.model;
+          if (msg.history) {
+            const h2 = msg.history;
+            ed.canUndo = h2.canUndo;
+            ed.canRedo = h2.canRedo;
+            emit("history");
+          }
           emit("model");
           break;
         case "error":
@@ -1034,6 +1046,22 @@
           return node;
         }
         node = node.parentElement;
+      }
+    }
+    return pickByBox(svg, x, y);
+  }
+  function pickByBox(svg, x, y) {
+    const pt = clientToSlide(x, y);
+    const slide = slideSize();
+    const pool = ed.scope ? [...ed.scope.children].filter((el) => el.hasAttribute("data-ink")) : [...svg.querySelectorAll("[data-ink-top]")];
+    for (let i = pool.length - 1; i >= 0; i--) {
+      const el = pool[i];
+      if (!selectable(el)) continue;
+      const b = slideBox(el);
+      if (!b || b.width * b.height > slide.width * slide.height * 0.8)
+        continue;
+      if (pt.x >= b.x && pt.x <= b.x + b.width && pt.y >= b.y && pt.y <= b.y + b.height) {
+        return el;
       }
     }
     return null;
@@ -3403,26 +3431,10 @@
       h(
         "div",
         { class: "btn-row" },
-        button(
-          icon("front", 14),
-          "Bring to front (Ctrl+Shift+\u2191)",
-          () => order2("front")
-        ),
-        button(
-          icon("up", 14),
-          "Bring forward (Ctrl+\u2191)",
-          () => order2("forward")
-        ),
-        button(
-          icon("down", 14),
-          "Send backward (Ctrl+\u2193)",
-          () => order2("backward")
-        ),
-        button(
-          icon("back", 14),
-          "Send to back (Ctrl+Shift+\u2193)",
-          () => order2("back")
-        ),
+        button("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
+        button("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
+        button("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
+        button("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
         button(
           icon("copy", 14),
           "Duplicate (Ctrl+D)",

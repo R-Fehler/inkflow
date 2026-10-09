@@ -57,6 +57,15 @@ export function connect(port: number): void {
                     pendingSlides = null;
                 }
                 ed.model = msg.model as EditorModel;
+                if (msg.history) {
+                    const h = msg.history as {
+                        canUndo: boolean;
+                        canRedo: boolean;
+                    };
+                    ed.canUndo = h.canUndo;
+                    ed.canRedo = h.canRedo;
+                    emit("history");
+                }
                 emit("model");
                 break;
             case "error":

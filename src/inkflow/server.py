@@ -92,9 +92,11 @@ class EditorState(TypedDict):
     """The visual editor's model for the last build (see ``editor.model``)."""
     clients: set[ServerConnection]
     """Connections that identified as an editor page."""
+    session: EditorSession | None
+    """Undo history and file writes for the editor (one per server)."""
 
 
-_editor: EditorState = {"deck": None, "model": None, "clients": set()}
+_editor: EditorState = {"deck": None, "model": None, "clients": set(), "session": None}
 
 
 # ── Deck loader ───────────────────────────────────────────────────────────────
@@ -197,7 +199,7 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
                 }
             )
         )
-        await _send_editors({"type": "editor-model", "model": model})
+        await _send_editors(_model_message())
     except Exception:
         # Outside collect_logs, so a fatal error reaches only the file sink. The overlay
         # and TUI error phase show it instead, never the banner.
@@ -211,6 +213,18 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         with contextlib.suppress(asyncio.CancelledError):
             await spin
         ui.refresh()
+
+
+def _model_message() -> dict[str, object]:
+    session = _editor["session"]
+    return {
+        "type": "editor-model",
+        "model": _editor["model"],
+        "history": {
+            "canUndo": bool(session and session.history.done),
+            "canRedo": bool(session and session.history.undone),
+        },
+    }
 
 
 def _without_edit(slide: SlideData) -> SlideData:
@@ -388,14 +402,7 @@ def make_ws_handler(
                 elif msg_type == "hello" and msg.get("role") == "editor":
                     _editor["clients"].add(websocket)
                     if _editor["model"] is not None:
-                        await websocket.send(
-                            json.dumps(
-                                {
-                                    "type": "editor-model",
-                                    "model": _editor["model"],
-                                }
-                            )
-                        )
+                        await websocket.send(json.dumps(_model_message()))
                 elif msg_type == "edit-op" and session is not None:
                     await _handle_edit_op(websocket, msg, session)
                 elif msg_type == "editor-context" and session is not None:
@@ -687,6 +694,7 @@ async def serve(
     try:
         edit_commands = resolve_edit_commands()
         session = EditorSession(deck_path)
+        _editor["session"] = session
         http_handler = make_http_handler(ws_port, deck_path.parent, edit_commands)
         # Bind before the Live UI so port conflicts fail fast with a clean message
         try:

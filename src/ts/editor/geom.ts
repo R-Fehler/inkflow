@@ -278,6 +278,17 @@ export function prependTranslate(
         y += parseFloat(m[2] ?? "0");
         rest = m[3].trim();
     }
+    // A lone matrix(…) absorbs the move into its own translation.
+    const mm = rest.match(/^matrix\(([^)]*)\)$/);
+    const nums =
+        mm?.[1]
+            .split(/[\s,]+/)
+            .filter(Boolean)
+            .map(Number) ?? [];
+    if (!m && nums.length === 6 && nums.every(Number.isFinite)) {
+        const [a, b, c, dd, e, f] = nums;
+        return `matrix(${a},${b},${c},${dd},${fmt(e + x)},${fmt(f + y)})`;
+    }
     const zero = Math.abs(x) < EPS && Math.abs(y) < EPS;
     if (zero) return rest || null;
     const t = `translate(${fmt(x)},${fmt(y)})`;

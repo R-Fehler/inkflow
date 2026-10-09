@@ -1044,18 +1044,10 @@ function arrangeSection(sels: Selected[]): HTMLElement {
         h(
             "div",
             { class: "btn-row" },
-            button(icon("front", 14), "Bring to front (Ctrl+Shift+↑)", () =>
-                order("front"),
-            ),
-            button(icon("up", 14), "Bring forward (Ctrl+↑)", () =>
-                order("forward"),
-            ),
-            button(icon("down", 14), "Send backward (Ctrl+↓)", () =>
-                order("backward"),
-            ),
-            button(icon("back", 14), "Send to back (Ctrl+Shift+↓)", () =>
-                order("back"),
-            ),
+            button("⇈", "Bring to front (Ctrl+Shift+↑)", () => order("front")),
+            button("↑", "Bring forward (Ctrl+↑)", () => order("forward")),
+            button("↓", "Send backward (Ctrl+↓)", () => order("backward")),
+            button("⇊", "Send to back (Ctrl+Shift+↓)", () => order("back")),
             button(icon("copy", 14), "Duplicate (Ctrl+D)", () =>
                 emit("duplicate"),
             ),

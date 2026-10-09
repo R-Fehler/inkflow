@@ -326,6 +326,38 @@ export function pick(x: number, y: number): SVGGraphicsElement | null {
             node = node.parentElement;
         }
     }
+    return pickByBox(svg, x, y);
+}
+
+// A click that lands in a gap of a shape (between a logo's strokes, inside an
+// unfilled outline) still selects it, as slide editors do: the topmost
+// selectable object whose box contains the point. Slide-sized boxes are left
+// out so clicking an empty area still clears the selection.
+function pickByBox(
+    svg: SVGSVGElement,
+    x: number,
+    y: number,
+): SVGGraphicsElement | null {
+    const pt = clientToSlide(x, y);
+    const slide = slideSize();
+    const pool = ed.scope
+        ? [...ed.scope.children].filter((el) => el.hasAttribute("data-ink"))
+        : [...svg.querySelectorAll("[data-ink-top]")];
+    for (let i = pool.length - 1; i >= 0; i--) {
+        const el = pool[i];
+        if (!selectable(el)) continue;
+        const b = slideBox(el);
+        if (!b || b.width * b.height > slide.width * slide.height * 0.8)
+            continue;
+        if (
+            pt.x >= b.x &&
+            pt.x <= b.x + b.width &&
+            pt.y >= b.y &&
+            pt.y <= b.y + b.height
+        ) {
+            return el as SVGGraphicsElement;
+        }
+    }
     return null;
 }
 

@@ -377,14 +377,13 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
         elif kind == "insert":
             new = _parse_fragment(str(op.get("xml", "")))
             if not new.get("id"):
-                new.set("id", unique_id(root, str(op.get("base") or _local(new.tag))))
-            else:
-                new.set("id", unique_id(root, new.get("id", "")))
+                new.set("id", str(op.get("base") or _local(new.tag)))
+            # Every id inside a pasted copy, not just its own, must stay unique.
+            _renumber_ids(new, root)
             index = op.get("index")
             if isinstance(index, int) and 0 <= index <= len(el):
                 el.insert(index, new)
             else:
-                # Above the last painted child, keeping a trailing comment last.
                 el.append(new)
             _fix_tail(el, new)
             result.ids[str(op.get("key", "insert"))] = new.get("id", "")
