@@ -50,6 +50,55 @@ commands:
       flag:
         deck: ["$files([\".py\"])"]
 
+  - name: context
+    description: Show what is selected in the visual editor.
+    flags:
+      -d, --deck=: Path to deck.py
+      --json: Print the raw JSON
+      --hook: Prompt-hook mode (quiet when stale, never fails)
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+
+  - name: render
+    description: Render slides to PNG images.
+    flags:
+      -d, --deck=: Path to deck.py
+      -s, --slide=: Slide number (1-based); repeatable
+      --all: Render every slide
+      --step=: Build step to show
+      -o, --output=: PNG file or directory
+      --scale=: Image scale
+      --chromium=: Path to a Chromium/Chrome binary
+      --no-sandbox: Pass --no-sandbox to Chromium
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+        output: ["$files"]
+        chromium: ["$files"]
+
+  - name: goto
+    description: Show a slide in every open editor.
+    flags:
+      --ws-port=: The server's WebSocket port
+      --host=: Server host
+
+  - name: select
+    description: Select elements by id in every open editor.
+    flags:
+      --slide=: Go to this slide first
+      --ws-port=: The server's WebSocket port
+      --host=: Server host
+
+  - name: setup-claude
+    description: Install the Claude Code prompt hook and inkflow skill.
+    flags:
+      -d, --deck=: Path to deck.py
+      --command=: Command the prompt hook runs
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+
   - name: clean
     description: Strip Inkscape editor metadata from SVG files.
     flags:

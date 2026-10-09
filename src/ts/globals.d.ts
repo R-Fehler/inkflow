@@ -16,6 +16,8 @@ declare global {
     const __ERROR_JSON__: string | null;
     const __LOGS_JSON__: LogEntry[];
     const __MODEL_JSON__: EditorModel | null;
+    const __RENDER_SVG__: string;
+    const __RENDER_STEP__: number | null;
 
     interface Window {
         inkflow: {

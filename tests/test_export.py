@@ -13,9 +13,9 @@ from click.testing import CliRunner
 from inkflow.cli import main
 from inkflow.export import (
     _INLINE_VIDEO_WARN_BYTES,
-    _find_chromium,
     build_pdf,
     build_static_html,
+    find_chromium,
 )
 from inkflow.logging import collect_logs
 
@@ -583,7 +583,7 @@ class TestEmptyDeck:
 
 
 class TestBuildPdf:
-    @pytest.mark.skipif(_find_chromium() is None, reason="chromium not available")
+    @pytest.mark.skipif(find_chromium() is None, reason="chromium not available")
     def test_produces_pdf_file(self, tmp_path: Path) -> None:
         _write_slide(tmp_path, _PLAIN_SLIDE_SVG)
         deck_path = _write_deck(tmp_path, _ONE_SLIDE_DECK)

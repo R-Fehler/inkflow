@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import importlib.resources
+import json
+import os
 import re
 import shutil
 import subprocess
@@ -204,7 +206,7 @@ def build_pdf(
     no_sandbox: bool = False,
     size: tuple[int, int] | None = None,
 ) -> None:
-    exe = chromium or _find_chromium()
+    exe = chromium or find_chromium()
     if exe is None:
         raise RuntimeError(
             "Chromium not found. Install chromium or google-chrome,"
@@ -258,7 +260,74 @@ def build_pdf(
         subprocess.run(cmd, check=True)
 
 
-def _find_chromium() -> str | None:
+def _hidden_window_height(base: list[str], tmp: Path) -> int:
+    """How much shorter headless Chrome's viewport is than the window it shoots.
+
+    New-style headless reserves room for browser UI it never draws, so a
+    screenshot of a WxH window shows a viewport less than H tall, and nothing is
+    painted below it. Measured once per run rather than assumed.
+    """
+    probe = tmp / "probe.html"
+    probe.write_text(
+        "<html><body><script>document.body.textContent="
+        + "'@'+innerHeight+'@'</script></body></html>",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [*base, "--window-size=800,800", "--dump-dom", probe.as_uri()],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    match = re.search(r"@(\d+)@", result.stdout)
+    return max(0, 800 - int(match.group(1))) if match else 0
+
+
+def crop_png_height(data: bytes, height: int) -> bytes:
+    """Keep the top ``height`` rows of a non-interlaced 8-bit PNG.
+
+    Every filter type refers only to the row above, so the kept rows are still
+    valid as they are: no pixel decoding is needed, just fewer of them.
+    """
+    import struct
+    import zlib
+
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not a PNG")
+    pos = 8
+    chunks: list[tuple[bytes, bytes]] = []
+    while pos < len(data):
+        (length,) = struct.unpack(">I", data[pos : pos + 4])
+        kind = data[pos + 4 : pos + 8]
+        chunks.append((kind, data[pos + 8 : pos + 8 + length]))
+        pos += 12 + length
+    ihdr = chunks[0][1]
+    width, old_height, depth, color, _, _, interlace = struct.unpack(">IIBBBBB", ihdr)
+    if depth != 8 or interlace or height >= old_height:
+        return data
+    channels = {0: 1, 2: 3, 4: 2, 6: 4}.get(color)
+    if channels is None:
+        return data
+    raw = zlib.decompress(b"".join(body for kind, body in chunks if kind == b"IDAT"))
+    stride = 1 + width * channels
+    kept = zlib.compress(raw[: stride * height])
+    new_ihdr = struct.pack(">II", width, height) + ihdr[8:]
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        crc = zlib.crc32(kind + body) & 0xFFFFFFFF
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", crc)
+
+    out = [data[:8], chunk(b"IHDR", new_ihdr)]
+    for kind, body in chunks[1:]:
+        if kind == b"IDAT":
+            continue
+        if kind == b"IEND":
+            out.append(chunk(b"IDAT", kept))
+        out.append(chunk(kind, body))
+    return b"".join(out)
+
+
+def find_chromium() -> str | None:
     for name in (
         "chrome",
         "chromium",
@@ -269,4 +338,119 @@ def _find_chromium() -> str | None:
     ):
         if found := shutil.which(name):
             return found
+    return _playwright_chromium()
+
+
+def _playwright_chromium() -> str | None:
+    """A Chromium that Playwright downloaded, common on CI and agent machines."""
+    roots = [
+        os.environ.get("PLAYWRIGHT_BROWSERS_PATH"),
+        str(Path.home() / ".cache" / "ms-playwright"),
+        str(Path.home() / "Library" / "Caches" / "ms-playwright"),
+    ]
+    patterns = (
+        "chromium-*/chrome-linux*/chrome",
+        "chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium",
+        "chromium-*/chrome-win*/chrome.exe",
+    )
+    for root in filter(None, roots):
+        base = Path(root)
+        for pattern in patterns:
+            found = sorted(base.glob(pattern), reverse=True)
+            if found:
+                return str(found[0])
     return None
+
+
+# ── render (PNG) ──────────────────────────────────────────────────────────────
+
+
+def render_png(
+    deck_path: Path,
+    slide_numbers: list[int],
+    output: Path,
+    *,
+    step: int | None = None,
+    scale: float = 1.0,
+    chromium: str | None = None,
+    no_sandbox: bool = False,
+) -> list[Path]:
+    """Screenshot slides (1-based, as the presenter numbers them) to PNG files.
+
+    Each slide is shown at ``step`` (its final build state when ``None``) on a
+    page with nothing else on it, so the image is exactly the slide. ``output`` is
+    the file for a single slide, or a directory for several (``slide-N.png``).
+    Returns the files written.
+    """
+    exe = chromium or find_chromium()
+    if exe is None:
+        raise RuntimeError(
+            "Chromium not found. Install chromium or google-chrome,"
+            + " or pass --chromium PATH."
+        )
+    deck = load_deck(deck_path)
+    project_dir = deck_path.parent
+    slides = process_deck(deck, project_dir, deck_path)
+    if not slides:
+        raise RuntimeError("Cannot render: the deck has no visible slides.")
+    for n in slide_numbers:
+        if not 1 <= n <= len(slides):
+            raise ValueError(f"no slide {n}: the deck has {len(slides)} slides")
+    styles_css = load_deck_styles(deck, project_dir)
+    if deck.embed_fonts:
+        font_css = embed_fonts_css_subsetted(slides, project_dir, deck.theme.fonts_dir)
+        if font_css:
+            styles_css = (font_css + "\n" + styles_css).strip()
+
+    pkg = importlib.resources.files("inkflow")
+    template = pkg.joinpath("render.html").read_text(encoding="utf-8")
+    css = pkg.joinpath("bundles", "presenter.css").read_text(encoding="utf-8")
+    js = pkg.joinpath("bundles", "render.js").read_text(encoding="utf-8")
+    data_theme = "" if deck.effective_mode == ColorMode.DARK else "light"
+    title = escape_html(resolve_deck_title(deck, project_dir))
+
+    single = len(slide_numbers) == 1 and output.suffix.lower() == ".png"
+    if not single:
+        output.mkdir(parents=True, exist_ok=True)
+    base = [exe, "--headless", "--disable-gpu", "--hide-scrollbars"]
+    if no_sandbox:
+        base.append("--no-sandbox")
+    written: list[Path] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        _copy_assets(slides, _asset_roots(deck, project_dir), Path(tmp))
+        lost = _hidden_window_height(base, Path(tmp))
+        for n in slide_numbers:
+            svg = slides[n - 1]["svg"]
+            w, h = _slide_dimensions(svg)
+            html = (
+                template.replace("/* __CSS__ */", css)
+                .replace("/* __STYLES__ */", styles_css)
+                .replace("/* __JS__ */", js)
+                .replace("__RENDER_SVG__", json.dumps(svg).replace("</", "<\\/"))
+                .replace("__RENDER_STEP__", json.dumps(step))
+                .replace("__DATA_THEME__", data_theme)
+                .replace("__TITLE__", title)
+                .replace("__W__", str(w))
+                .replace("__H__", str(h))
+            )
+            html_path = Path(tmp) / f"slide-{n}.html"
+            html_path.write_text(html, encoding="utf-8")
+            target = output if single else output / f"slide-{n}.png"
+            # The window is grown by what the browser keeps from the viewport, so
+            # the whole slide is painted; the strip that adds is cropped off.
+            cmd = [
+                *base,
+                f"--window-size={w},{h + lost}",
+                f"--force-device-scale-factor={scale:g}",
+                "--virtual-time-budget=3000",
+                f"--screenshot={target.resolve()}",
+                html_path.as_uri(),
+            ]
+            subprocess.run(cmd, check=True, capture_output=True)
+            if lost:
+                data = target.read_bytes()
+                # Chrome clamps the scale factor, so take it from the image.
+                actual = int.from_bytes(data[16:20], "big") / w
+                target.write_bytes(crop_png_height(data, round(h * actual)))
+            written.append(target)
+    return written

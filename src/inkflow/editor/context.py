@@ -85,7 +85,9 @@ def format_context(context: dict[str, object], *, max_age: float | None = None) 
             value = slide.get(key)
             if value:
                 lines.append(f"  {label}: {value}")
-        lines.append(f"  deck.py: Slide #{slide.get('deckIndex')} in the slides list")
+        lines.append(
+            f"  deck.py: slides[{slide.get('deckIndex')}] in Deck(slides=[...])"
+        )
     step = context.get("step")
     if step:
         lines.append(f"- previewing animation step {step}")
