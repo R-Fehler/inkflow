@@ -41,7 +41,12 @@ from inkflow.manifest import (
 )
 from inkflow.overlay import Overlay
 from inkflow.steps import StepResolver
-from inkflow.svg import compose_overlays, compose_with_ancestors, duplicate_zone_ids
+from inkflow.svg import (
+    compose_overlays,
+    compose_with_ancestors,
+    duplicate_zone_ids,
+    resolve_links,
+)
 from inkflow.svgio import SvgElement, serialize_svg
 from inkflow.themes import Theme
 from inkflow.titles import humanize
@@ -599,6 +604,9 @@ class SlideSvg:
     def prune_zones(self) -> None:
         self.root = remove_unreferenced_zones(self.root)
 
+    def resolve_links(self) -> None:
+        self.root = resolve_links(self.root)
+
     def scope_styles(self, slide_number: int) -> None:
         self.root = _scope_slide_styles(self.root, slide_number)
 
@@ -752,6 +760,7 @@ def process_slide(
             "zoneOrigins": zone_origins,
         }
     doc.prune_zones()
+    doc.resolve_links()
     doc.scope_styles(slide_number)
     return ProcessedSlide(doc.to_svg(), md_notes, edit)
 

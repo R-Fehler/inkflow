@@ -31,6 +31,14 @@ describe("htmlToMarkdown", () => {
         expect(out).toBe("- one\n- two\n  - nested\n\n1. a\n2. b");
     });
 
+    it("writes slide links with the slide: scheme", () => {
+        expect(
+            md(
+                '<p><a data-inkflow-slide="intro" title="Go to slide: intro">back</a></p>',
+            ),
+        ).toBe("[back](slide:intro)");
+    });
+
     it("writes headings, quotes and hard breaks", () => {
         expect(md("<h1>Title</h1>\n")).toBe("# Title");
         expect(md("<blockquote>\n<p>quoted\ntext</p>\n</blockquote>\n")).toBe(

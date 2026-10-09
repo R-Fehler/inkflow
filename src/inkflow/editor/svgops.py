@@ -20,7 +20,12 @@ from lxml import etree
 
 from inkflow import ns
 from inkflow.colors import SVG_TOKENS
-from inkflow.editor.provenance import PROVENANCE_ATTRS, is_element, locate
+from inkflow.editor.provenance import (
+    PROVENANCE_ATTRS,
+    is_element,
+    is_link_wrapper,
+    locate,
+)
 from inkflow.svgio import SvgElement, svg_parser
 
 
@@ -348,6 +353,9 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
             targets.append(root if not path else _resolve(root, parent_loc))
         elif kind == "ensure-marker":
             targets.append(root)
+        elif kind in ("delete", "duplicate", "order"):
+            # A linked object takes its link along.
+            targets.append(_outer(_resolve(root, op.get("loc"))))
         else:
             targets.append(_resolve(root, op.get("loc")))
 
@@ -441,6 +449,9 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
             result.structural = True
         elif kind == "title":
             _set_title(el, str(op.get("text") or ""))
+        elif kind == "link":
+            _set_link(el, op.get("href"))
+            result.structural = True
         elif kind == "lock":
             if op.get("locked"):
                 el.set(ns.INKFLOW_LOCKED, "true")
@@ -554,6 +565,52 @@ def _uncrop(frame: SvgElement) -> None:
     parent.replace(frame, image)
 
 
+def _outer(el: SvgElement) -> SvgElement:
+    """The link wrapper around ``el`` if it is the only object in one, else ``el``."""
+    parent = el.getparent()
+    return parent if parent is not None and is_link_wrapper(parent) else el
+
+
+_LINK_SCHEMES = re.compile(r"^(https?:|mailto:|tel:|slide:|#|[\w./-])", re.I)
+
+
+def _set_link(el: SvgElement, href: object) -> None:
+    """Link an object (wrap it in ``<a href>``), change its link, or remove it.
+
+    ``slide:<id>`` jumps to that slide in the presentation, like the Markdown
+    link scheme; anything else opens in a new tab there.
+    """
+    parent = el.getparent()
+    if parent is None:
+        raise SvgOpError("the root element cannot be linked")
+    wrapper = parent if is_link_wrapper(parent) else None
+    text = str(href).strip() if isinstance(href, str) else ""
+    if text and (
+        text.lower().startswith("javascript:") or not _LINK_SCHEMES.match(text)
+    ):
+        raise SvgOpError(f"{text!r} is not a link address")
+    if not text:
+        if wrapper is not None:
+            outer = wrapper.getparent()
+            assert outer is not None
+            el.tail = wrapper.tail
+            outer.replace(wrapper, el)
+        return
+    if wrapper is not None:
+        wrapper.set("href", text)
+        _drop(wrapper, _XLINK_HREF)
+        return
+    if _local(el.tag) == "a":
+        el.set("href", text)
+        return
+    a = etree.Element(_SVG + "a")
+    a.set("href", text)
+    a.tail = el.tail
+    el.tail = None
+    parent.replace(el, a)
+    a.append(el)
+
+
 def _set_title(el: SvgElement, text: str) -> None:
     """The element's ``<title>``: its accessible name (alt text) and tooltip."""
     titles = [c for c in el if is_element(c) and _local(c.tag) == "title"]
@@ -646,7 +703,7 @@ def _reorder(el: SvgElement, to: str) -> None:
 def group(svg: SvgFile, locs: list[str]) -> str:
     """Wrap the elements at ``locs`` (same parent) in a new ``<g>``; returns its id."""
     root = svg.root
-    els = [_resolve(root, loc) for loc in locs]
+    els = [_outer(_resolve(root, loc)) for loc in locs]
     if not els:
         raise SvgOpError("nothing to group")
     parent = els[0].getparent()

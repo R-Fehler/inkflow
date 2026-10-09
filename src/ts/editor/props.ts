@@ -1054,14 +1054,64 @@ function pictureSection(sel: Selected): HTMLElement {
     );
 }
 
-// Alt text: the object's <title>, which screen readers read and browsers show
-// as a tooltip.
+// The object's link, as the editor writes it (an <a> around the object), and
+// as the pipeline renders a slide link (data-inkflow-slide, no href).
+function linkOf(el: Element): string {
+    const a = el.parentElement;
+    if (a?.localName !== "a") return "";
+    const slide = a.getAttribute("data-inkflow-slide");
+    if (slide) return `slide:${slide}`;
+    return a.getAttribute("href") ?? a.getAttribute("xlink:href") ?? "";
+}
+
+// A bare number is a slide number (as shown in the slide list).
+function slideLinkByNumber(n: number): string | null {
+    const s = ed.model?.slides[n - 1];
+    return s?.id ? `slide:${s.id}` : null;
+}
+
+function slideOptions(): HTMLDataListElement {
+    const list = h("datalist", { id: "slide-link-list" });
+    for (const s of ed.model?.slides ?? []) {
+        if (!s.id) continue;
+        list.append(h("option", { value: `slide:${s.id}` }, s.title ?? s.id));
+    }
+    return list;
+}
+
+// Link and alt text. Alt text is the object's <title>, which screen readers
+// read and browsers show as a tooltip.
 function detailsSection(sel: Selected): HTMLElement {
     const title =
         [...sel.el.children].find((c) => c.localName === "title")
             ?.textContent ?? "";
+    const link = textInput(
+        linkOf(sel.el),
+        (v) =>
+            void sendSvgOps(
+                [
+                    {
+                        sel,
+                        ops: [
+                            {
+                                kind: "link",
+                                loc: sel.loc,
+                                href: /^\d+$/.test(v.trim())
+                                    ? slideLinkByNumber(Number(v))
+                                    : v.trim() || null,
+                            },
+                        ],
+                    },
+                ],
+                v.trim() ? "Link" : "Remove link",
+            ),
+        "https://… or slide:id",
+    );
+    link.setAttribute("list", "slide-link-list");
     return section(
-        "Accessibility",
+        "Link & alt text",
+        slideOptions(),
+        row("Link", link),
         row(
             "Alt text",
             textInput(

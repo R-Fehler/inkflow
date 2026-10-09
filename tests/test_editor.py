@@ -1312,6 +1312,49 @@ def test_theme_panel_writes_a_styles_block_and_deck_args(project: Path) -> None:
         )
 
 
+def test_link_op_wraps_unwraps_and_stays_transparent(project: Path) -> None:
+    from inkflow.editor.provenance import INK_TOP, stamper
+
+    svg = _svg()
+    loc = _loc(svg, "box")
+    apply_ops(svg, [{"kind": "link", "loc": loc, "href": "https://example.com"}])
+    a = svg.root.find(f"{{{SVG_NS}}}a")
+    assert a is not None and a.get("href") == "https://example.com"
+    assert a[0].get("id") == "box"
+    # The object inside is the selectable one, and keeps its link when moved
+    # in the stacking order or deleted.
+    root = parse_svg(svg.to_bytes().decode())
+    stamper(0)(root)
+    stamped = root.find(f"{{{SVG_NS}}}a")
+    assert stamped is not None
+    assert stamped.get(INK_TOP) is None and stamped[0].get(INK_TOP) == ""
+    inner = _loc(svg, "box")
+    apply_ops(svg, [{"kind": "link", "loc": inner, "href": "slide:intro"}])
+    assert svg.root.find(f"{{{SVG_NS}}}a[@href='slide:intro']") is not None
+    with pytest.raises(SvgOpError):
+        apply_ops(svg, [{"kind": "link", "loc": inner, "href": "javascript:x"}])
+    apply_ops(svg, [{"kind": "link", "loc": inner, "href": None}])
+    assert svg.root.find(f"{{{SVG_NS}}}a") is None
+    assert svg.root.find(f"{{{SVG_NS}}}rect[@id='box']") is not None
+    apply_ops(svg, [{"kind": "link", "loc": _loc(svg, "box"), "href": "#x"}])
+    apply_ops(svg, [{"kind": "delete", "loc": _loc(svg, "box")}])
+    assert svg.root.find(f"{{{SVG_NS}}}a") is None
+
+    # In the presentation: slide: links jump, web links open a new tab.
+    drawing = project / "slides" / "drawing.svg"
+    drawing.write_text(
+        drawing.read_text()
+        .replace('<rect id="box"', '<a href="slide:two"><rect id="box"')
+        .replace('height="100"/>', 'height="100"/></a>', 1)
+        .replace('<text id="label"', '<a href="https://x.y"><text id="label"')
+        .replace("Hello</text>", "Hello</text></a>"),
+        encoding="utf-8",
+    )
+    html = process_deck(_deck(project), project, project / "deck.py")[0]["svg"]
+    assert 'data-inkflow-slide="two"' in html and "slide:two" not in html
+    assert 'href="https://x.y" target="_blank"' in html
+
+
 # ── Model ────────────────────────────────────────────────────────────────────
 
 

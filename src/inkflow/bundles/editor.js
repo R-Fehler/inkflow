@@ -4572,10 +4572,51 @@
       )
     );
   }
+  function linkOf(el) {
+    const a = el.parentElement;
+    if (a?.localName !== "a") return "";
+    const slide = a.getAttribute("data-inkflow-slide");
+    if (slide) return `slide:${slide}`;
+    return a.getAttribute("href") ?? a.getAttribute("xlink:href") ?? "";
+  }
+  function slideLinkByNumber(n) {
+    const s = ed.model?.slides[n - 1];
+    return s?.id ? `slide:${s.id}` : null;
+  }
+  function slideOptions() {
+    const list2 = h("datalist", { id: "slide-link-list" });
+    for (const s of ed.model?.slides ?? []) {
+      if (!s.id) continue;
+      list2.append(h("option", { value: `slide:${s.id}` }, s.title ?? s.id));
+    }
+    return list2;
+  }
   function detailsSection(sel) {
     const title = [...sel.el.children].find((c) => c.localName === "title")?.textContent ?? "";
+    const link = textInput(
+      linkOf(sel.el),
+      (v) => void sendSvgOps(
+        [
+          {
+            sel,
+            ops: [
+              {
+                kind: "link",
+                loc: sel.loc,
+                href: /^\d+$/.test(v.trim()) ? slideLinkByNumber(Number(v)) : v.trim() || null
+              }
+            ]
+          }
+        ],
+        v.trim() ? "Link" : "Remove link"
+      ),
+      "https://\u2026 or slide:id"
+    );
+    link.setAttribute("list", "slide-link-list");
     return section(
-      "Accessibility",
+      "Link & alt text",
+      slideOptions(),
+      row2("Link", link),
       row2(
         "Alt text",
         textInput(
@@ -4972,6 +5013,10 @@
       case "br":
         return "\\\n";
       case "a": {
+        const slide = el.getAttribute("data-inkflow-slide");
+        if (slide && plain(el, ["data-inkflow-slide", "title"])) {
+          return `[${inline(el)}](slide:${slide})`;
+        }
         if (!plain(el, ["href", "title"])) throw new Unsupported(tag);
         const href = el.getAttribute("href") ?? "";
         const title = el.getAttribute("title");
@@ -5657,7 +5702,7 @@ ${area2.value.slice(pos)}`;
     const range = selectionRange(content2);
     const current = a?.getAttribute("href") ?? "";
     const url = window.prompt(
-      a ? "Link address (empty removes the link)" : "Link address",
+      a ? "Link address: https://\u2026 or slide:<id> (empty removes the link)" : "Link address: https://\u2026 or slide:<id>",
       current || "https://"
     );
     if (url == null) return;

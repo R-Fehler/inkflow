@@ -623,7 +623,9 @@ function editLink(content: HTMLElement): void {
     const range = selectionRange(content);
     const current = a?.getAttribute("href") ?? "";
     const url = window.prompt(
-        a ? "Link address (empty removes the link)" : "Link address",
+        a
+            ? "Link address: https://… or slide:<id> (empty removes the link)"
+            : "Link address: https://… or slide:<id>",
         current || "https://",
     );
     if (url == null) return;

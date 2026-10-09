@@ -86,6 +86,11 @@ function inlineNode(node: Node): string {
         case "br":
             return "\\\n";
         case "a": {
+            // A slide link as the renderer writes it (Markdown `slide:` scheme).
+            const slide = el.getAttribute("data-inkflow-slide");
+            if (slide && plain(el, ["data-inkflow-slide", "title"])) {
+                return `[${inline(el)}](slide:${slide})`;
+            }
             if (!plain(el, ["href", "title"])) throw new Unsupported(tag);
             const href = el.getAttribute("href") ?? "";
             const title = el.getAttribute("title");

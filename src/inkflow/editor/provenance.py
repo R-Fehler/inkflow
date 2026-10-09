@@ -72,6 +72,24 @@ def is_layer(el: SvgElement) -> bool:
     return el.tag == f"{{{ns.SVG}}}g" and el.get(_GROUPMODE) == "layer"
 
 
+def graphical_children(el: SvgElement) -> list[SvgElement]:
+    return [c for c in el if is_element(c) and c.tag not in _NON_GRAPHICAL]
+
+
+def is_link_wrapper(el: SvgElement) -> bool:
+    """An ``<a>`` around exactly one object: the editor's link on that object.
+
+    It is transparent to selection: the object inside is what gets selected,
+    moved and styled, and the link is one of its properties.
+    """
+    return el.tag == f"{{{ns.SVG}}}a" and len(graphical_children(el)) == 1
+
+
+def _at_object_level(el: SvgElement) -> bool:
+    parent = el.getparent()
+    return parent is not None and (parent.getparent() is None or is_layer(parent))
+
+
 def child_path(el: SvgElement) -> str:
     """Dot-joined child indices from the root down to ``el`` ("" for the root)."""
     indices: list[str] = []
@@ -90,7 +108,11 @@ def _is_object(el: SvgElement) -> bool:
         return False
     if not is_element(el) or not el.tag.startswith(f"{{{ns.SVG}}}"):
         return False
-    return parent.getparent() is None or is_layer(parent)
+    if is_link_wrapper(el):
+        return False
+    if is_link_wrapper(parent):
+        return _at_object_level(parent)
+    return _at_object_level(el)
 
 
 def stamper(key: int) -> Callable[[SvgElement], None]:
