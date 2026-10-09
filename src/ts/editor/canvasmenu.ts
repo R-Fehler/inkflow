@@ -32,6 +32,7 @@ import {
     order,
     ungroupSelection,
 } from "./toolbar";
+import { isPreviewing, togglePreview, videoOf } from "./videopreview";
 
 const menu = document.getElementById("context-menu")!;
 // Where the menu was opened (a follow-up menu opens there too).
@@ -61,6 +62,15 @@ function objectMenu(): HTMLElement[] {
             items.push(
                 menuItem("Enter group", () =>
                     enterGroup(el as unknown as SVGGElement),
+                ),
+            );
+        }
+        const video = videoOf(el);
+        if (video) {
+            items.push(
+                menuItem(
+                    isPreviewing(video) ? "Pause preview" : "Play preview",
+                    () => togglePreview(video),
                 ),
             );
         }

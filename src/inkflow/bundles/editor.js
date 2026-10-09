@@ -1270,6 +1270,8 @@
     svg.querySelectorAll("video").forEach((v) => {
       v.pause();
       v.removeAttribute("autoplay");
+      v.removeAttribute("controls");
+      v.controls = false;
       const start = parseFloat(v.dataset.start ?? "");
       if (start > 0) v.currentTime = start;
     });
@@ -4306,6 +4308,51 @@
     );
   }
 
+  // src/ts/editor/videopreview.ts
+  function videoOf(el2) {
+    if (!el2) return null;
+    return el2.localName === "video" ? el2 : el2.querySelector("video");
+  }
+  function isPreviewing(video) {
+    return !video.paused && !video.ended;
+  }
+  function togglePreview(video) {
+    if (isPreviewing(video)) {
+      video.pause();
+      return;
+    }
+    const start = parseFloat(video.dataset.start ?? "") || 0;
+    const end = parseFloat(video.dataset.end ?? "");
+    if (video.currentTime < start || end > 0 && video.currentTime >= end) {
+      video.currentTime = start;
+    }
+    if (end > 0) {
+      const stop = () => {
+        if (video.currentTime >= end) {
+          video.pause();
+          video.removeEventListener("timeupdate", stop);
+        }
+      };
+      video.addEventListener("timeupdate", stop);
+    }
+    void video.play().catch(() => {
+    });
+  }
+  function previewButton(video, make) {
+    const btn = make(
+      "\u25B6 Play preview",
+      "Play the video here (the presenter plays it as the deck says)",
+      () => togglePreview(video)
+    );
+    const sync = () => {
+      btn.textContent = isPreviewing(video) ? "\u23F8 Pause preview" : "\u25B6 Play preview";
+    };
+    for (const ev of ["play", "pause", "ended"])
+      video.addEventListener(ev, sync);
+    sync();
+    return btn;
+  }
+
   // src/ts/editor/props.ts
   var panel = document.getElementById("props-body");
   function section(title2, ...body2) {
@@ -5060,6 +5107,8 @@
             });
           })
         );
+        const video = media.kind === "video" ? videoOf(el2) : null;
+        if (video) body2.push(previewButton(video, button));
       } else {
         body2.push(
           button(
@@ -5075,6 +5124,10 @@
       if (media && (media.kind === "image" || media.kind === "video")) {
         panel.append(mediaSection(slide, name, media));
       }
+    }
+    const innerVideo = zone ? null : videoOf(el2);
+    if (innerVideo) {
+      panel.append(section("Video", previewButton(innerVideo, button)));
     }
     if (movable) panel.append(geometrySection([sel]));
     const textZone = zone && el2.localName === "foreignObject" && !!el2.querySelector(".inkflow-content");
@@ -7982,6 +8035,15 @@ ${area2.value.slice(pos)}`;
           menuItem(
             "Enter group",
             () => enterGroup(el2)
+          )
+        );
+      }
+      const video = videoOf(el2);
+      if (video) {
+        items.push(
+          menuItem(
+            isPreviewing(video) ? "Pause preview" : "Play preview",
+            () => togglePreview(video)
           )
         );
       }

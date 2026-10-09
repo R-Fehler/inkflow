@@ -213,6 +213,10 @@ function prepareForEditing(svg: SVGSVGElement): void {
     svg.querySelectorAll("video").forEach((v) => {
         v.pause();
         v.removeAttribute("autoplay");
+        // An object to place, not a player: native controls would take the
+        // clicks that select and drag it (see videopreview.ts).
+        v.removeAttribute("controls");
+        v.controls = false;
         // Show the frame a trimmed clip starts on, not its first one.
         const start = parseFloat(v.dataset.start ?? "");
         if (start > 0) v.currentTime = start;

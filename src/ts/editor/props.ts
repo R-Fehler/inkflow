@@ -57,6 +57,7 @@ import type {
     TypeInfo,
     ZoneValue,
 } from "./types";
+import { previewButton, videoOf } from "./videopreview";
 
 const panel = document.getElementById("props-body")!;
 
@@ -948,6 +949,8 @@ function renderObjectPanel(sel: Selected): void {
                     });
                 }),
             );
+            const video = media.kind === "video" ? videoOf(el) : null;
+            if (video) body.push(previewButton(video, button));
         } else {
             body.push(
                 button(
@@ -963,6 +966,12 @@ function renderObjectPanel(sel: Selected): void {
         if (media && (media.kind === "image" || media.kind === "video")) {
             panel.append(mediaSection(slide, name, media));
         }
+    }
+
+    // A group (or other object) with a video in it: play it from here too.
+    const innerVideo = zone ? null : videoOf(el);
+    if (innerVideo) {
+        panel.append(section("Video", previewButton(innerVideo, button)));
     }
 
     if (movable) panel.append(geometrySection([sel]));

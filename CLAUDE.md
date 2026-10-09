@@ -219,7 +219,9 @@ src/
                       find.ts, exportdlg.ts, openwith.ts ("Open ▾" in other programs),
                       decks.ts ("deck ▾": new/open/recent decks), git.ts (Git menu),
                       canvasmenu.ts (right-click menu on the canvas; text fields and
-                      Shift+right-click keep the browser's),
+                      Shift+right-click keep the browser's), videopreview.ts (canvas
+                      videos lose controls + pointer events so they select and drag;
+                      "Play preview" plays one in place; the presenter is unaffected),
                       dialog.ts (the one modal), connectors.ts (connection sites
                       and straight/elbow/curved routes, pure + tested)
     render/           the single-slide page behind `inkflow render`

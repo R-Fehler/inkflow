@@ -330,6 +330,13 @@ autoplay, loop, when to mute, a poster image and trim start / end in seconds. An
 image zone gets fit and anchor. To start a clip on a click rather than when the
 slide appears, add a **PlayVideo** animation to it.
 
+In the editor a video is an object to place, not a player: it never shows its
+playback controls and clicks go through to it, so a click selects it, a drag moves
+it and right-click opens the editor's menu, whatever its settings. To check it,
+**Play preview** (in its panel, or in the right-click menu) plays it in place,
+within its trim. The presenter plays it as the deck says: with its controls when
+**Controls** is on, autoplaying or on a click.
+
 ## Layouts and overlays
 
 Objects that come from a layout or an overlay are shared by every slide built on
