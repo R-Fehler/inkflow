@@ -6,6 +6,7 @@ import {
     invert,
     multiply,
     parseTransform,
+    planCrop,
     planMove,
     planResize,
     planRotate,
@@ -202,4 +203,68 @@ test("relativePath", () => {
     expect(relativePath("/p/slides/a.svg", "/p/slides/img/x.png")).toBe(
         "img/x.png",
     );
+});
+
+describe("planCrop", () => {
+    const frame = (over: Partial<ElementGeom> = {}) =>
+        geom({
+            tag: "svg",
+            sourceTag: "svg",
+            attrs: {
+                x: "100",
+                y: "50",
+                width: "400",
+                height: "200",
+                viewBox: "100 50 400 200",
+            },
+            ...over,
+        });
+
+    test("trimming an edge moves the viewBox with the frame", () => {
+        const plan = planCrop(
+            frame(),
+            { x: 100, y: 50, width: 400, height: 200 },
+            { x: 150, y: 50, width: 350, height: 100 },
+        );
+        expect(plan).toEqual({
+            x: "150",
+            y: "50",
+            width: "350",
+            height: "100",
+            viewBox: "150 50 350 100",
+        });
+    });
+
+    test("a scaled frame maps the crop into picture units", () => {
+        // Shown at twice the size: the viewBox is half the frame.
+        const plan = planCrop(
+            frame({
+                attrs: {
+                    x: "0",
+                    y: "0",
+                    width: "400",
+                    height: "200",
+                    viewBox: "10 10 200 100",
+                },
+            }),
+            { x: 0, y: 0, width: 400, height: 200 },
+            { x: 100, y: 0, width: 300, height: 200 },
+        );
+        expect(plan?.viewBox).toBe("60 10 150 100");
+        expect(plan?.x).toBe("100");
+    });
+
+    test("refuses a frame without a usable viewBox or a rotated one", () => {
+        const box = { x: 0, y: 0, width: 1, height: 1 };
+        expect(
+            planCrop(
+                frame({ attrs: { x: "0", y: "0", width: "1", height: "1" } }),
+                box,
+                box,
+            ),
+        ).toBeNull();
+        expect(
+            planCrop(frame({ own: rotateAbout(30, { x: 0, y: 0 }) }), box, box),
+        ).toBeNull();
+    });
 });

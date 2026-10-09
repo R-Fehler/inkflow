@@ -20,6 +20,7 @@ import {
     zoneName,
 } from "./canvas";
 import { copy, copySlides, cut, cutSlides } from "./clipboard";
+import { setCropMode } from "./crop";
 import { toast } from "./dom";
 import { openGallery } from "./gallery";
 import { insertImage, insertVideo, setTool } from "./insert";
@@ -282,6 +283,9 @@ function onKey(e: KeyboardEvent): void {
     ) {
         handled();
         gotoSlide(ed.current - 1);
+    } else if (ed.cropMode && (key === "Escape" || key === "Enter")) {
+        handled();
+        setCropMode(false);
     } else if (key === "Escape") {
         if (ed.tool !== "select") setTool("select");
         else if (ed.scope) enterGroup(null);

@@ -854,6 +854,22 @@ body.editing-zone #workspace {
   align-items: center;
   gap: 3px;
 }
+#overlay .crop-ghost {
+  opacity: 0.3;
+  pointer-events: none;
+}
+#overlay .crop-extent {
+  fill: none;
+  stroke: var(--sel);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+body.crop-mode #overlay .handle {
+  fill: #111;
+  stroke: #fff;
+  stroke-width: 2;
+}
 foreignObject.rich-editing .inkflow-content {
   outline: none;
   cursor: text;

@@ -17,6 +17,13 @@ import {
     slideSize,
     zoneName,
 } from "./canvas";
+import {
+    isCropped,
+    pictureOf,
+    resetCrop,
+    setCropMode,
+    startCrop,
+} from "./crop";
 import { clear, h, icon, toast } from "./dom";
 import { layoutLabel, openGallery } from "./gallery";
 import {
@@ -24,6 +31,7 @@ import {
     parseTransform,
     planResize,
     planRotate,
+    relativePath,
     rotationOf,
 } from "./geom";
 import { pickFile, upload, zoneMedia } from "./insert";
@@ -706,6 +714,7 @@ const TAG_NAMES: Record<string, string> = {
     path: "Path",
     text: "Text",
     image: "Image",
+    svg: "Image (cropped)",
     use: "Clone",
     foreignObject: "Embedded content",
 };
@@ -886,11 +895,11 @@ function renderObjectPanel(sel: Selected): void {
         panel.append(
             section(
                 "Style",
-                fills && el.localName !== "image" && paintRow([sel], "fill"),
-                el.localName !== "image" &&
+                fills && !pictureOf(el) && paintRow([sel], "fill"),
+                !pictureOf(el) &&
                     el.localName !== "g" &&
                     paintRow([sel], "stroke"),
-                el.localName !== "image" &&
+                !pictureOf(el) &&
                     el.localName !== "g" &&
                     row(
                         "Stroke width",
@@ -955,9 +964,122 @@ function renderObjectPanel(sel: Selected): void {
         );
         if (el.localName === "text") panel.append(textSection(sel));
     }
+    if (!zone && src?.writable && pictureOf(el)) {
+        panel.append(pictureSection(sel));
+    }
+    if (!zone && src?.writable && (movable || ed.layoutMode)) {
+        panel.append(detailsSection(sel));
+    }
 
     if (movable) panel.append(arrangeSection([sel]));
     if (id || zone || src?.writable) panel.append(elementAnimations(sel));
+}
+
+// ── Pictures (free images on the slide) ──
+
+const FITS: { value: string; label: string; par: string }[] = [
+    { value: "contain", label: "Fit inside", par: "xMidYMid meet" },
+    { value: "cover", label: "Fill (crop edges)", par: "xMidYMid slice" },
+    { value: "stretch", label: "Stretch", par: "none" },
+];
+
+function pictureSection(sel: Selected): HTMLElement {
+    const image = pictureOf(sel.el)!;
+    const loc = image.getAttribute("data-ink") ?? sel.loc;
+    const src = sourceOf(sel.key);
+    const href =
+        image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? "";
+    const par = image.getAttribute("preserveAspectRatio") ?? "xMidYMid meet";
+    const fit = FITS.find((f) => f.par === par)?.value ?? "contain";
+    const imageOps = (set: Record<string, string | null>, label: string) =>
+        void sendSvgOps([{ sel, ops: [{ kind: "attrs", loc, set }] }], label);
+    const cropped = isCropped(sel.el);
+    return section(
+        "Picture",
+        h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
+        h(
+            "div",
+            { class: "btn-row" },
+            button(
+                "Replace…",
+                "Pick another picture; it keeps this size and place",
+                async () => {
+                    const file = await pickFile("image/*");
+                    const up = file && src ? await upload(file) : null;
+                    if (!up || !src) return;
+                    imageOps(
+                        {
+                            href: relativePath(src.path, up.path),
+                            "xlink:href": null,
+                        },
+                        "Replace picture",
+                    );
+                },
+            ),
+            ed.cropMode
+                ? button(
+                      "Done cropping",
+                      "Enter",
+                      () => setCropMode(false),
+                      "on",
+                  )
+                : button(
+                      "Crop",
+                      "Crop (double-click the picture)",
+                      () => void startCrop(sel),
+                  ),
+            cropped
+                ? button(
+                      "Reset crop",
+                      "Show the whole picture again",
+                      () => void resetCrop(sel),
+                  )
+                : null,
+        ),
+        row(
+            "Fit",
+            selectInput(
+                FITS.map((f) => ({ value: f.value, label: f.label })),
+                fit,
+                (v) =>
+                    imageOps(
+                        {
+                            preserveAspectRatio:
+                                FITS.find((f) => f.value === v)?.par ?? null,
+                        },
+                        "Picture fit",
+                    ),
+            ),
+        ),
+    );
+}
+
+// Alt text: the object's <title>, which screen readers read and browsers show
+// as a tooltip.
+function detailsSection(sel: Selected): HTMLElement {
+    const title =
+        [...sel.el.children].find((c) => c.localName === "title")
+            ?.textContent ?? "";
+    return section(
+        "Accessibility",
+        row(
+            "Alt text",
+            textInput(
+                title,
+                (v) =>
+                    void sendSvgOps(
+                        [
+                            {
+                                sel,
+                                ops: [{ kind: "title", loc: sel.loc, text: v }],
+                            },
+                        ],
+                        "Alt text",
+                    ),
+                "Describe it for screen readers",
+            ),
+        ),
+    );
 }
 
 function textSection(sel: Selected): HTMLElement {

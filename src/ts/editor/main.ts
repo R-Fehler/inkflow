@@ -10,6 +10,7 @@ import {
     zoneName,
 } from "./canvas";
 import { initContext } from "./context";
+import { isCropped, setCropMode, startCrop } from "./crop";
 import { toast } from "./dom";
 import { initGallery } from "./gallery";
 import { afterRender, initInsert } from "./insert";
@@ -100,6 +101,10 @@ function boot(): void {
     hooks.editText = editTextOf;
     hooks.editZone = (zone, el, at) => editZone(zone, el, { at });
     hooks.editingHost = editingHost;
+    hooks.crop = (el) => {
+        const sel = ed.selection.find((s) => s.el === el);
+        if (sel) void startCrop(sel);
+    };
     hooks.finishEditing = () => void finishTextEdit();
 
     initCanvas();
@@ -117,6 +122,11 @@ function boot(): void {
         writeHash();
     });
     on("render", selectPending);
+    // Crop mode belongs to the one picture it was started on.
+    on("selection", () => {
+        const one = ed.selection.length === 1 ? ed.selection[0].el : null;
+        if (ed.cropMode && !(one && isCropped(one))) setCropMode(false);
+    });
     on("error", showError);
     on("edit-zone", () => {
         const el = ed.selection[0]?.el;

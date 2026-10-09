@@ -16,6 +16,7 @@ export const ed = {
     tool: "select" as Tool,
     interacting: false, // a drag is in progress: defer re-renders
     richEditing: false, // a zone is being edited in place: defer re-renders
+    cropMode: false, // the selected image's handles crop instead of scaling
     renderPending: false,
     canUndo: false,
     canRedo: false,

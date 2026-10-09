@@ -89,6 +89,8 @@ _ALLOWED_TAGS = frozenset(
         "desc",
         "use",
         "clipPath",
+        "svg",  # a cropped image's frame
+        "a",  # a link around objects
     )
 )
 _ID_RE = re.compile(r"^[A-Za-z_][\w.-]*$")
@@ -344,6 +346,12 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
             for name, value in values.items():
                 if name in ("id",) or name.lower().startswith("on"):
                     raise SvgOpError(f"attribute {name!r} cannot be set here")
+                if name in ("href", "xlink:href") and str(
+                    value or ""
+                ).strip().lower().startswith("javascript:"):
+                    raise SvgOpError("javascript: links are not allowed")
+                if name == "xlink:href":
+                    name = _XLINK_HREF
                 if value is None:
                     _drop(el, name)
                 else:
@@ -412,12 +420,135 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
         elif kind == "order":
             _reorder(el, str(op.get("to")))
             result.structural = True
+        elif kind == "crop-frame":
+            if _crop_frame(el):
+                result.structural = True
+        elif kind == "uncrop":
+            _uncrop(el)
+            result.structural = True
+        elif kind == "title":
+            _set_title(el, str(op.get("text") or ""))
         elif kind == "ensure-marker":
             if ensure_arrow_marker(root):
                 result.structural = True
         else:
             raise SvgOpError(f"unknown operation {kind!r}")
     return result
+
+
+def _num(el: SvgElement, name: str) -> float:
+    try:
+        return float(el.get(name, "0") or 0)
+    except ValueError as exc:
+        raise SvgOpError(f"{name} is not a number") from exc
+
+
+_TRANSLATE_ONLY = re.compile(
+    r"^\s*translate\(\s*([-+.\deE]+)(?:[\s,]+([-+.\deE]+))?\s*\)\s*$"
+)
+
+
+def _crop_frame(el: SvgElement) -> bool:
+    """Put an ``<image>`` into a nested ``<svg>`` frame, ready to be cropped.
+
+    The frame starts as the image's own box with a matching ``viewBox``, so
+    nothing moves; cropping then changes the frame (x/y/width/height) and its
+    ``viewBox`` together, which keeps the picture where it is. Returns False
+    when ``el`` already is such a frame.
+    """
+    tag = _local(el.tag)
+    if tag == "svg":
+        return False
+    if tag != "image":
+        raise SvgOpError("only images can be cropped")
+    if el.get("width") is None or el.get("height") is None:
+        raise SvgOpError("the image has no size to crop")
+    x, y = _num(el, "x"), _num(el, "y")
+    transform = el.get("transform")
+    if transform:
+        m = _TRANSLATE_ONLY.match(transform)
+        if not m:
+            raise SvgOpError("rotated or scaled images cannot be cropped")
+        x += float(m.group(1))
+        y += float(m.group(2) or 0)
+    w, h = _num(el, "width"), _num(el, "height")
+    frame = etree.Element(_SVG + "svg")
+    if el.get("id"):
+        frame.set("id", el.get("id", ""))
+        del el.attrib["id"]
+    for name, value in (("x", x), ("y", y), ("width", w), ("height", h)):
+        frame.set(name, f"{value:g}")
+    frame.set("viewBox", f"{x:g} {y:g} {w:g} {h:g}")
+    frame.set("preserveAspectRatio", "none")
+    for attr in ("class", "style", "opacity", "clip-path", "mask", "filter"):
+        if el.get(attr) is not None:
+            frame.set(attr, el.get(attr, ""))
+            del el.attrib[attr]
+    if transform:
+        del el.attrib["transform"]
+        el.set("x", f"{x:g}")
+        el.set("y", f"{y:g}")
+    parent = el.getparent()
+    if parent is None:
+        raise SvgOpError("the root element cannot be cropped")
+    frame.tail = el.tail
+    el.tail = None
+    parent.replace(el, frame)
+    frame.append(el)
+    return True
+
+
+def _cropped_image(frame: SvgElement) -> SvgElement:
+    images = [c for c in frame if is_element(c) and _local(c.tag) == "image"]
+    if _local(frame.tag) != "svg" or len(images) != 1 or not frame.get("viewBox"):
+        raise SvgOpError("not a cropped image")
+    return images[0]
+
+
+def _uncrop(frame: SvgElement) -> None:
+    """Undo a crop: the image again, at the size and place it is shown."""
+    image = _cropped_image(frame)
+    vb = [float(v) for v in re.split(r"[\s,]+", frame.get("viewBox", "").strip())]
+    if len(vb) != 4 or vb[2] <= 0 or vb[3] <= 0:
+        raise SvgOpError("invalid viewBox")
+    sx = _num(frame, "width") / vb[2]
+    sy = _num(frame, "height") / vb[3]
+    fx, fy = _num(frame, "x"), _num(frame, "y")
+    ix, iy = _num(image, "x"), _num(image, "y")
+    image.set("x", f"{fx + (ix - vb[0]) * sx:g}")
+    image.set("y", f"{fy + (iy - vb[1]) * sy:g}")
+    image.set("width", f"{_num(image, 'width') * sx:g}")
+    image.set("height", f"{_num(image, 'height') * sy:g}")
+    for attr in ("id", "class", "style", "opacity", "clip-path", "mask", "filter"):
+        if frame.get(attr) is not None and image.get(attr) is None:
+            image.set(attr, frame.get(attr, ""))
+    # Alt text set on the frame stays with the picture.
+    for child in [
+        c for c in frame if is_element(c) and _local(c.tag) in ("title", "desc")
+    ]:
+        if not any(_local(c.tag) == _local(child.tag) for c in image if is_element(c)):
+            image.insert(0, child)
+    parent = frame.getparent()
+    if parent is None:
+        raise SvgOpError("the root element cannot be uncropped")
+    image.tail = frame.tail
+    parent.replace(frame, image)
+
+
+def _set_title(el: SvgElement, text: str) -> None:
+    """The element's ``<title>``: its accessible name (alt text) and tooltip."""
+    titles = [c for c in el if is_element(c) and _local(c.tag) == "title"]
+    text = text.strip()
+    if not text:
+        for t in titles:
+            el.remove(t)
+        return
+    title = titles[0] if titles else etree.Element(_SVG + "title")
+    title.text = text
+    if not titles:
+        el.insert(0, title)
+        title.tail = el.text
+        el.text = None
 
 
 ARROW_MARKER = "inkflow-arrow"

@@ -370,7 +370,7 @@
     const r = (n) => String(Math.round(n * 1e6) / 1e6);
     return `matrix(${r(m.a)},${r(m.b)},${r(m.c)},${r(m.d)},${fmt(m.e)},${fmt(m.f)})`;
   }
-  var BOX_TAGS = /* @__PURE__ */ new Set(["rect", "image", "foreignObject", "use"]);
+  var BOX_TAGS = /* @__PURE__ */ new Set(["rect", "image", "foreignObject", "use", "svg"]);
   function num(v, fallback = 0) {
     const n = parseFloat(v ?? "");
     return Number.isFinite(n) ? n : fallback;
@@ -524,6 +524,51 @@
     }
     return { transform: formatTransform(multiply(inParent, g.own)) };
   }
+  function planCrop(g, from, to) {
+    const vb = (g.attrs.viewBox ?? "").trim().split(/[\s,]+/).map(Number);
+    if (vb.length !== 4 || vb.some((n) => !Number.isFinite(n))) return null;
+    if (!usesBoxAttrs(g)) return null;
+    const frame = {
+      x: num(g.attrs.x),
+      y: num(g.attrs.y),
+      width: num(g.attrs.width),
+      height: num(g.attrs.height)
+    };
+    if (frame.width <= EPS || frame.height <= EPS) return null;
+    const sx = from.width > EPS ? to.width / from.width : 1;
+    const sy = from.height > EPS ? to.height / from.height : 1;
+    const change = multiply(
+      translate(to.x, to.y),
+      multiply(
+        scaleAbout(sx, sy, { x: 0, y: 0 }),
+        translate(-from.x, -from.y)
+      )
+    );
+    const p = g.parentToSlide;
+    const inParent = multiply(invert(p), multiply(change, p));
+    if (!isAxisAligned(inParent)) return null;
+    const t = { x: g.own.e, y: g.own.f };
+    const moved = transformBox(inParent, {
+      ...frame,
+      x: frame.x + t.x,
+      y: frame.y + t.y
+    });
+    const next = { ...moved, x: moved.x - t.x, y: moved.y - t.y };
+    const kx = vb[2] / frame.width;
+    const ky = vb[3] / frame.height;
+    return {
+      x: fmt(next.x),
+      y: fmt(next.y),
+      width: fmt(next.width),
+      height: fmt(next.height),
+      viewBox: [
+        vb[0] + (next.x - frame.x) * kx,
+        vb[1] + (next.y - frame.y) * ky,
+        next.width * kx,
+        next.height * ky
+      ].map(fmt).join(" ")
+    };
+  }
   function planRotate(g, degrees, center) {
     return transformPlan(g, rotateAbout(degrees, center));
   }
@@ -611,6 +656,8 @@
     // a drag is in progress: defer re-renders
     richEditing: false,
     // a zone is being edited in place: defer re-renders
+    cropMode: false,
+    // the selected image's handles crop instead of scaling
     renderPending: false,
     canUndo: false,
     canRedo: false,
@@ -856,6 +903,8 @@
     editingHost: () => null,
     finishEditing: () => {
     },
+    crop: (_el) => {
+    },
     zoneMedia: (_zone) => {
     },
     toolDown: (_e, _pt) => false
@@ -999,13 +1048,33 @@
       y: inv.b * x + inv.d * y + inv.f
     };
   }
-  function slideBox(el) {
+  function measure(el) {
     const g = el;
     if (typeof g.getBBox !== "function") return null;
+    if (el.localName === "svg" && el !== slideRoot()) {
+      const s = el;
+      const ctm2 = el.parentElement?.getScreenCTM?.();
+      if (!ctm2) return null;
+      return {
+        bbox: {
+          x: s.x.baseVal.value,
+          y: s.y.baseVal.value,
+          width: s.width.baseVal.value,
+          height: s.height.baseVal.value
+        },
+        ctm: ctm2
+      };
+    }
+    const b = g.getBBox();
+    const ctm = g.getScreenCTM();
+    if (!ctm) return null;
+    return { bbox: { x: b.x, y: b.y, width: b.width, height: b.height }, ctm };
+  }
+  function slideBox(el) {
     try {
-      const bbox = g.getBBox();
-      const ctm = g.getScreenCTM();
-      if (!ctm) return null;
+      const m = measure(el);
+      if (!m) return null;
+      const { bbox, ctm } = m;
       const toSlide = multiply(invert(rootCTM()), mat(ctm));
       return transformBox(toSlide, {
         x: bbox.x,
@@ -1036,7 +1105,8 @@
     "y1",
     "x2",
     "y2",
-    "transform"
+    "transform",
+    "viewBox"
   ];
   function elementGeom(el) {
     const parent = el.parentElement;
@@ -1045,8 +1115,7 @@
     for (const a of GEOM_ATTRS) attrs2[a] = el.getAttribute(a);
     let box = { x: 0, y: 0, width: 0, height: 0 };
     try {
-      const b = el.getBBox();
-      box = { x: b.x, y: b.y, width: b.width, height: b.height };
+      box = measure(el)?.bbox ?? box;
     } catch {
     }
     return {
@@ -1191,9 +1260,10 @@
   }
   function elementCorners(el) {
     try {
-      const b = el.getBBox();
-      const ctm = el.getScreenCTM();
-      if (!ctm) return null;
+      const measured = measure(el);
+      if (!measured) return null;
+      const b = measured.bbox;
+      const ctm = measured.ctm;
       const o = paperOrigin();
       const m = mat(ctm);
       return [
@@ -1268,6 +1338,7 @@
         );
       }
     }
+    if (ed.cropMode) drawCropGhost();
     const transformable = ed.selection.filter((s) => canTransform(s.el));
     const box = transformable.length === ed.selection.length ? selectionBox() : null;
     if (box && ed.step == null) {
@@ -1301,7 +1372,8 @@
         class: "handle rot"
       });
       rh.dataset.handle = "rot";
-      overlay.append(rh);
+      const frames = ed.selection.some((s) => s.el.localName === "svg");
+      if (!ed.cropMode && !frames) overlay.append(rh);
       for (const h2 of HANDLES) {
         const p = handlePoint(h2, pb);
         const r = svgEl("rect", {
@@ -1351,6 +1423,25 @@
         })
       );
     }
+  }
+  function drawCropGhost() {
+    const frame = ed.selection[0]?.el;
+    const image = frame ? [...frame.children].find((c2) => c2.localName === "image") : void 0;
+    if (!image) return;
+    const c = elementCorners(image);
+    if (!c) return;
+    const xs = c.map((p) => p.x);
+    const ys = c.map((p) => p.y);
+    const ghost = svgEl("image", {
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      width: Math.max(...xs) - Math.min(...xs),
+      height: Math.max(...ys) - Math.min(...ys),
+      href: image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? "",
+      preserveAspectRatio: image.getAttribute("preserveAspectRatio") ?? "xMidYMid meet",
+      class: "crop-ghost"
+    });
+    overlay.append(ghost, poly(c, "crop-extent"));
   }
   var MEDIA_ZONES = /media|image|img|picture|photo|figure|video|logo/;
   function drawPlaceholders() {
@@ -1642,20 +1733,18 @@
         dy += snap.dy;
         guides = { xs: snap.guidesX, ys: snap.guidesY };
       }
+      const cropping = ed.cropMode && drag.snaps.length === 1;
       const to = resizedBox(
         drag.start,
         drag.handle,
         dx,
         dy,
-        keepsAspect(drag.snaps, e.shiftKey)
+        !cropping && keepsAspect(drag.snaps, e.shiftKey)
       );
       restore(drag.snaps);
       lastPlans = drag.snaps.map((s) => {
-        const plan = planResize(
-          s.geom,
-          s.box,
-          mapBox(s.box, drag.start, to)
-        );
+        const target = mapBox(s.box, drag.start, to);
+        const plan = cropping && planCrop(s.geom, s.box, target) || planResize(s.geom, s.box, target);
         applyPlanToDom(s.sel.el, plan);
         return {
           sel: s.sel,
@@ -1712,7 +1801,7 @@
     lastPlans = [];
     drawOverlay();
     if (!plans.length) return;
-    const label2 = drag.kind === "move" ? "Move" : drag.kind === "resize" ? "Resize" : "Rotate";
+    const label2 = drag.kind === "move" ? "Move" : drag.kind === "resize" ? ed.cropMode ? "Crop" : "Resize" : "Rotate";
     const ok = await sendSvgOps(plans, label2);
     if (!ok) restore(drag.snaps);
     drawOverlay();
@@ -1842,6 +1931,10 @@
       enterGroup(el);
       const inner = pick(e.clientX, e.clientY);
       if (inner) select([inner]);
+      return;
+    }
+    if (canTransform(el) && (el.localName === "image" || el.localName === "svg" && [...el.children].some((c) => c.localName === "image"))) {
+      hooks.crop(el);
     }
   }
   function initCanvas() {
@@ -3090,6 +3183,58 @@
     });
   }
 
+  // src/ts/editor/crop.ts
+  function pictureOf(el) {
+    if (el.localName === "image") return el;
+    if (el.localName !== "svg" || !el.getAttribute("viewBox")) return null;
+    const images = [...el.children].filter((c) => c.localName === "image");
+    return images.length === 1 ? images[0] : null;
+  }
+  function isCropped(el) {
+    return el.localName === "svg" && pictureOf(el) !== null;
+  }
+  function setCropMode(on2) {
+    if (ed.cropMode === on2) return;
+    ed.cropMode = on2;
+    document.body.classList.toggle("crop-mode", on2);
+    drawOverlay();
+    emit("crop");
+  }
+  async function startCrop(sel) {
+    if (isCropped(sel.el)) {
+      setCropMode(true);
+      return;
+    }
+    if (sel.el.localName !== "image") return;
+    const src = sourceOf(sel.key);
+    const slide = currentSlide();
+    if (!src?.writable || !slide) return;
+    const result = await edit({
+      action: "svg",
+      file: src.path,
+      hash: src.hash,
+      ops: [
+        { kind: "ensure-id", loc: sel.loc, base: "image", key: "img" },
+        { kind: "crop-frame", loc: sel.loc }
+      ],
+      label: "Crop"
+    });
+    const id = result.ids?.img;
+    if (!result.ok || !id) return;
+    afterRender.ids = [id];
+    ed.cropMode = true;
+    document.body.classList.add("crop-mode");
+    toast("Drag the handles to crop; Enter or Esc when done");
+  }
+  async function resetCrop(sel) {
+    if (!isCropped(sel.el)) return;
+    setCropMode(false);
+    await sendSvgOps(
+      [{ sel, ops: [{ kind: "uncrop", loc: sel.loc }] }],
+      "Reset crop"
+    );
+  }
+
   // src/ts/editor/notes.ts
   var area = document.getElementById("notes-input");
   var label = document.getElementById("notes-file");
@@ -3714,6 +3859,7 @@
     path: "Path",
     text: "Text",
     image: "Image",
+    svg: "Image (cropped)",
     use: "Clone",
     foreignObject: "Embedded content"
   };
@@ -3867,9 +4013,9 @@
       panel.append(
         section(
           "Style",
-          fills && el.localName !== "image" && paintRow([sel], "fill"),
-          el.localName !== "image" && el.localName !== "g" && paintRow([sel], "stroke"),
-          el.localName !== "image" && el.localName !== "g" && row(
+          fills && !pictureOf(el) && paintRow([sel], "fill"),
+          !pictureOf(el) && el.localName !== "g" && paintRow([sel], "stroke"),
+          !pictureOf(el) && el.localName !== "g" && row(
             "Stroke width",
             numberInput(
               strokeWidth,
@@ -3933,8 +4079,103 @@
       );
       if (el.localName === "text") panel.append(textSection(sel));
     }
+    if (!zone && src?.writable && pictureOf(el)) {
+      panel.append(pictureSection(sel));
+    }
+    if (!zone && src?.writable && (movable || ed.layoutMode)) {
+      panel.append(detailsSection(sel));
+    }
     if (movable) panel.append(arrangeSection([sel]));
     if (id || zone || src?.writable) panel.append(elementAnimations(sel));
+  }
+  var FITS = [
+    { value: "contain", label: "Fit inside", par: "xMidYMid meet" },
+    { value: "cover", label: "Fill (crop edges)", par: "xMidYMid slice" },
+    { value: "stretch", label: "Stretch", par: "none" }
+  ];
+  function pictureSection(sel) {
+    const image = pictureOf(sel.el);
+    const loc = image.getAttribute("data-ink") ?? sel.loc;
+    const src = sourceOf(sel.key);
+    const href = image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? "";
+    const par = image.getAttribute("preserveAspectRatio") ?? "xMidYMid meet";
+    const fit = FITS.find((f) => f.par === par)?.value ?? "contain";
+    const imageOps = (set, label2) => void sendSvgOps([{ sel, ops: [{ kind: "attrs", loc, set }] }], label2);
+    const cropped = isCropped(sel.el);
+    return section(
+      "Picture",
+      h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
+      h(
+        "div",
+        { class: "btn-row" },
+        button(
+          "Replace\u2026",
+          "Pick another picture; it keeps this size and place",
+          async () => {
+            const file = await pickFile("image/*");
+            const up = file && src ? await upload(file) : null;
+            if (!up || !src) return;
+            imageOps(
+              {
+                href: relativePath(src.path, up.path),
+                "xlink:href": null
+              },
+              "Replace picture"
+            );
+          }
+        ),
+        ed.cropMode ? button(
+          "Done cropping",
+          "Enter",
+          () => setCropMode(false),
+          "on"
+        ) : button(
+          "Crop",
+          "Crop (double-click the picture)",
+          () => void startCrop(sel)
+        ),
+        cropped ? button(
+          "Reset crop",
+          "Show the whole picture again",
+          () => void resetCrop(sel)
+        ) : null
+      ),
+      row(
+        "Fit",
+        selectInput(
+          FITS.map((f) => ({ value: f.value, label: f.label })),
+          fit,
+          (v) => imageOps(
+            {
+              preserveAspectRatio: FITS.find((f) => f.value === v)?.par ?? null
+            },
+            "Picture fit"
+          )
+        )
+      )
+    );
+  }
+  function detailsSection(sel) {
+    const title = [...sel.el.children].find((c) => c.localName === "title")?.textContent ?? "";
+    return section(
+      "Accessibility",
+      row(
+        "Alt text",
+        textInput(
+          title,
+          (v) => void sendSvgOps(
+            [
+              {
+                sel,
+                ops: [{ kind: "title", loc: sel.loc, text: v }]
+              }
+            ],
+            "Alt text"
+          ),
+          "Describe it for screen readers"
+        )
+      )
+    );
   }
   function textSection(sel) {
     const el = sel.el;
@@ -5518,6 +5759,9 @@ ${area2.value.slice(pos)}`;
     } else if (key === "PageUp" || key === "ArrowUp" && !ed.selection.length) {
       handled();
       gotoSlide(ed.current - 1);
+    } else if (ed.cropMode && (key === "Escape" || key === "Enter")) {
+      handled();
+      setCropMode(false);
     } else if (key === "Escape") {
       if (ed.tool !== "select") setTool("select");
       else if (ed.scope) enterGroup(null);
@@ -5651,6 +5895,10 @@ ${area2.value.slice(pos)}`;
     hooks.editText = editTextOf;
     hooks.editZone = (zone, el, at) => editZone(zone, el, { at });
     hooks.editingHost = editingHost;
+    hooks.crop = (el) => {
+      const sel = ed.selection.find((s) => s.el === el);
+      if (sel) void startCrop(sel);
+    };
     hooks.finishEditing = () => void finishTextEdit();
     initCanvas();
     initInsert();
@@ -5666,6 +5914,10 @@ ${area2.value.slice(pos)}`;
       writeHash();
     });
     on("render", selectPending);
+    on("selection", () => {
+      const one = ed.selection.length === 1 ? ed.selection[0].el : null;
+      if (ed.cropMode && !(one && isCropped(one))) setCropMode(false);
+    });
     on("error", showError);
     on("edit-zone", () => {
       const el = ed.selection[0]?.el;

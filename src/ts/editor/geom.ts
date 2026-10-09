@@ -169,7 +169,8 @@ export interface ElementGeom {
     localBox: Box; // getBBox(): geometry in the element's own user space
 }
 
-const BOX_TAGS = new Set(["rect", "image", "foreignObject", "use"]);
+// "svg" is a cropped image's frame (a nested <svg> with a viewBox).
+const BOX_TAGS = new Set(["rect", "image", "foreignObject", "use", "svg"]);
 
 function num(v: string | null | undefined, fallback = 0): number {
     const n = parseFloat(v ?? "");
@@ -359,6 +360,61 @@ export function planResize(g: ElementGeom, from: Box, to: Box): AttrPlan {
         }
     }
     return { transform: formatTransform(multiply(inParent, g.own)) };
+}
+
+// Crop a framed image (a nested <svg> with a viewBox): the frame's slide box
+// goes from `from` to `to` and its viewBox follows, so the picture inside stays
+// where it is and only the visible part changes. Null when the frame cannot
+// take the change as plain attributes (rotated, skewed).
+export function planCrop(g: ElementGeom, from: Box, to: Box): AttrPlan | null {
+    const vb = (g.attrs.viewBox ?? "")
+        .trim()
+        .split(/[\s,]+/)
+        .map(Number);
+    if (vb.length !== 4 || vb.some((n) => !Number.isFinite(n))) return null;
+    if (!usesBoxAttrs(g)) return null;
+    const frame: Box = {
+        x: num(g.attrs.x),
+        y: num(g.attrs.y),
+        width: num(g.attrs.width),
+        height: num(g.attrs.height),
+    };
+    if (frame.width <= EPS || frame.height <= EPS) return null;
+    const sx = from.width > EPS ? to.width / from.width : 1;
+    const sy = from.height > EPS ? to.height / from.height : 1;
+    const change = multiply(
+        translate(to.x, to.y),
+        multiply(
+            scaleAbout(sx, sy, { x: 0, y: 0 }),
+            translate(-from.x, -from.y),
+        ),
+    );
+    const p = g.parentToSlide;
+    const inParent = multiply(invert(p), multiply(change, p));
+    if (!isAxisAligned(inParent)) return null;
+    const t = { x: g.own.e, y: g.own.f };
+    const moved = transformBox(inParent, {
+        ...frame,
+        x: frame.x + t.x,
+        y: frame.y + t.y,
+    });
+    const next = { ...moved, x: moved.x - t.x, y: moved.y - t.y };
+    const kx = vb[2] / frame.width;
+    const ky = vb[3] / frame.height;
+    return {
+        x: fmt(next.x),
+        y: fmt(next.y),
+        width: fmt(next.width),
+        height: fmt(next.height),
+        viewBox: [
+            vb[0] + (next.x - frame.x) * kx,
+            vb[1] + (next.y - frame.y) * ky,
+            next.width * kx,
+            next.height * ky,
+        ]
+            .map(fmt)
+            .join(" "),
+    };
 }
 
 export function planRotate(

@@ -1166,6 +1166,69 @@ class TestSession:
             )
 
 
+def test_crop_frame_and_uncrop_round_trip() -> None:
+    svg = _svg(
+        DRAWING.replace(
+            '<rect id="box"',
+            '<image id="pic" href="a.png" x="10" y="20" width="400" height="200"'
+            + ' class="c" transform="translate(5,5)"/>\n  <rect id="box"',
+        )
+    )
+    loc = _loc(svg, "pic")
+    result = apply_ops(svg, [{"kind": "crop-frame", "loc": loc}])
+    assert result.structural
+    frame = svg.root.find(f".//{{{SVG_NS}}}svg[@id='pic']")
+    assert frame is not None
+    assert dict(frame.attrib) == {
+        "id": "pic",
+        "x": "15",
+        "y": "25",
+        "width": "400",
+        "height": "200",
+        "viewBox": "15 25 400 200",
+        "preserveAspectRatio": "none",
+        "class": "c",
+    }
+    image = frame[0]
+    assert image.get("x") == "15" and image.get("id") is None
+    # Framing twice is a no-op; cropping is attrs on the frame.
+    assert not apply_ops(svg, [{"kind": "crop-frame", "loc": loc}]).structural
+    apply_ops(
+        svg,
+        [
+            {
+                "kind": "attrs",
+                "loc": loc,
+                "set": {"x": "115", "width": "300", "viewBox": "115 25 300 200"},
+            }
+        ],
+    )
+    apply_ops(svg, [{"kind": "title", "loc": loc, "text": "Alt"}])
+    apply_ops(svg, [{"kind": "uncrop", "loc": loc}])
+    image = svg.root.find(f".//{{{SVG_NS}}}image[@id='pic']")
+    assert image is not None
+    assert image[0].text == "Alt"
+    assert (image.get("x"), image.get("width")) == ("15", "400")
+    assert image.get("class") == "c"
+    with pytest.raises(SvgOpError):
+        apply_ops(svg, [{"kind": "crop-frame", "loc": _loc(svg, "box")}])
+
+
+def test_title_op_sets_and_clears_alt_text() -> None:
+    svg = _svg()
+    loc = _loc(svg, "box")
+    apply_ops(svg, [{"kind": "title", "loc": loc, "text": "A blue box"}])
+    box = svg.root.find(f".//{{{SVG_NS}}}rect[@id='box']")
+    assert box is not None and box[0].text == "A blue box"
+    apply_ops(svg, [{"kind": "title", "loc": loc, "text": " "}])
+    assert len(box) == 0
+    with pytest.raises(SvgOpError):
+        apply_ops(
+            svg,
+            [{"kind": "attrs", "loc": loc, "set": {"href": "javascript:alert(1)"}}],
+        )
+
+
 # ── Model ────────────────────────────────────────────────────────────────────
 
 

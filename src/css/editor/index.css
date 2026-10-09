@@ -900,6 +900,27 @@ body.editing-zone #workspace {
     gap: 3px;
 }
 
+/* Cropping: the whole picture shows faded around the frame. */
+
+#overlay .crop-ghost {
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+#overlay .crop-extent {
+    fill: none;
+    stroke: var(--sel);
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+    pointer-events: none;
+}
+
+body.crop-mode #overlay .handle {
+    fill: #111;
+    stroke: #fff;
+    stroke-width: 2;
+}
+
 /* In-place rich text: the zone's own HTML is edited, with a floating bar. */
 
 foreignObject.rich-editing .inkflow-content {

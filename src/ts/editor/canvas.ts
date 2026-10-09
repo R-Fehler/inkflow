@@ -20,6 +20,7 @@ import {
     mat,
     multiply,
     parseTransform,
+    planCrop,
     planMove,
     planResize,
     planRotate,
@@ -52,6 +53,7 @@ export const hooks = {
     // and how to finish that edit when the pointer goes elsewhere.
     editingHost: (): Element | null => null,
     finishEditing: (): void => {},
+    crop: (_el: SVGGraphicsElement): void => {},
     zoneMedia: (_zone: string): void => {},
     toolDown: (_e: PointerEvent, _pt: { x: number; y: number }): boolean =>
         false,
@@ -227,13 +229,39 @@ export function clientToSlide(x: number, y: number): { x: number; y: number } {
     };
 }
 
-export function slideBox(el: Element): Box | null {
+// An element's box in its own user space and the matrix to the screen. A
+// nested <svg> (a cropped picture's frame) is measured by its viewport, not by
+// its contents, which is what getBBox() would give.
+function measure(el: Element): { bbox: Box; ctm: DOMMatrix } | null {
     const g = el as SVGGraphicsElement;
     if (typeof g.getBBox !== "function") return null;
-    try {
-        const bbox = g.getBBox();
-        const ctm = g.getScreenCTM();
+    if (el.localName === "svg" && el !== slideRoot()) {
+        const s = el as SVGSVGElement;
+        const ctm = (
+            el.parentElement as unknown as SVGGraphicsElement | null
+        )?.getScreenCTM?.();
         if (!ctm) return null;
+        return {
+            bbox: {
+                x: s.x.baseVal.value,
+                y: s.y.baseVal.value,
+                width: s.width.baseVal.value,
+                height: s.height.baseVal.value,
+            },
+            ctm,
+        };
+    }
+    const b = g.getBBox();
+    const ctm = g.getScreenCTM();
+    if (!ctm) return null;
+    return { bbox: { x: b.x, y: b.y, width: b.width, height: b.height }, ctm };
+}
+
+export function slideBox(el: Element): Box | null {
+    try {
+        const m = measure(el);
+        if (!m) return null;
+        const { bbox, ctm } = m;
         const toSlide = multiply(invert(rootCTM()), mat(ctm));
         return transformBox(toSlide, {
             x: bbox.x,
@@ -267,6 +295,7 @@ const GEOM_ATTRS = [
     "x2",
     "y2",
     "transform",
+    "viewBox",
 ];
 
 export function elementGeom(el: SVGGraphicsElement): ElementGeom {
@@ -276,8 +305,7 @@ export function elementGeom(el: SVGGraphicsElement): ElementGeom {
     for (const a of GEOM_ATTRS) attrs[a] = el.getAttribute(a);
     let box = { x: 0, y: 0, width: 0, height: 0 };
     try {
-        const b = el.getBBox();
-        box = { x: b.x, y: b.y, width: b.width, height: b.height };
+        box = measure(el)?.bbox ?? box;
     } catch {
         // not rendered
     }
@@ -500,9 +528,10 @@ function elementCorners(
     el: SVGGraphicsElement,
 ): { x: number; y: number }[] | null {
     try {
-        const b = el.getBBox();
-        const ctm = el.getScreenCTM();
-        if (!ctm) return null;
+        const measured = measure(el);
+        if (!measured) return null;
+        const b = measured.bbox;
+        const ctm = measured.ctm;
         const o = paperOrigin();
         const m = mat(ctm);
         return [
@@ -587,6 +616,7 @@ export function drawOverlay(): void {
             );
         }
     }
+    if (ed.cropMode) drawCropGhost();
     const transformable = ed.selection.filter((s) => canTransform(s.el));
     const box =
         transformable.length === ed.selection.length ? selectionBox() : null;
@@ -621,7 +651,9 @@ export function drawOverlay(): void {
             class: "handle rot",
         });
         rh.dataset.handle = "rot";
-        overlay.append(rh);
+        // A cropped picture's frame is kept unrotated (see planCrop).
+        const frames = ed.selection.some((s) => s.el.localName === "svg");
+        if (!ed.cropMode && !frames) overlay.append(rh);
         for (const h of HANDLES) {
             const p = handlePoint(h, pb);
             const r = svgEl("rect", {
@@ -671,6 +703,35 @@ export function drawOverlay(): void {
             }),
         );
     }
+}
+
+// In crop mode, the whole picture shows faded around the frame being cropped.
+function drawCropGhost(): void {
+    const frame = ed.selection[0]?.el;
+    const image = frame
+        ? ([...frame.children].find((c) => c.localName === "image") as
+              | SVGGraphicsElement
+              | undefined)
+        : undefined;
+    if (!image) return;
+    const c = elementCorners(image);
+    if (!c) return;
+    const xs = c.map((p) => p.x);
+    const ys = c.map((p) => p.y);
+    const ghost = svgEl("image", {
+        x: Math.min(...xs),
+        y: Math.min(...ys),
+        width: Math.max(...xs) - Math.min(...xs),
+        height: Math.max(...ys) - Math.min(...ys),
+        href:
+            image.getAttribute("href") ??
+            image.getAttribute("xlink:href") ??
+            "",
+        preserveAspectRatio:
+            image.getAttribute("preserveAspectRatio") ?? "xMidYMid meet",
+        class: "crop-ghost",
+    });
+    overlay.append(ghost, poly(c, "crop-extent"));
 }
 
 const MEDIA_ZONES = /media|image|img|picture|photo|figure|video|logo/;
@@ -1041,20 +1102,20 @@ function updateDrag(drag: Drag, e: PointerEvent): void {
             dy += snap.dy;
             guides = { xs: snap.guidesX, ys: snap.guidesY };
         }
+        const cropping = ed.cropMode && drag.snaps.length === 1;
         const to = resizedBox(
             drag.start,
             drag.handle,
             dx,
             dy,
-            keepsAspect(drag.snaps, e.shiftKey),
+            !cropping && keepsAspect(drag.snaps, e.shiftKey),
         );
         restore(drag.snaps);
         lastPlans = drag.snaps.map((s) => {
-            const plan = planResize(
-                s.geom,
-                s.box,
-                mapBox(s.box, drag.start, to),
-            );
+            const target = mapBox(s.box, drag.start, to);
+            const plan =
+                (cropping && planCrop(s.geom, s.box, target)) ||
+                planResize(s.geom, s.box, target);
             applyPlanToDom(s.sel.el, plan);
             return {
                 sel: s.sel,
@@ -1122,7 +1183,9 @@ async function endDrag(drag: Drag): Promise<void> {
         drag.kind === "move"
             ? "Move"
             : drag.kind === "resize"
-              ? "Resize"
+              ? ed.cropMode
+                  ? "Crop"
+                  : "Resize"
               : "Rotate";
     const ok = await sendSvgOps(plans, label);
     if (!ok) restore(drag.snaps);
@@ -1264,6 +1327,16 @@ function onDoubleClick(e: MouseEvent): void {
         enterGroup(el as unknown as SVGGElement);
         const inner = pick(e.clientX, e.clientY);
         if (inner) select([inner]);
+        return;
+    }
+    // Double-clicking a picture crops it, as in Google Slides.
+    if (
+        canTransform(el) &&
+        (el.localName === "image" ||
+            (el.localName === "svg" &&
+                [...el.children].some((c) => c.localName === "image")))
+    ) {
+        hooks.crop(el);
     }
 }
 
