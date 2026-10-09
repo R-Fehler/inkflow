@@ -1,10 +1,14 @@
 import { describe, expect, test } from "vitest";
 import {
     endpointsOf,
+    formatBend,
     nearestSite,
+    parseBend,
     parseConnection,
+    parseSite,
     pathData,
     route,
+    siteByName,
     sitesFromCorners,
 } from "./connectors";
 
@@ -100,5 +104,88 @@ describe("paths and connections", () => {
         });
         expect(parseConnection("box:middle")).toBeNull();
         expect(parseConnection(null)).toBeNull();
+    });
+});
+
+describe("more connection points", () => {
+    test("evenly spaced on every side, the middle keeping its plain name", () => {
+        const s = sitesFromCorners(square, 3);
+        expect(s.slice(0, 3).map((x) => [x.name, x.x, x.y])).toEqual([
+            ["top@0.25", 25, 0],
+            ["top", 50, 0],
+            ["top@0.75", 75, 0],
+        ]);
+        // Clockwise: the right side runs top to bottom, the bottom right to left.
+        expect(s[3]).toMatchObject({
+            name: "right@0.25",
+            x: 100,
+            y: 12.5,
+            dx: 1,
+        });
+        expect(s[6]).toMatchObject({
+            name: "bottom@0.25",
+            x: 75,
+            y: 50,
+            dy: 1,
+        });
+    });
+
+    test("a named point is found whether or not the shape offers it", () => {
+        expect(siteByName(square, "left@0.2")).toMatchObject({ x: 0, y: 40 });
+        expect(siteByName(square, "middle")).toBeNull();
+        expect(parseSite("top@1.5")).toBeNull();
+        expect(parseConnection("box:right@0.25")).toEqual({
+            id: "box",
+            site: "right@0.25",
+        });
+    });
+
+    test("on a round shape the points sit on the ellipse", () => {
+        const circle = [
+            { x: 0, y: 0 },
+            { x: 100, y: 0 },
+            { x: 100, y: 100 },
+            { x: 0, y: 100 },
+        ];
+        const p = siteByName(circle, "top@0.25", true)!;
+        expect(Math.hypot(p.x - 50, p.y - 50)).toBeCloseTo(50);
+        expect(siteByName(circle, "top", true)).toMatchObject({ x: 50, y: 0 });
+    });
+});
+
+describe("elbow bends", () => {
+    const a = { x: 100, y: 25, dx: 1, dy: 0 };
+    const b = { x: 300, y: 125, dx: -1, dy: 0 };
+
+    test("the middle segment can be moved", () => {
+        const r = route("elbow", a, b, { axis: "x", at: 150 });
+        expect(pathData(r)).toBe("M100,25 L150,25 L150,125 L300,125");
+        expect(r.bend).toEqual({ axis: "x", at: 150, mid: { x: 150, y: 75 } });
+    });
+
+    test("a bend for the other axis is ignored", () => {
+        const r = route("elbow", a, b, { axis: "y", at: 150 });
+        expect(r.bend?.at).toBe(200);
+    });
+
+    test("two ends facing the same way go round the further one", () => {
+        const rightA = { x: 100, y: 25, dx: 1, dy: 0 };
+        const rightB = { x: 300, y: 125, dx: 1, dy: 0 };
+        expect(pathData(route("elbow", rightA, rightB))).toBe(
+            "M100,25 L330,25 L330,125 L300,125",
+        );
+    });
+
+    test("side to top: moving the bend adds a jog before the top", () => {
+        const top = { x: 300, y: 125, dx: 0, dy: -1 };
+        expect(pathData(route("elbow", a, top, { axis: "x", at: 200 }))).toBe(
+            "M100,25 L200,25 L200,95 L300,95 L300,125",
+        );
+    });
+
+    test("stored as axis:value", () => {
+        expect(parseBend("x:640.5")).toEqual({ axis: "x", at: 640.5 });
+        expect(parseBend("z:1")).toBeNull();
+        expect(formatBend({ axis: "y", at: 12.345 })).toBe("y:12.35");
     });
 });

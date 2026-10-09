@@ -15,6 +15,8 @@ import {
     select,
     selectionBox,
     sendSvgOps,
+    showSites,
+    sitesPerSide,
     slideBox,
     slideRoot,
     slideSize,
@@ -458,6 +460,18 @@ function renderSlidePanel(): void {
     addFile("Notes", slide.notes.rel, slide.notes.path);
     const deckPath = ed.model?.deckPath;
     if (deckPath) addFile("Deck", fileName(deckPath), deckPath);
+    const textInDeck =
+        slide.md?.kind !== "file" &&
+        (slide.md?.kind === "inline" ||
+            Object.values(slide.zones).some((z) => z.kind === "text"));
+    if (textInDeck && editable)
+        files.append(
+            button(
+                "Move text to Markdown",
+                "Move this slide's text out of deck.py into its own .md file",
+                () => void edit({ action: "to-markdown", slide: di }),
+            ),
+        );
     panel.append(section("Files", files));
     const arrows = attachedConnectors();
     if (arrows.length) {
@@ -1049,6 +1063,14 @@ function renderObjectPanel(sel: Selected): void {
     if (!zone && src?.writable && movable && isConnector(el)) {
         panel.append(connectorSection(sel));
     }
+    if (
+        src?.writable &&
+        (movable || ed.layoutMode) &&
+        !isConnector(el) &&
+        el.localName !== "line"
+    ) {
+        panel.append(connectionPointsSection(sel));
+    }
     if (!zone && src?.writable && pictureOf(el)) {
         panel.append(pictureSection(sel));
     }
@@ -1141,9 +1163,14 @@ function connectorSection(sel: Selected): HTMLElement {
                 connectorStyle(el),
                 (v) => {
                     const style = v as "straight" | "elbow" | "curved";
-                    const d = connectorPath(el, {}, style);
+                    // A new route starts from its default shape.
+                    const d = connectorPath(el, {}, style, null);
                     send(
-                        { "inkflow:connector": v, ...(d ? { d } : {}) },
+                        {
+                            "inkflow:connector": v,
+                            "inkflow:bend": null,
+                            ...(d ? { d } : {}),
+                        },
                         "Connector route",
                     );
                 },
@@ -1175,7 +1202,7 @@ function connectorSection(sel: Selected): HTMLElement {
         h(
             "p",
             { class: "hint" },
-            `Start: ${describe("start")} · End: ${describe("end")}. Drag an end onto a shape's dot to attach it; Alt while dragging keeps it free.`,
+            `Start: ${describe("start")} · End: ${describe("end")}. Drag an end onto a shape's dot to attach it; Alt while dragging keeps it free.${connectorStyle(el) === "elbow" ? " Drag the yellow handle to move the elbow's middle segment." : ""}`,
         ),
         h(
             "div",
@@ -1185,6 +1212,18 @@ function connectorSection(sel: Selected): HTMLElement {
                 "Re-attach to the shapes where they are now",
                 () => reroute([sel]),
             ),
+            el.hasAttribute("inkflow:bend") &&
+                button(
+                    "Reset bend",
+                    "Put the elbow's middle segment back where it goes by default",
+                    () => {
+                        const d = connectorPath(el, {}, "elbow", null);
+                        send(
+                            { "inkflow:bend": null, ...(d ? { d } : {}) },
+                            "Reset bend",
+                        );
+                    },
+                ),
             button("Detach", "Free both ends", () =>
                 send(
                     {
@@ -1196,6 +1235,50 @@ function connectorSection(sel: Selected): HTMLElement {
             ),
         ),
     );
+}
+
+// How many points on each side an arrow can attach to (inkflow:sites); an
+// attached arrow keeps its point when there are fewer later.
+function connectionPointsSection(sel: Selected): HTMLElement {
+    const n = sitesPerSide(sel.el);
+    const box = section(
+        "Connection points",
+        row(
+            "Per side",
+            selectInput(
+                [1, 2, 3, 4, 5, 7, 9].map((k) => ({
+                    value: String(k),
+                    label: k === 1 ? "1 (middle)" : String(k),
+                })),
+                String(n),
+                (v) =>
+                    void sendSvgOps(
+                        [
+                            {
+                                sel,
+                                ops: [
+                                    {
+                                        kind: "attrs",
+                                        loc: sel.loc,
+                                        set: {
+                                            "inkflow:sites":
+                                                v === "1" ? null : v,
+                                        },
+                                    },
+                                ],
+                            },
+                        ],
+                        "Connection points",
+                    ),
+            ),
+        ),
+    );
+    // Show the points on the slide while the setting is in view.
+    box.addEventListener("mouseenter", () =>
+        showSites([{ el: sel.el, active: null }]),
+    );
+    box.addEventListener("mouseleave", () => showSites([]));
+    return box;
 }
 
 // ── Text boxes ──

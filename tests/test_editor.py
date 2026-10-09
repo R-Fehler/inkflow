@@ -620,6 +620,13 @@ class TestCodegen:
 # ── Session (end to end on files) ─────────────────────────────────────────────
 
 
+def build_model_ids(project: Path) -> list[dict[str, object]]:
+    return cast(
+        "list[dict[str, object]]",
+        process_deck(_deck(project), project, project / "deck.py"),
+    )
+
+
 def _hash(path: Path) -> str:
     from inkflow.editor.svgops import file_hash
 
@@ -707,13 +714,67 @@ class TestSession:
         )
         assert (project / "slides" / "text.md").read_text() == "# Title\n\nNew body\n"
 
-    def test_zone_text_in_deck(self, project: Path) -> None:
+    def test_zone_text_moves_into_a_new_markdown_file(self, project: Path) -> None:
         session = EditorSession(project / "deck.py")
         session.apply(
             {"action": "zone-text", "slide": 2, "zone": "title", "text": "Bye"},
             _deck(project),
         )
-        assert 'zones={"title": "Bye"}' in (project / "deck.py").read_text()
+        # Named after the slide's id, so slide:<id> links keep working.
+        assert (project / "slides" / "two.md").read_text() == "# Bye\n"
+        assert 'Slide("two", md="two.md")' in (project / "deck.py").read_text()
+        assert [s["id"] for s in build_model_ids(project)] == ["drawing", "text", "two"]
+
+    def test_move_text_to_markdown(self, project: Path) -> None:
+        deck_py = project / "deck.py"
+        deck_py.write_text(
+            deck_py.read_text()
+            .replace('md="text.md"', 'md=Inline("Body"), zones={"title": "Hi"}')
+            .replace("import Deck, Slide,", "import Deck, Inline, Slide,"),
+            encoding="utf-8",
+        )
+        session = EditorSession(deck_py)
+        session.apply({"action": "to-markdown", "slide": 1}, _deck(project))
+        code = deck_py.read_text()
+        assert 'Slide("two", md="two.md")' in code
+        assert (project / "slides" / "two.md").read_text() == "# Hi\n\nBody"
+        session.apply({"action": "to-markdown", "slide": 2}, _deck(project))
+        assert (project / "slides" / "two-2.md").read_text() == "# Hello\n"
+        assert 'Slide("two", md="two-2.md")' in deck_py.read_text()
+        ids = [s["id"] for s in build_model_ids(project)]
+        assert ids == ["drawing", "two", "two-2"]
+        with pytest.raises(EditError, match="no text"):
+            session.apply({"action": "to-markdown", "slide": 2}, _deck(project))
+
+    def test_text_box_settings_stay_in_deck(self, project: Path) -> None:
+        deck_py = project / "deck.py"
+        deck_py.write_text(
+            deck_py.read_text()
+            .replace(
+                'zones={"title": "Hello"}',
+                'zones={"title": TextBox("Hello", padding=4)}',
+            )
+            .replace("import Deck, Slide,", "import Deck, Slide, TextBox,"),
+            encoding="utf-8",
+        )
+        session = EditorSession(deck_py)
+        session.apply(
+            {"action": "zone-text", "slide": 2, "zone": "title", "text": "Bye"},
+            _deck(project),
+        )
+        assert 'TextBox(text="Bye", padding=4)' in deck_py.read_text()
+        assert not (project / "slides" / "two.md").exists()
+
+    def test_a_taken_name_keeps_the_slide_id(self, project: Path) -> None:
+        (project / "slides" / "two.md").write_text("Other\n", encoding="utf-8")
+        session = EditorSession(project / "deck.py")
+        session.apply(
+            {"action": "zone-text", "slide": 2, "zone": "content", "text": "Body"},
+            _deck(project),
+        )
+        code = (project / "deck.py").read_text()
+        assert 'md="two-2.md"' in code and 'id="two"' in code
+        assert (project / "slides" / "two-2.md").read_text() == "# Hello\n\nBody\n"
 
     def test_new_notes_file(self, project: Path) -> None:
         session = EditorSession(project / "deck.py")
@@ -767,6 +828,9 @@ class TestSession:
         )
         new = project / "slides" / "text.svg"
         assert 'inkflow:parent="../layouts/two.svg"' in new.read_text()
+        # Inkscape shows the layout behind it and the theme's colours.
+        assert 'inkflow:layout-src="../layouts/two.svg"' in new.read_text()
+        assert '<style id="inkflow-preview">' in new.read_text()
         assert _deck(project).slides[1].src == "text.svg"
         assert sorted(p.name for p in (project / "slides").glob("*.svg")) == [
             "drawing.svg",
@@ -959,7 +1023,9 @@ class TestSession:
 
         result = session.apply(box("Hello **world**"), _deck(project))
         assert result["ids"] == {"new": "zone-text"}
-        assert _deck(project).slides[0].zones == {"text": "Hello **world**"}
+        md = project / "slides" / "drawing.md"
+        assert _deck(project).slides[0].zones == {}
+        assert md.read_text() == "::text::\nHello **world**\n"
         html = process_deck(_deck(project), project, project / "deck.py")[0]["svg"]
         assert "<strong>world</strong>" in html
 
@@ -976,10 +1042,9 @@ class TestSession:
             },
             _deck(project),
         )
-        assert _deck(project).slides[0].zones == {
-            "text": "Hello **world**",
-            "text-2": "Hello **world**",
-        }
+        assert md.read_text() == (
+            "::text::\nHello **world**\n\n::text-2::\nHello **world**\n"
+        )
         session.apply(
             {
                 "action": "svg",
@@ -990,7 +1055,7 @@ class TestSession:
             },
             _deck(project),
         )
-        assert _deck(project).slides[0].zones == {"text-2": "Hello **world**"}
+        assert md.read_text() == "::text-2::\nHello **world**\n"
         assert 'id="zone-text"' not in drawing.read_text()
 
     def test_text_box_on_a_markdown_slide_writes_the_md_file(
@@ -1516,7 +1581,9 @@ def test_shape_text_turns_a_rectangle_into_a_styled_text_box(project: Path) -> N
     deck = _deck(project)
     # The animation that targeted the rectangle follows it.
     assert deck.slides[0].animations[0].element == "zone-text"
-    assert deck.slides[0].zones == {"text": "Inside **the** box"}
+    assert (project / "slides" / "drawing.md").read_text() == (
+        "::text::\nInside **the** box\n"
+    )
     html = process_deck(deck, project, project / "deck.py")[0]["svg"]
     assert "background:var(--inkflow-surface)" in html
     assert "<strong>the</strong>" in html
@@ -1580,6 +1647,15 @@ def test_open_file_lists_programs_and_launches_only_locally(
     with pytest.raises(EditError, match="no such program"):
         session.apply({**request, "app": "rm", "_local": True}, None)
     assert len(launched) == 1
+
+    # With the deck built, an SVG gets its Inkscape preview refreshed first.
+    drawing = project / "slides" / "drawing.svg"
+    assert "inkflow-preview" not in drawing.read_text()
+    out = session.apply({**request, "_local": True}, _deck(project))
+    assert '<style id="inkflow-preview">' in drawing.read_text()
+    assert out["label"] == "Refresh Inkscape preview" and len(launched) == 2
+    again = session.apply({**request, "_local": True}, _deck(project))
+    assert "label" not in again  # already current: nothing written
 
 
 # ── Model ────────────────────────────────────────────────────────────────────

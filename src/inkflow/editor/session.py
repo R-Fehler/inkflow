@@ -73,12 +73,15 @@ from inkflow.fonts import font_index
 from inkflow.layout import (
     create_slide,
     discover_layouts,
+    preview_layers_text,
     resolve_chain,
     resolve_parent_path,
 )
+from inkflow.logging import logger
 from inkflow.manifest import Deck, Image, Inline, Slide, TextBox, Video
 from inkflow.ns import INKFLOW_SHOW_SHAPE
-from inkflow.pipeline import resolve_slide_src
+from inkflow.pipeline import resolve_slide_src, slide_ids
+from inkflow.sync import build_context, plan_preview
 from inkflow.transitions import Transition
 from inkflow.zones import remove_zone_section, replace_zone_text, zone_spans
 
@@ -318,7 +321,7 @@ class EditorSession:
             apps = open_choices(path, self.edit_commands)
             return {"ok": True, "apps": [{"id": a.id, "label": a.label} for a in apps]}
         if action == "open-file":
-            return self._open_file(msg)
+            return self._open_file(msg, deck)
         if action == "find":
             return {"ok": True, "hits": self._find(msg)}
         if deck is None:
@@ -348,6 +351,7 @@ class EditorSession:
             "insert-video": self._insert_video,
             "insert-textbox": self._insert_textbox,
             "shape-text": self._shape_text,
+            "to-markdown": self._to_markdown,
             "theme-set": self._theme_set,
             "replace": self._replace,
             "md-text": self._md_text,
@@ -485,7 +489,12 @@ class EditorSession:
                     )
                     if new_id and new_id.startswith("zone-"):
                         self._copy_zone_content(
-                            index, slide, zone, new_id.removeprefix("zone-"), txn
+                            index,
+                            slide,
+                            deck,
+                            zone,
+                            new_id.removeprefix("zone-"),
+                            txn,
                         )
         extra["ids"] = result_ids
         extra["structural"] = structural
@@ -530,8 +539,12 @@ class EditorSession:
         if isinstance(grow, dict):
             # A text box that outgrew its frame is resized in the same step.
             self._svg(cast("dict[str, object]", grow), deck, txn, {})
-        if zone in slide.zones or (origin == "deck"):
-            current = slide.zones.get(zone)
+        current = slide.zones.get(zone)
+        # A TextBox keeps its settings in deck.py, and a slide whose Markdown
+        # is written inline keeps its text there; everything else is Markdown.
+        if isinstance(current, TextBox) or (
+            zone in slide.zones and isinstance(slide.md, Inline)
+        ):
             source = self._deck_source(txn)
             code = Code()
             if isinstance(current, TextBox):
@@ -543,8 +556,8 @@ class EditorSession:
             source.set_zone(index, zone, value)
             self._save_deck(txn, source, code.imports)
             return f"Edit {zone}"
-        if slide.md is not None and not isinstance(slide.md, Inline):
-            md_path = self._md_path(slide)
+        if not isinstance(slide.md, Inline):
+            md_path = self._slide_markdown(index, slide, deck, txn, zone)
             source_text = txn.read(md_path).decode("utf-8")
             if origin == "md-file":
                 if not text.strip():
@@ -557,15 +570,10 @@ class EditorSession:
                 new = replace_zone_text(source_text, zone, text)
             txn.write(md_path, new.encode("utf-8"))
             return f"Edit {zone}"
-        if isinstance(slide.md, Inline):
-            new = replace_zone_text(str(slide.md), zone, text)
-            source = self._deck_source(txn)
-            source.set_slide_arg(index, "md", f"Inline({_py(new)})")
-            self._save_deck(txn, source, {"Inline"})
-            return f"Edit {zone}"
+        new = replace_zone_text(str(slide.md), zone, text)
         source = self._deck_source(txn)
-        source.set_zone(index, zone, _py(text) if text.strip() else None)
-        self._save_deck(txn, source, set())
+        source.set_slide_arg(index, "md", f"Inline({_py(new)})")
+        self._save_deck(txn, source, {"Inline"})
         return f"Edit {zone}"
 
     def _zone_media(
@@ -707,7 +715,7 @@ class EditorSession:
         index, slide = self._deck_slide(deck, msg)
         text = str(msg.get("text") or "Text").strip() or "Text"
         zone = self._new_zone(msg, deck, slide, txn, "text")
-        self._put_zone_text(index, slide, zone, text, txn)
+        self._put_zone_text(index, slide, deck, zone, text, txn)
         extra["ids"] = {"new": f"zone-{zone}"}
         extra["zone"] = zone
         extra["structural"] = True
@@ -839,7 +847,9 @@ class EditorSession:
             raise EditError(f"{raw} does not exist")
         return path
 
-    def _open_file(self, msg: dict[str, object]) -> dict[str, object]:
+    def _open_file(
+        self, msg: dict[str, object], deck: Deck | None
+    ) -> dict[str, object]:
         # Set by the server from the connection itself, never by the browser: a
         # program opens on this machine's screen, so only a local page may ask.
         if msg.get("_local") is not True:
@@ -849,10 +859,32 @@ class EditorSession:
         app = apps.get(str(msg.get("app") or "system"))
         if app is None:
             raise EditError(f"no such program for {path.name}")
+        result: dict[str, object] = {"ok": True}
+        if deck is not None and path.suffix.lower() == ".svg":
+            # Inkscape draws only what is in the file: bring its layout layers
+            # and theme colours up to date first (one undoable step).
+            text = self._inkscape_preview(path, deck)
+            if text is not None:
+                txn = _Txn(self.project_dir)
+                txn.write(path, text.encode("utf-8"))
+                step = txn.commit("Refresh Inkscape preview")
+                self.history.record(step)
+                result = self._result(step)
         error = open_with(path, app)
         if error is not None:
             raise EditError(error)
-        return {"ok": True, "opened": str(path.relative_to(self.project_dir))}
+        return {**result, "opened": str(path.relative_to(self.project_dir))}
+
+    def _inkscape_preview(self, path: Path, deck: Deck) -> str | None:
+        """``path`` with its preview layers and theme colours brought up to date
+        (what ``inkflow sync`` writes), or None when they already are."""
+        dark = deck.effective_mode == ColorMode.DARK
+        try:
+            ctx = build_context(deck, self.project_dir, deck.theme, dark)
+            return preview_layers_text(path, plan_preview(path, ctx).layers)
+        except (ValueError, OSError) as exc:
+            logger.warning(f"{path.name}: cannot update its Inkscape preview ({exc})")
+            return None
 
     # ── Formulas ──
 
@@ -966,7 +998,7 @@ class EditorSession:
             self._rename_cues(deck, path, {old: zone_id}, txn)
         zone = zone_id.removeprefix("zone-")
         text = str(msg.get("text") or "Text").strip() or "Text"
-        self._put_zone_text(index, slide, zone, text, txn)
+        self._put_zone_text(index, slide, deck, zone, text, txn)
         extra["ids"] = {"new": zone_id}
         extra["structural"] = True
         return "Text in shape"
@@ -982,21 +1014,97 @@ class EditorSession:
             return None
 
     def _put_zone_text(
-        self, index: int, slide: Slide, zone: str, text: str, txn: _Txn
+        self, index: int, slide: Slide, deck: Deck, zone: str, text: str, txn: _Txn
     ) -> None:
-        md_path = self._md_file(slide)
-        if md_path is not None:
-            md = txn.read(md_path).decode("utf-8")
-            txn.write(md_path, replace_zone_text(md, zone, text).encode("utf-8"))
-            return
-        source = self._deck_source(txn)
         if isinstance(slide.md, Inline):
+            source = self._deck_source(txn)
             new = replace_zone_text(str(slide.md), zone, text)
             source.set_slide_arg(index, "md", f"Inline({_py(new)})")
             self._save_deck(txn, source, {"Inline"})
             return
-        source.set_zone(index, zone, _py(text))
+        md_path = self._slide_markdown(index, slide, deck, txn)
+        md = txn.read(md_path).decode("utf-8")
+        txn.write(md_path, replace_zone_text(md, zone, text).encode("utf-8"))
+
+    def _slide_markdown(
+        self,
+        index: int,
+        slide: Slide,
+        deck: Deck,
+        txn: _Txn,
+        zone: str | None = None,
+        move_all: bool = False,
+    ) -> Path:
+        """The slide's Markdown file, created the first time the slide gets text.
+
+        Slide text lives in Markdown, not in deck.py. A new file takes every
+        plain-text zone from ``zones={...}`` with it; an existing one takes
+        ``zone`` (the one being written), so a zone is never filled from both.
+        A ``TextBox`` stays, since its settings are Python.
+        """
+        md_path = self._md_file(slide)
+        created = md_path is None
+        slide_id = self._slide_id(slide, deck)
+        if md_path is None:
+            md_path = _unique_path(self.project_dir / "slides", _slug(slide_id), ".md")
+        moved = {
+            name: value
+            for name, value in slide.zones.items()
+            if isinstance(value, str) and (created or move_all or name == zone)
+        }
+        if not created and not moved:
+            return md_path
+        text = "" if created else txn.read(md_path).decode("utf-8")
+        # The title first, so it becomes the file's leading heading.
+        for name in sorted(moved, key=lambda n: n != "title"):
+            text = replace_zone_text(text, name, moved[name])
+        txn.write(md_path, text.encode("utf-8"))
+        source = self._deck_source(txn)
+        for name in moved:
+            source.set_zone(index, name, None)
+        if created:
+            source.set_slide_arg(index, "md", _py(md_path.name))
+            if slide.id is None and md_path.stem != slide_id:
+                source.set_slide_arg(index, "id", _py(slide_id))
         self._save_deck(txn, source, set())
+        return md_path
+
+    def _to_markdown(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, _extra: dict[str, object]
+    ) -> str:
+        """Move a slide's text out of deck.py into its Markdown file."""
+        index, slide = self._deck_slide(deck, msg)
+        if isinstance(slide.md, Inline):
+            # Inline Markdown becomes the file's content, with the zones' text.
+            slide_id = self._slide_id(slide, deck)
+            path = _unique_path(self.project_dir / "slides", _slug(slide_id), ".md")
+            text = str(slide.md)
+            moved = [n for n, v in slide.zones.items() if isinstance(v, str)]
+            for name in moved:
+                text = replace_zone_text(text, name, cast("str", slide.zones[name]))
+            txn.write(path, text.encode("utf-8"))
+            source = self._deck_source(txn)
+            for name in moved:
+                source.set_zone(index, name, None)
+            source.set_slide_arg(index, "md", _py(path.name))
+            if slide.id is None and path.stem != slide_id:
+                source.set_slide_arg(index, "id", _py(slide_id))
+            self._save_deck(txn, source, set())
+            return "Move text to Markdown"
+        if not any(isinstance(v, str) for v in slide.zones.values()):
+            raise EditError("this slide has no text in deck.py to move")
+        self._slide_markdown(index, slide, deck, txn, move_all=True)
+        return "Move text to Markdown"
+
+    def _slide_id(self, slide: Slide, deck: Deck) -> str:
+        """The id the slide is known by now. A new Markdown file is named after
+        it, since an id not written out is inferred from the Markdown file's
+        name, so ``slide:<id>`` links keep pointing at the slide."""
+        visible = [s for s in deck.slides if s.visible]
+        for s, slide_id in zip(visible, slide_ids(visible), strict=True):
+            if s is slide:
+                return slide_id
+        return slide_ids([slide])[0]
 
     def _drop_zone_content(
         self, index: int, slide: Slide, zone: str, txn: _Txn
@@ -1020,7 +1128,7 @@ class EditorSession:
                 self._save_deck(txn, source, {"Inline"})
 
     def _copy_zone_content(
-        self, index: int, slide: Slide, old: str, new: str, txn: _Txn
+        self, index: int, slide: Slide, deck: Deck, old: str, new: str, txn: _Txn
     ) -> None:
         """Give a duplicated zone the same content as the one it copies."""
         if old in slide.zones:
@@ -1040,7 +1148,7 @@ class EditorSession:
         if md is None or old not in zone_spans(md):
             return
         start, end = zone_spans(md)[old]
-        self._put_zone_text(index, slide, new, md[start:end], txn)
+        self._put_zone_text(index, slide, deck, new, md[start:end], txn)
 
     def _deck_rel(self, path: Path) -> str:
         resolved = path if path.is_absolute() else self.project_dir / path
@@ -1243,7 +1351,9 @@ class EditorSession:
         # layers; it writes to disk, so its file only becomes the transaction's.
         try:
             create_slide(parent, path, self.project_dir, deck.theme)
-            data = path.read_bytes()
+            # Layout layers and theme colours, so it looks right in Inkscape.
+            text = self._inkscape_preview(path, deck)
+            data = text.encode("utf-8") if text is not None else path.read_bytes()
         except (ValueError, OSError) as exc:
             raise EditError(str(exc)) from exc
         finally:

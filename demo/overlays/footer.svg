@@ -39,7 +39,8 @@
 .inkflow-fill-pink { fill: #f5c2e7; }
 .inkflow-stroke-pink { stroke: #f5c2e7; }
 .inkflow-fill-grey { fill: #6c7086; }
-.inkflow-stroke-grey { stroke: #6c7086; }</style></defs><!-- The inkflow mark, composited on top of every slide via Deck(overlays=...).
+.inkflow-stroke-grey { stroke: #6c7086; }
+#zone-title, #zone-content { fill: #808080; fill-opacity: 0.08; stroke: #808080; stroke-opacity: 0.7; stroke-width: 2; stroke-dasharray: 12 8; }</style></defs><!-- The inkflow mark, composited on top of every slide via Deck(overlays=...).
      Colour comes from .inkflow-demo-logo-mark (demo/styles.css) so it follows
      dark/light. Previously this lived in layouts/footer.svg, which content.svg
      and center.svg each had to inherit. --><g class="inkflow-demo-logo-mark" transform="matrix(0.71616821,0,0,0.71616821,43.005724,966.55464)" id="demo-logo-mark">

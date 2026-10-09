@@ -109,16 +109,31 @@ def _infer_slide_id(slide: Slide) -> str:
 
 
 def _deduplicate_ids(raw_ids: list[str]) -> list[str]:
+    """Number repeated ids ``-2``, ``-3``…, skipping any number that is already
+    some other slide's own id (``content``, ``content-2``, ``content`` must not
+    give two ``content-2``)."""
+    taken = set(raw_ids)
     seen: dict[str, int] = {}
+    used: set[str] = set()
     result: list[str] = []
     for raw in raw_ids:
-        if raw not in seen:
-            seen[raw] = 1
+        if raw not in used:
+            seen.setdefault(raw, 1)
+            used.add(raw)
             result.append(raw)
-        else:
-            seen[raw] += 1
-            result.append(f"{raw}-{seen[raw]}")
+            continue
+        n = seen.get(raw, 1) + 1
+        while f"{raw}-{n}" in taken or f"{raw}-{n}" in used:
+            n += 1
+        seen[raw] = n
+        used.add(f"{raw}-{n}")
+        result.append(f"{raw}-{n}")
     return result
+
+
+def slide_ids(slides: list[Slide]) -> list[str]:
+    """The id each slide is known by (``slide:<id>`` links), in order."""
+    return _deduplicate_ids([_infer_slide_id(s) for s in slides])
 
 
 def _infer_slide_title(
@@ -859,10 +874,9 @@ def process_deck(
     visible_slides = [s for s in deck.slides if s.visible]
     ctx = deck_context(deck, project_dir, len(visible_slides), editor=editor)
     assets = ctx.assets
-    raw_ids = [_infer_slide_id(s) for s in visible_slides]
-    slide_ids = _deduplicate_ids(raw_ids)
+    ids = slide_ids(visible_slides)
     results: list[SlideData] = []
-    for i, (slide, slide_id) in enumerate(zip(visible_slides, slide_ids, strict=True)):
+    for i, (slide, slide_id) in enumerate(zip(visible_slides, ids, strict=True)):
         logger.debug(f"processing slide {i + 1}/{len(visible_slides)}: {slide_id}")
         md = load_md(slide.md, project_dir)
         parsed = parse_markdown_zones(md.text) if md is not None else None

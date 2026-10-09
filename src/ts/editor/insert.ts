@@ -21,11 +21,19 @@ import {
     slideToPaper,
 } from "./canvas";
 import { pasteText } from "./clipboard";
-import type { End, Site } from "./connectors";
+import { type End, pathData, route, type Site } from "./connectors";
 import { svgEl, toast } from "./dom";
 import { fmt, invert, mat, multiply, relativePath, transformBox } from "./geom";
 import { edit, request } from "./net";
-import { currentSlide, ed, emit, off, on } from "./state";
+import {
+    CONNECTOR_TOOLS,
+    currentSlide,
+    ed,
+    emit,
+    off,
+    on,
+    type Tool,
+} from "./state";
 import type { SlideModel } from "./types";
 
 const overlay = document.getElementById("overlay") as unknown as SVGSVGElement;
@@ -195,18 +203,24 @@ function drawDraft(
     tool: string,
     a: { x: number; y: number },
     b: { x: number; y: number },
+    ends?: { a: End; b: End },
 ) {
     draft?.remove();
     const m = slideToPaper();
     const pa = { x: m.a * a.x + m.e, y: m.d * a.y + m.f };
     const pb = { x: m.a * b.x + m.e, y: m.d * b.y + m.f };
-    if (tool === "line" || tool === "arrow") {
-        draft = svgEl("line", {
-            x1: pa.x,
-            y1: pa.y,
-            x2: pb.x,
-            y2: pb.y,
+    const style = CONNECTOR_TOOLS[tool as Tool];
+    if (style) {
+        // The route the connector will take, ends facing their sites.
+        const r = route(style, ends?.a ?? a, ends?.b ?? b);
+        const toPaper = (p: { x: number; y: number }) => ({
+            x: m.a * p.x + m.e,
+            y: m.d * p.y + m.f,
+        });
+        draft = svgEl("path", {
+            d: pathData({ ...r, points: r.points.map(toPaper) }),
             class: "draft",
+            fill: "none",
         });
     } else {
         const box = transformBox(m, {
@@ -283,11 +297,13 @@ async function insertConnector(
     };
     const startAt = attach(startHit);
     const endAt = attach(endHit);
+    const style = CONNECTOR_TOOLS[tool as Tool] ?? "straight";
+    const arrow = tool !== "line";
     const attrs = [
-        'inkflow:connector="straight"',
+        `inkflow:connector="${style}"`,
         startAt ? `inkflow:connect-start="${startAt}"` : "",
         endAt ? `inkflow:connect-end="${endAt}"` : "",
-        tool === "arrow" ? 'marker-end="url(#inkflow-arrow)"' : "",
+        arrow ? 'marker-end="url(#inkflow-arrow)"' : "",
     ]
         .filter(Boolean)
         .join(" ");
@@ -295,9 +311,9 @@ async function insertConnector(
         // Routed into the insertion parent's space once it is known (a slide
         // drawn from a layout gets its own SVG first).
         () =>
-            `<path d="${newConnectorPath("straight", a, b, insertParent().el)}" ${SHAPE_STYLE.line} ${attrs}/>`,
-        tool,
-        { marker: tool === "arrow", before: () => before },
+            `<path d="${newConnectorPath(style, a, b, insertParent().el)}" ${SHAPE_STYLE.line} ${attrs}/>`,
+        arrow ? "arrow" : "line",
+        { marker: arrow, before: () => before },
     );
 }
 
@@ -309,7 +325,7 @@ function onToolDown(e: PointerEvent, start: { x: number; y: number }): boolean {
     const paperEl = e.currentTarget as HTMLElement;
     paperEl.setPointerCapture(e.pointerId);
     ed.interacting = true;
-    const connecting = tool === "line" || tool === "arrow";
+    const connecting = tool in CONNECTOR_TOOLS;
     // Lines and arrows start and end on connection sites when near one.
     const startHit = connecting && !e.altKey ? siteAt(start, null) : null;
     if (startHit) start = { x: startHit.site.x, y: startHit.site.y };
@@ -350,7 +366,17 @@ function onToolDown(e: PointerEvent, start: { x: number; y: number }): boolean {
                 y: start.y + Math.sign(end.y - start.y || 1) * d,
             };
         }
-        drawDraft(tool, start, end);
+        drawDraft(
+            tool,
+            start,
+            end,
+            connecting
+                ? {
+                      a: startHit ? startHit.site : start,
+                      b: endHit ? endHit.site : end,
+                  }
+                : undefined,
+        );
     };
     const up = () => {
         paperEl.removeEventListener("pointermove", move);

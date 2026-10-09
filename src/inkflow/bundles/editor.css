@@ -1710,6 +1710,17 @@ body.offline #offline-banner {
   fill: var(--sel);
   stroke: #fff;
 }
+#overlay .handle.bend {
+  fill: #ffd166;
+  stroke: var(--sel);
+  stroke-width: 1.5;
+}
+#overlay .handle.bend.ew {
+  cursor: ew-resize;
+}
+#overlay .handle.bend.ns {
+  cursor: ns-resize;
+}
 foreignObject.rich-editing .math-chip {
   cursor: pointer;
   border-radius: 4px;

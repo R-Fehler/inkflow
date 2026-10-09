@@ -1,7 +1,25 @@
 import type { SlideData } from "../shared/types";
 import type { EditorModel, Selected, SlideModel, SourceInfo } from "./types";
 
-export type Tool = "select" | "text" | "rect" | "ellipse" | "line" | "arrow";
+export type Tool =
+    | "select"
+    | "text"
+    | "rect"
+    | "ellipse"
+    | "line"
+    | "arrow"
+    | "elbow"
+    | "curve";
+
+/** The tools that draw a connector, and the route each draws. */
+export const CONNECTOR_TOOLS: Partial<
+    Record<Tool, "straight" | "elbow" | "curved">
+> = {
+    line: "straight",
+    arrow: "straight",
+    elbow: "elbow",
+    curve: "curved",
+};
 
 // All mutable editor state, in one place (mirrors presenter/state.ts).
 export const ed = {

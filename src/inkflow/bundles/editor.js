@@ -196,30 +196,72 @@
   }
 
   // src/ts/editor/connectors.ts
-  var SITE_NAMES = ["top", "right", "bottom", "left"];
-  function sitesFromCorners(c) {
+  var SIDES = ["top", "right", "bottom", "left"];
+  var MAX_SITES = 9;
+  function siteName(side, t) {
+    return Math.abs(t - 0.5) < 1e-9 ? side : `${side}@${Math.round(t * 1e3) / 1e3}`;
+  }
+  function parseSite(name) {
+    const [side, frac] = name.split("@");
+    if (!SIDES.includes(side)) return null;
+    const t = frac === void 0 ? 0.5 : Number(frac);
+    return Number.isFinite(t) && t >= 0 && t <= 1 ? { side, t } : null;
+  }
+  function siteOnCorners(c, side, t, round = false) {
+    const along = {
+      top: [t, 0],
+      right: [1, t],
+      bottom: [1 - t, 1],
+      left: [0, 1 - t]
+    };
+    let [u, v] = along[side];
+    if (round) {
+      const off2 = Math.sqrt(Math.max(0, 0.25 - (t - 0.5) ** 2));
+      if (side === "top") v = 0.5 - off2;
+      else if (side === "bottom") v = 0.5 + off2;
+      else if (side === "right") u = 0.5 + off2;
+      else u = 0.5 - off2;
+    }
+    const ex = { x: c[1].x - c[0].x, y: c[1].y - c[0].y };
+    const ey = { x: c[3].x - c[0].x, y: c[3].y - c[0].y };
+    const x = c[0].x + u * ex.x + v * ey.x;
+    const y = c[0].y + u * ex.y + v * ey.y;
+    const i = SIDES.indexOf(side);
+    const a = c[i];
+    const b = c[(i + 1) % 4];
+    let nx = b.y - a.y;
+    let ny = -(b.x - a.x);
     const centre = {
       x: (c[0].x + c[1].x + c[2].x + c[3].x) / 4,
       y: (c[0].y + c[1].y + c[2].y + c[3].y) / 4
     };
-    const edges = [
-      ["top", c[0], c[1]],
-      ["right", c[1], c[2]],
-      ["bottom", c[2], c[3]],
-      ["left", c[3], c[0]]
-    ];
-    return edges.map(([name, a, b]) => {
-      const x = (a.x + b.x) / 2;
-      const y = (a.y + b.y) / 2;
-      const len = Math.hypot(x - centre.x, y - centre.y) || 1;
-      return {
-        name,
-        x,
-        y,
-        dx: (x - centre.x) / len,
-        dy: (y - centre.y) / len
-      };
-    });
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    if (nx * (mid.x - centre.x) + ny * (mid.y - centre.y) < 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    const len = Math.hypot(nx, ny) || 1;
+    const clean = (n2) => Math.abs(n2) < 1e-12 ? 0 : n2;
+    return {
+      name: siteName(side, t),
+      x,
+      y,
+      dx: clean(nx / len),
+      dy: clean(ny / len)
+    };
+  }
+  function sitesFromCorners(c, perSide = 1, round = false) {
+    const n2 = Math.max(1, Math.min(MAX_SITES, Math.round(perSide)));
+    return SIDES.flatMap(
+      (side) => Array.from(
+        { length: n2 },
+        (_, k) => siteOnCorners(c, side, (k + 1) / (n2 + 1), round)
+      )
+    );
+  }
+  function siteByName(c, name, round = false) {
+    const s = parseSite(name);
+    return s ? siteOnCorners(c, s.side, s.t, round) : null;
   }
   function nearestSite(sites, p, within) {
     let best2 = null;
@@ -244,17 +286,27 @@
   function horizontal(d) {
     return Math.abs(d.x) >= Math.abs(d.y);
   }
-  function route(style, a, b) {
+  function parseBend(value) {
+    const m = /^([xy]):(-?\d*\.?\d+(?:e[-+]?\d+)?)$/i.exec(value ?? "");
+    if (!m) return null;
+    const at = Number(m[2]);
+    return Number.isFinite(at) ? { axis: m[1], at } : null;
+  }
+  function formatBend(b) {
+    return `${b.axis}:${Math.round(b.at * 100) / 100}`;
+  }
+  var STUB = 30;
+  function route(style, a, b, bend = null) {
     if (style === "curved") {
-      const da2 = direction(a, b);
-      const db2 = direction(b, a);
+      const da = direction(a, b);
+      const db = direction(b, a);
       const k = Math.max(30, Math.hypot(b.x - a.x, b.y - a.y) * 0.4);
       return {
         curve: true,
         points: [
           { x: a.x, y: a.y },
-          { x: a.x + da2.x * k, y: a.y + da2.y * k },
-          { x: b.x + db2.x * k, y: b.y + db2.y * k },
+          { x: a.x + da.x * k, y: a.y + da.y * k },
+          { x: b.x + db.x * k, y: b.y + db.y * k },
           { x: b.x, y: b.y }
         ]
       };
@@ -265,31 +317,73 @@
         points: [a, b].map((p) => ({ x: p.x, y: p.y }))
       };
     }
+    return elbow(a, b, bend);
+  }
+  function elbow(a, b, bend) {
     const da = direction(a, b);
     const db = direction(b, a);
-    const pts = [{ x: a.x, y: a.y }];
-    if (horizontal(da) && horizontal(db)) {
-      const mx = (a.x + b.x) / 2;
-      pts.push({ x: mx, y: a.y }, { x: mx, y: b.y });
-    } else if (!horizontal(da) && !horizontal(db)) {
-      const my = (a.y + b.y) / 2;
-      pts.push({ x: a.x, y: my }, { x: b.x, y: my });
-    } else if (horizontal(da)) {
-      pts.push({ x: b.x, y: a.y });
+    const ha = horizontal(da);
+    const hb = horizontal(db);
+    let axis;
+    let fallback;
+    let build2;
+    if (ha === hb) {
+      axis = ha ? "x" : "y";
+      const pa = ha ? a.x : a.y;
+      const pb = ha ? b.x : b.y;
+      const sa = Math.sign(ha ? da.x : da.y);
+      const sb = Math.sign(ha ? db.x : db.y);
+      fallback = sa === sb ? sa > 0 ? Math.max(pa, pb) + STUB : Math.min(pa, pb) - STUB : (pa + pb) / 2;
+      build2 = (m) => ha ? {
+        pts: [a, { x: m, y: a.y }, { x: m, y: b.y }, b],
+        mid: { x: m, y: (a.y + b.y) / 2 }
+      } : {
+        pts: [a, { x: a.x, y: m }, { x: b.x, y: m }, b],
+        mid: { x: (a.x + b.x) / 2, y: m }
+      };
+    } else if (ha) {
+      axis = "x";
+      fallback = b.x;
+      const k = b.y + Math.sign(db.y || 1) * STUB;
+      build2 = (m) => ({
+        pts: [a, { x: m, y: a.y }, { x: m, y: k }, { x: b.x, y: k }, b],
+        mid: { x: m, y: (a.y + k) / 2 }
+      });
     } else {
-      pts.push({ x: a.x, y: b.y });
+      axis = "y";
+      fallback = b.y;
+      const k = b.x + Math.sign(db.x || 1) * STUB;
+      build2 = (m) => ({
+        pts: [a, { x: a.x, y: m }, { x: k, y: m }, { x: k, y: b.y }, b],
+        mid: { x: (a.x + k) / 2, y: m }
+      });
     }
-    pts.push({ x: b.x, y: b.y });
-    const out = pts.filter((p, i) => {
-      if (i === 0 || i === pts.length - 1) return true;
-      const prev = pts[i - 1];
-      const next = pts[i + 1];
-      const collinear = Math.abs(
-        (p.x - prev.x) * (next.y - p.y) - (p.y - prev.y) * (next.x - p.x)
-      ) < 1e-6;
-      return !collinear;
-    });
-    return { curve: false, points: out };
+    const at = bend && bend.axis === axis ? bend.at : fallback;
+    const { pts, mid } = build2(at);
+    return {
+      curve: false,
+      points: simplify(pts.map((p) => ({ x: p.x, y: p.y }))),
+      bend: { axis, at, mid }
+    };
+  }
+  function simplify(pts) {
+    const out = [];
+    for (const p of pts) {
+      const last = out[out.length - 1];
+      if (last && Math.hypot(p.x - last.x, p.y - last.y) < 1e-6) continue;
+      out.push(p);
+      while (out.length >= 3) {
+        const [p0, p1, p2] = out.slice(-3);
+        const ux = p1.x - p0.x;
+        const uy = p1.y - p0.y;
+        const vx = p2.x - p1.x;
+        const vy = p2.y - p1.y;
+        if (Math.abs(ux * vy - uy * vx) < 1e-6 && ux * vx + uy * vy > 0) {
+          out.splice(out.length - 2, 1);
+        } else break;
+      }
+    }
+    return out;
   }
   function n(v) {
     return String(Math.round(v * 100) / 100);
@@ -314,7 +408,7 @@
     if (!value) return null;
     const i = value.lastIndexOf(":");
     const site = value.slice(i + 1);
-    if (i <= 0 || !SITE_NAMES.includes(site)) return null;
+    if (i <= 0 || !parseSite(site)) return null;
     return { id: value.slice(0, i), site };
   }
 
@@ -783,6 +877,12 @@
   }
 
   // src/ts/editor/state.ts
+  var CONNECTOR_TOOLS = {
+    line: "straight",
+    arrow: "straight",
+    elbow: "elbow",
+    curve: "curved"
+  };
   var ed = {
     model: null,
     slides: [],
@@ -1259,7 +1359,8 @@
     // A connector's route and its attachments.
     "d",
     "inkflow:connect-start",
-    "inkflow:connect-end"
+    "inkflow:connect-end",
+    "inkflow:bend"
   ];
   function elementGeom(el2) {
     const parent = el2.parentElement;
@@ -1582,6 +1683,20 @@
         handle.dataset.handle = `c-${which}`;
         overlay.append(handle);
       }
+      const bend = connectorRoute(connector)?.bend;
+      if (bend) {
+        const p = apply(m, bend.mid);
+        const handle = svgEl("rect", {
+          x: p.x - 5,
+          y: p.y - 5,
+          width: 10,
+          height: 10,
+          transform: `rotate(45 ${p.x} ${p.y})`,
+          class: `handle bend ${bend.axis === "x" ? "ew" : "ns"}`
+        });
+        handle.dataset.handle = "c-bend";
+        overlay.append(handle);
+      }
     }
     if (box && ed.step == null) {
       const pb = toPaperBox(box);
@@ -1747,24 +1862,39 @@
     const ctm = el2.getScreenCTM?.();
     return ctm ? multiply(invert(rootCTM()), mat(ctm)) : null;
   }
-  function sitesOf(el2) {
+  var SITES = "inkflow:sites";
+  function sitesPerSide(el2) {
+    const n2 = Number(el2.getAttribute(SITES) ?? 1);
+    return Number.isFinite(n2) ? Math.max(1, Math.min(MAX_SITES, Math.round(n2))) : 1;
+  }
+  function cornersOf(el2) {
     try {
       const m = measure(el2);
       if (!m) return null;
       const toSlide = multiply(invert(rootCTM()), mat(m.ctm));
       const b = m.bbox;
       if (b.width <= 0 && b.height <= 0) return null;
-      return sitesFromCorners(
-        [
+      const tag = el2.getAttribute("data-ink-tag") ?? el2.localName;
+      return {
+        corners: [
           { x: b.x, y: b.y },
           { x: b.x + b.width, y: b.y },
           { x: b.x + b.width, y: b.y + b.height },
           { x: b.x, y: b.y + b.height }
-        ].map((p) => apply(toSlide, p))
-      );
+        ].map((p) => apply(toSlide, p)),
+        round: tag === "ellipse" || tag === "circle"
+      };
     } catch {
       return null;
     }
+  }
+  function sitesOf(el2) {
+    const c = cornersOf(el2);
+    return c ? sitesFromCorners(c.corners, sitesPerSide(el2), c.round) : null;
+  }
+  function siteOf(el2, name) {
+    const c = cornersOf(el2);
+    return c ? siteByName(c.corners, name, c.round) : null;
   }
   function byId(id) {
     return slideRoot()?.querySelector(`[id="${CSS.escape(id)}"]`) ?? null;
@@ -1820,7 +1950,7 @@
     const c = parseConnection(conn.getAttribute(ENDS[which]));
     if (c) {
       const target = byId(c.id);
-      const site = target ? sitesOf(target)?.find((s) => s.name === c.site) : null;
+      const site = target ? siteOf(target, c.site) : null;
       if (site) return site;
     }
     const pts = endpointsOf(conn.getAttribute("d") ?? "");
@@ -1828,13 +1958,18 @@
     if (!pts || !m) return null;
     return apply(m, which === "start" ? pts.start : pts.end);
   }
-  function connectorPath(conn, ends = {}, style = connectorStyle(conn)) {
+  var BEND = "inkflow:bend";
+  function connectorRoute(conn, ends = {}, style = connectorStyle(conn), bend = parseBend(conn.getAttribute(BEND))) {
     const a = ends.start ?? connectorEnd(conn, "start");
     const b = ends.end ?? connectorEnd(conn, "end");
+    if (!a || !b) return null;
+    return route(style, a, b, bend);
+  }
+  function connectorPath(conn, ends = {}, style = connectorStyle(conn), bend = parseBend(conn.getAttribute(BEND))) {
+    const r = connectorRoute(conn, ends, style, bend);
     const toSlide = toSlideMat(conn);
-    if (!a || !b || !toSlide) return null;
+    if (!r || !toSlide) return null;
     const local = invert(toSlide);
-    const r = route(style, a, b);
     return pathData({ ...r, points: r.points.map((p) => apply(local, p)) });
   }
   function newConnectorPath(style, a, b, parent) {
@@ -1906,7 +2041,12 @@
     for (const [k, v] of Object.entries(set)) {
       if (v === null) conn.removeAttribute(k);
     }
-    const d = connectorPath(conn, ends);
+    let bend = parseBend(conn.getAttribute(BEND));
+    if (bend) {
+      bend = { ...bend, at: bend.at + (bend.axis === "x" ? dx : dy) };
+      set[BEND] = formatBend(bend);
+    }
+    const d = connectorPath(conn, ends, connectorStyle(conn), bend);
     if (d) set.d = d;
     applyPlanToDom(conn, { d: set.d ?? null });
     return [{ kind: "attrs", loc: sel.loc, set }];
@@ -1954,6 +2094,31 @@
       set: { d, [ENDS[drag.which]]: attach }
     });
     return [{ sel, ops }];
+  }
+  function bendPlans(drag, p) {
+    const sel = drag.snaps[0].sel;
+    const conn = sel.el;
+    const current = connectorRoute(conn)?.bend;
+    if (!current) return [];
+    const bend = {
+      axis: current.axis,
+      at: Math.round(current.axis === "x" ? p.x : p.y)
+    };
+    const d = connectorPath(conn, {}, "elbow", bend);
+    if (!d) return [];
+    applyPlanToDom(conn, { d });
+    return [
+      {
+        sel,
+        ops: [
+          {
+            kind: "attrs",
+            loc: sel.loc,
+            set: { d, [BEND]: formatBend(bend) }
+          }
+        ]
+      }
+    ];
   }
   function opsByFile(plans) {
     const out = /* @__PURE__ */ new Map();
@@ -2094,6 +2259,7 @@
     const snaps = sels.map(snapshot);
     const start = unionBoxes(snaps.map((s) => s.box));
     if (!start) return null;
+    if (handle === "c-bend") return { kind: "bend", snaps };
     if (handle === "c-start" || handle === "c-end") {
       return {
         kind: "endpoint",
@@ -2253,6 +2419,9 @@
     } else if (drag.kind === "endpoint") {
       restore(drag.snaps);
       lastPlans = endpointPlans(drag, p1, e);
+    } else if (drag.kind === "bend") {
+      restore(drag.snaps);
+      lastPlans = bendPlans(drag, p1);
     } else if (drag.kind === "marquee") {
       marquee = {
         x: Math.min(p0.x, p1.x),
@@ -2289,7 +2458,7 @@
     drawOverlay();
     if (!plans.length) return;
     if (siteHints.length) siteHints = [];
-    const label3 = drag.kind === "endpoint" ? "Connect" : drag.kind === "move" ? "Move" : drag.kind === "resize" ? ed.cropMode ? "Crop" : "Resize" : "Rotate";
+    const label3 = drag.kind === "endpoint" ? "Connect" : drag.kind === "bend" ? "Reshape arrow" : drag.kind === "move" ? "Move" : drag.kind === "resize" ? ed.cropMode ? "Crop" : "Resize" : "Rotate";
     const ok = await sendSvgOps(plans, label3);
     if (!ok) restore(drag.snaps);
     drawOverlay();
@@ -2365,7 +2534,7 @@
           hoverEl = el2;
           drawOverlay();
         }
-      } else if ((ed.tool === "line" || ed.tool === "arrow") && e.buttons === 0) {
+      } else if (ed.tool in CONNECTOR_TOOLS && e.buttons === 0) {
         const p = clientToSlide(e.clientX, e.clientY);
         const hit = e.altKey ? null : siteAt(p, null);
         const under = candidatesAt(e.clientX, e.clientY).find(
@@ -2616,18 +2785,22 @@
     return `<text x="${fmt(p.x)}" y="${fmt(p.y)}" class="inkflow-fill-text" style="font-size:56px;font-family:var(--inkflow-body-font, sans-serif)">Text</text>`;
   }
   var draft = null;
-  function drawDraft(tool, a, b) {
+  function drawDraft(tool, a, b, ends) {
     draft?.remove();
     const m = slideToPaper();
     const pa = { x: m.a * a.x + m.e, y: m.d * a.y + m.f };
     const pb = { x: m.a * b.x + m.e, y: m.d * b.y + m.f };
-    if (tool === "line" || tool === "arrow") {
-      draft = svgEl("line", {
-        x1: pa.x,
-        y1: pa.y,
-        x2: pb.x,
-        y2: pb.y,
-        class: "draft"
+    const style = CONNECTOR_TOOLS[tool];
+    if (style) {
+      const r = route(style, ends?.a ?? a, ends?.b ?? b);
+      const toPaper = (p) => ({
+        x: m.a * p.x + m.e,
+        y: m.d * p.y + m.f
+      });
+      draft = svgEl("path", {
+        d: pathData({ ...r, points: r.points.map(toPaper) }),
+        class: "draft",
+        fill: "none"
       });
     } else {
       const box = transformBox(m, {
@@ -2685,18 +2858,20 @@
     };
     const startAt = attach(startHit);
     const endAt = attach(endHit);
+    const style = CONNECTOR_TOOLS[tool] ?? "straight";
+    const arrow = tool !== "line";
     const attrs2 = [
-      'inkflow:connector="straight"',
+      `inkflow:connector="${style}"`,
       startAt ? `inkflow:connect-start="${startAt}"` : "",
       endAt ? `inkflow:connect-end="${endAt}"` : "",
-      tool === "arrow" ? 'marker-end="url(#inkflow-arrow)"' : ""
+      arrow ? 'marker-end="url(#inkflow-arrow)"' : ""
     ].filter(Boolean).join(" ");
     await insertXml(
       // Routed into the insertion parent's space once it is known (a slide
       // drawn from a layout gets its own SVG first).
-      () => `<path d="${newConnectorPath("straight", a, b, insertParent().el)}" ${SHAPE_STYLE.line} ${attrs2}/>`,
-      tool,
-      { marker: tool === "arrow", before: () => before }
+      () => `<path d="${newConnectorPath(style, a, b, insertParent().el)}" ${SHAPE_STYLE.line} ${attrs2}/>`,
+      arrow ? "arrow" : "line",
+      { marker: arrow, before: () => before }
     );
   }
   function onToolDown(e, start) {
@@ -2707,7 +2882,7 @@
     const paperEl = e.currentTarget;
     paperEl.setPointerCapture(e.pointerId);
     ed.interacting = true;
-    const connecting = tool === "line" || tool === "arrow";
+    const connecting = tool in CONNECTOR_TOOLS;
     const startHit = connecting && !e.altKey ? siteAt(start, null) : null;
     if (startHit) start = { x: startHit.site.x, y: startHit.site.y };
     let endHit = null;
@@ -2741,7 +2916,15 @@
           y: start.y + Math.sign(end.y - start.y || 1) * d
         };
       }
-      drawDraft(tool, start, end);
+      drawDraft(
+        tool,
+        start,
+        end,
+        connecting ? {
+          a: startHit ? startHit.site : start,
+          b: endHit ? endHit.site : end
+        } : void 0
+      );
     };
     const up = () => {
       paperEl.removeEventListener("pointermove", move);
@@ -5197,6 +5380,15 @@
     addFile("Notes", slide.notes.rel, slide.notes.path);
     const deckPath = ed.model?.deckPath;
     if (deckPath) addFile("Deck", fileName(deckPath), deckPath);
+    const textInDeck = slide.md?.kind !== "file" && (slide.md?.kind === "inline" || Object.values(slide.zones).some((z) => z.kind === "text"));
+    if (textInDeck && editable)
+      files2.append(
+        button(
+          "Move text to Markdown",
+          "Move this slide's text out of deck.py into its own .md file",
+          () => void edit({ action: "to-markdown", slide: di })
+        )
+      );
     panel2.append(section("Files", files2));
     const arrows = attachedConnectors();
     if (arrows.length) {
@@ -5709,6 +5901,9 @@
     if (!zone && src?.writable && movable && isConnector(el2)) {
       panel2.append(connectorSection(sel));
     }
+    if (src?.writable && (movable || ed.layoutMode) && !isConnector(el2) && el2.localName !== "line") {
+      panel2.append(connectionPointsSection(sel));
+    }
     if (!zone && src?.writable && pictureOf(el2)) {
       panel2.append(pictureSection(sel));
     }
@@ -5773,9 +5968,13 @@
           connectorStyle(el2),
           (v) => {
             const style = v;
-            const d = connectorPath(el2, {}, style);
+            const d = connectorPath(el2, {}, style, null);
             send(
-              { "inkflow:connector": v, ...d ? { d } : {} },
+              {
+                "inkflow:connector": v,
+                "inkflow:bend": null,
+                ...d ? { d } : {}
+              },
               "Connector route"
             );
           }
@@ -5804,7 +6003,7 @@
       h(
         "p",
         { class: "hint" },
-        `Start: ${describe("start")} \xB7 End: ${describe("end")}. Drag an end onto a shape's dot to attach it; Alt while dragging keeps it free.`
+        `Start: ${describe("start")} \xB7 End: ${describe("end")}. Drag an end onto a shape's dot to attach it; Alt while dragging keeps it free.${connectorStyle(el2) === "elbow" ? " Drag the yellow handle to move the elbow's middle segment." : ""}`
       ),
       h(
         "div",
@@ -5813,6 +6012,17 @@
           "Re-route",
           "Re-attach to the shapes where they are now",
           () => reroute([sel])
+        ),
+        el2.hasAttribute("inkflow:bend") && button(
+          "Reset bend",
+          "Put the elbow's middle segment back where it goes by default",
+          () => {
+            const d = connectorPath(el2, {}, "elbow", null);
+            send(
+              { "inkflow:bend": null, ...d ? { d } : {} },
+              "Reset bend"
+            );
+          }
         ),
         button(
           "Detach",
@@ -5827,6 +6037,45 @@
         )
       )
     );
+  }
+  function connectionPointsSection(sel) {
+    const n2 = sitesPerSide(sel.el);
+    const box = section(
+      "Connection points",
+      row2(
+        "Per side",
+        selectInput(
+          [1, 2, 3, 4, 5, 7, 9].map((k) => ({
+            value: String(k),
+            label: k === 1 ? "1 (middle)" : String(k)
+          })),
+          String(n2),
+          (v) => void sendSvgOps(
+            [
+              {
+                sel,
+                ops: [
+                  {
+                    kind: "attrs",
+                    loc: sel.loc,
+                    set: {
+                      "inkflow:sites": v === "1" ? null : v
+                    }
+                  }
+                ]
+              }
+            ],
+            "Connection points"
+          )
+        )
+      )
+    );
+    box.addEventListener(
+      "mouseenter",
+      () => showSites([{ el: sel.el, active: null }])
+    );
+    box.addEventListener("mouseleave", () => showSites([]));
+    return box;
   }
   function textBoxSection(sel) {
     const el2 = sel.el;
@@ -8074,7 +8323,9 @@ ${area2.value.slice(pos)}`;
     r: "rect",
     o: "ellipse",
     l: "line",
-    a: "arrow"
+    a: "arrow",
+    e: "elbow",
+    c: "curve"
   };
   function onKey2(e) {
     const target = e.target;

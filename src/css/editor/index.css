@@ -1921,6 +1921,20 @@ body.offline #offline-banner {
     stroke: #fff;
 }
 
+#overlay .handle.bend {
+    fill: #ffd166;
+    stroke: var(--sel);
+    stroke-width: 1.5;
+}
+
+#overlay .handle.bend.ew {
+    cursor: ew-resize;
+}
+
+#overlay .handle.bend.ns {
+    cursor: ns-resize;
+}
+
 /* ── Formulas in rich text ── */
 
 foreignObject.rich-editing .math-chip {

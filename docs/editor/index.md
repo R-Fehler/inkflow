@@ -20,20 +20,32 @@ the file watcher shows each one the others' changes within a moment.
 | You change… | …and the editor writes |
 |---|---|
 | A shape, text, image, its position, size, rotation, colour | The slide's SVG, in place: only the attributes you touched |
-| Text in a Markdown zone | That zone's section of the slide's `.md` file |
-| Text in a zone filled from `deck.py` | The `zones={...}` entry in `deck.py` |
+| Text in a zone | That zone's section of the slide's `.md` file, created on the slide's first text (see below) |
+| Text in a zone filled by a `TextBox(...)` | Its `text=` in `deck.py` (its settings are Python) |
 | Slide order, new / duplicate / hidden / deleted slides | The `Deck(slides=[...])` list in `deck.py` |
 | Transition, animations, title, font size | That slide's `Slide(...)` call in `deck.py` |
 | Speaker notes | The slide's notes file (created on first edit if it has none) |
 | An inserted image | Copied into `assets/`, referenced relative to the SVG |
 | An inserted video | Copied into `assets/`; a `zone-video` rect in the slide's SVG plus `zones={"video": Video(...)}` in `deck.py`, as one undo step |
 | An image or video zone's settings | Its `Image(...)` / `Video(...)` call in `deck.py` |
-| A new text box | A `zone-text` rect in the slide's SVG; its Markdown in the slide's `.md` file (or `zones={...}` when it has none) |
+| A new text box | A `zone-text` rect in the slide's SVG; its Markdown in the slide's `.md` file |
 | A crop | The picture's SVG: the `<image>` goes into a nested `<svg>` frame |
 | A line or arrow attached to shapes | A `<path>` with `inkflow:connector` and `inkflow:connect-start` / `-end`; re-routed in the same edit whenever an attached shape moves |
+| An elbow's moved middle segment, a shape's extra connection points | `inkflow:bend` on the arrow, `inkflow:sites` on the shape |
 | A link, alt text, hiding, locking | The object in the SVG: an `<a href>` around it, a `<title>`, `display:none`, `inkflow:locked` |
 | Theme colours and fonts | One marked block in the project's `styles.css` |
 | Colour mode, base font size | `Deck(mode=..., font_size=...)` in `deck.py` |
+
+**Slide text lives in Markdown files.** The first time you type into a slide that
+has no `.md` file (a new slide from the gallery, say), the editor creates
+`slides/<slide-id>.md`, points the slide at it with `md=`, and writes the text
+there. Plain text already in that slide's `zones={...}` moves into the file in the
+same undo step, so `deck.py` keeps the deck's structure and the words live in
+Markdown. The file is named after the slide's id, so `slide:<id>` links keep
+working. For older slides, **Move text to Markdown** under *Files* in the slide
+panel does the same on demand (it also turns `md=Inline(...)` into a file).
+A `TextBox(...)` stays in `deck.py`, since its alignment and padding are Python
+settings.
 
 `deck.py` is edited structurally: comments and formatting are kept, and a comment
 written above a slide moves with it. If your slide list is built in code (a loop, a
@@ -179,11 +191,26 @@ layout itself is left alone.
 
 ## Lines, arrows and connectors
 
-Lines and arrows connect shapes, as in PowerPoint. With the line or arrow tool,
-hovering a shape shows its four connection points (the middle of each edge,
-turning with the shape). Start or end the drag on one and that end attaches
-there. From then on the arrow follows the shape: move, resize, rotate or nudge it
-and the arrow is re-routed in the same undo step.
+Lines and arrows connect shapes, as in PowerPoint. The toolbar has four tools:
+line (<kbd>L</kbd>), arrow (<kbd>A</kbd>), elbow arrow (<kbd>E</kbd>, right-angled
+turns) and curved arrow (<kbd>C</kbd>). With any of them, hovering a shape shows
+its connection points (the middle of each edge by default, turning with the
+shape). Start or end the drag on one and that end attaches there. From then on
+the arrow follows the shape: move, resize, rotate or nudge it and the arrow is
+re-routed in the same undo step.
+
+**More connection points.** A shape's **Connection points** section sets how many
+points each side offers (1, 2, 3, 4, 5, 7 or 9), so a box can take, say, three
+inputs on its left side. Hovering the section shows them on the slide. An arrow
+attached to a point keeps it when you later choose fewer.
+
+**Reshaping an elbow.** A selected elbow arrow has a yellow handle on its
+adjustable segment: the middle one between two facing sides, or the last vertical
+(or horizontal) run before it enters a top or side. Drag it to move that segment,
+for example to route around another shape. The arrow keeps that shape when its
+shapes move; **Reset bend** in the Connector section puts it back. Between two
+sides facing the same way, the default elbow now goes around rather than through
+the shapes.
 
 Select an arrow to see its two ends as handles; a filled handle is attached. Drag
 an end onto another shape's point to re-attach it, or into empty space to free it
@@ -312,7 +339,7 @@ Each result can also be downloaded straight from the dialog (the web page as a
 
 | Key | Action |
 |---|---|
-| <kbd>V</kbd> <kbd>T</kbd> <kbd>R</kbd> <kbd>O</kbd> <kbd>L</kbd> <kbd>A</kbd> <kbd>I</kbd> | Select, text, rectangle, ellipse, line, arrow, image |
+| <kbd>V</kbd> <kbd>T</kbd> <kbd>R</kbd> <kbd>O</kbd> <kbd>L</kbd> <kbd>A</kbd> <kbd>E</kbd> <kbd>C</kbd> <kbd>I</kbd> | Select, text, rectangle, ellipse, line, arrow, elbow arrow, curved arrow, image |
 | <kbd>Shift</kbd>+<kbd>I</kbd> | Insert a video |
 | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> | Undo / redo |
 | <kbd>Ctrl</kbd>+<kbd>C</kbd> <kbd>X</kbd> <kbd>V</kbd> <kbd>D</kbd> | Copy, cut, paste, duplicate (objects, or slides in the slide list) |
@@ -360,3 +387,10 @@ The editor covers the everyday slide work. Path and node editing, gradients,
 filters, masks and anything else a vector editor is for stay with Inkscape (or
 your editor of choice); open the same file there, and the editor picks up the
 result when you save.
+
+Inkscape draws only what is in the file, so a slide's SVG carries a preview: its
+layout as locked layers behind it, the theme's colours as a stylesheet, and its
+zones as faint dashed outlines (an unfilled shape would otherwise be painted
+black). Slides the editor creates get it straight away, and **Open ▾ → Inkscape**
+brings it up to date first (after a theme change, say) as an undoable step. For
+files made elsewhere, `inkflow sync` does the same for the whole deck.

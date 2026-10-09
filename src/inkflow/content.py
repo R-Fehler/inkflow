@@ -380,6 +380,9 @@ def _replace_with_foreignobject(
         variables = _zone_vars(el)
         if variables:
             fo.set("style", variables)
+    if el.get(ns.INKFLOW_SITES) is not None:
+        # How many connection points the box offers (the editor's arrows).
+        fo.set(ns.INKFLOW_SITES, el.get(ns.INKFLOW_SITES, ""))
 
     wrapper_style_parts: list[str] = list(shape_css)
     if item.valign is not None:

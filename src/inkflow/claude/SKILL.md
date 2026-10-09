@@ -87,6 +87,9 @@ Paths are relative to `deck.py`; keep media files in `assets/`.
 - A free text box is a zone too: a `<rect id="zone-text">` (or `zone-text-2`, …) in
   the slide's own SVG, filled by a `::text::` section in the slide's `.md` (or
   `zones={"text": "..."}`). Its text wraps; SVG `<text>` does not.
+- Slide text belongs in the slide's `.md` file, not in `deck.py`: give a slide
+  without one `md="<slide-id>.md"` in `slides/` (the editor does the same on the
+  first text typed into it); keep `zones={...}` for images, videos and `TextBox`.
 - Text inside a drawn shape: give the zone rect (or ellipse) its own fill/stroke and
   `inkflow:show-shape="true"`; the shape is then painted as the text box's
   background and border (otherwise a zone shape is only a placeholder). Padding and
@@ -102,7 +105,10 @@ Paths are relative to `deck.py`; keep media files in `assets/`.
 - `inkflow:locked="true"` on an object keeps the visual editor from selecting it.
 - An arrow attached to shapes is a `<path inkflow:connector="straight|elbow|curved"
   inkflow:connect-start="<id>:right" inkflow:connect-end="<id>:left" d="…">` (sides:
-  top, right, bottom, left). Keep its `d` roughly right; the author's "Re-route all"
+  top, right, bottom, left, or a point along a side: `top@0.25`, clockwise from the
+  side's first corner; a shape's `inkflow:sites="3"` offers three per side). An
+  elbow's moved middle segment is `inkflow:bend="x:640"` (or `y:`) in slide units.
+  Keep its `d` roughly right; the author's "Re-route all"
   in the editor snaps it to the shapes. Rename an id and update `connect-*` too.
 
 ## Check your work

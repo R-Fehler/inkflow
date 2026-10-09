@@ -10,14 +10,20 @@
 import { applyStepInstant } from "../shared/step";
 import { parseViewBox } from "../shared/viewbox";
 import {
+    type Bend,
     type ConnectorStyle,
     type End,
     endpointsOf,
+    formatBend,
+    MAX_SITES,
     nearestSite,
+    type Pt,
+    parseBend,
     parseConnection,
     pathData,
     route,
     type Site,
+    siteByName,
     sitesFromCorners,
 } from "./connectors";
 import { h, svgEl, toast } from "./dom";
@@ -41,7 +47,15 @@ import {
 } from "./geom";
 import { edit } from "./net";
 import { type SnapTargets, snapBox, snapEdges, targetsFor } from "./snap";
-import { currentRendered, currentSlide, ed, emit, on, sourceOf } from "./state";
+import {
+    CONNECTOR_TOOLS,
+    currentRendered,
+    currentSlide,
+    ed,
+    emit,
+    on,
+    sourceOf,
+} from "./state";
 import type { Selected, SvgOp } from "./types";
 
 const canvas = document.getElementById("canvas")!;
@@ -314,6 +328,7 @@ const GEOM_ATTRS = [
     "d",
     "inkflow:connect-start",
     "inkflow:connect-end",
+    "inkflow:bend",
 ];
 
 export function elementGeom(el: SVGGraphicsElement): ElementGeom {
@@ -674,7 +689,7 @@ export function selectionBox(): Box | null {
 }
 
 export const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
-type Handle = (typeof HANDLES)[number] | "rot" | "c-start" | "c-end";
+type Handle = (typeof HANDLES)[number] | "rot" | "c-start" | "c-end" | "c-bend";
 
 function handlePoint(h: Handle, b: Box): { x: number; y: number } {
     const cx = b.x + b.width / 2;
@@ -756,6 +771,21 @@ export function drawOverlay(): void {
                 class: `handle endpoint${attached ? " attached" : ""}`,
             });
             handle.dataset.handle = `c-${which}`;
+            overlay.append(handle);
+        }
+        const bend = connectorRoute(connector)?.bend;
+        if (bend) {
+            // The elbow's adjustable segment: drag it to reshape the route.
+            const p = apply(m, bend.mid);
+            const handle = svgEl("rect", {
+                x: p.x - 5,
+                y: p.y - 5,
+                width: 10,
+                height: 10,
+                transform: `rotate(45 ${p.x} ${p.y})`,
+                class: `handle bend ${bend.axis === "x" ? "ew" : "ns"}`,
+            });
+            handle.dataset.handle = "c-bend";
             overlay.append(handle);
         }
     }
@@ -952,25 +982,51 @@ function toSlideMat(el: Element): Mat | null {
     return ctm ? multiply(invert(rootCTM()), mat(ctm)) : null;
 }
 
-/** An object's connection sites, in slide units. */
-export function sitesOf(el: Element): Site[] | null {
+const SITES = "inkflow:sites";
+
+/** How many connection points per side an object offers (inkflow:sites). */
+export function sitesPerSide(el: Element): number {
+    const n = Number(el.getAttribute(SITES) ?? 1);
+    return Number.isFinite(n)
+        ? Math.max(1, Math.min(MAX_SITES, Math.round(n)))
+        : 1;
+}
+
+// An object's corners in slide units, and whether it is round (its sites
+// then sit on the ellipse rather than the box around it).
+function cornersOf(el: Element): { corners: Pt[]; round: boolean } | null {
     try {
         const m = measure(el);
         if (!m) return null;
         const toSlide = multiply(invert(rootCTM()), mat(m.ctm));
         const b = m.bbox;
         if (b.width <= 0 && b.height <= 0) return null;
-        return sitesFromCorners(
-            [
+        const tag = el.getAttribute("data-ink-tag") ?? el.localName;
+        return {
+            corners: [
                 { x: b.x, y: b.y },
                 { x: b.x + b.width, y: b.y },
                 { x: b.x + b.width, y: b.y + b.height },
                 { x: b.x, y: b.y + b.height },
             ].map((p) => apply(toSlide, p)),
-        );
+            round: tag === "ellipse" || tag === "circle",
+        };
     } catch {
         return null;
     }
+}
+
+/** An object's connection sites, in slide units. */
+export function sitesOf(el: Element): Site[] | null {
+    const c = cornersOf(el);
+    return c ? sitesFromCorners(c.corners, sitesPerSide(el), c.round) : null;
+}
+
+/** One named site of an object (offered or not: a connection keeps its
+ * place when the object offers fewer points later). */
+function siteOf(el: Element, name: string): Site | null {
+    const c = cornersOf(el);
+    return c ? siteByName(c.corners, name, c.round) : null;
 }
 
 function byId(id: string): Element | null {
@@ -1047,9 +1103,7 @@ function connectorEnd(conn: Element, which: "start" | "end"): End | null {
     const c = parseConnection(conn.getAttribute(ENDS[which]));
     if (c) {
         const target = byId(c.id);
-        const site = target
-            ? sitesOf(target)?.find((s) => s.name === c.site)
-            : null;
+        const site = target ? siteOf(target, c.site) : null;
         if (site) return site;
     }
     const pts = endpointsOf(conn.getAttribute("d") ?? "");
@@ -1058,18 +1112,32 @@ function connectorEnd(conn: Element, which: "start" | "end"): End | null {
     return apply(m, which === "start" ? pts.start : pts.end);
 }
 
+const BEND = "inkflow:bend";
+
+/** A connector's route in slide units (its elbow bend as set on it). */
+function connectorRoute(
+    conn: Element,
+    ends: { start?: End; end?: End } = {},
+    style: ConnectorStyle = connectorStyle(conn),
+    bend: Bend | null = parseBend(conn.getAttribute(BEND)),
+): ReturnType<typeof route> | null {
+    const a = ends.start ?? connectorEnd(conn, "start");
+    const b = ends.end ?? connectorEnd(conn, "end");
+    if (!a || !b) return null;
+    return route(style, a, b, bend);
+}
+
 /** The path data for a connector in its own user space. */
 export function connectorPath(
     conn: Element,
     ends: { start?: End; end?: End } = {},
     style: ConnectorStyle = connectorStyle(conn),
+    bend: Bend | null = parseBend(conn.getAttribute(BEND)),
 ): string | null {
-    const a = ends.start ?? connectorEnd(conn, "start");
-    const b = ends.end ?? connectorEnd(conn, "end");
+    const r = connectorRoute(conn, ends, style, bend);
     const toSlide = toSlideMat(conn);
-    if (!a || !b || !toSlide) return null;
+    if (!r || !toSlide) return null;
     const local = invert(toSlide);
-    const r = route(style, a, b);
     return pathData({ ...r, points: r.points.map((p) => apply(local, p)) });
 }
 
@@ -1177,7 +1245,13 @@ function connectorMoveOps(sel: Selected, dx: number, dy: number): SvgOp[] {
     for (const [k, v] of Object.entries(set)) {
         if (v === null) conn.removeAttribute(k);
     }
-    const d = connectorPath(conn, ends);
+    // A moved elbow keeps its shape: its bend moves along.
+    let bend = parseBend(conn.getAttribute(BEND));
+    if (bend) {
+        bend = { ...bend, at: bend.at + (bend.axis === "x" ? dx : dy) };
+        set[BEND] = formatBend(bend);
+    }
+    const d = connectorPath(conn, ends, connectorStyle(conn), bend);
     if (d) set.d = d;
     applyPlanToDom(conn, { d: set.d ?? null });
     return [{ kind: "attrs", loc: sel.loc, set }];
@@ -1238,6 +1312,36 @@ function endpointPlans(
         set: { d, [ENDS[drag.which]]: attach },
     });
     return [{ sel, ops }];
+}
+
+/** Drag an elbow's adjustable segment along its axis. */
+function bendPlans(
+    drag: { snaps: Snapshot[] },
+    p: { x: number; y: number },
+): { sel: Selected; ops: SvgOp[] }[] {
+    const sel = drag.snaps[0].sel;
+    const conn = sel.el;
+    const current = connectorRoute(conn)?.bend;
+    if (!current) return [];
+    const bend: Bend = {
+        axis: current.axis,
+        at: Math.round(current.axis === "x" ? p.x : p.y),
+    };
+    const d = connectorPath(conn, {}, "elbow", bend);
+    if (!d) return [];
+    applyPlanToDom(conn, { d });
+    return [
+        {
+            sel,
+            ops: [
+                {
+                    kind: "attrs",
+                    loc: sel.loc,
+                    set: { d, [BEND]: formatBend(bend) },
+                },
+            ],
+        },
+    ];
 }
 
 // ── Sending plans ──
@@ -1421,6 +1525,7 @@ type Drag =
       }
     | { kind: "rotate"; snaps: Snapshot[]; center: { x: number; y: number } }
     | { kind: "endpoint"; which: "start" | "end"; snaps: Snapshot[] }
+    | { kind: "bend"; snaps: Snapshot[] }
     | { kind: "marquee"; additive: boolean };
 
 let pointer: {
@@ -1440,6 +1545,7 @@ function beginDrag(handle: Handle | null): Drag | null {
     const snaps = sels.map(snapshot);
     const start = unionBoxes(snaps.map((s) => s.box));
     if (!start) return null;
+    if (handle === "c-bend") return { kind: "bend", snaps };
     if (handle === "c-start" || handle === "c-end") {
         return {
             kind: "endpoint",
@@ -1613,6 +1719,9 @@ function updateDrag(drag: Drag, e: PointerEvent): void {
     } else if (drag.kind === "endpoint") {
         restore(drag.snaps);
         lastPlans = endpointPlans(drag, p1, e);
+    } else if (drag.kind === "bend") {
+        restore(drag.snaps);
+        lastPlans = bendPlans(drag, p1);
     } else if (drag.kind === "marquee") {
         marquee = {
             x: Math.min(p0.x, p1.x),
@@ -1659,13 +1768,15 @@ async function endDrag(drag: Drag): Promise<void> {
     const label =
         drag.kind === "endpoint"
             ? "Connect"
-            : drag.kind === "move"
-              ? "Move"
-              : drag.kind === "resize"
-                ? ed.cropMode
-                    ? "Crop"
-                    : "Resize"
-                : "Rotate";
+            : drag.kind === "bend"
+              ? "Reshape arrow"
+              : drag.kind === "move"
+                ? "Move"
+                : drag.kind === "resize"
+                  ? ed.cropMode
+                      ? "Crop"
+                      : "Resize"
+                  : "Rotate";
     const ok = await sendSvgOps(plans, label);
     if (!ok) restore(drag.snaps);
     drawOverlay();
@@ -1748,10 +1859,7 @@ function onPointerMove(e: PointerEvent): void {
                 hoverEl = el;
                 drawOverlay();
             }
-        } else if (
-            (ed.tool === "line" || ed.tool === "arrow") &&
-            e.buttons === 0
-        ) {
+        } else if (ed.tool in CONNECTOR_TOOLS && e.buttons === 0) {
             // The connection sites a line or arrow would attach to.
             const p = clientToSlide(e.clientX, e.clientY);
             const hit = e.altKey ? null : siteAt(p, null);
