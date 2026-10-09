@@ -22,6 +22,13 @@ export function connected(): boolean {
     return ws !== null && ws.readyState === WebSocket.OPEN;
 }
 
+// After "Quit Inkflow" the page stops reconnecting to the stopped server.
+let stopped = false;
+
+export function stopReconnecting(): void {
+    stopped = true;
+}
+
 // Callers waiting for the connection (the start page's first request).
 let waiting: (() => void)[] = [];
 
@@ -46,7 +53,7 @@ export function connect(port: number): void {
             resolve({ ok: false, error: "disconnected from the server" });
         }
         pending.clear();
-        window.setTimeout(() => connect(port), 1500);
+        if (!stopped) window.setTimeout(() => connect(port), 1500);
     };
     sock.onmessage = (event) => {
         let msg: Record<string, unknown>;

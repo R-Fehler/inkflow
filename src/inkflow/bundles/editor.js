@@ -957,6 +957,10 @@
   function connected() {
     return ws !== null && ws.readyState === WebSocket.OPEN;
   }
+  var stopped = false;
+  function stopReconnecting() {
+    stopped = true;
+  }
   var waiting = [];
   function whenConnected() {
     if (connected()) return Promise.resolve();
@@ -978,7 +982,7 @@
         resolve({ ok: false, error: "disconnected from the server" });
       }
       pending.clear();
-      window.setTimeout(() => connect(port), 1500);
+      if (!stopped) window.setTimeout(() => connect(port), 1500);
     };
     sock.onmessage = (event) => {
       let msg;
@@ -3402,6 +3406,10 @@ Decks: new, open, recent` : "Decks";
         menu2.append(item);
       }
     }
+    menu2.append(
+      h("div", { class: "menu-sep" }),
+      menuItem("Quit Inkflow", () => void quit())
+    );
     const r = button.getBoundingClientRect();
     showMenu(r.left, r.bottom + 4);
   }
@@ -3412,6 +3420,15 @@ Decks: new, open, recent` : "Decks";
       return false;
     }
     closeDialog();
+    if (res.redirect) {
+      toast("That deck is already open: switching to it\u2026");
+      location.assign(String(res.redirect));
+      return true;
+    }
+    if (!res.opening) {
+      toast("That deck is the one open here");
+      return true;
+    }
     toast(
       `Opening ${baseName(String(res.deck ?? path).replace(/[\\/]deck\.py$/, ""))}\u2026`
     );
@@ -3699,6 +3716,32 @@ Decks: new, open, recent` : "Decks";
       { wide: true }
     );
   }
+  async function quit() {
+    const res = await request({ action: "quit" });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot stop inkflow from here", "error");
+      return;
+    }
+    stopReconnecting();
+    document.getElementById("start")?.remove();
+    document.body.classList.add("start-mode");
+    document.body.append(
+      h(
+        "div",
+        { id: "start", class: "start" },
+        h(
+          "div",
+          { class: "start-card" },
+          h("div", { class: "start-logo" }, "ink", h("b", {}, "flow")),
+          h(
+            "p",
+            { class: "start-lead" },
+            "Inkflow has stopped. Everything was saved as you went; you can close this tab."
+          )
+        )
+      )
+    );
+  }
   async function showStart() {
     document.body.classList.add("start-mode");
     await whenConnected();
@@ -3751,7 +3794,16 @@ Decks: new, open, recent` : "Decks";
             if (data) openDeckDialog(data);
           })
         ),
-        recent
+        recent,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "start-quit",
+            onclick: () => void quit()
+          },
+          "Quit Inkflow"
+        )
       )
     );
     document.body.append(page);

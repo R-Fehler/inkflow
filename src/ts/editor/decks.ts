@@ -5,7 +5,7 @@
 
 import { closeDialog, openDialog } from "./dialog";
 import { clear, h, toast } from "./dom";
-import { request, whenConnected } from "./net";
+import { request, stopReconnecting, whenConnected } from "./net";
 import { menuItem, showMenu } from "./sorter";
 import { ed, on } from "./state";
 
@@ -101,6 +101,10 @@ async function openMenu(): Promise<void> {
             menu.append(item);
         }
     }
+    menu.append(
+        h("div", { class: "menu-sep" }),
+        menuItem("Quit Inkflow", () => void quit()),
+    );
     const r = button.getBoundingClientRect();
     showMenu(r.left, r.bottom + 4);
 }
@@ -112,6 +116,17 @@ async function openDeck(path: string): Promise<boolean> {
         return false;
     }
     closeDialog();
+    if (res.redirect) {
+        // Another inkflow has this deck open: edit it there, never in two
+        // servers at once.
+        toast("That deck is already open: switching to it…");
+        location.assign(String(res.redirect));
+        return true;
+    }
+    if (!res.opening) {
+        toast("That deck is the one open here");
+        return true;
+    }
     toast(
         `Opening ${baseName(String(res.deck ?? path).replace(/[\\/]deck\.py$/, ""))}…`,
     );
@@ -434,6 +449,34 @@ function openDeckDialog(data: DeckInfo): void {
     );
 }
 
+// Stops this server (the deck's files are saved as you go); the page says so.
+async function quit(): Promise<void> {
+    const res = await request({ action: "quit" });
+    if (!res.ok) {
+        toast(res.error ?? "Cannot stop inkflow from here", "error");
+        return;
+    }
+    stopReconnecting();
+    document.getElementById("start")?.remove();
+    document.body.classList.add("start-mode");
+    document.body.append(
+        h(
+            "div",
+            { id: "start", class: "start" },
+            h(
+                "div",
+                { class: "start-card" },
+                h("div", { class: "start-logo" }, "ink", h("b", {}, "flow")),
+                h(
+                    "p",
+                    { class: "start-lead" },
+                    "Inkflow has stopped. Everything was saved as you went; you can close this tab.",
+                ),
+            ),
+        ),
+    );
+}
+
 // ── Start page ──
 //
 // The editor without a deck (`inkflow edit --start`, the desktop launcher):
@@ -494,6 +537,15 @@ export async function showStart(): Promise<void> {
                 }),
             ),
             recent,
+            h(
+                "button",
+                {
+                    type: "button",
+                    class: "start-quit",
+                    onclick: () => void quit(),
+                },
+                "Quit Inkflow",
+            ),
         ),
     );
     document.body.append(page);

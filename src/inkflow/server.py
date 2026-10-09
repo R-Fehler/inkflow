@@ -34,6 +34,7 @@ from watchfiles import (
 from websockets.asyncio.server import ServerConnection
 from websockets.asyncio.server import serve as ws_serve
 
+from inkflow import instances
 from inkflow.assets import MIME_TYPES, AssetRoots
 from inkflow.edit import (
     NO_EDIT_COMMANDS,
@@ -104,6 +105,8 @@ class EditorState(TypedDict):
     """Undo history and file writes for the editor (one per open deck)."""
     switch: asyncio.Event | None
     """Set when the editor asked to open another deck (see ``serve``)."""
+    shutdown: asyncio.Event | None
+    """Set to stop the server (the editor's "Quit Inkflow", or idle)."""
 
 
 _editor: EditorState = {
@@ -112,6 +115,7 @@ _editor: EditorState = {
     "clients": set(),
     "session": None,
     "switch": None,
+    "shutdown": None,
 }
 
 
@@ -387,6 +391,8 @@ async def _handle_edit_op(
     )
     if session.switch_to is not None and _editor["switch"] is not None:
         _editor["switch"].set()
+    if session.quit_requested and _editor["shutdown"] is not None:
+        _editor["shutdown"].set()
 
 
 def make_ws_handler(
@@ -711,6 +717,29 @@ def make_http_handler(
             parts = request_line.split(" ", 2)
             request_path = parts[1] if len(parts) >= 2 else "/"
 
+            if request_path == instances.PROBE_PATH:
+                # Who is serving here (see instances.py): another inkflow
+                # opening a deck asks before starting a second server for it.
+                session = _editor["session"]
+                body = json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "deck": str(session.deck_path)
+                        if session is not None and session.has_deck
+                        else None,
+                    }
+                ).encode()
+                writer.write(
+                    b"HTTP/1.1 200 OK\r\n"
+                    + b"Content-Type: application/json\r\n"
+                    + b"Cache-Control: no-store\r\n"
+                    + b"Connection: close\r\n"
+                    + f"Content-Length: {len(body)}\r\n\r\n".encode()
+                    + body
+                )
+                await writer.drain()
+                return
+
             download = _export_download(request_path)
             if download is not None:
                 name, mime, body = await asyncio.to_thread(*download)
@@ -802,12 +831,21 @@ async def _watch(
 # ── Keyboard handler ──────────────────────────────────────────────────────────
 
 
+def open_browser(url: str) -> None:
+    _open_browser(url)
+
+
 def _open_browser(url: str) -> None:
     # Redirect fd 1/2 to /dev/null so the browser process can't write startup
     # noise to the terminal and corrupt the Rich Live cursor tracking.
+    try:
+        saved_out = os.dup(1)
+        saved_err = os.dup(2)
+    except OSError:
+        # No console at all (pythonw on Windows): nothing to protect.
+        webbrowser.open(url)
+        return
     devnull = os.open(os.devnull, os.O_WRONLY)
-    saved_out = os.dup(1)
-    saved_err = os.dup(2)
     try:
         os.dup2(devnull, 1)
         os.dup2(devnull, 2)
@@ -903,17 +941,27 @@ async def serve(
     levels: Levels,
     open_path: str | None = None,
     exporters: Exporters | None = None,
+    quit_when_idle: float | None = None,
 ) -> None:
     """Run the server until quit. ``open_path`` (e.g. ``"/edit"``) opens a
     browser on that page once the first build is done; ``exporters`` enable
     the editor's Export dialog. Without a deck (``None``) the editor shows its
-    start page: a new deck, another one, or a recent one.
+    start page: a new deck, another one, or a recent one. With
+    ``quit_when_idle`` (seconds) it stops once no page has been connected for
+    that long (a server started without a terminal to stop it from).
 
     When the editor opens another deck (or creates one), the servers close and
     start again on the same ports for that deck; open pages reconnect to it."""
     while True:
         next_deck = await _serve_deck(
-            deck_path, host, http_port, ws_port, levels, open_path, exporters
+            deck_path,
+            host,
+            http_port,
+            ws_port,
+            levels,
+            open_path,
+            exporters,
+            quit_when_idle,
         )
         if next_deck is None:
             return
@@ -926,6 +974,22 @@ async def serve(
         _editor["model"] = None
 
 
+async def _quit_when_idle(shutdown: asyncio.Event, delay: float) -> None:
+    """Stop once no page has been connected for ``delay`` seconds.
+
+    The delay covers a reload, and the moment a deck switch restarts the
+    servers, so only closing the last tab (or never opening one) stops it.
+    """
+    idle = 0.0
+    while True:
+        await asyncio.sleep(1)
+        idle = 0.0 if _state["ws_clients"] else idle + 1
+        if idle >= delay:
+            report("Stopping", f"no page open for {delay:g} seconds")
+            shutdown.set()
+            return
+
+
 async def _serve_deck(
     deck_path: Path | None,
     host: str,
@@ -934,6 +998,7 @@ async def _serve_deck(
     levels: Levels,
     open_path: str | None,
     exporters: Exporters | None,
+    quit_when_idle: float | None = None,
 ) -> Path | None:
     """Serve one deck until quit (None) or until the editor opens another
     (its deck.py). Without a deck, only the editor's start page is served:
@@ -943,6 +1008,7 @@ async def _serve_deck(
     shutdown = asyncio.Event()
     switch = asyncio.Event()
     _editor["switch"] = switch
+    _editor["shutdown"] = shutdown
 
     loop = asyncio.get_running_loop()
     uninstall_shutdown_handler = install_shutdown_handler(loop, shutdown)
@@ -971,6 +1037,16 @@ async def _serve_deck(
                 )
                 return
             raise
+        # Other inkflow processes find this server (and its deck) here.
+        instances.register(
+            instances.Instance(
+                pid=os.getpid(),
+                host=host,
+                port=http_port,
+                ws_port=ws_port,
+                deck=str(deck_path.resolve()) if deck_path else None,
+            )
+        )
 
         with Live(Text(""), console=console, auto_refresh=False) as live:
             ui = LiveUI(
@@ -1006,6 +1082,15 @@ async def _serve_deck(
                             if deck_path is not None
                             else []
                         ),
+                        *(
+                            [
+                                asyncio.create_task(
+                                    _quit_when_idle(shutdown, quit_when_idle)
+                                )
+                            ]
+                            if quit_when_idle is not None
+                            else []
+                        ),
                         asyncio.create_task(
                             _read_keys(
                                 deck_path,
@@ -1038,6 +1123,8 @@ async def _serve_deck(
     finally:
         uninstall_shutdown_handler()
         _editor["switch"] = None
+        _editor["shutdown"] = None
+        instances.unregister(os.getpid())
     if switch.is_set() and not shutdown.is_set():
         return _editor["session"].switch_to if _editor["session"] else None
     return None

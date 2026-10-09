@@ -1,8 +1,10 @@
 """A desktop launcher for the editor (``inkflow setup-desktop``).
 
-The launcher runs ``inkflow edit --start`` in a terminal window: the editor
-opens in the browser on its start page (a new deck, another one, a recent
-one), and closing the terminal stops the server. It names this Python and
+The launcher runs ``inkflow edit --start``: the editor opens in the browser on
+its start page (a new deck, another one, a recent one). By default the server
+runs hidden and stops a minute after its last page closes (or with "Quit
+Inkflow"); ``terminal=True`` runs it in a terminal window instead, which shows
+its status and stops it when closed. It names this Python and
 ``-m inkflow`` rather than whatever ``inkflow`` is on PATH, so it starts the
 installation that created it (``uv tool install inkflow`` keeps that path
 across upgrades).
@@ -28,18 +30,29 @@ class LauncherError(Exception):
     pass
 
 
-def command() -> list[str]:
-    """What the launcher runs."""
-    return [sys.executable, "-m", "inkflow", "edit", "--start"]
+IDLE_SECONDS = 60
+"""A hidden server stops once no page has been open this long."""
 
 
-def install() -> list[Path]:
+def command(terminal: bool = False) -> list[str]:
+    """What the launcher runs: in a terminal, or hidden (then it stops by
+    itself once no page is open)."""
+    python = sys.executable
+    if not terminal and sys.platform == "win32":
+        # pythonw: no console window.
+        windowless = Path(python).with_name("pythonw.exe")
+        python = str(windowless) if windowless.exists() else python
+    args = [python, "-m", "inkflow", "edit", "--start"]
+    return args if terminal else [*args, f"--quit-when-idle={IDLE_SECONDS}"]
+
+
+def install(terminal: bool = False) -> list[Path]:
     """Add the launcher to the application menu; returns the files written."""
     if sys.platform == "darwin":
-        return [_macos()]
+        return [_macos(terminal)]
     if sys.platform == "win32":
-        return [_windows()]
-    return _linux()
+        return [_windows(terminal)]
+    return _linux(terminal)
 
 
 def uninstall() -> list[Path]:
@@ -82,7 +95,7 @@ def _icon_svg() -> bytes:
     return files("inkflow").joinpath("theme", "icon.svg").read_bytes()
 
 
-def desktop_entry(exec_line: str, icon: Path) -> str:
+def desktop_entry(exec_line: str, icon: Path, terminal: bool = False) -> str:
     return (
         "[Desktop Entry]\n"
         "Type=Application\n"
@@ -90,14 +103,15 @@ def desktop_entry(exec_line: str, icon: Path) -> str:
         f"Comment={COMMENT}\n"
         f"Exec={exec_line}\n"
         f"Icon={icon}\n"
-        # The terminal shows the server's status; closing it stops the server.
-        "Terminal=true\n"
+        # A terminal shows the server's status, and closing it stops the
+        # server; without one the server stops once no page is open.
+        f"Terminal={'true' if terminal else 'false'}\n"
         "Categories=Office;Presentation;\n"
         "Keywords=slides;presentation;deck;svg;\n"
     )
 
 
-def _linux() -> list[Path]:
+def _linux(terminal: bool) -> list[Path]:
     icon = _icon_file()
     icon.parent.mkdir(parents=True, exist_ok=True)
     icon.write_bytes(_icon_svg())
@@ -105,8 +119,8 @@ def _linux() -> list[Path]:
     entry.parent.mkdir(parents=True, exist_ok=True)
     # Exec quoting: the desktop-entry spec's, which matches the shell's for
     # the paths that occur here (no %, $ or backquotes).
-    exec_line = " ".join(shlex.quote(part) for part in command())
-    entry.write_text(desktop_entry(exec_line, icon), encoding="utf-8")
+    exec_line = " ".join(shlex.quote(part) for part in command(terminal))
+    entry.write_text(desktop_entry(exec_line, icon, terminal), encoding="utf-8")
     entry.chmod(0o755)
     if shutil.which("update-desktop-database"):
         subprocess.run(
@@ -120,7 +134,7 @@ def _linux() -> list[Path]:
 # ── macOS ──
 
 
-def _macos() -> Path:
+def _macos(terminal: bool) -> Path:
     app = Path.home() / "Applications" / f"{NAME}.app"
     macos = app / "Contents" / "MacOS"
     macos.mkdir(parents=True, exist_ok=True)
@@ -136,18 +150,20 @@ def _macos() -> Path:
     (app / "Contents" / "Info.plist").write_text(
         "\n".join(plist) + "\n", encoding="utf-8"
     )
-    # Run in Terminal, so the server's status shows and closing it stops it.
-    line = " ".join(shlex.quote(part) for part in command())
+    line = " ".join(shlex.quote(part) for part in command(terminal))
     script = macos / NAME
-    script.write_text(
-        "#!/bin/sh\n"
-        + "osascript -e "
-        + shlex.quote(
-            f'tell application "Terminal" to do script "{_applescript(line)}"'
+    if terminal:
+        # In Terminal: the server's status shows, and closing it stops it.
+        body = (
+            "osascript -e "
+            + shlex.quote(
+                f'tell application "Terminal" to do script "{_applescript(line)}"'
+            )
+            + " -e 'tell application \"Terminal\" to activate'\n"
         )
-        + " -e 'tell application \"Terminal\" to activate'\n",
-        encoding="utf-8",
-    )
+    else:
+        body = f"exec {line} >/dev/null 2>&1\n"
+    script.write_text("#!/bin/sh\n" + body, encoding="utf-8")
     script.chmod(0o755)
     return app
 
@@ -164,11 +180,11 @@ def _start_menu() -> Path:
     return Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
 
 
-def _windows() -> Path:
+def _windows(terminal: bool) -> Path:
     link = _start_menu() / f"{NAME}.lnk"
     link.parent.mkdir(parents=True, exist_ok=True)
-    exe, *args = command()
-    # python.exe (not pythonw) keeps a console window: the server's status.
+    # python.exe keeps a console window (the server's status), pythonw none.
+    exe, *args = command(terminal)
     ps = (
         "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:INKFLOW_LNK);"
         "$s.TargetPath = $env:INKFLOW_EXE;"

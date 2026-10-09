@@ -7,11 +7,12 @@ from pathlib import Path
 
 import click
 
+from inkflow import instances
 from inkflow.cli._common import deck_option, main, resolve_deck_path
 from inkflow.editor.session import Exporters
 from inkflow.export import build_pdf, build_static_html
 from inkflow.logging import Levels, report
-from inkflow.server import pick_ports
+from inkflow.server import open_browser, pick_ports
 from inkflow.server import serve as _serve
 
 # The editor's Export dialog runs the same builds as the commands below.
@@ -56,9 +57,24 @@ def serve(
     - `q`: quit (Ctrl-D and Ctrl-C also work)
     """
     resolved = resolve_deck_path(deck_path)
+    if _already_served(resolved, "/", open_it=False):
+        return
     port, ws_port = pick_ports(host, port, ws_port)
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(_serve(resolved, host, port, ws_port, levels, exporters=EXPORTERS))
+
+
+def _already_served(deck_py: Path, path: str, *, open_it: bool) -> bool:
+    """One server per deck: when another inkflow already serves ``deck_py``,
+    say where (and open it) instead of starting a second one that would write
+    the same files."""
+    other = instances.serving(deck_py)
+    if other is None:
+        return False
+    report("Already open", f"{other.url(path)} (process {other.pid})")
+    if open_it:
+        open_browser(other.url(path))
+    return True
 
 
 @main.command()
@@ -93,6 +109,17 @@ def serve(
     is_flag=True,
     help="Open the start page (new deck, open a deck, recent decks) instead of a deck.",
 )
+@click.option(
+    "--quit-when-idle",
+    "quit_when_idle",
+    type=float,
+    is_flag=False,
+    flag_value=60.0,
+    default=None,
+    metavar="SECONDS",
+    help="Stop once no editor or presenter page has been open this long "
+    + "[default when given: 60]. For a server without a terminal.",
+)
 @click.pass_obj
 def edit(
     levels: Levels,
@@ -102,6 +129,7 @@ def edit(
     ws_port: int | None,
     no_open: bool,
     start: bool,
+    quit_when_idle: float | None,
 ) -> None:
     """Open the visual editor: click, drag and type on your slides.
 
@@ -118,6 +146,9 @@ def edit(
     or pick a recent one. `inkflow setup-desktop` adds a launcher for that to
     the desktop's application menu.
 
+    One server per deck: if another inkflow already has the deck open, this
+    opens its editor instead of starting a second server for the same files.
+
     Keyboard shortcuts in the terminal are those of `serve`, plus `e` to open the
     editor again.
     """
@@ -127,12 +158,21 @@ def edit(
         report("Starting", "no deck here: the editor opens on its start page")
     else:
         resolved = resolve_deck_path(deck_path)
+        if _already_served(resolved, "/edit", open_it=not no_open):
+            return
     open_path = None if no_open else "/edit"
     port, ws_port = pick_ports(host, port, ws_port)
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(
             _serve(
-                resolved, host, port, ws_port, levels, open_path, exporters=EXPORTERS
+                resolved,
+                host,
+                port,
+                ws_port,
+                levels,
+                open_path,
+                exporters=EXPORTERS,
+                quit_when_idle=quit_when_idle,
             )
         )
 

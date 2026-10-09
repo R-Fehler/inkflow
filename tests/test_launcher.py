@@ -13,7 +13,11 @@ from inkflow.cli import main
 
 
 def test_launcher_starts_this_installation_on_the_start_page() -> None:
-    assert launcher.command() == [sys.executable, "-m", "inkflow", "edit", "--start"]
+    base = [sys.executable, "-m", "inkflow", "edit", "--start"]
+    assert launcher.command(terminal=True) == base
+    if sys.platform != "win32":
+        # Hidden: stops by itself once no page is open.
+        assert launcher.command() == [*base, "--quit-when-idle=60"]
 
 
 @pytest.mark.skipif(sys.platform in ("darwin", "win32"), reason="freedesktop only")
@@ -24,10 +28,13 @@ def test_linux_menu_entry_and_icon(
     result = CliRunner().invoke(main, ["setup-desktop"])
     assert result.exit_code == 0, result.output
     entry = (tmp_path / "applications" / "inkflow.desktop").read_text()
-    assert "Exec=" in entry and "-m inkflow edit --start" in entry
-    assert "Terminal=true" in entry
+    assert "Exec=" in entry and "-m inkflow edit --start --quit-when-idle" in entry
+    assert "Terminal=false" in entry
     icon = tmp_path / "icons" / "hicolor" / "scalable" / "apps" / "inkflow.svg"
     assert f"Icon={icon}" in entry and icon.read_bytes().startswith(b"<")
+    result = CliRunner().invoke(main, ["setup-desktop", "--terminal"])
+    entry = (tmp_path / "applications" / "inkflow.desktop").read_text()
+    assert "Terminal=true" in entry and "quit-when-idle" not in entry
     result = CliRunner().invoke(main, ["setup-desktop", "--remove"])
     assert result.exit_code == 0
     assert not (tmp_path / "applications" / "inkflow.desktop").exists()

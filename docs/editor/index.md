@@ -97,12 +97,28 @@ uv tool install inkflow     # the `inkflow` command, in its own environment
 inkflow setup-desktop       # Inkflow in the application menu
 ```
 
-The launcher opens a terminal running `inkflow edit --start`, so the server's
-status is in view and closing that window stops it; the editor opens in your
-browser. It starts the installation that created it, so `uv tool upgrade inkflow`
-keeps it working. On Linux it is a `.desktop` entry with an icon under
-`~/.local/share`, on macOS `~/Applications/Inkflow.app`, on Windows a Start
-menu shortcut. `inkflow setup-desktop --remove` takes it away again.
+The launcher starts the editor in your browser with no window of its own: the
+server runs in the background and stops a minute after its last tab closes
+(reloads and switching decks are fine), or at once with **Quit Inkflow** in the
+deck menu or on the start page. Your edits are saved as you make them, so
+nothing is lost either way. `inkflow setup-desktop --terminal` makes a launcher
+that runs the server in a terminal window instead, which shows its status and
+stops it when closed.
+
+The launcher starts the installation that created it, so `uv tool upgrade
+inkflow` keeps it working. On Linux it is a `.desktop` entry with an icon under
+`~/.local/share`, on macOS `~/Applications/Inkflow.app`, on Windows a Start menu
+shortcut. `inkflow setup-desktop --remove` takes it away again.
+
+### One server per deck
+
+Every launch (and every `inkflow edit` or `inkflow serve`) is a server of its
+own, on the next free ports, so several decks can be open side by side, each in
+its own tab or window. A deck is only ever open in one server, though, so two
+editors never write the same files: opening a deck that another server already
+has (from the start page, the deck menu or the command line) takes you to that
+server's editor instead. Open more tabs or windows on the same address to work
+on one deck in several places; they all stay in sync.
 
 ## Version control
 

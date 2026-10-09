@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from inkflow import animations as animations_module
+from inkflow import instances
 from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
 from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, open_with
@@ -88,7 +89,7 @@ from inkflow.transitions import Transition
 from inkflow.zones import remove_zone_section, replace_zone_text, zone_spans
 
 DECK_MODULE = "_inkflow_deck"
-_PROJECT_ACTIONS = ("project-info", "browse", "new-deck", "open-deck")
+_PROJECT_ACTIONS = ("project-info", "browse", "new-deck", "open-deck", "quit")
 _MEDIA_ACTIONS = frozenset(
     {
         "import-path",
@@ -295,6 +296,8 @@ class EditorSession:
     """The configured ``INKFLOW_EDIT_CMD*`` commands, offered first by "Open"."""
     switch_to: Path | None
     """A deck.py the editor asked to open instead (the server switches to it)."""
+    quit_requested: bool
+    """The editor asked the server to stop ("Quit Inkflow")."""
     has_deck: bool
     """False on the start page (no deck yet): only opening or creating a deck
     works, and the home folder stands in for the project."""
@@ -309,6 +312,7 @@ class EditorSession:
         self.exporters = exporters
         self.edit_commands = NO_EDIT_COMMANDS
         self.switch_to = None
+        self.quit_requested = False
         self.has_deck = deck_path is not None
         self.deck_path = (deck_path or Path.home() / "deck.py").resolve()
         self.project_dir = self.deck_path.parent
@@ -1140,6 +1144,10 @@ class EditorSession:
                         p for p in projects.recent() if p != str(self.deck_path)
                     ],
                 }
+            if action == "quit":
+                self._local_only(msg, "stop inkflow")
+                self.quit_requested = True
+                return {"ok": True}
             self._local_only(msg, "open or create decks")
             if action == "browse":
                 path = msg.get("path")
@@ -1166,6 +1174,18 @@ class EditorSession:
             else:
                 deck_py = projects.deck_file(str(msg.get("path") or ""))
                 projects.remember(deck_py)
+                if self.has_deck and deck_py == self.deck_path:
+                    return {"ok": True, "deck": str(deck_py), "opening": False}
+                # One server per deck: one that has it open already is used
+                # (the page goes there) rather than a second one writing it.
+                other = instances.serving(deck_py, exclude_pid=os.getpid())
+                if other is not None:
+                    return {
+                        "ok": True,
+                        "deck": str(deck_py),
+                        "opening": False,
+                        "redirect": other.url("/edit"),
+                    }
         except (projects.ProjectError, OSError) as exc:
             raise EditError(str(exc)) from exc
         if msg.get("open") is not False:

@@ -121,13 +121,23 @@ def completion_cmd(shell: str) -> None:
     is_flag=True,
     help="Remove the launcher instead.",
 )
-def setup_desktop(remove: bool) -> None:
+@click.option(
+    "--terminal",
+    "terminal",
+    is_flag=True,
+    help="Run the server in a terminal window (its status; closing it stops it).",
+)
+def setup_desktop(remove: bool, terminal: bool) -> None:
     """Add Inkflow to the desktop's application menu.
 
-    The launcher opens a terminal running `inkflow edit --start`: the editor
-    comes up in the browser on its start page (a new deck, open a deck, recent
-    decks), and closing the terminal stops it. It starts this installation of
-    inkflow (for example the one `uv tool install inkflow` made).
+    The launcher runs `inkflow edit --start`: the editor comes up in the
+    browser on its start page (a new deck, open a deck, recent decks). The
+    server runs hidden and stops a minute after its last tab closes, or at
+    "Quit Inkflow" in the deck menu; with `--terminal` it runs in a terminal
+    window instead. Each launch is its own server, but a deck already open in
+    one is never opened in a second: you are taken to the first. It starts
+    this installation of inkflow (for example the one `uv tool install
+    inkflow` made).
 
     Linux: a `.desktop` entry and icon under `~/.local/share`. macOS:
     `~/Applications/Inkflow.app`. Windows: a Start menu shortcut.
@@ -142,12 +152,12 @@ def setup_desktop(remove: bool) -> None:
             report("Nothing", "no launcher was installed", style="yellow")
         return
     try:
-        written = launcher.install()
+        written = launcher.install(terminal)
     except launcher.LauncherError as exc:
         raise click.ClickException(str(exc)) from exc
     for path in written:
         report("Wrote", str(path))
-    report("Runs", " ".join(launcher.command()))
+    report("Runs", " ".join(launcher.command(terminal)))
 
 
 @main.command("setup-git")

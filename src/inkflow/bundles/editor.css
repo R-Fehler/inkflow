@@ -2132,3 +2132,17 @@ body.start-mode #workspace {
 .start-deck-name {
   font-weight: 600;
 }
+.start-quit {
+  margin-top: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--subtext);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.start-quit:hover {
+  color: var(--text);
+  text-decoration: underline;
+}

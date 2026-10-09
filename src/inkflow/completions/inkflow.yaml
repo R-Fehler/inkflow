@@ -48,6 +48,7 @@ commands:
       --ws-port=: WebSocket port
       --no-open: Do not open the editor in a browser on start
       --start: Open the start page (new deck, open, recent) instead of a deck
+      --quit-when-idle=: Stop once no page has been open this many seconds
     completion:
       flag:
         deck: ["$files([\".py\"])"]
@@ -139,6 +140,7 @@ commands:
     description: Add Inkflow to the desktop's application menu.
     flags:
       --remove: Remove the launcher instead
+      --terminal: Run the server in a terminal window
 
   - name: setup-git
     description: Configure git hooks and SVG diff driver.

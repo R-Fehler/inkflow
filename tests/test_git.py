@@ -9,7 +9,7 @@ from typing import cast
 
 import pytest
 
-from inkflow import lfs
+from inkflow import instances, lfs
 from inkflow.editor import gitops, projects
 from inkflow.editor.session import EditError, EditorSession
 
@@ -25,6 +25,7 @@ def _isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(f"GIT_{who}_NAME", "Test")
         monkeypatch.setenv(f"GIT_{who}_EMAIL", "test@example.com")
     monkeypatch.setattr(projects, "_recent_file", lambda: tmp_path / "recent.json")
+    monkeypatch.setattr(instances, "_dir", lambda: tmp_path / "servers")
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -247,7 +248,7 @@ def test_browse_and_open_deck(repo: Path, tmp_path: Path) -> None:
     assert listing["dirs"] == ["talk"] and listing["repo"] == str(repo.parent)
     assert projects.browse(str(repo), tmp_path)["isDeck"] is True
 
-    session = EditorSession(repo / "deck.py")
+    session = EditorSession(None)
     with pytest.raises(EditError, match="this machine"):
         session.apply({"action": "browse", "path": str(repo)}, None)
     out = session.apply(
@@ -255,6 +256,10 @@ def test_browse_and_open_deck(repo: Path, tmp_path: Path) -> None:
     )
     assert out["deck"] == str((repo / "deck.py").resolve())
     assert session.switch_to == (repo / "deck.py").resolve()
+    # The deck already open here: nothing to switch to.
+    here = EditorSession(repo / "deck.py")
+    again = here.apply({"action": "open-deck", "path": str(repo), "_local": True}, None)
+    assert again["opening"] is False and here.switch_to is None
     with pytest.raises(EditError, match=r"no deck\.py"):
         session.apply(
             {"action": "open-deck", "path": str(tmp_path), "_local": True}, None
