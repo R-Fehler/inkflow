@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import re
+import site
+import sysconfig
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from functools import cache
 from pathlib import Path
 from typing import NamedTuple, TypedDict, cast
 
@@ -631,6 +634,32 @@ def process_slide(
     return doc.to_svg(), md_notes
 
 
+@cache
+def _installed_package_roots() -> tuple[Path, ...]:
+    """Directories holding installed packages: a venv's or the system's site-packages.
+
+    Used to tell dependency code (e.g. a theme bundled with ``pip``-installed
+    inkflow) apart from authored project content, even when the venv itself
+    lives inside the project directory (``uv``'s default ``.venv`` layout) —
+    so the check doesn't depend on guessing the venv's directory name.
+    """
+    roots = {
+        sysconfig.get_path("purelib"),
+        sysconfig.get_path("platlib"),
+        *site.getsitepackages(),
+        site.getusersitepackages(),
+    }
+    return tuple(Path(root).resolve() for root in roots if root)
+
+
+def _is_project_file(path: Path, project_dir: Path) -> bool:
+    """Whether path is authored project content, not dependency code installed
+    inside it (e.g. a venv nested under the project directory)."""
+    return path.is_relative_to(project_dir) and not any(
+        path.is_relative_to(root) for root in _installed_package_roots()
+    )
+
+
 def _source_for(roots: AssetRoots, path: Path | None) -> AssetSource:
     """Asset source for loaded text: its own file, or deck.py for ``Inline``."""
     if path is None:
@@ -652,13 +681,14 @@ def _editable_files(
     — every slide's own SVG plus its deck script is the floor.
 
     A theme/built-in ancestor is skipped: it lives outside the project (often
-    inside an installed package), so editing it is unlikely to be wanted and may
+    inside an installed package — including one installed into a venv nested
+    under the project directory), so editing it is unlikely to be wanted and may
     not even be writable.
     """
     files: list[EditableFile] = []
     chain = resolve_chain(svg_path, ctx.project_dir, ctx.theme)
     for parent in chain:
-        if parent.is_relative_to(ctx.project_dir):
+        if _is_project_file(parent, ctx.project_dir):
             files.append({"label": "Parent", "name": parent.name, "path": str(parent)})
     files.append({"label": "Layout", "name": svg_path.name, "path": str(svg_path)})
     if md is not None and md.path is not None:

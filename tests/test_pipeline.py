@@ -816,6 +816,32 @@ class TestEditableFiles:
             {"label": "Deck", "name": "deck.py", "path": str(deck_path)},
         ]
 
+    def test_installed_package_ancestor_excluded_even_inside_project_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A venv (whatever it's named) nested under the project dir, holding a
+        # pip-installed theme: still not project content, even though it passes
+        # a plain is_relative_to(project_dir) check.
+        venv_site_packages = tmp_path / "some-venv-name" / "site-packages"
+        installed_parent = venv_site_packages / "sometheme" / "theme" / "parent.svg"
+        installed_parent.parent.mkdir(parents=True, exist_ok=True)
+        installed_parent.write_text(_LAYOUT_SVG, encoding="utf-8")
+        monkeypatch.setattr(
+            "inkflow.pipeline._installed_package_roots",
+            lambda: (venv_site_packages,),
+        )
+
+        layout = tmp_path / "layouts" / "layout.svg"
+        layout.parent.mkdir(parents=True, exist_ok=True)
+        layout.write_text(_svg_with_parent(str(installed_parent)), encoding="utf-8")
+        deck_path = tmp_path / "deck.py"
+        deck = Deck(slides=[Slide("layout")])
+        results = process_deck(deck, tmp_path, deck_path)
+        assert results[0]["editableFiles"] == [
+            {"label": "Layout", "name": "layout.svg", "path": str(layout)},
+            {"label": "Deck", "name": "deck.py", "path": str(deck_path)},
+        ]
+
 
 class TestParseMarkdownOnce:
     def test_markdown_parsed_once_per_md_slide(
