@@ -96,6 +96,7 @@ _MEDIA_ACTIONS = frozenset(
         "convert",
         "convert-status",
         "convert-cancel",
+        "discard-source",
     }
 )
 
@@ -913,15 +914,21 @@ class EditorSession:
     # ── Media files ──
 
     def _media_file(self, msg: dict[str, object]) -> Path:
-        """A video in the project, named by a request."""
+        """A video named by a request: in the project, or (for an editor on
+        this machine) a file elsewhere on it, converted from where it is."""
         raw = str(msg.get("path") or "")
         path = Path(raw)
         path = (path if path.is_absolute() else self.project_dir / path).resolve()
-        if not path.is_relative_to(self.project_dir.resolve()) or not path.is_file():
+        inside = path.is_relative_to(self.project_dir.resolve())
+        if not path.is_file() or not (inside or msg.get("_local") is True):
             raise EditError(f"no video at {raw}")
         return path
 
-    def _placed(self, path: Path) -> dict[str, object]:
+    def _placed(self, arrival: media.Arrival) -> dict[str, object]:
+        if arrival.convert:
+            # Not on a slide yet: the editor asks how to convert it first.
+            return {"ok": True, "convert": True, "source": str(arrival.path)}
+        path = arrival.path
         return {"ok": True, "path": str(path), "rel": self._deck_rel(path)}
 
     def _plan(self, msg: dict[str, object]) -> tuple[media.Plan, dict[str, object]]:
@@ -967,7 +974,11 @@ class EditorSession:
                     "issues": media.issues(info),
                     "tools": media.tools(),
                     "qualities": list(media.QUALITIES),
+                    "remux": media.remux_target(info),
                 }
+            if action == "discard-source":
+                media.discard_source(self.project_dir, self._media_file(msg))
+                return {"ok": True}
             if action == "convert-plan":
                 plan, _ = self._plan(msg)
                 rel = {
@@ -988,7 +999,9 @@ class EditorSession:
                 plan, info = self._plan(msg)
                 duration = info.get("duration")
                 job = self.conversions.start(
-                    plan, duration if isinstance(duration, float) else None
+                    plan,
+                    duration if isinstance(duration, float) else None,
+                    source=self._media_file(msg),
                 )
                 return {"ok": True, "job": job}
             job_id = str(msg.get("job") or "")
@@ -1124,7 +1137,7 @@ class EditorSession:
                         path if isinstance(path, str) else None,
                         self.project_dir,
                         {
-                            "video": media.VIDEO_SUFFIXES,
+                            "video": media.video_suffixes(),
                             "media": media.MEDIA_SUFFIXES,
                         }.get(str(msg.get("files")), frozenset()),
                     ),
@@ -1875,8 +1888,8 @@ class EditorSession:
             raise EditError("upload is not valid base64") from exc
         name = Path(str(msg.get("name") or "upload")).name
         try:
-            path = self.uploads.chunk(secrets.token_hex(8), name, data, last=True)
+            arrival = self.uploads.chunk(secrets.token_hex(8), name, data, last=True)
         except media.MediaError as exc:
             raise EditError(str(exc)) from exc
-        assert path is not None
-        return self._placed(path)
+        assert arrival is not None
+        return self._placed(arrival)

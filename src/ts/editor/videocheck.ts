@@ -43,7 +43,20 @@ interface MediaInfo {
     issues: Issue[];
     tools: { ffprobe: boolean; ffmpeg: boolean };
     qualities: string[];
+    // The container its streams fit as they are ("mp4", "webm"), if any.
+    remux: string | null;
 }
+
+interface Placed {
+    path: string;
+    rel: string;
+}
+
+// What a finished conversion is for: replacing the video on a slide (the
+// user may untick that), or a file coming in that needs converting first.
+type ConvertFor =
+    | { kind: "replace"; ctx: VideoContext }
+    | { kind: "insert"; done: (placed: Placed | null) => void };
 
 const LONG = 10 * 60;
 
@@ -181,7 +194,11 @@ function showCheck(ctx: VideoContext, data: MediaInfo, issues: Issue[]): void {
                     {
                         type: "button",
                         class: "pbtn primary",
-                        onclick: () => convertDialog(ctx, data),
+                        onclick: () =>
+                            convertDialog(ctx.path, data, {
+                                kind: "replace",
+                                ctx,
+                            }),
                     },
                     "Convert…",
                 ),
@@ -201,25 +218,50 @@ const PRESETS: { label: string; height: number | null }[] = [
     { label: "480p", height: 480 },
 ];
 
-function convertDialog(ctx: VideoContext, data: MediaInfo): void {
+/** A video that needs converting before it can go on a slide (another
+ * format, read by ffmpeg): the convert dialog, which places the result or,
+ * closed, nothing. */
+export async function convertForInsert(source: string): Promise<Placed | null> {
+    const data = await mediaInfo(source);
+    if (!data) return null;
+    return new Promise((resolve) =>
+        convertDialog(source, data, { kind: "insert", done: resolve }),
+    );
+}
+
+function convertDialog(
+    path: string,
+    data: MediaInfo,
+    purpose: ConvertFor,
+): void {
     const info = data.info;
-    let format = "mp4";
-    // Full HD by default when the source is bigger, else its own size.
-    let height: number | null = info.height && info.height > 1080 ? 1080 : null;
+    // Repackaging keeps the video as it is: the default whenever it can.
+    let format = data.remux ? "copy" : "mp4";
+    // The source's own resolution unless asked otherwise.
+    let height: number | null = null;
     let quality = 2;
     let audio = !!info.acodec;
+    const inserting = purpose.kind === "insert";
 
+    const choices: string[][] = [
+        ["mp4", "MP4 (H.264)", "Plays in every browser. The safe choice."],
+        [
+            "webm",
+            "WebM (VP9)",
+            "Smaller at the same quality; not in all Safari versions.",
+        ],
+    ];
+    if (data.remux) {
+        choices.unshift([
+            "copy",
+            `Keep the video as it is (.${data.remux})`,
+            `Its ${info.vcodec?.toUpperCase() ?? "video"} already plays in browsers: repackaged without re-encoding, in seconds and with no quality lost.`,
+        ]);
+    }
     const formats = h(
         "div",
         { class: "look-list" },
-        ...[
-            ["mp4", "MP4 (H.264)", "Plays in every browser. The safe choice."],
-            [
-                "webm",
-                "WebM (VP9)",
-                "Smaller at the same quality; not in all Safari versions.",
-            ],
-        ].map(([value, label, text]) => {
+        ...choices.map(([value, label, text]) => {
             const radio = h("input", {
                 type: "radio",
                 name: "video-format",
@@ -321,12 +363,15 @@ function convertDialog(ctx: VideoContext, data: MediaInfo): void {
         "Convert now",
     ) as HTMLButtonElement;
     let job: string | null = null;
+    let finished = false;
 
     async function update(): Promise<void> {
         qualityLabel.textContent = data.qualities[quality] ?? "";
+        // Resolution and quality are an encoder's: a repackage keeps both.
+        size.disabled = slider.disabled = format === "copy";
         const res = await request({
             action: "convert-plan",
-            path: ctx.path,
+            path,
             format,
             height,
             quality,
@@ -354,7 +399,7 @@ function convertDialog(ctx: VideoContext, data: MediaInfo): void {
         }
         const res = await request({
             action: "convert",
-            path: ctx.path,
+            path,
             format,
             height,
             quality,
@@ -375,7 +420,7 @@ function convertDialog(ctx: VideoContext, data: MediaInfo): void {
                 return;
             }
             job = null;
-            run.textContent = "Convert now";
+            run.textContent = inserting ? "Convert and insert" : "Convert now";
             progress.hidden = true;
             if (st.state !== "done" || typeof st.path !== "string") {
                 toast(
@@ -385,11 +430,14 @@ function convertDialog(ctx: VideoContext, data: MediaInfo): void {
                 return;
             }
             toast(`Converted to ${st.rel}`, "ok");
-            if (use.checked) {
+            finished = true;
+            const placed = { path: st.path, rel: String(st.rel) };
+            if (purpose.kind === "insert") purpose.done(placed);
+            else if (use.checked) {
                 await edit({
                     action: "zone-media",
-                    slide: ctx.slide,
-                    zone: ctx.zone,
+                    slide: purpose.ctx.slide,
+                    zone: purpose.ctx.zone,
                     src: st.path,
                 });
             }
@@ -403,7 +451,13 @@ function convertDialog(ctx: VideoContext, data: MediaInfo): void {
         h(
             "div",
             { class: "deck-form" },
-            h("p", { class: "hint" }, `${name(ctx.path)}: ${describe(info)}`),
+            h("p", { class: "hint" }, `${name(path)}: ${describe(info)}`),
+            inserting &&
+                h(
+                    "p",
+                    { class: "hint warn" },
+                    "Browsers cannot play this file as it is: convert it to put it on the slide.",
+                ),
             h(
                 "div",
                 { class: "field" },
@@ -443,16 +497,30 @@ function convertDialog(ctx: VideoContext, data: MediaInfo): void {
                     { class: "hint warn" },
                     "ffmpeg is not installed here: copy the command and run it where it is, or install ffmpeg to convert from the editor.",
                 ),
-            h(
-                "label",
-                { class: "check-row" },
-                use,
-                "Use the converted video on this slide",
-            ),
+            !inserting &&
+                h(
+                    "label",
+                    { class: "check-row" },
+                    use,
+                    "Use the converted video on this slide",
+                ),
             h("div", { class: "btn-row end" }, progress, run),
         ),
-        { wide: true },
+        {
+            wide: true,
+            // Closed before it finished: an insert is called off, and a
+            // source staged for it goes (cancelling a running ffmpeg first).
+            onClose: () => {
+                if (finished) return;
+                if (job) void request({ action: "convert-cancel", job });
+                if (purpose.kind === "insert") {
+                    void request({ action: "discard-source", path });
+                    purpose.done(null);
+                }
+            },
+        },
     );
+    if (inserting) run.textContent = "Convert and insert";
     void update();
 }
 

@@ -3780,7 +3780,10 @@ Decks: new, open, recent` : "Decks";
             {
               type: "button",
               class: "pbtn primary",
-              onclick: () => convertDialog(ctx, data)
+              onclick: () => convertDialog(ctx.path, data, {
+                kind: "replace",
+                ctx
+              })
             },
             "Convert\u2026"
           )
@@ -3796,23 +3799,39 @@ Decks: new, open, recent` : "Decks";
     { label: "HD (720p)", height: 720 },
     { label: "480p", height: 480 }
   ];
-  function convertDialog(ctx, data) {
+  async function convertForInsert(source) {
+    const data = await mediaInfo(source);
+    if (!data) return null;
+    return new Promise(
+      (resolve) => convertDialog(source, data, { kind: "insert", done: resolve })
+    );
+  }
+  function convertDialog(path, data, purpose) {
     const info3 = data.info;
-    let format = "mp4";
-    let height = info3.height && info3.height > 1080 ? 1080 : null;
+    let format = data.remux ? "copy" : "mp4";
+    let height = null;
     let quality = 2;
     let audio = !!info3.acodec;
+    const inserting = purpose.kind === "insert";
+    const choices = [
+      ["mp4", "MP4 (H.264)", "Plays in every browser. The safe choice."],
+      [
+        "webm",
+        "WebM (VP9)",
+        "Smaller at the same quality; not in all Safari versions."
+      ]
+    ];
+    if (data.remux) {
+      choices.unshift([
+        "copy",
+        `Keep the video as it is (.${data.remux})`,
+        `Its ${info3.vcodec?.toUpperCase() ?? "video"} already plays in browsers: repackaged without re-encoding, in seconds and with no quality lost.`
+      ]);
+    }
     const formats = h(
       "div",
       { class: "look-list" },
-      ...[
-        ["mp4", "MP4 (H.264)", "Plays in every browser. The safe choice."],
-        [
-          "webm",
-          "WebM (VP9)",
-          "Smaller at the same quality; not in all Safari versions."
-        ]
-      ].map(([value, label4, text]) => {
+      ...choices.map(([value, label4, text]) => {
         const radio = h("input", {
           type: "radio",
           name: "video-format",
@@ -3906,11 +3925,13 @@ Decks: new, open, recent` : "Decks";
       "Convert now"
     );
     let job = null;
+    let finished = false;
     async function update() {
       qualityLabel.textContent = data.qualities[quality] ?? "";
+      size3.disabled = slider.disabled = format === "copy";
       const res = await request({
         action: "convert-plan",
-        path: ctx.path,
+        path,
         format,
         height,
         quality,
@@ -3935,7 +3956,7 @@ Decks: new, open, recent` : "Decks";
       }
       const res = await request({
         action: "convert",
-        path: ctx.path,
+        path,
         format,
         height,
         quality,
@@ -3956,7 +3977,7 @@ Decks: new, open, recent` : "Decks";
           return;
         }
         job = null;
-        run.textContent = "Convert now";
+        run.textContent = inserting ? "Convert and insert" : "Convert now";
         progress.hidden = true;
         if (st.state !== "done" || typeof st.path !== "string") {
           toast(
@@ -3966,11 +3987,14 @@ Decks: new, open, recent` : "Decks";
           return;
         }
         toast(`Converted to ${st.rel}`, "ok");
-        if (use.checked) {
+        finished = true;
+        const placed = { path: st.path, rel: String(st.rel) };
+        if (purpose.kind === "insert") purpose.done(placed);
+        else if (use.checked) {
           await edit({
             action: "zone-media",
-            slide: ctx.slide,
-            zone: ctx.zone,
+            slide: purpose.ctx.slide,
+            zone: purpose.ctx.zone,
             src: st.path
           });
         }
@@ -3983,7 +4007,12 @@ Decks: new, open, recent` : "Decks";
       h(
         "div",
         { class: "deck-form" },
-        h("p", { class: "hint" }, `${name(ctx.path)}: ${describe(info3)}`),
+        h("p", { class: "hint" }, `${name(path)}: ${describe(info3)}`),
+        inserting && h(
+          "p",
+          { class: "hint warn" },
+          "Browsers cannot play this file as it is: convert it to put it on the slide."
+        ),
         h(
           "div",
           { class: "field" },
@@ -4022,7 +4051,7 @@ Decks: new, open, recent` : "Decks";
           { class: "hint warn" },
           "ffmpeg is not installed here: copy the command and run it where it is, or install ffmpeg to convert from the editor."
         ),
-        h(
+        !inserting && h(
           "label",
           { class: "check-row" },
           use,
@@ -4030,8 +4059,21 @@ Decks: new, open, recent` : "Decks";
         ),
         h("div", { class: "btn-row end" }, progress, run)
       ),
-      { wide: true }
+      {
+        wide: true,
+        // Closed before it finished: an insert is called off, and a
+        // source staged for it goes (cancelling a running ffmpeg first).
+        onClose: () => {
+          if (finished) return;
+          if (job) void request({ action: "convert-cancel", job });
+          if (purpose.kind === "insert") {
+            void request({ action: "discard-source", path });
+            purpose.done(null);
+          }
+        }
+      }
     );
+    if (inserting) run.textContent = "Convert and insert";
     void update();
   }
   function pickVideoFromDisk(start) {
@@ -4455,6 +4497,9 @@ Decks: new, open, recent` : "Decks";
         action: "import-path",
         path: media.path
       });
+      if (result2.ok && result2.convert) {
+        return convertForInsert(String(result2.source));
+      }
       if (result2.ok && result2.path && result2.rel) {
         return { path: result2.path, rel: result2.rel };
       }
@@ -4488,11 +4533,9 @@ Decks: new, open, recent` : "Decks";
       }
       if (last) break;
     }
+    if (result.convert) return convertForInsert(String(result.source));
     if (!result.path || !result.rel) return null;
     return { path: result.path, rel: result.rel };
-  }
-  function mediaName(media) {
-    return media.name;
   }
   function droppedPath(dt) {
     const list3 = dt?.getData("text/uri-list") ?? "";
@@ -4546,8 +4589,10 @@ Decks: new, open, recent` : "Decks";
       video.src = `/${rel}`;
     });
   }
+  var VIDEO_EXT = /\.(mp4|webm|ogg|ogv|mov|mkv|avi|m4v|wmv|flv|mpe?g|ts|mts|m2ts|3gp|3g2|mxf|vob|f4v|asf|dv)$/i;
+  var VIDEO_ACCEPT = "video/*,.mkv,.avi,.m4v,.wmv,.flv,.mpg,.mpeg,.ts,.mts,.m2ts,.3gp,.mxf,.vob,.dv";
   function isVideo(file) {
-    return file instanceof File && file.type.startsWith("video/") || /\.(mp4|webm|ogg|mov)$/i.test(file.name);
+    return file instanceof File && file.type.startsWith("video/") || VIDEO_EXT.test(file.name);
   }
   function isImage(file) {
     return file instanceof File && file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name);
@@ -4594,9 +4639,7 @@ Decks: new, open, recent` : "Decks";
     }
   }
   async function insertVideo() {
-    const file = await pickFile(
-      "video/mp4,video/webm,video/ogg,video/quicktime"
-    );
+    const file = await pickFile(VIDEO_ACCEPT);
     if (file) await insertVideoFile(file);
   }
   async function insertFile(file, at2) {
@@ -4605,9 +4648,8 @@ Decks: new, open, recent` : "Decks";
       await fillZone(zone, file);
       return;
     }
-    if (isVideo(file)) await insertVideoFile(file, at2);
-    else if (isImage(file)) await insertImageFile(file, at2);
-    else toast(`Cannot insert ${mediaName(file)}`, "error");
+    if (isImage(file)) await insertImageFile(file, at2);
+    else await insertVideoFile(file, at2);
   }
   async function insertImageFile(file, at2) {
     if (!await ensureOwnDrawing()) return;
@@ -4645,7 +4687,7 @@ Decks: new, open, recent` : "Decks";
     const file = await pickFile("image/*");
     if (file) await insertImageFile(file);
   }
-  var MEDIA_ACCEPT = "image/*,video/mp4,video/webm,video/ogg,video/quicktime";
+  var MEDIA_ACCEPT = `image/*,${VIDEO_ACCEPT}`;
   async function fillZone(zone, file) {
     const slide = currentSlide();
     if (!slide) return;

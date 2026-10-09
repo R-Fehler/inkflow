@@ -332,6 +332,13 @@ static build and the PDF exactly like a hand-written one.
 
 New files land in `assets/`, and an identical file already there is reused.
 
+**Other formats.** Browsers play MP4, WebM and MOV (and MOV only when its codec
+suits them). With ffmpeg installed, any other video ffmpeg can read (MKV, AVI,
+WMV, MPEG, MTS, 3GP, …) can be inserted too: the **Convert** dialog opens first,
+and the video goes on the slide once it is converted. A file picked from disk is
+converted from where it is; an uploaded one waits in `.inkflow/incoming/` and is
+deleted once converted or when you close the dialog.
+
 **Checking and converting.** After a video comes in, the editor checks it:
 
 - whether this browser can play it at all (if not, it would show as an empty
@@ -346,7 +353,12 @@ panel or right-click menu opens it at any time.
 **Convert…** turns the video into MP4 (H.264, plays in every browser) or WebM
 (VP9, smaller; not in all Safari versions). It offers:
 
-- resolution presets (keep, 4K, Full HD, HD, 480p; never larger than the source);
+- **Keep the video as it is** when the video stream already suits a browser
+  (H.264 into `.mp4`, VP8/VP9/AV1 into `.webm`): the file is only repackaged,
+  which takes seconds and loses nothing; sound that does not fit the new file is
+  converted on the way;
+- resolution presets (keep, the default, 4K, Full HD, HD, 480p; never larger than
+  the source);
 - a quality slider from smallest to best;
 - keeping or dropping the sound;
 - a rough size estimate;

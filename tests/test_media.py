@@ -57,13 +57,13 @@ def test_import_by_path_copies_once_and_reuses_project_files(
 ) -> None:
     source = tmp_path / "Holiday Film.mp4"
     source.write_bytes(b"\0" * 1000)
-    first = media.import_path(project, source)
+    first = media.import_path(project, source).path
     assert first == project / "assets" / "holiday-film.mp4"
-    assert media.import_path(project, source) == first  # identical: no second copy
+    assert media.import_path(project, source).path == first  # identical: no copy
     source.write_bytes(b"\1" * 1000)
-    assert media.import_path(project, source).name == "holiday-film-2.mp4"
+    assert media.import_path(project, source).path.name == "holiday-film-2.mp4"
     # Already in the project: used where it is.
-    assert media.import_path(project, first) == first
+    assert media.import_path(project, first) == media.Arrival(first)
     with pytest.raises(media.MediaError, match="cannot insert"):
         (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
         media.import_path(project, tmp_path / "notes.txt")
@@ -75,7 +75,8 @@ def test_chunks_arrive_whole_however_many(project: Path) -> None:
     assert uploads.chunk("abc123", "talk.mp4", b"one-", last=False) is None
     assert uploads.chunk("abc123", "talk.mp4", b"two-", last=False) is None
     done = uploads.chunk("abc123", "talk.mp4", b"three", last=True)
-    assert done is not None and done.read_bytes() == b"one-two-three"
+    assert done is not None and not done.convert
+    assert done.path.read_bytes() == b"one-two-three"
     with pytest.raises(media.MediaError):
         uploads.chunk("../x", "talk.mp4", b"", last=True)
 
@@ -191,3 +192,121 @@ def test_probe_and_convert_through_the_session(project: Path, clip: Path) -> Non
     assert status["rel"] == "assets/clip-one-240p.mp4"
     out = media.probe(project / "assets" / "clip-one-240p.mp4")
     assert out["vcodec"] == "h264" and out["height"] == 240
+
+
+@pytest.fixture
+def mkv(tmp_path: Path) -> Path:
+    """H.264 with PCM sound in Matroska: browsers cannot play the file, but
+    its video can move into an .mp4 untouched."""
+    if not has_ffmpeg:
+        pytest.skip("needs ffmpeg")
+    out = tmp_path / "camera" / "Take 1.mkv"
+    out.parent.mkdir()
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=2:size=320x180:rate=25",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=duration=2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "pcm_s16le",
+            "-shortest",
+            str(out),
+        ],
+        check=True,
+    )
+    return out
+
+
+def test_remux_keeps_the_video_and_fixes_the_sound(tmp_path: Path) -> None:
+    info: dict[str, object] = {"vcodec": "h264", "acodec": "pcm_s16le", "size": 500}
+    assert media.remux_target(info) == "mp4"
+    plan = media.plan(
+        tmp_path / "Take 1.mkv",
+        tmp_path,
+        info,
+        fmt="copy",
+        height=720,
+        quality=0,
+        audio=True,
+    )
+    assert plan.args[plan.args.index("-c:v") + 1] == "copy"
+    assert plan.args[plan.args.index("-c:a") + 1] == "aac"  # PCM does not fit .mp4
+    assert "-vf" not in plan.args and plan.out.name == "take-1.mp4"
+    assert plan.estimate == 500
+    vp9: dict[str, object] = {"vcodec": "vp9", "acodec": "opus"}
+    webm = media.plan(
+        tmp_path / "a.mkv",
+        tmp_path,
+        vp9,
+        fmt="copy",
+        height=None,
+        quality=2,
+        audio=True,
+    )
+    assert (
+        webm.out.suffix == ".webm" and webm.args[webm.args.index("-c:a") + 1] == "copy"
+    )
+    with pytest.raises(media.MediaError, match="cannot be kept"):
+        media.plan(
+            tmp_path / "a.mkv",
+            tmp_path,
+            {"vcodec": "hevc"},
+            fmt="copy",
+            height=None,
+            quality=2,
+            audio=True,
+        )
+
+
+def test_other_formats_come_in_for_converting(project: Path, mkv: Path) -> None:
+    # By path: converted from where it is, nothing copied.
+    arrival = media.import_path(project, mkv)
+    assert arrival == media.Arrival(mkv.resolve(), convert=True)
+    assert not (project / "assets").exists()
+    # In chunks: kept in the staging area until it is converted.
+    uploads = media.Uploads(project)
+    staged = uploads.chunk("up1234", mkv.name, mkv.read_bytes(), last=True)
+    assert staged is not None and staged.convert
+    assert staged.path.parent.parent == project / ".inkflow" / "incoming"
+    # Not a video: refused.
+    with pytest.raises(media.MediaError, match="not a video"):
+        uploads.chunk("up5678", "notes.xyz", b"hello", last=True)
+
+    session = EditorSession(project / "deck.py")
+    info = session.apply({"action": "media-info", "path": str(staged.path)}, None)
+    assert info["remux"] == "mp4"
+    with pytest.raises(EditError, match="no video"):
+        session.apply({"action": "media-info", "path": str(mkv)}, None)  # not local
+    job = session.apply(
+        {
+            "action": "convert",
+            "_local": True,
+            "path": str(staged.path),
+            "format": "copy",
+            "audio": True,
+        },
+        None,
+    )["job"]
+    status: dict[str, object] = {}
+    for _ in range(200):
+        status = session.apply({"action": "convert-status", "job": job}, None)
+        if status["state"] != "running":
+            break
+        time.sleep(0.1)
+    assert status["state"] == "done", status
+    assert status["rel"] == "assets/take-1.mp4"
+    assert not staged.path.parent.exists()  # the staged source goes once converted
+    out = media.probe(project / "assets" / "take-1.mp4")
+    assert out["vcodec"] == "h264" and out["acodec"] == "aac"

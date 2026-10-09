@@ -35,7 +35,7 @@ import {
     type Tool,
 } from "./state";
 import type { SlideModel } from "./types";
-import { checkVideo } from "./videocheck";
+import { checkVideo, convertForInsert } from "./videocheck";
 
 const overlay = document.getElementById("overlay") as unknown as SVGSVGElement;
 
@@ -529,7 +529,8 @@ export type MediaIn = File | { path: string; name: string; file?: File };
 
 const CHUNK = 4 * 1024 * 1024;
 
-/** Copy a file into the deck's assets; no size limit. */
+/** Copy a file into the deck's assets; no size limit. A video in another
+ * format (one ffmpeg reads) is converted first, in the convert dialog. */
 export async function upload(
     media: MediaIn,
 ): Promise<{ path: string; rel: string } | null> {
@@ -538,6 +539,9 @@ export async function upload(
             action: "import-path",
             path: media.path,
         });
+        if (result.ok && result.convert) {
+            return convertForInsert(String(result.source));
+        }
         if (result.ok && result.path && result.rel) {
             return { path: result.path, rel: result.rel };
         }
@@ -573,12 +577,9 @@ export async function upload(
         }
         if (last) break;
     }
+    if (result.convert) return convertForInsert(String(result.source));
     if (!result.path || !result.rel) return null;
     return { path: result.path, rel: result.rel as string };
-}
-
-function mediaName(media: MediaIn): string {
-    return media.name;
 }
 
 /** A file:// link a drop carries (Firefox and others add one for files
@@ -652,10 +653,17 @@ export function videoSize(rel: string): Promise<BrowserVideo> {
     });
 }
 
+// Video formats the pickers offer: what browsers play, and what ffmpeg
+// converts (the server decides, by reading the file).
+const VIDEO_EXT =
+    /\.(mp4|webm|ogg|ogv|mov|mkv|avi|m4v|wmv|flv|mpe?g|ts|mts|m2ts|3gp|3g2|mxf|vob|f4v|asf|dv)$/i;
+export const VIDEO_ACCEPT =
+    "video/*,.mkv,.avi,.m4v,.wmv,.flv,.mpg,.mpeg,.ts,.mts,.m2ts,.3gp,.mxf,.vob,.dv";
+
 export function isVideo(file: MediaIn): boolean {
     return (
         (file instanceof File && file.type.startsWith("video/")) ||
-        /\.(mp4|webm|ogg|mov)$/i.test(file.name)
+        VIDEO_EXT.test(file.name)
     );
 }
 
@@ -716,9 +724,7 @@ export async function insertVideoFile(
 }
 
 export async function insertVideo(): Promise<void> {
-    const file = await pickFile(
-        "video/mp4,video/webm,video/ogg,video/quicktime",
-    );
+    const file = await pickFile(VIDEO_ACCEPT);
     if (file) await insertVideoFile(file);
 }
 
@@ -733,9 +739,10 @@ export async function insertFile(
         await fillZone(zone, file);
         return;
     }
-    if (isVideo(file)) await insertVideoFile(file, at);
-    else if (isImage(file)) await insertImageFile(file, at);
-    else toast(`Cannot insert ${mediaName(file)}`, "error");
+    if (isImage(file)) await insertImageFile(file, at);
+    // Anything else may be a video in a format ffmpeg reads: the server
+    // reads it, and refuses what is not one.
+    else await insertVideoFile(file, at);
 }
 
 export async function insertImageFile(
@@ -780,7 +787,7 @@ export async function insertImage(): Promise<void> {
     if (file) await insertImageFile(file);
 }
 
-const MEDIA_ACCEPT = "image/*,video/mp4,video/webm,video/ogg,video/quicktime";
+const MEDIA_ACCEPT = `image/*,${VIDEO_ACCEPT}`;
 
 export async function fillZone(zone: string, file: MediaIn): Promise<void> {
     const slide = currentSlide();

@@ -40,6 +40,38 @@ from inkflow.editor.context import CONTEXT_DIR
 VIDEO_SUFFIXES = frozenset({".mp4", ".webm", ".ogg", ".mov"})
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"})
 MEDIA_SUFFIXES = VIDEO_SUFFIXES | IMAGE_SUFFIXES
+OTHER_VIDEO_SUFFIXES = frozenset(
+    {
+        ".mkv",
+        ".avi",
+        ".m4v",
+        ".wmv",
+        ".flv",
+        ".mpg",
+        ".mpeg",
+        ".ogv",
+        ".ts",
+        ".mts",
+        ".m2ts",
+        ".3gp",
+        ".3g2",
+        ".mxf",
+        ".vob",
+        ".f4v",
+        ".asf",
+        ".dv",
+    }
+)
+"""Common video files browsers do not play but ffmpeg converts (any file with
+a video stream is accepted; these are the ones the folder browser lists)."""
+
+
+def video_suffixes() -> frozenset[str]:
+    """What the folder browser lists as videos: with ffmpeg, the convertible too."""
+    return (
+        VIDEO_SUFFIXES | OTHER_VIDEO_SUFFIXES if tools()["ffmpeg"] else VIDEO_SUFFIXES
+    )
+
 
 LARGE_BYTES = 100 * 1024 * 1024
 LONG_SECONDS = 10 * 60
@@ -97,23 +129,55 @@ def settle(project_dir: Path, staged: Path, name: str) -> Path:
     return target
 
 
-def import_path(project_dir: Path, source: Path) -> Path:
+@dataclass(frozen=True)
+class Arrival:
+    """A file brought in: ready on a slide, or a video ffmpeg must convert
+    first (``convert``: then ``path`` is the source to convert from, outside
+    ``assets/``)."""
+
+    path: Path
+    convert: bool = False
+
+
+def is_convertible(path: Path) -> bool:
+    """A video ffmpeg can read but browsers cannot play as it is: anything with
+    a video stream that lasts (a still image has no duration)."""
+    if not tools()["ffmpeg"]:
+        return False
+    info = probe(path)
+    duration = info.get("duration")
+    return bool(info.get("vcodec")) and isinstance(duration, float) and duration > 0
+
+
+def _unplayable(suffix: str) -> MediaError:
+    hint = (
+        " (with ffmpeg installed, any video it can read can be inserted and converted)"
+        if not tools()["ffmpeg"]
+        else ""
+    )
+    return MediaError(f"cannot insert {suffix or 'this kind of'} files{hint}")
+
+
+def import_path(project_dir: Path, source: Path) -> Arrival:
     """A file from this computer, by path: used where it is when it is in the
-    project already, else copied into ``assets/``."""
+    project already, else copied into ``assets/``. A video in another format is
+    converted straight from where it is (no copy)."""
     source = source.expanduser()
     if not source.is_absolute() or not source.is_file():
         raise MediaError(f"no file at {source}")
     if source.suffix.lower() not in MEDIA_SUFFIXES:
-        raise MediaError(f"cannot insert {source.suffix or 'this kind of'} files")
+        if is_convertible(source):
+            return Arrival(source.resolve(), convert=True)
+        raise _unplayable(source.suffix)
     resolved = source.resolve()
     if (
         resolved.is_relative_to(project_dir.resolve())
         and CONTEXT_DIR not in resolved.parts
     ):
-        return resolved
+        return Arrival(resolved)
     staged = _staging(project_dir) / f"{secrets.token_hex(8)}.part"
     shutil.copyfile(resolved, staged)
-    return settle(project_dir, staged, source.name)
+    return Arrival(settle(project_dir, staged, source.name))
 
 
 @dataclass
@@ -123,13 +187,13 @@ class Uploads:
     project_dir: Path
     open: dict[str, Path] = field(default_factory=dict)
 
-    def chunk(self, upload: str, name: str, data: bytes, last: bool) -> Path | None:
+    def chunk(self, upload: str, name: str, data: bytes, last: bool) -> Arrival | None:
         if not re.fullmatch(r"[A-Za-z0-9_-]{6,64}", upload):
             raise MediaError("bad upload id")
-        if Path(name).suffix.lower() not in MEDIA_SUFFIXES:
-            raise MediaError(
-                f"cannot insert {Path(name).suffix or 'this kind of'} files"
-            )
+        suffix = Path(name).suffix.lower()
+        # Another format is fine when ffmpeg can convert it: checked once here.
+        if suffix not in MEDIA_SUFFIXES and not tools()["ffmpeg"]:
+            raise _unplayable(suffix)
         staged = self.open.get(upload)
         if staged is None:
             staged = _staging(self.project_dir) / f"{upload}.part"
@@ -140,7 +204,28 @@ class Uploads:
         if not last:
             return None
         del self.open[upload]
-        return settle(self.project_dir, staged, Path(name).name)
+        if suffix in MEDIA_SUFFIXES:
+            return Arrival(settle(self.project_dir, staged, Path(name).name))
+        # Kept in the staging area, under its own name, until converted.
+        # (a folder per upload keeps the file's own name for the output)
+        folder = _staging(self.project_dir) / upload
+        folder.mkdir(exist_ok=True)
+        source = folder / f"{_slug(Path(name).stem)}{suffix}"
+        os.replace(staged, source)
+        if not is_convertible(source):
+            source.unlink()
+            raise MediaError(f"{Path(name).name} is not a video ffmpeg can read")
+        return Arrival(source, convert=True)
+
+
+def discard_source(project_dir: Path, source: Path) -> None:
+    """Drop a staged source nobody converted (only ever in the staging area)."""
+    staging = (project_dir / CONTEXT_DIR / "incoming").resolve()
+    folder = source.resolve().parent
+    if folder.parent == staging:
+        source.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            folder.rmdir()
 
 
 # ── Probing ──
@@ -276,6 +361,21 @@ def _target_size(info: dict[str, object], height: int | None) -> tuple[int, int]
     return round(w * height / h / 2) * 2, height
 
 
+def remux_target(info: dict[str, object]) -> str | None:
+    """The container a video's own streams fit as they are (no re-encoding):
+    H.264 in .mp4, VP8/VP9/AV1 in .webm; None when its video needs encoding."""
+    vcodec = info.get("vcodec")
+    if vcodec == "h264":
+        return "mp4"
+    if vcodec in ("vp8", "vp9", "av1"):
+        return "webm"
+    return None
+
+
+# Audio a container takes as it is; anything else is encoded on the way.
+_AUDIO_FITS = {"mp4": {"aac", "mp3"}, "webm": {"opus", "vorbis"}}
+
+
 def plan(
     source: Path,
     out_dir: Path,
@@ -286,7 +386,11 @@ def plan(
     quality: int,
     audio: bool,
 ) -> Plan:
-    """The ffmpeg command converting ``source``, and a rough output size."""
+    """The ffmpeg command converting ``source``, and a rough output size.
+    ``fmt`` "copy" repackages the streams into the container they fit
+    (``remux_target``), without re-encoding the video."""
+    if fmt == "copy":
+        return _remux(source, out_dir, info, audio)
     if fmt not in _CRF:
         raise MediaError("convert to mp4 or webm")
     quality = max(0, min(len(QUALITIES) - 1, quality))
@@ -322,6 +426,31 @@ def plan(
     return Plan(args, out, estimate)
 
 
+def _remux(source: Path, out_dir: Path, info: dict[str, object], audio: bool) -> Plan:
+    target = remux_target(info)
+    if target is None:
+        raise MediaError("its video cannot be kept as it is: convert it to mp4 or webm")
+    out = out_dir / f"{_slug(source.stem)}.{target}"
+    args = ["ffmpeg", "-hide_banner", "-y", "-i", str(source), "-map", "0:v:0"]
+    args += ["-c:v", "copy"]
+    acodec = info.get("acodec")
+    if audio and acodec:
+        args += ["-map", "0:a:0"]
+        if acodec in _AUDIO_FITS[target]:
+            args += ["-c:a", "copy"]
+        elif target == "mp4":
+            args += ["-c:a", "aac", "-b:a", "128k"]
+        else:
+            args += ["-c:a", "libopus", "-b:a", "128k"]
+    else:
+        args.append("-an")
+    if target == "mp4":
+        args += ["-movflags", "+faststart"]
+    args.append(str(out))
+    size = info.get("size")
+    return Plan(args, out, size if isinstance(size, int) else None)
+
+
 def command_line(p: Plan, display: dict[Path, str]) -> str:
     """The command as one line to copy, with paths shown as given."""
     return shlex.join([display.get(Path(a), a) for a in p.args])
@@ -337,6 +466,7 @@ class Job:
     error: str = ""
     result: Path | None = None
     process: subprocess.Popen[str] | None = None
+    source: Path | None = None
 
 
 class Conversions:
@@ -346,12 +476,13 @@ class Conversions:
         self.project_dir: Path = project_dir
         self.jobs: dict[str, Job] = {}
 
-    def start(self, p: Plan, duration: float | None) -> str:
+    def start(self, p: Plan, duration: float | None, source: Path | None = None) -> str:
+        """Run ``p``; a ``source`` staged for converting goes once it is done."""
         if not tools()["ffmpeg"]:
             raise MediaError("ffmpeg is not installed")
         staged = _staging(self.project_dir) / f"{secrets.token_hex(8)}{p.out.suffix}"
         args = [*p.args[:-1], "-progress", "pipe:1", "-nostats", str(staged)]
-        job = Job(staged, p.out.name, duration)
+        job = Job(staged, p.out.name, duration, source=source)
         job_id = secrets.token_hex(6)
         self.jobs[job_id] = job
         job.process = subprocess.Popen(
@@ -384,6 +515,8 @@ class Conversions:
             job.state = "error"
             job.error = str(exc)
             return
+        if job.source is not None:
+            discard_source(self.project_dir, job.source)
         job.progress = 1.0
         job.state = "done"
 

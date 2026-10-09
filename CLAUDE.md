@@ -124,9 +124,15 @@ src/
                                looks, folder browsing, recent decks), media.py (files of any
                                size: by path (`import_path`, local only) or in chunks
                                (`Uploads`), staged in .inkflow/incoming/ and moved into
-                               assets/ in one rename; `probe` (ffprobe), `issues`, `plan`
-                               (ffmpeg MP4/WebM command + rough size), `Conversions`
-                               (background ffmpeg jobs, also staged))
+                               assets/ in one rename; both return an `Arrival`, which
+                               says `convert=True` for a video browsers cannot play but
+                               ffmpeg can read (by path: converted from where it is;
+                               uploaded: kept in incoming/<id>/ until converted, then
+                               `discard_source`); `probe` (ffprobe), `issues`, `plan`
+                               (ffmpeg MP4/WebM command + rough size, or `fmt="copy"`:
+                               remux via `remux_target`, sound re-encoded only if it
+                               does not fit), `Conversions` (background ffmpeg jobs,
+                               also staged))
     cli/              CLI package (entry point inkflow.cli:main). _common.py holds the
                                `main` group, shared options, and the Project/Target helpers;
                                commands are grouped by area: project.py (init, setup-git,
@@ -228,7 +234,9 @@ src/
                       videos lose controls + pointer events so they select and drag;
                       "Play preview" plays one in place; the presenter is unaffected),
                       videocheck.ts (Video check after insert: browser decode test +
-                      ffprobe issues; Convert dialog with presets/quality/estimate),
+                      ffprobe issues; Convert dialog with remux/presets/quality/
+                      estimate; `convertForInsert` makes it mandatory for formats
+                      only ffmpeg reads),
                       dialog.ts (the one modal), connectors.ts (connection sites
                       and straight/elbow/curved routes, pure + tested)
     render/           the single-slide page behind `inkflow render`
