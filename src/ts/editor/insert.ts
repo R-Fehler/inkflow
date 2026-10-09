@@ -35,6 +35,7 @@ import {
     type Tool,
 } from "./state";
 import type { SlideModel } from "./types";
+import { checkVideo } from "./videocheck";
 
 const overlay = document.getElementById("overlay") as unknown as SVGSVGElement;
 
@@ -508,7 +509,7 @@ export async function typeInto(el: Element): Promise<void> {
 
 // ── Images ──
 
-function readBase64(file: File): Promise<string> {
+function readBase64(file: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => {
@@ -520,16 +521,82 @@ function readBase64(file: File): Promise<string> {
     });
 }
 
+// A file to bring into the deck: one the browser holds (a pick, a drop, a
+// paste), or one on this computer named by its path (a drop that carried a
+// file:// link, the folder browser). The server copies a path itself, so it
+// costs nothing to send whatever its size.
+export type MediaIn = File | { path: string; name: string; file?: File };
+
+const CHUNK = 4 * 1024 * 1024;
+
+/** Copy a file into the deck's assets; no size limit. */
 export async function upload(
-    file: File,
+    media: MediaIn,
 ): Promise<{ path: string; rel: string } | null> {
-    const data = await readBase64(file);
-    const result = await request({ action: "upload", name: file.name, data });
-    if (!result.ok || !result.path || !result.rel) {
-        toast(result.error ?? "upload failed", "error");
+    if (!(media instanceof File)) {
+        const result = await request({
+            action: "import-path",
+            path: media.path,
+        });
+        if (result.ok && result.path && result.rel) {
+            return { path: result.path, rel: result.rel };
+        }
+        // Not this computer, or not readable there: send the dropped file.
+        if (media.file) return upload(media.file);
+        toast(result.error ?? "could not copy the file", "error");
         return null;
     }
-    return { path: result.path, rel: result.rel };
+    // In chunks: one message per few MB, staged by the server until complete.
+    const id = `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    const big = media.size > 3 * CHUNK;
+    let result: Awaited<ReturnType<typeof request>> = { ok: false };
+    for (let at = 0; at < media.size || at === 0; at += CHUNK) {
+        const last = at + CHUNK >= media.size;
+        const data = await readBase64(media.slice(at, at + CHUNK));
+        result = await request({
+            action: "upload-chunk",
+            upload: id,
+            name: media.name,
+            data,
+            last,
+        });
+        if (!result.ok) {
+            toast(result.error ?? "upload failed", "error");
+            return null;
+        }
+        if (big) {
+            const done = Math.min(
+                100,
+                Math.round(((at + CHUNK) / media.size) * 100),
+            );
+            toast(`Copying ${media.name}… ${done}%`);
+        }
+        if (last) break;
+    }
+    if (!result.path || !result.rel) return null;
+    return { path: result.path, rel: result.rel as string };
+}
+
+function mediaName(media: MediaIn): string {
+    return media.name;
+}
+
+/** A file:// link a drop carries (Firefox and others add one for files
+ * dragged from a file manager), as a local path. */
+export function droppedPath(dt: DataTransfer | null): string | null {
+    const list = dt?.getData("text/uri-list") ?? "";
+    const uri = list.split(/\r?\n/).find((line) => line.startsWith("file://"));
+    if (!uri) return null;
+    try {
+        const url = new URL(uri);
+        if (url.host && url.host !== "localhost") return null;
+        return decodeURIComponent(url.pathname).replace(
+            /^\/([A-Za-z]:\/)/,
+            "$1",
+        );
+    } catch {
+        return null;
+    }
 }
 
 function naturalSize(rel: string): Promise<{ w: number; h: number }> {
@@ -545,20 +612,36 @@ function naturalSize(rel: string): Promise<{ w: number; h: number }> {
     });
 }
 
-function videoSize(rel: string): Promise<{ w: number; h: number }> {
+export interface BrowserVideo {
+    w: number;
+    h: number;
+    // Whether this browser could read the video at all (codec, container).
+    decoded: boolean;
+    duration: number | null;
+}
+
+export function videoSize(rel: string): Promise<BrowserVideo> {
     return new Promise((resolve) => {
         const video = document.createElement("video");
-        const fallback = { w: 1280, h: 720 };
+        const fallback = { w: 1280, h: 720, decoded: false, duration: null };
         // A format the browser cannot decode never loads its metadata.
         const timer = window.setTimeout(() => resolve(fallback), 3000);
         video.preload = "metadata";
         video.muted = true;
         video.onloadedmetadata = () => {
             window.clearTimeout(timer);
+            const duration = Number.isFinite(video.duration)
+                ? video.duration
+                : null;
             resolve(
                 video.videoWidth && video.videoHeight
-                    ? { w: video.videoWidth, h: video.videoHeight }
-                    : fallback,
+                    ? {
+                          w: video.videoWidth,
+                          h: video.videoHeight,
+                          decoded: true,
+                          duration,
+                      }
+                    : { ...fallback, duration },
             );
         };
         video.onerror = () => {
@@ -569,10 +652,17 @@ function videoSize(rel: string): Promise<{ w: number; h: number }> {
     });
 }
 
-export function isVideo(file: File): boolean {
+export function isVideo(file: MediaIn): boolean {
     return (
-        file.type.startsWith("video/") ||
+        (file instanceof File && file.type.startsWith("video/")) ||
         /\.(mp4|webm|ogg|mov)$/i.test(file.name)
+    );
+}
+
+function isImage(file: MediaIn): boolean {
+    return (
+        (file instanceof File && file.type.startsWith("image/")) ||
+        /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name)
     );
 }
 
@@ -580,7 +670,7 @@ export function isVideo(file: File): boolean {
 // through zones={...} in deck.py, so it plays like any other Video (and its
 // settings show in the panel). Both files change in one undoable step.
 export async function insertVideoFile(
-    file: File,
+    file: MediaIn,
     at?: { x: number; y: number },
 ): Promise<void> {
     if (!(await ensureOwnDrawing())) return;
@@ -614,7 +704,15 @@ export async function insertVideoFile(
         src: up.path,
     });
     const id = result.ids?.new;
-    if (result.ok && id) afterRender.ids = [id];
+    if (result.ok && id) {
+        afterRender.ids = [id];
+        void checkVideo({
+            path: up.path,
+            slide: slide.deckIndex,
+            zone: id.replace(/^zone-/, ""),
+            browser: size,
+        });
+    }
 }
 
 export async function insertVideo(): Promise<void> {
@@ -627,7 +725,7 @@ export async function insertVideo(): Promise<void> {
 // A dropped or pasted file: into the media zone under it if there is one,
 // else onto the slide as a free image or video.
 export async function insertFile(
-    file: File,
+    file: MediaIn,
     at?: { x: number; y: number; clientX: number; clientY: number },
 ): Promise<void> {
     const zone = at ? mediaZoneAt(at.clientX, at.clientY) : null;
@@ -636,12 +734,12 @@ export async function insertFile(
         return;
     }
     if (isVideo(file)) await insertVideoFile(file, at);
-    else if (file.type.startsWith("image/")) await insertImageFile(file, at);
-    else toast(`Cannot insert ${file.name}`, "error");
+    else if (isImage(file)) await insertImageFile(file, at);
+    else toast(`Cannot insert ${mediaName(file)}`, "error");
 }
 
 export async function insertImageFile(
-    file: File,
+    file: MediaIn,
     at?: { x: number; y: number },
 ) {
     if (!(await ensureOwnDrawing())) return;
@@ -684,18 +782,26 @@ export async function insertImage(): Promise<void> {
 
 const MEDIA_ACCEPT = "image/*,video/mp4,video/webm,video/ogg,video/quicktime";
 
-async function fillZone(zone: string, file: File): Promise<void> {
+export async function fillZone(zone: string, file: MediaIn): Promise<void> {
     const slide = currentSlide();
     if (!slide) return;
     const up = await upload(file);
     if (!up) return;
-    await edit({
+    const result = await edit({
         action: "zone-media",
         slide: slide.deckIndex,
         zone,
         src: up.path,
         fit: slide.zones[zone]?.fit ?? "cover",
     });
+    if (result.ok && isVideo(file)) {
+        void checkVideo({
+            path: up.path,
+            slide: slide.deckIndex,
+            zone,
+            browser: await videoSize(up.rel),
+        });
+    }
 }
 
 export async function zoneMedia(zone: string): Promise<void> {
@@ -748,11 +854,15 @@ export function initInsert(): void {
         const file = e.dataTransfer?.files?.[0];
         if (!file) return;
         e.preventDefault();
-        void insertFile(file, {
+        const at = {
             ...clientToSlide(e.clientX, e.clientY),
             clientX: e.clientX,
             clientY: e.clientY,
-        });
+        };
+        // With the file's path the server copies it straight from disk;
+        // without one (or if that fails) the browser sends its contents.
+        const path = droppedPath(e.dataTransfer);
+        void insertFile(path ? { path, name: file.name, file } : file, at);
     });
     document.addEventListener("paste", (e) => {
         const target = e.target as HTMLElement;

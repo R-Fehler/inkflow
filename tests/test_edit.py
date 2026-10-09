@@ -141,3 +141,24 @@ def test_open_choices_offer_installed_programs_then_the_system_default(
         Path("a.png"), EditCommands(default="nano {path}", svg=None)
     )
     assert configured[0].id == "configured"
+
+
+def test_video_editors_are_offered_installed_or_as_flatpaks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inkflow import edit
+
+    def which(name: str) -> str | None:
+        return f"/usr/bin/{name}" if name in ("shotcut", "flatpak") else None
+
+    monkeypatch.setattr("inkflow.edit.shutil.which", which)
+
+    def flatpak(app_id: str) -> bool:
+        return app_id == "no.mifi.losslesscut"
+
+    monkeypatch.setattr("inkflow.edit._flatpak_installed", flatpak)
+    choices = edit.open_choices(Path("clip.mp4"), EditCommands(default=None, svg=None))
+    assert [(c.id, c.command) for c in choices[:2]] == [
+        ("losslesscut", "flatpak run no.mifi.losslesscut {path}"),
+        ("shotcut", "shotcut {path}"),
+    ]

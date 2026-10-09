@@ -15,6 +15,7 @@ default app for the file.
 
 from __future__ import annotations
 
+import functools
 import os
 import shlex
 import shutil
@@ -114,7 +115,31 @@ _CANDIDATES: dict[str, list[tuple[str, str]]] = {
     "SVG": [("inkscape", "Inkscape"), *_TEXT_EDITORS],
     "IMAGE": [("gimp", "GIMP"), ("krita", "Krita"), ("pinta", "Pinta")],
     "TEXT": _TEXT_EDITORS,
-    "VIDEO": [("vlc", "VLC"), ("mpv", "mpv")],
+    "VIDEO": [
+        ("losslesscut", "LosslessCut (trim, no re-encoding)"),
+        ("shotcut", "Shotcut"),
+        ("kdenlive", "Kdenlive"),
+        ("avidemux3_qt5", "Avidemux"),
+        ("avidemux", "Avidemux"),
+        ("ghb", "HandBrake (convert)"),
+        ("openshot-qt", "OpenShot"),
+        ("vlc", "VLC"),
+        ("mpv", "mpv"),
+    ],
+}
+# The same programs installed as Flatpaks (no binary on PATH).
+_FLATPAKS = {
+    "losslesscut": "no.mifi.losslesscut",
+    "shotcut": "org.shotcut.Shotcut",
+    "kdenlive": "org.kde.kdenlive",
+    "avidemux": "org.avidemux.Avidemux",
+    "ghb": "fr.handbrake.ghb",
+    "openshot-qt": "org.openshot.OpenShot",
+    "vlc": "org.videolan.VLC",
+    "mpv": "io.mpv.Mpv",
+    "inkscape": "org.inkscape.Inkscape",
+    "gimp": "org.gimp.GIMP",
+    "krita": "org.kde.krita",
 }
 # macOS apps live in /Applications rather than on PATH.
 _MAC_APPS = {
@@ -125,6 +150,11 @@ _MAC_APPS = {
     "zed": "Zed",
     "subl": "Sublime Text",
     "vlc": "VLC",
+    "losslesscut": "LosslessCut",
+    "shotcut": "Shotcut",
+    "kdenlive": "kdenlive",
+    "ghb": "HandBrake",
+    "openshot-qt": "OpenShot Video Editor",
 }
 
 
@@ -139,7 +169,24 @@ def _installed(binary: str) -> str | None:
     app = _MAC_APPS.get(binary)
     if sys.platform == "darwin" and app and Path(f"/Applications/{app}.app").exists():
         return f"open -a {shlex.quote(app)} {{path}}"
+    flatpak = _FLATPAKS.get(binary)
+    if flatpak and _flatpak_installed(flatpak):
+        return f"flatpak run {flatpak} {{path}}"
     return None
+
+
+@functools.cache
+def _flatpak_installed(app_id: str) -> bool:
+    """Whether a Flatpak app is installed (asked once per process)."""
+    if shutil.which("flatpak") is None:
+        return False
+    try:
+        result = subprocess.run(
+            ["flatpak", "info", app_id], capture_output=True, timeout=5
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
 
 
 def open_choices(path: Path, commands: EditCommands) -> list[App]:
@@ -149,9 +196,11 @@ def open_choices(path: Path, commands: EditCommands) -> list[App]:
     if configured:
         program = Path(shlex.split(configured)[0]).name
         apps.append(App("configured", f"{program} (configured)", configured))
+    labels: set[str] = set()
     for binary, label in _CANDIDATES.get(_kind(path) or "", []):
         command = _installed(binary)
-        if command:
+        if command and label not in labels:  # one Avidemux, however installed
+            labels.add(label)
             apps.append(App(binary, label, command))
     apps.append(App("system", "Default app", None))
     return apps

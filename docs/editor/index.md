@@ -320,6 +320,50 @@ ordinary zone: the editor adds a `zone-video` rect to the slide's SVG and fills 
 from `deck.py` with `Video("assets/clip.mp4")`, so it plays in the presenter, the
 static build and the PDF exactly like a hand-written one.
 
+**Any size.** There is no size limit:
+
+- A file you pick or paste is sent to the server in chunks, with progress shown
+  for big ones.
+- A file dragged from your file manager usually comes with its path (Firefox adds
+  a `file://` link), and then the server copies it straight from disk.
+- **Insert video from a folder…** in the right-click menu of an empty spot browses
+  this computer's folders and copies the video you pick in the same way.
+- A file that is already inside the deck's folder is used where it is.
+
+New files land in `assets/`, and an identical file already there is reused.
+
+**Checking and converting.** After a video comes in, the editor checks it:
+
+- whether this browser can play it at all (if not, it would show as an empty
+  box);
+- with `ffprobe` installed (it comes with ffmpeg), its codec, resolution and
+  length;
+- whether it is over 100 MB or longer than 10 minutes.
+
+Anything worth knowing opens **Video check**, and **Check & convert…** in a video's
+panel or right-click menu opens it at any time.
+
+**Convert…** turns the video into MP4 (H.264, plays in every browser) or WebM
+(VP9, smaller; not in all Safari versions). It offers:
+
+- resolution presets (keep, 4K, Full HD, HD, 480p; never larger than the source);
+- a quality slider from smallest to best;
+- keeping or dropping the sound;
+- a rough size estimate;
+- the `ffmpeg` command to copy and run in the deck's folder.
+
+With ffmpeg installed, **Convert now** runs it in the background with a progress
+bar and puts the converted file on the slide.
+
+To trim, set its start and end in the panel (nothing is re-encoded). To cut it
+properly, **Open ▾** offers the video editors installed on this computer
+(LosslessCut, Shotcut, Kdenlive, Avidemux, HandBrake, OpenShot, and Flatpak
+installs of them) next to VLC and mpv.
+
+While you edit, `inkflow serve` answers byte-range requests, so videos seek and
+play in every browser, Safari included, and a large file is streamed rather than
+read into memory.
+
 Dropping an image or video **onto a media zone** (an empty one, or one already
 showing media) fills that zone instead. Replacing a file keeps the zone's settings
 (fit, loop, autoplay…) and drops only what belonged to the old file: its poster,

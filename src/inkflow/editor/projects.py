@@ -80,8 +80,14 @@ def slug(text: str) -> str:
 # ── Folders ──
 
 
-def browse(path: str | None, fallback: Path) -> dict[str, object]:
-    """A folder's subfolders, for the editor's folder picker."""
+_NO_FILES: frozenset[str] = frozenset()
+
+
+def browse(
+    path: str | None, fallback: Path, suffixes: frozenset[str] = _NO_FILES
+) -> dict[str, object]:
+    """A folder's subfolders, and its files with one of ``suffixes``, for the
+    editor's folder and file pickers."""
     folder = Path(path).expanduser() if path else fallback
     if not folder.is_absolute():
         folder = fallback / folder
@@ -100,8 +106,18 @@ def browse(path: str | None, fallback: Path) -> dict[str, object]:
     except OSError as exc:
         raise ProjectError(f"cannot read {folder}: {exc.strerror}") from exc
     root = gitops.repo_root(folder)
+    found: list[dict[str, object]] = []
+    if suffixes:
+        for p in sorted(folder.iterdir(), key=lambda p: p.name.lower()):
+            if (
+                p.suffix.lower() in suffixes
+                and p.is_file()
+                and not p.name.startswith(".")
+            ):
+                found.append({"name": p.name, "size": p.stat().st_size})
     return {
         "path": str(folder),
+        "files": found[:1000],
         "parent": str(folder.parent) if folder.parent != folder else None,
         "dirs": dirs[:500],
         "isDeck": (folder / "deck.py").is_file(),

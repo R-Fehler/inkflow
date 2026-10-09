@@ -57,6 +57,7 @@ import type {
     TypeInfo,
     ZoneValue,
 } from "./types";
+import { openVideoCheck } from "./videocheck";
 import { previewButton, videoOf } from "./videopreview";
 
 const panel = document.getElementById("props-body")!;
@@ -951,6 +952,21 @@ function renderObjectPanel(sel: Selected): void {
             );
             const video = media.kind === "video" ? videoOf(el) : null;
             if (video) body.push(previewButton(video, button));
+            if (media.kind === "video" && media.src) {
+                const src = media.src;
+                body.push(
+                    button(
+                        "Check & convert…",
+                        "Can every browser play it? Convert it to MP4 or WebM, smaller or at another resolution",
+                        () =>
+                            void openVideoCheck({
+                                path: src,
+                                slide: slide.deckIndex,
+                                zone: name,
+                            }),
+                    ),
+                );
+            }
         } else {
             body.push(
                 button(

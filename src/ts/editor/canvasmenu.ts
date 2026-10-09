@@ -13,12 +13,13 @@ import {
     pick,
     select,
     selectAll,
+    zoneName,
 } from "./canvas";
 import { copy, cut, pasteFromClipboard } from "./clipboard";
 import { pictureOf, startCrop } from "./crop";
 import { clear, h } from "./dom";
 import { openGallery } from "./gallery";
-import { typeInto } from "./insert";
+import { insertVideoFile, typeInto } from "./insert";
 import { edit } from "./net";
 import { isHidden, toggleHidden, toggleLocked } from "./objects";
 import { openMenu as openWithMenu } from "./openwith";
@@ -32,6 +33,7 @@ import {
     order,
     ungroupSelection,
 } from "./toolbar";
+import { openVideoCheck, pickVideoFromDisk } from "./videocheck";
 import { isPreviewing, togglePreview, videoOf } from "./videopreview";
 
 const menu = document.getElementById("context-menu")!;
@@ -73,6 +75,23 @@ function objectMenu(): HTMLElement[] {
                     () => togglePreview(video),
                 ),
             );
+            const zone = isZone(el) ? zoneName(el) : null;
+            const media = zone ? currentSlide()?.zones[zone] : null;
+            const slide = currentSlide();
+            if (zone && slide && media?.kind === "video" && media.src) {
+                const src = media.src;
+                items.push(
+                    menuItem(
+                        "Check & convert…",
+                        () =>
+                            void openVideoCheck({
+                                path: src,
+                                slide: slide.deckIndex,
+                                zone,
+                            }),
+                    ),
+                );
+            }
         }
         if (pictureOf(el)) {
             items.push(menuItem("Crop", () => void startCrop(one!)));
@@ -138,6 +157,15 @@ function objectMenu(): HTMLElement[] {
     return items;
 }
 
+// A video straight from disk: the server copies it, however big.
+async function insertFromDisk(): Promise<void> {
+    const start = ed.model?.projectDir ?? "";
+    const path = await pickVideoFromDisk(start);
+    if (!path) return;
+    const name = path.split(/[\\/]/).pop() ?? path;
+    await insertVideoFile({ path, name });
+}
+
 function slideMenu(): HTMLElement[] {
     const slide = currentSlide();
     const editable = !!ed.model?.deckEditable;
@@ -145,6 +173,7 @@ function slideMenu(): HTMLElement[] {
     return [
         menuItem("Paste", () => void pasteFromClipboard()),
         menuItem("Select all", () => selectAll()),
+        menuItem("Insert video from a folder…", () => void insertFromDisk()),
         sep(),
         title("Slide"),
         menuItem(

@@ -1171,7 +1171,8 @@ foreignObject.rich-editing {
 
 #context-menu {
     position: fixed;
-    z-index: 30;
+    /* above the dialog: a menu opened from one (Open in…) */
+    z-index: 50;
     display: none;
     min-width: 200px;
     max-height: 70vh;
@@ -2280,4 +2281,49 @@ foreignObject.rich-editing .math-chip.editing {
 /* Videos on the canvas let clicks through to their zone (select, drag). */
 #slide-host video {
     pointer-events: none;
+}
+
+.folder.file {
+    display: flex;
+    gap: 8px;
+}
+
+.file-size {
+    margin-left: auto;
+}
+
+.video-issues {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.video-issues li {
+    margin: 4px 0;
+}
+
+.video-issues .issue-error {
+    color: var(--red);
+}
+
+.video-issues .issue-warning {
+    color: var(--yellow);
+}
+
+.video-quality {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.quality-slider {
+    flex: 1;
+}
+
+.video-command {
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+}
+
+.video-estimate {
+    margin: 0;
 }

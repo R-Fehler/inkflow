@@ -34,9 +34,16 @@ interface Folder {
     path: string;
     parent: string | null;
     dirs: string[];
+    files?: { name: string; size: number }[];
     isDeck: boolean;
     repo: string | null;
     home: string;
+}
+
+export function megabytes(bytes: number): string {
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+    if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 function baseName(path: string): string {
@@ -114,9 +121,11 @@ async function openDeck(path: string): Promise<boolean> {
 // ── Folder picker ──
 
 // Browses the server's folders (a browser cannot name a path on disk).
-function folderPicker(
+export function folderPicker(
     start: string,
     onChange: (folder: Folder) => void,
+    // Also list files of a kind ("video", "media"), each picked with onFile.
+    files?: { kind: string; onFile: (path: string) => void },
 ): { el: HTMLElement; current: () => Folder | null } {
     let folder: Folder | null = null;
     const path = h("input", {
@@ -127,7 +136,11 @@ function folderPicker(
     const list = h("div", { class: "folder-list" });
     const where = h("div", { class: "hint folder-where" });
     const go = async (target: string) => {
-        const res = await request({ action: "browse", path: target });
+        const res = await request({
+            action: "browse",
+            path: target,
+            files: files?.kind,
+        });
         if (!res.ok) {
             where.textContent = res.error ?? "Cannot open that folder";
             return;
@@ -161,7 +174,22 @@ function folderPicker(
                 ),
             );
         }
-        if (!folder.dirs.length && !folder.parent) {
+        for (const f of folder.files ?? []) {
+            list.append(
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "folder file",
+                        onclick: () =>
+                            files?.onFile(join(folder?.path ?? "", f.name)),
+                    },
+                    `🎞 ${f.name}`,
+                    h("span", { class: "hint file-size" }, megabytes(f.size)),
+                ),
+            );
+        }
+        if (!folder.dirs.length && !folder.parent && !folder.files?.length) {
             list.append(h("p", { class: "hint" }, "No folders here."));
         }
         where.textContent = folder.repo

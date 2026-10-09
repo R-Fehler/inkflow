@@ -27,7 +27,7 @@ from inkflow import animations as animations_module
 from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
 from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, open_with
-from inkflow.editor import gitops, projects
+from inkflow.editor import gitops, media, projects
 from inkflow.editor.codegen import Code, coerce_fields
 from inkflow.editor.deckedit import DeckEditError, DeckSource
 from inkflow.editor.findreplace import (
@@ -87,9 +87,17 @@ from inkflow.transitions import Transition
 from inkflow.zones import remove_zone_section, replace_zone_text, zone_spans
 
 DECK_MODULE = "_inkflow_deck"
-_MAX_UPLOAD = 50 * 1024 * 1024
-_VIDEO_SUFFIXES = {".mp4", ".webm", ".ogg", ".mov"}
-_UPLOAD_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", *_VIDEO_SUFFIXES}
+_MEDIA_ACTIONS = frozenset(
+    {
+        "import-path",
+        "upload-chunk",
+        "media-info",
+        "convert-plan",
+        "convert",
+        "convert-status",
+        "convert-cancel",
+    }
+)
 
 
 class EditError(Exception):
@@ -281,9 +289,13 @@ class EditorSession:
     exporters: Exporters | None
     """The build functions behind the Export dialog (None: export unavailable)."""
     edit_commands: EditCommands
+    """The configured ``INKFLOW_EDIT_CMD*`` commands, offered first by "Open"."""
     switch_to: Path | None
     """A deck.py the editor asked to open instead (the server switches to it)."""
-    """The configured ``INKFLOW_EDIT_CMD*`` commands, offered first by "Open"."""
+    uploads: media.Uploads
+    """Files arriving in chunks (no size limit)."""
+    conversions: media.Conversions
+    """ffmpeg conversions running in the background."""
 
     def __init__(self, deck_path: Path, exporters: Exporters | None = None) -> None:
         self.exporters = exporters
@@ -291,6 +303,8 @@ class EditorSession:
         self.switch_to = None
         self.deck_path = deck_path.resolve()
         self.project_dir = self.deck_path.parent
+        self.uploads = media.Uploads(self.project_dir)
+        self.conversions = media.Conversions(self.project_dir)
         self.history = History()
         self.built_hash = None
         self.server = {}
@@ -320,6 +334,8 @@ class EditorSession:
             return {"ok": True, "files": export_assets(self.project_dir, names)}
         if action == "math":
             return self._math(msg)
+        if action in _MEDIA_ACTIONS:
+            return self._media(msg)
         if action == "git":
             return self._git(msg)
         if action in ("project-info", "browse", "new-deck", "open-deck"):
@@ -597,7 +613,7 @@ class EditorSession:
             self._save_deck(txn, source, set())
             return f"Clear {zone}"
         rel = self._deck_rel(Path(str(src)))
-        cls = Video if Path(rel).suffix.lower() in _VIDEO_SUFFIXES else Image
+        cls = Video if Path(rel).suffix.lower() in media.VIDEO_SUFFIXES else Image
         current = slide.zones.get(zone)
         fit = msg.get("fit")
         if type(current) is cls:
@@ -703,7 +719,7 @@ class EditorSession:
         if not isinstance(src, str) or not src:
             raise EditError("no video to insert")
         rel = self._deck_rel(Path(src))
-        if Path(rel).suffix.lower() not in _VIDEO_SUFFIXES:
+        if Path(rel).suffix.lower() not in media.VIDEO_SUFFIXES:
             raise EditError("not a video file")
         zone = self._new_zone(msg, deck, slide, txn, "video")
         source = self._deck_source(txn)
@@ -894,6 +910,104 @@ class EditorSession:
             logger.warning(f"{path.name}: cannot update its Inkscape preview ({exc})")
             return None
 
+    # ── Media files ──
+
+    def _media_file(self, msg: dict[str, object]) -> Path:
+        """A video in the project, named by a request."""
+        raw = str(msg.get("path") or "")
+        path = Path(raw)
+        path = (path if path.is_absolute() else self.project_dir / path).resolve()
+        if not path.is_relative_to(self.project_dir.resolve()) or not path.is_file():
+            raise EditError(f"no video at {raw}")
+        return path
+
+    def _placed(self, path: Path) -> dict[str, object]:
+        return {"ok": True, "path": str(path), "rel": self._deck_rel(path)}
+
+    def _plan(self, msg: dict[str, object]) -> tuple[media.Plan, dict[str, object]]:
+        source = self._media_file(msg)
+        info = media.probe(source)
+        raw_height = msg.get("height")
+        height = int(cast("int", raw_height)) if raw_height else None
+        plan = media.plan(
+            source,
+            self.project_dir / "assets",
+            info,
+            fmt=str(msg.get("format") or "mp4"),
+            height=height,
+            quality=int(cast("int", msg.get("quality") or 2)),
+            audio=msg.get("audio") is not False,
+        )
+        return plan, info
+
+    def _media(self, msg: dict[str, object]) -> dict[str, object]:
+        action = msg.get("action")
+        try:
+            if action == "import-path":
+                self._local_only(msg, "insert files by path")
+                source = Path(str(msg.get("path") or ""))
+                return self._placed(media.import_path(self.project_dir, source))
+            if action == "upload-chunk":
+                try:
+                    data = base64.b64decode(str(msg.get("data") or ""), validate=True)
+                except ValueError as exc:
+                    raise EditError("upload is not valid base64") from exc
+                done = self.uploads.chunk(
+                    str(msg.get("upload") or ""),
+                    str(msg.get("name") or ""),
+                    data,
+                    msg.get("last") is True,
+                )
+                return self._placed(done) if done else {"ok": True}
+            if action == "media-info":
+                info = media.probe(self._media_file(msg))
+                return {
+                    "ok": True,
+                    "info": info,
+                    "issues": media.issues(info),
+                    "tools": media.tools(),
+                    "qualities": list(media.QUALITIES),
+                }
+            if action == "convert-plan":
+                plan, _ = self._plan(msg)
+                rel = {
+                    Path(a): self._deck_rel(Path(a))
+                    for a in plan.args
+                    if Path(a).is_absolute()
+                    and Path(a).is_relative_to(self.project_dir)
+                }
+                rel[plan.out] = self._deck_rel(plan.out.parent) + "/" + plan.out.name
+                return {
+                    "ok": True,
+                    "command": media.command_line(plan, rel),
+                    "estimate": plan.estimate,
+                    "out": rel[plan.out],
+                }
+            if action == "convert":
+                self._local_only(msg, "run ffmpeg")
+                plan, info = self._plan(msg)
+                duration = info.get("duration")
+                job = self.conversions.start(
+                    plan, duration if isinstance(duration, float) else None
+                )
+                return {"ok": True, "job": job}
+            job_id = str(msg.get("job") or "")
+            if action == "convert-cancel":
+                self.conversions.cancel(job_id)
+                return {"ok": True}
+            job = self.conversions.status(job_id)
+            out: dict[str, object] = {
+                "ok": True,
+                "state": job.state,
+                "progress": job.progress,
+                "error": job.error,
+            }
+            if job.result is not None:
+                out.update(path=str(job.result), rel=self._deck_rel(job.result))
+            return out
+        except (media.MediaError, OSError) as exc:
+            raise EditError(str(exc)) from exc
+
     # ── Git ──
 
     # Operations that change files on disk: the editor's undo steps no longer
@@ -1007,7 +1121,12 @@ class EditorSession:
                 return {
                     "ok": True,
                     **projects.browse(
-                        path if isinstance(path, str) else None, self.project_dir
+                        path if isinstance(path, str) else None,
+                        self.project_dir,
+                        {
+                            "video": media.VIDEO_SUFFIXES,
+                            "media": media.MEDIA_SUFFIXES,
+                        }.get(str(msg.get("files")), frozenset()),
                     ),
                 }
             if action == "new-deck":
@@ -1749,23 +1868,15 @@ class EditorSession:
     # ── Uploads ──
 
     def _upload(self, msg: dict[str, object]) -> dict[str, object]:
-        name = Path(str(msg.get("name") or "upload")).name
-        suffix = Path(name).suffix.lower()
-        if suffix not in _UPLOAD_SUFFIXES:
-            raise EditError(f"cannot insert {suffix or 'this'} files")
+        """A whole file in one message (the editor sends chunks: upload-chunk)."""
         try:
             data = base64.b64decode(str(msg.get("data") or ""), validate=True)
         except ValueError as exc:
             raise EditError("upload is not valid base64") from exc
-        if len(data) > _MAX_UPLOAD:
-            raise EditError("file is larger than 50 MB")
-        assets = self.project_dir / "assets"
-        assets.mkdir(exist_ok=True)
-        stem = _slug(Path(name).stem)
-        existing = [
-            p for p in assets.glob(f"{stem}*{suffix}") if p.read_bytes() == data
-        ]
-        path = existing[0] if existing else _unique_path(assets, stem, suffix)
-        if not existing:
-            path.write_bytes(data)
-        return {"ok": True, "path": str(path), "rel": self._deck_rel(path)}
+        name = Path(str(msg.get("name") or "upload")).name
+        try:
+            path = self.uploads.chunk(secrets.token_hex(8), name, data, last=True)
+        except media.MediaError as exc:
+            raise EditError(str(exc)) from exc
+        assert path is not None
+        return self._placed(path)

@@ -11,6 +11,7 @@ import io
 import ipaddress
 import json
 import os
+import re
 import socket
 import sys
 import time
@@ -582,6 +583,88 @@ def _resolve_asset(roots: AssetRoots, request_path: str) -> Path | None:
     return resolved
 
 
+_RANGE = re.compile(rb"^range:\s*bytes=(\d*)-(\d*)\s*$", re.I | re.M)
+_CHUNK = 1024 * 1024
+
+
+def _range_header(raw: bytes) -> tuple[int | None, int | None] | None:
+    """The single byte range a request asks for (``Range: bytes=a-b``)."""
+    m = _RANGE.search(raw.split(b"\r\n\r\n", 1)[0])
+    if m is None or (not m.group(1) and not m.group(2)):
+        return None
+    return (
+        int(m.group(1)) if m.group(1) else None,
+        int(m.group(2)) if m.group(2) else None,
+    )
+
+
+def byte_range(
+    size: int, wanted: tuple[int | None, int | None] | None
+) -> tuple[int, int] | None:
+    """The inclusive span to send for a ``Range`` request, or None for all of
+    it. ``(None, n)`` is the last n bytes. Raises ValueError when the range
+    lies outside the file."""
+    if wanted is None:
+        return None
+    start, end = wanted
+    if start is None:
+        if not end:
+            raise ValueError("empty suffix range")
+        start, end = max(0, size - end), size - 1
+    else:
+        end = size - 1 if end is None else min(end, size - 1)
+    if start >= size or start > end:
+        raise ValueError("range outside the file")
+    return start, end
+
+
+async def _send_file(
+    writer: asyncio.StreamWriter,
+    path: Path,
+    wanted: tuple[int | None, int | None] | None,
+) -> None:
+    """Stream a file, or the byte range asked for (206): a video seeks and
+    plays in every browser (Safari asks for ranges), and a large file is never
+    read into memory whole."""
+    mime = MIME_TYPES[path.suffix.lower()]
+    size = path.stat().st_size
+    try:
+        span = byte_range(size, wanted)
+    except ValueError:
+        writer.write(
+            b"HTTP/1.1 416 Range Not Satisfiable\r\n"
+            + f"Content-Range: bytes */{size}\r\n".encode()
+            + b"Connection: close\r\nContent-Length: 0\r\n\r\n"
+        )
+        await writer.drain()
+        return
+    start, end = span if span else (0, size - 1)
+    length = max(0, end - start + 1)
+    status = b"206 Partial Content" if span else b"200 OK"
+    header = (
+        b"HTTP/1.1 "
+        + status
+        + b"\r\n"
+        + f"Content-Type: {mime}\r\n".encode()
+        + b"Accept-Ranges: bytes\r\n"
+        + (f"Content-Range: bytes {start}-{end}/{size}\r\n".encode() if span else b"")
+        + b"Cache-Control: no-store\r\n"
+        + b"Connection: close\r\n"
+        + f"Content-Length: {length}\r\n\r\n".encode()
+    )
+    writer.write(header)
+    with path.open("rb") as f:
+        _ = f.seek(start)
+        left = length
+        while left > 0:
+            chunk = f.read(min(_CHUNK, left))
+            if not chunk:
+                break
+            writer.write(chunk)
+            await writer.drain()
+            left -= len(chunk)
+
+
 def _read_export(path: Path) -> tuple[str, str, bytes]:
     """An exported file, or an exported folder as a zip, for download."""
     if path.is_dir():
@@ -649,19 +732,7 @@ def make_http_handler(
                 roots = AssetRoots(project_dir, _state["theme_dir"])
                 asset_path = _resolve_asset(roots, request_path)
                 if asset_path is not None:
-                    mime = MIME_TYPES[asset_path.suffix.lower()]
-                    body = asset_path.read_bytes()
-                    header = (
-                        b"HTTP/1.1 200 OK\r\n"
-                        + f"Content-Type: {mime}\r\n".encode()
-                        + b"Cache-Control: no-store\r\n"
-                        + b"Connection: close\r\n"
-                        + b"Content-Length: "
-                        + str(len(body)).encode()
-                        + b"\r\n\r\n"
-                    )
-                    writer.write(header + body)
-                    await writer.drain()
+                    await _send_file(writer, asset_path, _range_header(raw))
                     return
 
             if _is_editor_path(request_path):

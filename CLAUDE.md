@@ -121,7 +121,12 @@ src/
                                view/revert/restore a commit, `lfs_status` = media
                                no LFS rule covers or committed as full copies, `lfs_track`
                                / `lfs_off`; shells out to git with GIT_TERMINAL_PROMPT=0), projects.py (new deck in one of four
-                               looks, folder browsing, recent decks)
+                               looks, folder browsing, recent decks), media.py (files of any
+                               size: by path (`import_path`, local only) or in chunks
+                               (`Uploads`), staged in .inkflow/incoming/ and moved into
+                               assets/ in one rename; `probe` (ffprobe), `issues`, `plan`
+                               (ffmpeg MP4/WebM command + rough size), `Conversions`
+                               (background ffmpeg jobs, also staged))
     cli/              CLI package (entry point inkflow.cli:main). _common.py holds the
                                `main` group, shared options, and the Project/Target helpers;
                                commands are grouped by area: project.py (init, setup-git,
@@ -222,6 +227,8 @@ src/
                       Shift+right-click keep the browser's), videopreview.ts (canvas
                       videos lose controls + pointer events so they select and drag;
                       "Play preview" plays one in place; the presenter is unaffected),
+                      videocheck.ts (Video check after insert: browser decode test +
+                      ffprobe issues; Convert dialog with presets/quality/estimate),
                       dialog.ts (the one modal), connectors.ts (connection sites
                       and straight/elbow/curved routes, pure + tested)
     render/           the single-slide page behind `inkflow render`
@@ -381,7 +388,8 @@ Everything the editor adds is plain deck source, so Inkscape, an agent and the p
 
 ## Server
 
-- HTTP on port 7777 (asyncio streams, custom handler)
+- HTTP on port 7777 (asyncio streams, custom handler); assets are streamed in
+  chunks with byte-range support (`_send_file`, 206/416), which Safari needs for video
 - WebSocket on port 7778 (websockets 16.0 — uses `websockets.asyncio.server.serve`, not the legacy `websockets.serve`)
 - File watcher: `watchfiles.awatch` (async generator)
 - Both run inside an `asyncio.TaskGroup`
