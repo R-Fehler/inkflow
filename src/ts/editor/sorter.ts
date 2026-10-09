@@ -131,7 +131,7 @@ export async function newSlide(
         op: "new",
         after,
         layout,
-        name: layout ?? "slide",
+        name: "slide",
     });
     if (result.ok && result.select != null) pendingSelect = result.select;
 }

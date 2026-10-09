@@ -112,7 +112,12 @@ def load_deck(deck_path: Path) -> Deck:
     # the class *name*, so nothing else keeps the class from being collected).
     # A live-reload re-load replaces this entry with the fresh module.
     sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
+    # Compiled from source every time rather than through the loader: the
+    # bytecode cache validates by mtime (whole seconds) and size, so an edit
+    # that keeps the size (the editor reordering slides) within the same second
+    # would load the stale cached code.
+    code = compile(deck_path.read_bytes(), str(deck_path), "exec")
+    exec(code, mod.__dict__)
     if not hasattr(mod, "main"):
         raise AttributeError(f"{deck_path} must define a main() -> Deck function")
     return cast(Callable[[], Deck], mod.main)()

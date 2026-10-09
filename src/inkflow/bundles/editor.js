@@ -435,7 +435,24 @@
         }
       }
     }
-    return { attrs: transformPlan(g, translate(dx, dy)) };
+    return { attrs: { transform: prependTranslate(g.attrs.transform, delta) } };
+  }
+  var LEADING_TRANSLATE = /^\s*translate\(\s*([-+.\deE]+)(?:[\s,]+([-+.\deE]+))?\s*\)\s*(.*)$/s;
+  function prependTranslate(transform, d) {
+    const original = (transform ?? "").trim();
+    const m = original.match(LEADING_TRANSLATE);
+    let x = d.x;
+    let y = d.y;
+    let rest = original;
+    if (m) {
+      x += parseFloat(m[1]);
+      y += parseFloat(m[2] ?? "0");
+      rest = m[3].trim();
+    }
+    const zero = Math.abs(x) < EPS && Math.abs(y) < EPS;
+    if (zero) return rest || null;
+    const t = `translate(${fmt(x)},${fmt(y)})`;
+    return rest ? `${t} ${rest}` : t;
   }
   function planResize(g, from, to) {
     const sx = from.width > EPS ? to.width / from.width : 1;
@@ -1855,7 +1872,7 @@
       op: "new",
       after,
       layout,
-      name: layout ?? "slide"
+      name: "slide"
     });
     if (result.ok && result.select != null) pendingSelect = result.select;
   }
@@ -2087,7 +2104,8 @@
     const result = await edit({
       action: "slide",
       op: "detach",
-      slide: deckIndex
+      slide: deckIndex,
+      name: slide.id ?? slide.explicitId ?? "slide"
     });
     if (!result.ok) return false;
     toast("This slide now has its own SVG (built on its layout)");

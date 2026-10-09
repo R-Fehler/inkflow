@@ -256,7 +256,32 @@ export function planMove(
             }
         }
     }
-    return { attrs: transformPlan(g, translate(dx, dy)) };
+    return { attrs: { transform: prependTranslate(g.attrs.transform, delta) } };
+}
+
+const LEADING_TRANSLATE =
+    /^\s*translate\(\s*([-+.\deE]+)(?:[\s,]+([-+.\deE]+))?\s*\)\s*(.*)$/s;
+
+// A move keeps the author's transform as written (a `rotate(…)` stays a
+// rotate) and only adds to, or merges into, a leading translate.
+export function prependTranslate(
+    transform: string | null | undefined,
+    d: Pt,
+): string | null {
+    const original = (transform ?? "").trim();
+    const m = original.match(LEADING_TRANSLATE);
+    let x = d.x;
+    let y = d.y;
+    let rest = original;
+    if (m) {
+        x += parseFloat(m[1]);
+        y += parseFloat(m[2] ?? "0");
+        rest = m[3].trim();
+    }
+    const zero = Math.abs(x) < EPS && Math.abs(y) < EPS;
+    if (zero) return rest || null;
+    const t = `translate(${fmt(x)},${fmt(y)})`;
+    return rest ? `${t} ${rest}` : t;
 }
 
 // Resize the element's slide-space bounding box `from` to `to`.

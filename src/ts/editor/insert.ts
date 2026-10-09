@@ -67,6 +67,7 @@ export async function ensureOwnDrawing(): Promise<boolean> {
         action: "slide",
         op: "detach",
         slide: deckIndex,
+        name: slide.id ?? slide.explicitId ?? "slide",
     });
     if (!result.ok) return false;
     toast("This slide now has its own SVG (built on its layout)");

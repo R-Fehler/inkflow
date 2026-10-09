@@ -32,7 +32,7 @@ from inkflow.editor.svgops import (
     group,
     ungroup,
 )
-from inkflow.layout import create_slide
+from inkflow.layout import create_slide, discover_layouts
 from inkflow.manifest import Deck, Inline, Slide, TextBox
 from inkflow.pipeline import resolve_slide_src
 from inkflow.transitions import Transition
@@ -541,7 +541,10 @@ class EditorSession:
         elif op == "detach":
             index, slide = self._deck_slide(deck, msg)
             name = self._new_slide_file(
-                slide.src, slide.id or Path(slide.src).stem, txn, deck
+                slide.src,
+                str(msg.get("name") or slide.id or Path(slide.src).stem),
+                txn,
+                deck,
             )
             source.set_slide_arg(index, "src", _py(name))
             label = "Give slide its own drawing"
@@ -582,7 +585,13 @@ class EditorSession:
     ) -> str:
         slides_dir = self.project_dir / "slides"
         slides_dir.mkdir(exist_ok=True)
-        path = _unique_path(slides_dir, _slug(stem), ".svg")
+        # A bare Slide("name") looks in slides/ before the layouts, so a file
+        # named like a layout would silently replace it for every other slide.
+        taken = {p.stem for _, p in discover_layouts(self.project_dir, deck.theme)}
+        slug = _slug(stem)
+        if slug in taken:
+            slug = f"{slug}-slide"
+        path = _unique_path(slides_dir, slug, ".svg")
         # create_slide resolves the parent and injects the Inkscape preview layers.
         try:
             create_slide(parent, path, self.project_dir, deck.theme)

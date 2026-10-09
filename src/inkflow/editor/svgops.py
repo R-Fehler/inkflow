@@ -436,7 +436,7 @@ def _fix_tail(parent: SvgElement, new: SvgElement) -> None:
     indent = "\n" + lead.rsplit("\n", 1)[1] if lead else "\n"
     prev = new.getprevious()
     if new.getnext() is None and prev is not None:
-        new.tail = prev.tail
+        new.tail = prev.tail or "\n"
         prev.tail = indent
     else:
         new.tail = indent
