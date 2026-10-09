@@ -319,10 +319,18 @@ export function editingHost(): Element | null {
 }
 
 /** Edit a zone: in place when its Markdown allows, else in the source pane. */
+type ZoneEditOpts = {
+    at?: { x: number; y: number };
+    selectAll?: boolean;
+    // Text written only so there was something to edit (an empty zone's
+    // "+"): finishing with it unchanged, or with nothing, undoes that write.
+    placeholder?: string;
+};
+
 export function editZone(
     zone: string,
     el: Element | null,
-    opts: { at?: { x: number; y: number }; selectAll?: boolean } = {},
+    opts: ZoneEditOpts = {},
 ): void {
     void finishTextEdit();
     if (el && editZoneRich(zone, el, opts)) return;
@@ -344,11 +352,7 @@ const COLORS = [
     "grey",
 ];
 
-function editZoneRich(
-    zone: string,
-    el: Element,
-    opts: { at?: { x: number; y: number }; selectAll?: boolean },
-): boolean {
+function editZoneRich(zone: string, el: Element, opts: ZoneEditOpts): boolean {
     const slide = currentSlide();
     const content = el.querySelector<HTMLElement>(".inkflow-content");
     if (!slide || !content || ed.step != null) return false;
@@ -421,6 +425,13 @@ function editZoneRich(
             const grow = growOp(fo, content);
             cleanup();
             ed.richEditing = false;
+            if (
+                opts.placeholder !== undefined &&
+                (md === start || !md.trim())
+            ) {
+                await takeBackPlaceholder();
+                return;
+            }
             if (md === start && !grow) {
                 emit("rerender");
                 return;
@@ -439,6 +450,10 @@ function editZoneRich(
         cancel: () => {
             cleanup();
             ed.richEditing = false;
+            if (opts.placeholder !== undefined) {
+                void takeBackPlaceholder();
+                return;
+            }
             // Re-rendering restores what the zone said before editing.
             emit("rerender");
         },
@@ -491,10 +506,14 @@ function editZoneRich(
     return true;
 }
 
-function placeCaret(
-    content: HTMLElement,
-    opts: { at?: { x: number; y: number }; selectAll?: boolean },
-): void {
+// The placeholder was the last step in the history (nothing else ran while it
+// was being edited), so undoing it leaves the zone empty, as it was.
+async function takeBackPlaceholder(): Promise<void> {
+    const result = await edit({ action: "undo" });
+    if (!result.ok) emit("rerender");
+}
+
+function placeCaret(content: HTMLElement, opts: ZoneEditOpts): void {
     const sel = window.getSelection();
     if (!sel) return;
     let range: Range | null = null;

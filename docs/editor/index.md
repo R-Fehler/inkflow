@@ -230,8 +230,10 @@ slide instead, where the slide re-renders as you type; the **M↓** button switc
 to that pane at any time. Nothing is ever dropped: the editor only edits in place
 when it can write back exactly what the zone holds.
 
-Empty zones show a small **+ zone** label; click it to start writing (or to pick an
-image or video, for zones named like `media`, `image` or `video`).
+Empty zones show a small **+ zone** label; click it to start writing in place: the
+zone gets its name as text, selected, so typing replaces it. Leave it as it is, empty
+it or press <kbd>Escape</kbd> and the zone is empty again. For zones named like
+`media`, `image` or `video` the label picks an image or video instead.
 
 ## Drawing
 
@@ -251,7 +253,8 @@ built in code, or while editing a layout), the tool places a plain SVG text line
 **Text in a shape.** Double-click a rectangle or ellipse (or select it and press
 <kbd>Enter</kbd>) and type: the shape becomes a text box that keeps its fill,
 stroke and rounded corners, with wrapping Markdown text inside it, formulas
-included. The properties panel's **Text box** section sets the padding and the
+included. Its text is centred horizontally and vertically, as labels in diagrams
+usually are. The properties panel's **Text box** section sets the padding and the
 horizontal and vertical alignment, and **Draw the box** gives any text box (the
 plain ones too) a visible background and border, styled with the same fill and
 stroke controls as a shape. In the SVG this is the zone shape keeping its own

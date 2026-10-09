@@ -82,6 +82,7 @@ export const hooks = {
     crop: (_el: SVGGraphicsElement): void => {},
     typeInto: (_el: SVGGraphicsElement): void => {},
     zoneMedia: (_zone: string): void => {},
+    zoneText: (_zone: string): void => {},
     toolDown: (_e: PointerEvent, _pt: { x: number; y: number }): boolean =>
         false,
 };
@@ -950,13 +951,13 @@ function drawPlaceholders(): void {
         const title = svgEl("title");
         title.textContent = media
             ? `Add an image or video to the ${z.zone} zone`
-            : `Add ${z.zone} text (Markdown)`;
+            : `Add ${z.zone} text`;
         g.append(title);
         g.addEventListener("pointerdown", (e) => {
             e.stopPropagation();
             e.preventDefault();
             if (media) hooks.zoneMedia(z.zone);
-            else hooks.editZone(z.zone, null);
+            else hooks.zoneText(z.zone);
         });
         overlay.append(g);
     }

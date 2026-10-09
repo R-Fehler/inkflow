@@ -39,8 +39,14 @@ import { checkVideo, convertForInsert } from "./videocheck";
 
 const overlay = document.getElementById("overlay") as unknown as SVGSVGElement;
 
-// Ids to select once the rebuild that contains them has rendered.
-export const afterRender: { ids: string[]; editText: boolean } = {
+// Ids to select once the rebuild that contains them has rendered; with
+// editText, the first is edited in place. A placeholder is text written only
+// to have something to edit: left as it is, the edit is undone.
+export const afterRender: {
+    ids: string[];
+    editText: boolean;
+    placeholder?: string;
+} = {
     ids: [],
     editText: false,
 };
@@ -507,6 +513,32 @@ export async function typeInto(el: Element): Promise<void> {
     }
 }
 
+// ── Text into an empty zone ──
+
+/** "content-left" -> "Content left": what an empty zone first says. */
+export function zonePlaceholder(zone: string): string {
+    const words = zone.replace(/[-_]+/g, " ").trim() || "Text";
+    return words[0].toUpperCase() + words.slice(1);
+}
+
+// A layout's empty text zone, from its "+" label: it gets its name as text,
+// which is then edited in place (selected, so typing replaces it).
+export async function zoneText(zone: string): Promise<void> {
+    const slide = currentSlide();
+    if (!slide) return;
+    const text = zonePlaceholder(zone);
+    const result = await edit({
+        action: "zone-text",
+        slide: slide.deckIndex,
+        zone,
+        text,
+    });
+    if (!result.ok) return;
+    afterRender.ids = [`zone-${zone}`];
+    afterRender.editText = true;
+    afterRender.placeholder = text;
+}
+
 // ── Images ──
 
 function readBase64(file: Blob): Promise<string> {
@@ -848,6 +880,7 @@ export function initInsert(): void {
     hooks.toolDown = onToolDown;
     hooks.typeInto = (el) => void typeInto(el);
     hooks.zoneMedia = (zone) => void zoneMedia(zone);
+    hooks.zoneText = (zone) => void zoneText(zone);
     const canvas = document.getElementById("canvas")!;
     canvas.addEventListener("dragover", (e) => {
         if (e.dataTransfer?.types.includes("Files")) {

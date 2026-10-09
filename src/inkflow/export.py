@@ -8,9 +8,16 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
+from collections.abc import Generator
+from contextlib import contextmanager
+from functools import partial
 from html import escape as escape_html
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import cast
+
+from typing_extensions import override
 
 from inkflow.assets import (
     MIME_TYPES,
@@ -249,36 +256,110 @@ def build_pdf(
             .replace("__SLIDES__", slides_html)
             .replace("__TITLE__", escape_html(title))
         )
-        html_path = Path(tmp) / "slides.html"
-        html_path.write_text(html, encoding="utf-8")
-        cmd = [
-            exe,
-            "--headless",
-            "--disable-gpu",
-            "--print-to-pdf-no-header",
-            f"--print-to-pdf={output.resolve()}",
-            html_path.as_uri(),
-        ]
-        if no_sandbox:
-            cmd.insert(1, "--no-sandbox")
-        subprocess.run(cmd, check=True)
+        (Path(tmp) / "slides.html").write_text(html, encoding="utf-8")
+        target = output.resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # A file left from an earlier export must not pass for this one.
+        target.unlink(missing_ok=True)
+        with _served(Path(tmp)) as url:
+            cmd = [
+                exe,
+                "--headless",
+                "--disable-gpu",
+                "--print-to-pdf-no-header",
+                f"--print-to-pdf={target}",
+                f"{url}/slides.html",
+            ]
+            if no_sandbox:
+                cmd.insert(1, "--no-sandbox")
+            _run_chromium(cmd, target, b"%PDF")
 
 
-def _hidden_window_height(base: list[str], tmp: Path) -> int:
+@contextmanager
+def _served(directory: Path) -> Generator[str]:
+    """Serve ``directory`` on a loopback port for the length of the block.
+
+    The page is handed to Chromium over HTTP rather than as a ``file://`` URL:
+    a Chromium installed as a snap (Ubuntu's ``chromium``) or a Flatpak has its
+    own private ``/tmp`` and cannot see the temporary directory the page is
+    written to, so it would print its "file not found" page instead of the
+    deck. Every confined browser can still reach localhost.
+    """
+    handler = partial(_QuietHandler, directory=str(directory))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+class _QuietHandler(SimpleHTTPRequestHandler):
+    @override
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+def _run_chromium(cmd: list[str], target: Path, magic: bytes) -> None:
+    """Run Chromium to write ``target`` and check that it did.
+
+    Chromium reports most failures only on stderr, and a confined one (snap,
+    Flatpak) that may not write where it was asked exits 0 without a file, so
+    both the exit status and the file itself are checked, and either failure
+    is raised with what Chromium said.
+    """
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        raise RuntimeError(f"could not start {cmd[0]}: {exc}") from exc
+    said = _chromium_said(result.stderr)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"{Path(cmd[0]).name} failed (exit status {result.returncode})" + said
+        )
+    try:
+        with target.open("rb") as f:
+            ok = f.read(len(magic)) == magic
+    except OSError:
+        ok = False
+    if not ok:
+        raise RuntimeError(
+            f"{Path(cmd[0]).name} did not write {target}. A Chromium installed as"
+            + " a snap or Flatpak may only write inside your home folder (not in"
+            + " /tmp or a hidden folder): pick an output there, or pass"
+            + " --chromium with another Chromium-based browser."
+            + said
+        )
+
+
+def _chromium_said(stderr: str) -> str:
+    """The last lines of Chromium's stderr that are not routine noise."""
+    noise = ("dbus", "Fontconfig", "GPU", "gpu_", "Gtk-", "libva", "vaapi")
+    lines = [
+        line.strip()
+        for line in stderr.splitlines()
+        if line.strip() and not any(word in line for word in noise)
+    ]
+    return ("\n" + "\n".join(lines[-5:])) if lines else ""
+
+
+def _hidden_window_height(base: list[str], tmp: Path, url: str) -> int:
     """How much shorter headless Chrome's viewport is than the window it shoots.
 
     New-style headless reserves room for browser UI it never draws, so a
     screenshot of a WxH window shows a viewport less than H tall, and nothing is
     painted below it. Measured once per run rather than assumed.
     """
-    probe = tmp / "probe.html"
-    probe.write_text(
+    (tmp / "probe.html").write_text(
         "<html><body><script>document.body.textContent="
         + "'@'+innerHeight+'@'</script></body></html>",
         encoding="utf-8",
     )
     result = subprocess.run(
-        [*base, "--window-size=800,800", "--dump-dom", probe.as_uri()],
+        [*base, "--window-size=800,800", "--dump-dom", f"{url}/probe.html"],
         capture_output=True,
         text=True,
         check=False,
@@ -422,9 +503,9 @@ def render_png(
     if no_sandbox:
         base.append("--no-sandbox")
     written: list[Path] = []
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory() as tmp, _served(Path(tmp)) as url:
         _copy_assets(slides, _asset_roots(deck, project_dir), Path(tmp))
-        lost = _hidden_window_height(base, Path(tmp))
+        lost = _hidden_window_height(base, Path(tmp), url)
         for n in slide_numbers:
             svg = slides[n - 1]["svg"]
             w, h = _slide_dimensions(svg)
@@ -439,9 +520,9 @@ def render_png(
                 .replace("__W__", str(w))
                 .replace("__H__", str(h))
             )
-            html_path = Path(tmp) / f"slide-{n}.html"
-            html_path.write_text(html, encoding="utf-8")
-            target = output if single else output / f"slide-{n}.png"
+            (Path(tmp) / f"slide-{n}.html").write_text(html, encoding="utf-8")
+            target = (output if single else output / f"slide-{n}.png").resolve()
+            target.unlink(missing_ok=True)
             # The window is grown by what the browser keeps from the viewport, so
             # the whole slide is painted; the strip that adds is cropped off.
             cmd = [
@@ -449,10 +530,10 @@ def render_png(
                 f"--window-size={w},{h + lost}",
                 f"--force-device-scale-factor={scale:g}",
                 "--virtual-time-budget=3000",
-                f"--screenshot={target.resolve()}",
-                html_path.as_uri(),
+                f"--screenshot={target}",
+                f"{url}/slide-{n}.html",
             ]
-            subprocess.run(cmd, check=True, capture_output=True)
+            _run_chromium(cmd, target, b"\x89PNG")
             if lost:
                 data = target.read_bytes()
                 # Chrome clamps the scale factor, so take it from the image.

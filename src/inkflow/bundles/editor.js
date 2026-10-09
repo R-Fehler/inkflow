@@ -1163,6 +1163,8 @@
     },
     zoneMedia: (_zone) => {
     },
+    zoneText: (_zone) => {
+    },
     toolDown: (_e, _pt) => false
   };
   function slideRoot() {
@@ -1846,13 +1848,13 @@
       label4.textContent = text;
       g.append(label4);
       const title2 = svgEl("title");
-      title2.textContent = media ? `Add an image or video to the ${z.zone} zone` : `Add ${z.zone} text (Markdown)`;
+      title2.textContent = media ? `Add an image or video to the ${z.zone} zone` : `Add ${z.zone} text`;
       g.append(title2);
       g.addEventListener("pointerdown", (e) => {
         e.stopPropagation();
         e.preventDefault();
         if (media) hooks.zoneMedia(z.zone);
-        else hooks.editZone(z.zone, null);
+        else hooks.zoneText(z.zone);
       });
       overlay.append(g);
     }
@@ -4479,6 +4481,25 @@ Decks: new, open, recent` : "Decks";
       afterRender.editText = true;
     }
   }
+  function zonePlaceholder(zone) {
+    const words = zone.replace(/[-_]+/g, " ").trim() || "Text";
+    return words[0].toUpperCase() + words.slice(1);
+  }
+  async function zoneText(zone) {
+    const slide = currentSlide();
+    if (!slide) return;
+    const text = zonePlaceholder(zone);
+    const result = await edit({
+      action: "zone-text",
+      slide: slide.deckIndex,
+      zone,
+      text
+    });
+    if (!result.ok) return;
+    afterRender.ids = [`zone-${zone}`];
+    afterRender.editText = true;
+    afterRender.placeholder = text;
+  }
   function readBase64(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -4738,6 +4759,7 @@ Decks: new, open, recent` : "Decks";
     hooks.toolDown = onToolDown;
     hooks.typeInto = (el2) => void typeInto(el2);
     hooks.zoneMedia = (zone) => void zoneMedia(zone);
+    hooks.zoneText = (zone) => void zoneText(zone);
     const canvas2 = document.getElementById("canvas");
     canvas2.addEventListener("dragover", (e) => {
       if (e.dataTransfer?.types.includes("Files")) {
@@ -7955,6 +7977,10 @@ ${area2.value.slice(pos)}`;
         const grow = growOp(fo, content2);
         cleanup();
         ed.richEditing = false;
+        if (opts2.placeholder !== void 0 && (md === start || !md.trim())) {
+          await takeBackPlaceholder();
+          return;
+        }
         if (md === start && !grow) {
           emit("rerender");
           return;
@@ -7973,6 +7999,10 @@ ${area2.value.slice(pos)}`;
       cancel: () => {
         cleanup();
         ed.richEditing = false;
+        if (opts2.placeholder !== void 0) {
+          void takeBackPlaceholder();
+          return;
+        }
         emit("rerender");
       }
     };
@@ -8018,6 +8048,10 @@ ${area2.value.slice(pos)}`;
       }
     });
     return true;
+  }
+  async function takeBackPlaceholder() {
+    const result = await edit({ action: "undo" });
+    if (!result.ok) emit("rerender");
   }
   function placeCaret(content2, opts2) {
     const sel = window.getSelection();
@@ -10309,13 +10343,14 @@ Continue?`)) return null;
       (el2) => el2 instanceof SVGGraphicsElement
     );
     if (!els.length) return;
-    const editText = afterRender.editText;
+    const { editText, placeholder } = afterRender;
     afterRender.ids = [];
     afterRender.editText = false;
+    afterRender.placeholder = void 0;
     select(els);
     if (editText && els[0].localName === "text") editTextOf(els[0]);
     else if (editText && isZone(els[0])) {
-      editZone(zoneName(els[0]), els[0], { selectAll: true });
+      editZone(zoneName(els[0]), els[0], { selectAll: true, placeholder });
     }
   }
   function boot() {

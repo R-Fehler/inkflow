@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 from pathlib import Path
 
 import click
@@ -208,7 +209,13 @@ def export_cmd(
                 f"--size must be WxH (e.g. 1920x1080), got: {size!r}"
             ) from None
     try:
-        build_pdf(resolved, out, chromium, no_sandbox, size=parsed_size)
+        build_pdf(
+            resolved,
+            out,
+            chromium,
+            no_sandbox or (hasattr(os, "geteuid") and os.geteuid() == 0),
+            size=parsed_size,
+        )
     except (RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     report("Exported", str(out))

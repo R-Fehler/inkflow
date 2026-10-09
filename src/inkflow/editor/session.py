@@ -51,6 +51,7 @@ from inkflow.editor.svgops import (
     element_at,
     file_hash,
     group,
+    set_style,
     ungroup,
     unique_id,
 )
@@ -1267,6 +1268,17 @@ class EditorSession:
                 svg, [{"kind": "id", "loc": msg.get("loc"), "id": zone_id, "from": old}]
             )
         el.set(INKFLOW_SHOW_SHAPE, "true")
+        # Text in a shape is a label (diagrams, buttons): centred both ways,
+        # unless the shape already says otherwise.
+        style = el.get("style", "")
+        set_style(
+            el,
+            {
+                var: "center"
+                for var in ("--inkflow-align", "--inkflow-valign")
+                if var not in style
+            },
+        )
         txn.write(path, svg.to_bytes())
         if old and old != zone_id:
             self._rename_cues(deck, path, {old: zone_id}, txn)

@@ -91,13 +91,14 @@ function selectPending(): void {
             (el): el is SVGGraphicsElement => el instanceof SVGGraphicsElement,
         );
     if (!els.length) return;
-    const editText = afterRender.editText;
+    const { editText, placeholder } = afterRender;
     afterRender.ids = [];
     afterRender.editText = false;
+    afterRender.placeholder = undefined;
     select(els);
     if (editText && els[0].localName === "text") editTextOf(els[0]);
     else if (editText && isZone(els[0])) {
-        editZone(zoneName(els[0]), els[0], { selectAll: true });
+        editZone(zoneName(els[0]), els[0], { selectAll: true, placeholder });
     }
 }
 

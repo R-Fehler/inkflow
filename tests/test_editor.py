@@ -1578,6 +1578,8 @@ def test_shape_text_turns_a_rectangle_into_a_styled_text_box(project: Path) -> N
     assert result["ids"] == {"new": "zone-text"}
     text = drawing.read_text()
     assert 'id="zone-text"' in text and 'inkflow:show-shape="true"' in text
+    # A label in a shape: centred both ways.
+    assert 'style="--inkflow-align:center;--inkflow-valign:center"' in text
     deck = _deck(project)
     # The animation that targeted the rectangle follows it.
     assert deck.slides[0].animations[0].element == "zone-text"
@@ -1587,6 +1589,7 @@ def test_shape_text_turns_a_rectangle_into_a_styled_text_box(project: Path) -> N
     html = process_deck(deck, project, project / "deck.py")[0]["svg"]
     assert "background:var(--inkflow-surface)" in html
     assert "<strong>the</strong>" in html
+    assert "--inkflow-valign:center" in html  # carried onto the text box
     with pytest.raises(EditError, match="rectangles and ellipses"):
         svg = SvgFile.from_bytes(drawing, drawing.read_bytes())
         session.apply(

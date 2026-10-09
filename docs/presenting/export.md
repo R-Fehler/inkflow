@@ -102,11 +102,22 @@ inkflow export --size 1280x720
 
 ### Running as root or in Docker
 
-Pass `--no-sandbox` when Chromium refuses to start due to sandbox restrictions:
+Running as root, inkflow passes `--no-sandbox` on its own. Otherwise pass it when Chromium refuses to start due to sandbox restrictions:
 
 ```bash
 inkflow export --no-sandbox
 ```
+
+### Snap and Flatpak browsers
+
+Ubuntu's `chromium` is a snap, and snaps and Flatpaks run in a confinement that
+cannot see the rest of the system's `/tmp`. Inkflow therefore hands the slides to
+the browser from a short-lived local web server on `127.0.0.1`, never as a file,
+so any install works. The browser still writes the PDF itself, though, and a
+confined one may only write inside your home folder (not in `/tmp` or a hidden
+folder such as `~/.cache`). If it cannot, the export stops with that message;
+pick an output path in your home folder, or point `--chromium` at another
+browser. Whatever Chromium printed on failure is shown with the error.
 
 ### Requirements
 
