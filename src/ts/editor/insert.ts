@@ -232,12 +232,6 @@ function onToolDown(e: PointerEvent, start: { x: number; y: number }): boolean {
     if (tool === "select") return false;
     e.preventDefault();
     clearSelection();
-    if (tool === "text") {
-        const p = toParent(insertParent().el, start.x, start.y);
-        void insertXml(textXml(p), "text", { editText: true });
-        setTool("select");
-        return true;
-    }
     const paperEl = e.currentTarget as HTMLElement;
     paperEl.setPointerCapture(e.pointerId);
     ed.interacting = true;
@@ -264,6 +258,12 @@ function onToolDown(e: PointerEvent, start: { x: number; y: number }): boolean {
         ed.interacting = false;
         let a = start;
         let b = end;
+        if (tool === "text") {
+            void insertTextBox(start, end);
+            setTool("select");
+            drawOverlay();
+            return;
+        }
         if (Math.hypot(b.x - a.x, b.y - a.y) < 8) {
             // A click: a default-sized shape centred there.
             const w = tool === "line" || tool === "arrow" ? 300 : 360;
@@ -284,6 +284,67 @@ function onToolDown(e: PointerEvent, start: { x: number; y: number }): boolean {
     paperEl.addEventListener("pointermove", move);
     paperEl.addEventListener("pointerup", up);
     return true;
+}
+
+// ── Text boxes ──
+
+// A text box wraps its text and holds Markdown (bold words, lists, links…):
+// a zone of its own on the slide, edited in place. Where there is nowhere to
+// keep its Markdown (a deck built in code, a layout being edited), the text
+// tool falls back to a plain SVG text line.
+async function insertTextBox(
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+): Promise<void> {
+    const slide = currentSlide();
+    if (!slide) return;
+    const vb = slideRoot()?.viewBox.baseVal;
+    const vw = vb?.width || 1920;
+    let box = {
+        x: Math.min(a.x, b.x),
+        y: Math.min(a.y, b.y),
+        width: Math.abs(b.x - a.x),
+        height: Math.abs(b.y - a.y),
+    };
+    if (box.width < 40 || box.height < 20) {
+        // A click: a box from there to near the slide's right edge.
+        box = {
+            x: a.x,
+            y: a.y - 40,
+            width: Math.max(300, Math.min(900, vw - a.x - 60)),
+            height: 100,
+        };
+    }
+    const plain = ed.layoutMode || (!ed.model?.deckEditable && !slide.md);
+    if (plain) {
+        const p = toParent(insertParent().el, a.x, a.y);
+        await insertXml(textXml(p), "text", { editText: true });
+        return;
+    }
+    if (!(await ensureOwnDrawing())) return;
+    const src = ownSource();
+    const current = currentSlide();
+    if (!src || !current) return;
+    const parent = insertParent();
+    const p0 = toParent(parent.el, box.x, box.y);
+    const p1 = toParent(parent.el, box.x + box.width, box.y + box.height);
+    const result = await edit({
+        action: "insert-textbox",
+        slide: current.deckIndex,
+        file: src.path,
+        hash: src.hash,
+        parent: parent.loc,
+        x: Math.round(Math.min(p0.x, p1.x)),
+        y: Math.round(Math.min(p0.y, p1.y)),
+        width: Math.round(Math.abs(p1.x - p0.x)),
+        height: Math.round(Math.abs(p1.y - p0.y)),
+        text: "Text",
+    });
+    const id = result.ids?.new;
+    if (result.ok && id) {
+        afterRender.ids = [id];
+        afterRender.editText = true;
+    }
 }
 
 // ── Images ──

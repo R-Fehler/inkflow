@@ -121,6 +121,63 @@
     stroke: var(--inkflow-grey);
 }
 
+/* ── HTML text colour utilities (coloured words in Markdown: <span class=…>) ── */
+
+.inkflow-color-bg {
+    color: var(--inkflow-bg);
+}
+.inkflow-color-surface {
+    color: var(--inkflow-surface);
+}
+.inkflow-color-border {
+    color: var(--inkflow-border);
+}
+.inkflow-color-text {
+    color: var(--inkflow-text);
+}
+.inkflow-color-text-muted {
+    color: var(--inkflow-text-muted);
+}
+.inkflow-color-accent {
+    color: var(--inkflow-accent);
+}
+.inkflow-color-accent-fg {
+    color: var(--inkflow-accent-fg);
+}
+.inkflow-color-code-bg {
+    color: var(--inkflow-code-bg);
+}
+.inkflow-color-code-text {
+    color: var(--inkflow-code-text);
+}
+.inkflow-color-red {
+    color: var(--inkflow-red);
+}
+.inkflow-color-orange {
+    color: var(--inkflow-orange);
+}
+.inkflow-color-yellow {
+    color: var(--inkflow-yellow);
+}
+.inkflow-color-green {
+    color: var(--inkflow-green);
+}
+.inkflow-color-teal {
+    color: var(--inkflow-teal);
+}
+.inkflow-color-blue {
+    color: var(--inkflow-blue);
+}
+.inkflow-color-purple {
+    color: var(--inkflow-purple);
+}
+.inkflow-color-pink {
+    color: var(--inkflow-pink);
+}
+.inkflow-color-grey {
+    color: var(--inkflow-grey);
+}
+
 /* ── foreignObject layout wrapper ────────────────────────────────────────── */
 
 /* --inkflow-valign: start | center | end  (set on #zone-* in layout SVG CSS) */

@@ -196,9 +196,9 @@
   }
 
   // src/ts/editor/dom.ts
-  function h(tag, attrs = {}, ...children) {
+  function h(tag, attrs2 = {}, ...children) {
     const el = document.createElement(tag);
-    for (const [k, v] of Object.entries(attrs)) {
+    for (const [k, v] of Object.entries(attrs2)) {
       if (v == null || v === false) continue;
       if (k.startsWith("on") && typeof v === "function") {
         el.addEventListener(k.slice(2), v);
@@ -220,9 +220,9 @@
     while (el.firstChild) el.removeChild(el.firstChild);
   }
   var SVG_NS = "http://www.w3.org/2000/svg";
-  function svgEl(tag, attrs = {}) {
+  function svgEl(tag, attrs2 = {}) {
     const el = document.createElementNS(SVG_NS, tag);
-    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+    for (const [k, v] of Object.entries(attrs2)) el.setAttribute(k, String(v));
     return el;
   }
   var ICON_PATHS = {
@@ -253,9 +253,9 @@
     fit: '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>'
   };
   function icon(name, size = 16) {
-    const wrap = document.createElement("span");
-    wrap.innerHTML = `<svg viewBox="0 0 16 16" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] ?? ""}</svg>`;
-    return wrap.firstElementChild;
+    const wrap2 = document.createElement("span");
+    wrap2.innerHTML = `<svg viewBox="0 0 16 16" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] ?? ""}</svg>`;
+    return wrap2.firstElementChild;
   }
   var toastTimer = 0;
   function toast(message, kind = "info") {
@@ -609,6 +609,8 @@
     tool: "select",
     interacting: false,
     // a drag is in progress: defer re-renders
+    richEditing: false,
+    // a zone is being edited in place: defer re-renders
     renderPending: false,
     canUndo: false,
     canRedo: false,
@@ -847,7 +849,12 @@
   var hooks = {
     editText: (_el) => {
     },
-    editZone: (_zone, _box) => {
+    editZone: (_zone, _el, _at) => {
+    },
+    // The element being edited in place (clicks inside it place the caret),
+    // and how to finish that edit when the pointer goes elsewhere.
+    editingHost: () => null,
+    finishEditing: () => {
     },
     zoneMedia: (_zone) => {
     },
@@ -886,7 +893,7 @@
     drawOverlay();
   }
   function render() {
-    if (ed.interacting) {
+    if (ed.interacting || ed.richEditing) {
       ed.renderPending = true;
       return;
     }
@@ -1034,8 +1041,8 @@
   function elementGeom(el) {
     const parent = el.parentElement;
     const parentCTM = parent?.getScreenCTM?.();
-    const attrs = {};
-    for (const a of GEOM_ATTRS) attrs[a] = el.getAttribute(a);
+    const attrs2 = {};
+    for (const a of GEOM_ATTRS) attrs2[a] = el.getAttribute(a);
     let box = { x: 0, y: 0, width: 0, height: 0 };
     try {
       const b = el.getBBox();
@@ -1045,7 +1052,7 @@
     return {
       tag: el.localName,
       sourceTag: el.getAttribute("data-ink-tag") ?? el.localName,
-      attrs,
+      attrs: attrs2,
       own: parseTransform(el.getAttribute("transform")),
       parentToSlide: parentCTM ? multiply(invert(rootCTM()), mat(parentCTM)) : { ...IDENTITY },
       localBox: box
@@ -1388,18 +1395,7 @@
         e.stopPropagation();
         e.preventDefault();
         if (media) hooks.zoneMedia(z.zone);
-        else {
-          const r = paper.getBoundingClientRect();
-          hooks.editZone(
-            z.zone,
-            new DOMRect(
-              r.left + pb.x,
-              r.top + pb.y,
-              pb.width,
-              pb.height
-            )
-          );
-        }
+        else hooks.editZone(z.zone, null);
       });
       overlay.append(g);
     }
@@ -1442,7 +1438,10 @@
         hash: src?.hash ?? "",
         ops,
         label: label2,
-        coalesce
+        coalesce,
+        // Deleting or duplicating a zone takes its content along (not in
+        // layout mode: a layout's zones are filled by every slide).
+        zoneSlide: ed.layoutMode ? void 0 : slide.deckIndex
       });
       ok = ok && result.ok;
     }
@@ -1488,11 +1487,11 @@
     await sendSvgOps(plans, "Nudge", "nudge");
   }
   function snapshot(sel) {
-    const attrs = {};
-    for (const a of GEOM_ATTRS) attrs[a] = sel.el.getAttribute(a);
+    const attrs2 = {};
+    for (const a of GEOM_ATTRS) attrs2[a] = sel.el.getAttribute(a);
     return {
       sel,
-      attrs,
+      attrs: attrs2,
       kids: textChildren(sel.el).map((el) => ({
         el,
         x: el.getAttribute("x"),
@@ -1724,8 +1723,13 @@
       ed.slideSelection.clear();
       emit("slide-selection");
     }
-    if (e.button !== 0 || !slideRoot()) return;
     const target = e.target;
+    const editing = hooks.editingHost();
+    if (editing) {
+      if (editing.contains(target)) return;
+      hooks.finishEditing();
+    }
+    if (e.button !== 0 || !slideRoot()) return;
     const handle = target.closest("[data-handle]")?.dataset.handle;
     const pt = clientToSlide(e.clientX, e.clientY);
     if (!handle && ed.tool !== "select") {
@@ -1818,10 +1822,11 @@
     return null;
   }
   function onDoubleClick(e) {
+    if (hooks.editingHost()?.contains(e.target)) return;
     const el = pick(e.clientX, e.clientY);
     if (!el) return;
     if (isZone(el)) {
-      hooks.editZone(zoneName(el), el.getBoundingClientRect());
+      hooks.editZone(zoneName(el), el, { x: e.clientX, y: e.clientY });
       return;
     }
     const text = textUnder(e.clientX, e.clientY);
@@ -1868,6 +1873,7 @@
       }
     });
     on("model", render);
+    on("rerender", render);
   }
   function setZoom(z) {
     ed.zoom = z <= 0 ? 0 : Math.max(0.05, Math.min(z, 8));
@@ -2041,12 +2047,6 @@
     if (tool === "select") return false;
     e.preventDefault();
     clearSelection();
-    if (tool === "text") {
-      const p = toParent(insertParent().el, start.x, start.y);
-      void insertXml(textXml(p), "text", { editText: true });
-      setTool("select");
-      return true;
-    }
     const paperEl = e.currentTarget;
     paperEl.setPointerCapture(e.pointerId);
     ed.interacting = true;
@@ -2073,6 +2073,12 @@
       ed.interacting = false;
       let a = start;
       let b = end;
+      if (tool === "text") {
+        void insertTextBox(start, end);
+        setTool("select");
+        drawOverlay();
+        return;
+      }
       if (Math.hypot(b.x - a.x, b.y - a.y) < 8) {
         const w = tool === "line" || tool === "arrow" ? 300 : 360;
         const h2 = tool === "line" || tool === "arrow" ? 0 : 220;
@@ -2092,6 +2098,56 @@
     paperEl.addEventListener("pointermove", move);
     paperEl.addEventListener("pointerup", up);
     return true;
+  }
+  async function insertTextBox(a, b) {
+    const slide = currentSlide();
+    if (!slide) return;
+    const vb = slideRoot()?.viewBox.baseVal;
+    const vw = vb?.width || 1920;
+    let box = {
+      x: Math.min(a.x, b.x),
+      y: Math.min(a.y, b.y),
+      width: Math.abs(b.x - a.x),
+      height: Math.abs(b.y - a.y)
+    };
+    if (box.width < 40 || box.height < 20) {
+      box = {
+        x: a.x,
+        y: a.y - 40,
+        width: Math.max(300, Math.min(900, vw - a.x - 60)),
+        height: 100
+      };
+    }
+    const plain2 = ed.layoutMode || !ed.model?.deckEditable && !slide.md;
+    if (plain2) {
+      const p = toParent(insertParent().el, a.x, a.y);
+      await insertXml(textXml(p), "text", { editText: true });
+      return;
+    }
+    if (!await ensureOwnDrawing()) return;
+    const src = ownSource();
+    const current = currentSlide();
+    if (!src || !current) return;
+    const parent = insertParent();
+    const p0 = toParent(parent.el, box.x, box.y);
+    const p1 = toParent(parent.el, box.x + box.width, box.y + box.height);
+    const result = await edit({
+      action: "insert-textbox",
+      slide: current.deckIndex,
+      file: src.path,
+      hash: src.hash,
+      parent: parent.loc,
+      x: Math.round(Math.min(p0.x, p1.x)),
+      y: Math.round(Math.min(p0.y, p1.y)),
+      width: Math.round(Math.abs(p1.x - p0.x)),
+      height: Math.round(Math.abs(p1.y - p0.y)),
+      text: "Text"
+    });
+    const id = result.ids?.new;
+    if (result.ok && id) {
+      afterRender.ids = [id];
+      afterRender.editText = true;
+    }
   }
   function readBase64(file) {
     return new Promise((resolve, reject) => {
@@ -4198,6 +4254,236 @@
     });
   }
 
+  // src/ts/editor/richtext.ts
+  var Unsupported = class extends Error {
+  };
+  var COLOR_CLASS = /^inkflow-color-[\w-]+$/;
+  var RAW_INLINE = /* @__PURE__ */ new Set(["u", "mark", "sub", "sup"]);
+  function attrs(el) {
+    return [...el.attributes].map((a) => a.name);
+  }
+  function plain(el, allowed = []) {
+    return attrs(el).every(
+      (a) => allowed.includes(a) || a === "style" || a === "dir"
+    );
+  }
+  function escapeText(text) {
+    return text.replace(/\\/g, "\\\\").replace(/([*`[\]<~$])/g, "\\$1").replace(/(^|\W)_|_(?=\W|$)/g, (m) => m.replace("_", "\\_")).replace(/ /g, " ");
+  }
+  function codeSpan(text) {
+    const ticks = text.includes("`") ? "``" : "`";
+    const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
+    return `${ticks}${pad}${text}${pad}${ticks}`;
+  }
+  function wrap(inner, mark) {
+    const m = inner.match(/^(\s*)([\s\S]*?)(\s*)$/);
+    if (!m?.[2]) return inner;
+    return `${m[1]}${mark}${m[2]}${mark}${m[3]}`;
+  }
+  function inline(node) {
+    let out = "";
+    for (const child of node.childNodes) out += inlineNode(child);
+    return out.replace(/\\\n\n/g, "\\\n");
+  }
+  function inlineNode(node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return escapeText(
+        (node.textContent ?? "").replace(/[ \t]*\n\s*/g, "\n")
+      );
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return "";
+    const el = node;
+    const tag = el.localName;
+    switch (tag) {
+      case "strong":
+      case "b":
+        if (!plain(el)) throw new Unsupported(tag);
+        return wrap(inline(el), "**");
+      case "em":
+      case "i":
+        if (!plain(el)) throw new Unsupported(tag);
+        return wrap(inline(el), "*");
+      case "s":
+      case "del":
+      case "strike":
+        if (!plain(el)) throw new Unsupported(tag);
+        return wrap(inline(el), "~~");
+      case "code":
+        if (!plain(el)) throw new Unsupported(tag);
+        return codeSpan(el.textContent ?? "");
+      case "br":
+        return "\\\n";
+      case "a": {
+        if (!plain(el, ["href", "title"])) throw new Unsupported(tag);
+        const href = el.getAttribute("href") ?? "";
+        const title = el.getAttribute("title");
+        const t = title ? ` "${title.replace(/"/g, '\\"')}"` : "";
+        return `[${inline(el)}](${href.replace(/[()\s]/g, encodeURIComponent)}${t})`;
+      }
+      case "span": {
+        const cls = el.getAttribute("class") ?? "";
+        if (!cls && plain(el)) return inline(el);
+        if (COLOR_CLASS.test(cls) && plain(el, ["class"])) {
+          return `<span class="${cls}">${inline(el)}</span>`;
+        }
+        throw new Unsupported(`span.${cls}`);
+      }
+      case "font":
+        return inline(el);
+      default:
+        if (RAW_INLINE.has(tag) && plain(el)) {
+          return `<${tag}>${inline(el)}</${tag}>`;
+        }
+        throw new Unsupported(tag);
+    }
+  }
+  var BLOCK = /* @__PURE__ */ new Set([
+    "p",
+    "div",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "ul",
+    "ol",
+    "blockquote",
+    "hr",
+    "table",
+    "pre"
+  ]);
+  function isBlank(node) {
+    return node.nodeType === Node.TEXT_NODE && !(node.textContent ?? "").trim();
+  }
+  function cellText(cell) {
+    return inline(cell).replace(/\|/g, "\\|").replace(/\\\n/g, " ").trim();
+  }
+  function align(cell) {
+    const a = cell.style?.textAlign || cell.getAttribute("align");
+    return a === "center" || a === "right" || a === "left" ? a : "";
+  }
+  function tableMarkdown(table) {
+    const rows = [...table.querySelectorAll("tr")];
+    if (!rows.length) return "";
+    const width = Math.max(...rows.map((r) => r.children.length));
+    const cells = rows.map((r) => {
+      const out = [...r.children].map(cellText);
+      while (out.length < width) out.push("");
+      return out;
+    });
+    const aligns = [...rows[0].children].map(align);
+    while (aligns.length < width) aligns.push("");
+    const rule = aligns.map(
+      (a) => a === "center" ? ":---:" : a === "right" ? "---:" : a === "left" ? ":---" : "---"
+    );
+    const line = (r) => `| ${r.join(" | ")} |`;
+    return [line(cells[0]), line(rule), ...cells.slice(1).map(line)].join("\n");
+  }
+  function listMarkdown(list2) {
+    const ordered = list2.localName === "ol";
+    let n = parseInt(list2.getAttribute("start") ?? "1", 10) || 1;
+    const lines = [];
+    for (const li of list2.children) {
+      if (li.localName !== "li") throw new Unsupported(li.localName);
+      if (!plain(li)) throw new Unsupported("li with attributes");
+      const marker = ordered ? `${n++}. ` : "- ";
+      const pad = " ".repeat(marker.length);
+      const own = [];
+      const nested = [];
+      for (const c of li.childNodes) {
+        const el = c;
+        if (c.nodeType === Node.ELEMENT_NODE && /^[ou]l$/.test(el.localName)) {
+          nested.push(listMarkdown(el));
+        } else if (c.nodeType === Node.ELEMENT_NODE && (el.localName === "p" || el.localName === "div")) {
+          own.push(inline(el));
+        } else {
+          own.push(inlineNode(c));
+        }
+      }
+      const text = own.join("").trim().replace(/\n/g, `
+${pad}`);
+      lines.push(`${marker}${text}`);
+      for (const sub of nested) {
+        lines.push(
+          sub.split("\n").map((l) => pad + l).join("\n")
+        );
+      }
+    }
+    return lines.join("\n");
+  }
+  function blockMarkdown(el) {
+    const tag = el.localName;
+    if (/^h[1-6]$/.test(tag)) {
+      if (!plain(el)) throw new Unsupported(tag);
+      return `${"#".repeat(Number(tag[1]))} ${inline(el).trim()}`;
+    }
+    switch (tag) {
+      case "p":
+      case "div":
+        if (!plain(el)) throw new Unsupported(tag);
+        if ([...el.children].some((c) => BLOCK.has(c.localName))) {
+          return blocks(el);
+        }
+        return escapeLineStart(inline(el).replace(/\\\n$/, "").trim());
+      case "ul":
+      case "ol":
+        if (!plain(el, ["start"])) throw new Unsupported(tag);
+        return listMarkdown(el);
+      case "blockquote":
+        if (!plain(el)) throw new Unsupported(tag);
+        return blocks(el).split("\n").map((l) => l ? `> ${l}` : ">").join("\n");
+      case "hr":
+        return "---";
+      case "table":
+        if (!plain(el)) throw new Unsupported(tag);
+        return tableMarkdown(el);
+      default:
+        throw new Unsupported(tag);
+    }
+  }
+  function escapeLineStart(md) {
+    const ordered = md.match(/^(\d+)([.)]) /);
+    if (ordered) {
+      return `${ordered[1]}\\${ordered[2]} ${md.slice(ordered[0].length)}`;
+    }
+    return /^(#{1,6} |[-+] |> )/.test(md) ? `\\${md}` : md;
+  }
+  function blocks(root2) {
+    const out = [];
+    let run = "";
+    const flush = () => {
+      if (run.trim()) out.push(run.trim());
+      run = "";
+    };
+    for (const node of root2.childNodes) {
+      if (isBlank(node)) continue;
+      const el = node;
+      if (node.nodeType === Node.ELEMENT_NODE && BLOCK.has(el.localName)) {
+        flush();
+        const md = blockMarkdown(el);
+        if (md.trim()) out.push(md);
+      } else if (node.nodeType === Node.ELEMENT_NODE && el.localName === "br") {
+        flush();
+      } else {
+        run += inlineNode(node);
+      }
+    }
+    flush();
+    return out.join("\n\n");
+  }
+  function htmlToMarkdown(root2) {
+    return blocks(root2);
+  }
+  function normalizeMarkdown(md) {
+    return md.replace(/\r/g, "").replace(/ {2,}\n(?=[^\n])/g, "\\\n").split("\n").map(
+      (l) => l.replace(/\s+$/, "").replace(/^(\s*)[*+] /, "$1- ").replace(/^(\s*)\d+[.)] /, "$11. ")
+    ).join("\n").replace(/__(.+?)__/g, "**$1**").replace(/(^|\W)_(\S.*?)_(?=\W|$)/g, "$1*$2*").replace(/\\([\\`*_{}[\]()#+\-.!<>~$|])/g, "$1").replace(/ *\| */g, "|").replace(/\|:?-+:?/g, "|-").replace(/\n{3,}/g, "\n\n").trim();
+  }
+  function sameMarkdown(a, b) {
+    return normalizeMarkdown(a) === normalizeMarkdown(b);
+  }
+
   // src/ts/editor/textedit.ts
   var layer = document.getElementById("text-layer");
   var dock = document.getElementById("zone-dock");
@@ -4326,7 +4612,7 @@
     area2.dispatchEvent(new Event("input"));
     area2.focus();
   }
-  function editZoneText(zone, box) {
+  function editZoneText(zone) {
     void finishTextEdit();
     const slide = currentSlide();
     if (!slide) return;
@@ -4416,9 +4702,8 @@ ${area2.value.slice(pos)}`;
         " Done"
       )
     );
-    void box;
-    const wrap = h("div", { class: "zone-edit-wrap" }, bar, area2);
-    dock.append(wrap);
+    const wrap2 = h("div", { class: "zone-edit-wrap" }, bar, area2);
+    dock.append(wrap2);
     document.body.classList.add("editing-zone");
     area2.focus();
     active = {
@@ -4451,9 +4736,561 @@ ${area2.value.slice(pos)}`;
     });
     area2.addEventListener("blur", (e) => {
       const next = e.relatedTarget;
-      if (next && wrap.contains(next)) return;
+      if (next && wrap2.contains(next)) return;
       void finishTextEdit();
     });
+  }
+  var richHost = null;
+  function editingHost() {
+    return richHost;
+  }
+  function editZone(zone, el, opts = {}) {
+    void finishTextEdit();
+    if (el && editZoneRich(zone, el, opts)) return;
+    editZoneText(zone);
+  }
+  var COLORS = [
+    "text",
+    "text-muted",
+    "accent",
+    "red",
+    "orange",
+    "yellow",
+    "green",
+    "teal",
+    "blue",
+    "purple",
+    "pink",
+    "grey"
+  ];
+  function editZoneRich(zone, el, opts) {
+    const slide = currentSlide();
+    const content = el.querySelector(".inkflow-content");
+    if (!slide || !content || ed.step != null) return false;
+    const origin = slide.zoneOrigins?.[zone];
+    if (!ed.model?.deckEditable && (origin === "deck" || !slide.md)) {
+      return false;
+    }
+    let start;
+    try {
+      start = htmlToMarkdown(content);
+    } catch {
+      return false;
+    }
+    if (!sameMarkdown(start, slide.zoneText?.[zone] ?? "")) return false;
+    const fo = el;
+    const deckIndex = slide.deckIndex;
+    ed.richEditing = true;
+    richHost = content;
+    fo.classList.add("rich-editing");
+    fo.style.overflow = "visible";
+    content.contentEditable = "true";
+    content.spellcheck = true;
+    document.execCommand("defaultParagraphSeparator", false, "p");
+    content.focus();
+    placeCaret(content, opts);
+    const bar = richToolbar(content, () => {
+      void finishTextEdit().then(() => editZoneText(zone));
+    });
+    layer.append(bar);
+    positionBar(bar, fo);
+    const cleanup = () => {
+      richHost = null;
+      content.contentEditable = "false";
+      fo.classList.remove("rich-editing");
+      fo.style.overflow = "";
+      bar.remove();
+      document.removeEventListener("selectionchange", onSelection);
+    };
+    const onSelection = () => syncToolbar(bar, content);
+    document.addEventListener("selectionchange", onSelection);
+    syncToolbar(bar, content);
+    active = {
+      commit: async () => {
+        let md;
+        try {
+          md = htmlToMarkdown(content);
+        } catch (err) {
+          cleanup();
+          ed.richEditing = false;
+          emit("rerender");
+          toast(
+            `Not saved: ${err instanceof Unsupported ? `<${err.message}>` : "this content"} cannot be written as Markdown`,
+            "error"
+          );
+          return;
+        }
+        const grow = growOp(fo, content);
+        cleanup();
+        ed.richEditing = false;
+        if (md === start && !grow) {
+          emit("rerender");
+          return;
+        }
+        if (!md.trim() && removeEmptyBox(fo, zone, deckIndex)) return;
+        const result = await edit({
+          action: "zone-text",
+          slide: deckIndex,
+          zone,
+          text: md,
+          origin,
+          svg: grow
+        });
+        if (!result.ok) emit("rerender");
+      },
+      cancel: () => {
+        cleanup();
+        ed.richEditing = false;
+        emit("rerender");
+      }
+    };
+    content.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      const mod = e.ctrlKey || e.metaKey;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancel();
+      } else if (e.key === "Enter" && mod) {
+        e.preventDefault();
+        void finishTextEdit();
+      } else if (mod && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        editLink(content);
+      } else if (e.key === "Tab") {
+        e.preventDefault();
+        const cell = caretElement(content)?.closest("td, th");
+        if (cell) moveCell(cell, e.shiftKey ? -1 : 1);
+        else if (caretElement(content)?.closest("li")) {
+          document.execCommand(e.shiftKey ? "outdent" : "indent");
+        }
+      }
+    });
+    content.addEventListener("paste", (e) => {
+      e.preventDefault();
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      document.execCommand("insertText", false, text);
+    });
+    content.addEventListener("focusout", (e) => {
+      const next = e.relatedTarget;
+      if (next && (bar.contains(next) || content.contains(next))) return;
+      if (bar.matches(":hover")) return;
+      void finishTextEdit();
+    });
+    return true;
+  }
+  function placeCaret(content, opts) {
+    const sel = window.getSelection();
+    if (!sel) return;
+    let range = null;
+    if (opts.at && !opts.selectAll) {
+      range = document.caretRangeFromPoint?.(opts.at.x, opts.at.y) ?? null;
+      if (range && !content.contains(range.startContainer)) range = null;
+    }
+    if (!range) {
+      range = document.createRange();
+      range.selectNodeContents(content);
+      if (!opts.selectAll) range.collapse(false);
+    }
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  function positionBar(bar, fo) {
+    const r = fo.getBoundingClientRect();
+    const top = r.top - 44 < 52 ? r.bottom + 8 : r.top - 44;
+    bar.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 640))}px`;
+    bar.style.top = `${top}px`;
+  }
+  function removeEmptyBox(fo, zone, deckIndex) {
+    const slide = currentSlide();
+    const loc = fo.getAttribute("data-ink");
+    if (!slide || !loc || !/^text(-\d+)?$/.test(zone)) return false;
+    const src = slide.sources?.[parseInt(loc.split(":")[0] ?? "", 10)];
+    if (src?.role !== "slide" || slide.srcShared || !src.writable) return false;
+    void edit({
+      action: "svg",
+      file: src.path,
+      hash: src.hash,
+      zoneSlide: deckIndex,
+      ops: [{ kind: "delete", loc }],
+      label: "Delete text box"
+    });
+    return true;
+  }
+  function growOp(fo, content) {
+    const slide = currentSlide();
+    const loc = fo.getAttribute("data-ink");
+    if (!slide || !loc || fo.getAttribute("data-ink-tag") !== "rect") return;
+    const src = slide.sources?.[parseInt(loc.split(":")[0] ?? "", 10)];
+    if (!src?.writable || src.role === "slide" && slide.srcShared) return;
+    if (src.role !== "slide" && !ed.layoutMode) return;
+    const wrapper = content.parentElement;
+    const have = parseFloat(fo.getAttribute("height") ?? "0");
+    const need = wrapper ? wrapper.scrollHeight : 0;
+    if (!have || need <= have + 2) return;
+    return {
+      file: src.path,
+      hash: src.hash,
+      ops: [{ kind: "attrs", loc, set: { height: String(Math.ceil(need)) } }]
+    };
+  }
+  function caretElement(content) {
+    const sel = window.getSelection();
+    const node = sel?.anchorNode ?? null;
+    if (!node || !content.contains(node)) return null;
+    return node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  }
+  function changed(content) {
+    content.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  function selectionRange(content) {
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return null;
+    const range = sel.getRangeAt(0);
+    return content.contains(range.commonAncestorContainer) ? range : null;
+  }
+  function unwrap(el) {
+    el.replaceWith(...el.childNodes);
+  }
+  function wrapRange(content, make, same) {
+    const range = selectionRange(content);
+    if (!range || range.collapsed) return;
+    const frag = range.extractContents();
+    frag.querySelectorAll(same).forEach(unwrap);
+    const sel = window.getSelection();
+    if (make) {
+      const el = make();
+      el.append(frag);
+      range.insertNode(el);
+      range.selectNodeContents(el);
+    } else {
+      const first = frag.firstChild;
+      const last = frag.lastChild;
+      range.insertNode(frag);
+      if (first && last) {
+        range.setStartBefore(first);
+        range.setEndAfter(last);
+      }
+    }
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    content.querySelectorAll(same).forEach((el) => {
+      if (!el.textContent) el.remove();
+    });
+    changed(content);
+  }
+  function setColor(content, token) {
+    wrapRange(
+      content,
+      token ? () => h("span", { class: `inkflow-color-${token}` }) : null,
+      'span[class^="inkflow-color-"]'
+    );
+  }
+  function toggleCode(content) {
+    const inCode = caretElement(content)?.closest("code");
+    if (inCode && content.contains(inCode)) {
+      unwrap(inCode);
+      changed(content);
+      return;
+    }
+    wrapRange(content, () => h("code", {}), "code");
+  }
+  function editLink(content) {
+    const a = caretElement(content)?.closest("a");
+    const range = selectionRange(content);
+    const current = a?.getAttribute("href") ?? "";
+    const url = window.prompt(
+      a ? "Link address (empty removes the link)" : "Link address",
+      current || "https://"
+    );
+    if (url == null) return;
+    const sel = window.getSelection();
+    if (range) {
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
+    if (a && !url.trim()) {
+      unwrap(a);
+    } else if (a) {
+      a.setAttribute("href", url.trim());
+    } else if (url.trim() && range && !range.collapsed) {
+      document.execCommand("createLink", false, url.trim());
+    } else if (url.trim()) {
+      document.execCommand(
+        "insertHTML",
+        false,
+        `<a href="${encodeURI(url.trim())}">${url.trim().replace(/</g, "&lt;")}</a>`
+      );
+    }
+    changed(content);
+  }
+  function cellOf(content) {
+    const cell = caretElement(content)?.closest("td, th");
+    return cell && content.contains(cell) ? cell : null;
+  }
+  function focusCell(cell) {
+    const range = document.createRange();
+    range.selectNodeContents(cell);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  }
+  function moveCell(cell, by) {
+    const table = cell.closest("table");
+    if (!table) return;
+    const cells = [...table.querySelectorAll("th, td")];
+    const next = cells[cells.indexOf(cell) + by];
+    if (next) focusCell(next);
+    else if (by > 0) {
+      addRow(cell);
+      const after = [...table.querySelectorAll("th, td")];
+      focusCell(after[cells.length]);
+    }
+  }
+  function newCell(tag, like) {
+    const cell = document.createElement(tag);
+    const align2 = like?.style.textAlign;
+    if (align2) cell.style.textAlign = align2;
+    cell.append(document.createElement("br"));
+    return cell;
+  }
+  function addRow(cell) {
+    const row2 = cell.parentElement;
+    const table = row2.closest("table");
+    let body = table.tBodies[0];
+    if (!body) {
+      body = document.createElement("tbody");
+      table.append(body);
+    }
+    const tr = document.createElement("tr");
+    for (const c of row2.children) tr.append(newCell("td", c));
+    if (row2.parentElement?.localName === "thead") body.prepend(tr);
+    else row2.after(tr);
+  }
+  function addColumn(cell) {
+    const table = cell.closest("table");
+    const index = cell.cellIndex;
+    for (const row2 of table.rows) {
+      const ref = row2.cells[index];
+      const tag = row2.parentElement?.localName === "thead" ? "th" : "td";
+      const c = newCell(tag, ref);
+      if (ref) ref.after(c);
+      else row2.append(c);
+    }
+  }
+  function deleteRow(cell) {
+    const row2 = cell.parentElement;
+    const table = row2.closest("table");
+    if (table.rows.length <= 1) {
+      table.remove();
+      return;
+    }
+    if (row2.parentElement?.localName === "thead") {
+      const next = table.tBodies[0]?.rows[0];
+      if (!next) return;
+      const head = document.createElement("tr");
+      for (const c of next.cells) {
+        const th = newCell("th", c);
+        th.replaceChildren(...c.childNodes);
+        head.append(th);
+      }
+      row2.replaceWith(head);
+      next.remove();
+      return;
+    }
+    row2.remove();
+  }
+  function deleteColumn(cell) {
+    const table = cell.closest("table");
+    const index = cell.cellIndex;
+    if (table.rows[0]?.cells.length <= 1) {
+      table.remove();
+      return;
+    }
+    for (const row2 of [...table.rows]) row2.cells[index]?.remove();
+  }
+  function alignColumn(cell, align2) {
+    const table = cell.closest("table");
+    for (const row2 of table.rows) {
+      const c = row2.cells[cell.cellIndex];
+      if (c) c.style.textAlign = align2;
+    }
+  }
+  function insertTable(content) {
+    const head = "<th>Header</th><th>Header</th><th>Header</th>";
+    const row2 = "<td><br></td><td><br></td><td><br></td>";
+    document.execCommand(
+      "insertHTML",
+      false,
+      `<table><thead><tr>${head}</tr></thead><tbody><tr>${row2}</tr><tr>${row2}</tr></tbody></table><p><br></p>`
+    );
+    const after = caretElement(content)?.closest("p");
+    const table = after?.previousElementSibling;
+    const first = table?.localName === "table" ? table.querySelector("th") : null;
+    if (first) {
+      const range = document.createRange();
+      range.selectNodeContents(first);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
+    changed(content);
+  }
+  function tableCommand(content, fn) {
+    const cell = cellOf(content);
+    if (!cell) return;
+    fn(cell);
+    changed(content);
+    syncToolbar(document.querySelector(".rich-bar"), content);
+  }
+  function richToolbar(content, toSource) {
+    const btn = (label2, title, fn, cls = "") => h(
+      "button",
+      {
+        type: "button",
+        class: `fmt-btn ${cls}`,
+        title,
+        onmousedown: (e) => {
+          e.preventDefault();
+          fn();
+          syncToolbar(bar, content);
+        }
+      },
+      label2
+    );
+    const exec = (cmd, value) => () => {
+      document.execCommand(cmd, false, value);
+      changed(content);
+    };
+    const block = h("select", { class: "fmt-block", title: "Paragraph style" });
+    for (const [v, l] of [
+      ["p", "Text"],
+      ["h1", "Title"],
+      ["h2", "Heading"],
+      ["h3", "Subheading"],
+      ["blockquote", "Quote"]
+    ]) {
+      block.append(h("option", { value: v }, l));
+    }
+    block.addEventListener("mousedown", (e) => e.stopPropagation());
+    block.addEventListener("change", () => {
+      content.focus();
+      document.execCommand("formatBlock", false, `<${block.value}>`);
+      changed(content);
+    });
+    const swatches = h("div", { class: "fmt-colors" });
+    const host2 = content.closest("svg");
+    const css = host2 ? getComputedStyle(host2) : null;
+    swatches.append(
+      btn(
+        "A",
+        "Default colour",
+        () => setColor(content, null),
+        "swatch none"
+      )
+    );
+    for (const t of COLORS) {
+      const b = btn("", t, () => setColor(content, t), "swatch");
+      b.style.background = css?.getPropertyValue(`--inkflow-${t}`).trim() || "currentColor";
+      swatches.append(b);
+    }
+    const colorBtn = btn(
+      h("span", { class: "fmt-color-a" }, "A"),
+      "Text colour",
+      () => swatches.classList.toggle("open")
+    );
+    const tableTools = h(
+      "span",
+      { class: "fmt-table" },
+      h("span", { class: "fmt-sep" }),
+      btn("+row", "Add a row below", () => tableCommand(content, addRow)),
+      btn(
+        "+col",
+        "Add a column to the right",
+        () => tableCommand(content, addColumn)
+      ),
+      btn("\u2212row", "Delete this row", () => tableCommand(content, deleteRow)),
+      btn(
+        "\u2212col",
+        "Delete this column",
+        () => tableCommand(content, deleteColumn)
+      ),
+      btn(
+        "\u21E4",
+        "Align column left",
+        () => tableCommand(content, (c) => alignColumn(c, "left"))
+      ),
+      btn(
+        "\u21D4",
+        "Centre column",
+        () => tableCommand(content, (c) => alignColumn(c, "center"))
+      ),
+      btn(
+        "\u21E5",
+        "Align column right",
+        () => tableCommand(content, (c) => alignColumn(c, "right"))
+      )
+    );
+    const bar = h(
+      "div",
+      { class: "rich-bar" },
+      block,
+      h("span", { class: "fmt-sep" }),
+      btn(h("b", {}, "B"), "Bold (Ctrl+B)", exec("bold"), "fmt-bold"),
+      btn(h("i", {}, "I"), "Italic (Ctrl+I)", exec("italic"), "fmt-italic"),
+      btn(
+        h("s", {}, "S"),
+        "Strikethrough",
+        exec("strikeThrough"),
+        "fmt-strike"
+      ),
+      btn("</>", "Inline code", () => toggleCode(content), "fmt-code"),
+      h("span", { class: "fmt-color-wrap" }, colorBtn, swatches),
+      btn("\u{1F517}", "Link (Ctrl+K)", () => editLink(content), "fmt-link"),
+      h("span", { class: "fmt-sep" }),
+      btn("\u2022", "Bullet list", exec("insertUnorderedList"), "fmt-ul"),
+      btn("1.", "Numbered list", exec("insertOrderedList"), "fmt-ol"),
+      btn("\u25A6", "Insert a table", () => insertTable(content)),
+      tableTools,
+      h("span", { class: "fmt-sep" }),
+      btn("Tx", "Clear formatting", exec("removeFormat")),
+      btn("M\u2193", "Edit the Markdown source (math, code, reveals\u2026)", toSource),
+      btn(
+        h("span", {}, icon("select", 13), " Done"),
+        "Done (Ctrl+Enter)",
+        () => void finishTextEdit(),
+        "done"
+      )
+    );
+    return bar;
+  }
+  function syncToolbar(bar, content) {
+    if (!bar) return;
+    const el = caretElement(content);
+    const state = (cmd) => {
+      try {
+        return document.queryCommandState(cmd);
+      } catch {
+        return false;
+      }
+    };
+    const on2 = (cls, v) => bar.querySelector(`.${cls}`)?.classList.toggle("on", v);
+    on2("fmt-bold", state("bold"));
+    on2("fmt-italic", state("italic"));
+    on2("fmt-strike", state("strikeThrough"));
+    on2("fmt-code", !!el?.closest("code"));
+    on2("fmt-link", !!el?.closest("a"));
+    on2("fmt-ul", !!el?.closest("ul"));
+    on2("fmt-ol", !!el?.closest("ol"));
+    const blockEl = el?.closest("p, h1, h2, h3, h4, h5, h6, blockquote, li");
+    const select2 = bar.querySelector(".fmt-block");
+    if (select2 && blockEl) {
+      const tag = blockEl.closest("blockquote") ? "blockquote" : blockEl.localName;
+      select2.value = ["p", "h1", "h2", "h3", "blockquote"].includes(tag) ? tag : "p";
+    }
+    bar.querySelector(".fmt-table")?.classList.toggle(
+      "show",
+      !!el?.closest("td, th")
+    );
   }
 
   // src/ts/editor/toolbar.ts
@@ -4802,6 +5639,9 @@ ${area2.value.slice(pos)}`;
     afterRender.editText = false;
     select(els);
     if (editText && els[0].localName === "text") editTextOf(els[0]);
+    else if (editText && isZone(els[0])) {
+      editZone(zoneName(els[0]), els[0], { selectAll: true });
+    }
   }
   function boot() {
     ed.model = INITIAL_MODEL;
@@ -4809,7 +5649,9 @@ ${area2.value.slice(pos)}`;
     ed.error = INITIAL_ERROR;
     readHash();
     hooks.editText = editTextOf;
-    hooks.editZone = (zone, box) => editZoneText(zone, box);
+    hooks.editZone = (zone, el, at) => editZone(zone, el, { at });
+    hooks.editingHost = editingHost;
+    hooks.finishEditing = () => void finishTextEdit();
     initCanvas();
     initInsert();
     initSorter();
@@ -4827,8 +5669,7 @@ ${area2.value.slice(pos)}`;
     on("error", showError);
     on("edit-zone", () => {
       const el = ed.selection[0]?.el;
-      if (el && isZone(el))
-        editZoneText(zoneName(el), el.getBoundingClientRect());
+      if (el && isZone(el)) editZone(zoneName(el), el);
     });
     on("edit-text", () => {
       const el = ed.selection[0]?.el;

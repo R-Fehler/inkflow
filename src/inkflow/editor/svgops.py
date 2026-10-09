@@ -116,6 +116,11 @@ def _resolve(root: SvgElement, loc: object) -> SvgElement:
     return el
 
 
+def element_at(root: SvgElement, loc: object) -> SvgElement:
+    """The element a ``data-ink`` locator names (``SvgOpError`` if none)."""
+    return _resolve(root, loc)
+
+
 def all_ids(root: SvgElement) -> set[str]:
     return {i for el in root.iter() if is_element(el) and (i := el.get("id"))}
 

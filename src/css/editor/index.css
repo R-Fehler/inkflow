@@ -900,6 +900,105 @@ body.editing-zone #workspace {
     gap: 3px;
 }
 
+/* In-place rich text: the zone's own HTML is edited, with a floating bar. */
+
+foreignObject.rich-editing .inkflow-content {
+    outline: none;
+    cursor: text;
+    caret-color: var(--sel);
+}
+
+foreignObject.rich-editing {
+    outline: 2px solid var(--sel);
+    outline-offset: 2px;
+}
+
+.rich-bar {
+    position: fixed;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    max-width: min(760px, calc(100vw - 16px));
+    padding: 4px;
+    background: var(--ui-panel);
+    border: 1px solid var(--ui-line);
+    border-radius: 8px;
+    box-shadow: 0 6px 24px rgb(0 0 0 / 0.28);
+    font-size: 13px;
+}
+
+.rich-bar .fmt-btn.on {
+    background: var(--sel-soft);
+    border-color: var(--sel);
+}
+
+.fmt-sep {
+    width: 1px;
+    height: 18px;
+    margin: 0 4px;
+    background: var(--ui-line);
+}
+
+.fmt-block {
+    height: 26px;
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-line);
+    border-radius: 5px;
+    padding: 0 4px;
+}
+
+.fmt-color-wrap {
+    position: relative;
+    display: inline-flex;
+}
+
+.fmt-color-a {
+    text-decoration: underline 3px var(--sel);
+    font-weight: 600;
+}
+
+.fmt-colors {
+    position: absolute;
+    top: 30px;
+    left: 0;
+    display: none;
+    grid-template-columns: repeat(7, 22px);
+    gap: 4px;
+    padding: 6px;
+    background: var(--ui-panel);
+    border: 1px solid var(--ui-line);
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgb(0 0 0 / 0.25);
+}
+
+.fmt-colors.open {
+    display: grid;
+}
+
+.fmt-btn.swatch {
+    min-width: 22px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--ui-line);
+    border-radius: 50%;
+}
+
+.fmt-btn.swatch.none {
+    font-size: 11px;
+}
+
+.fmt-table {
+    display: none;
+    align-items: center;
+    gap: 2px;
+}
+
+.fmt-table.show {
+    display: inline-flex;
+}
+
 .zone-editor {
     flex: 1;
     border: none;

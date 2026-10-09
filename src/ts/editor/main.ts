@@ -18,7 +18,7 @@ import { initNotes } from "./notes";
 import { initProps } from "./props";
 import { initSorter, renderSorter } from "./sorter";
 import { currentSlide, ed, emit, on } from "./state";
-import { editSvgText, editZoneText, finishTextEdit } from "./textedit";
+import { editingHost, editSvgText, editZone, finishTextEdit } from "./textedit";
 import { initToolbar } from "./toolbar";
 
 const INITIAL_MODEL = __MODEL_JSON__;
@@ -86,6 +86,9 @@ function selectPending(): void {
     afterRender.editText = false;
     select(els);
     if (editText && els[0].localName === "text") editTextOf(els[0]);
+    else if (editText && isZone(els[0])) {
+        editZone(zoneName(els[0]), els[0], { selectAll: true });
+    }
 }
 
 function boot(): void {
@@ -95,7 +98,9 @@ function boot(): void {
     readHash();
 
     hooks.editText = editTextOf;
-    hooks.editZone = (zone, box) => editZoneText(zone, box);
+    hooks.editZone = (zone, el, at) => editZone(zone, el, { at });
+    hooks.editingHost = editingHost;
+    hooks.finishEditing = () => void finishTextEdit();
 
     initCanvas();
     initInsert();
@@ -115,8 +120,7 @@ function boot(): void {
     on("error", showError);
     on("edit-zone", () => {
         const el = ed.selection[0]?.el;
-        if (el && isZone(el))
-            editZoneText(zoneName(el), el.getBoundingClientRect());
+        if (el && isZone(el)) editZone(zoneName(el), el);
     });
     on("edit-text", () => {
         const el = ed.selection[0]?.el;

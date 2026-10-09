@@ -15,6 +15,7 @@ export const ed = {
     zoom: 0, // 0 = fit to window, else device px per slide unit
     tool: "select" as Tool,
     interacting: false, // a drag is in progress: defer re-renders
+    richEditing: false, // a zone is being edited in place: defer re-renders
     renderPending: false,
     canUndo: false,
     canRedo: false,

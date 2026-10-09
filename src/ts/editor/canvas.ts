@@ -43,7 +43,15 @@ const SNAP_PX = 6;
 // Hooks other modules install (kept as callbacks to avoid import cycles).
 export const hooks = {
     editText: (_el: SVGGraphicsElement): void => {},
-    editZone: (_zone: string, _box: DOMRect): void => {},
+    editZone: (
+        _zone: string,
+        _el: Element | null,
+        _at?: { x: number; y: number },
+    ): void => {},
+    // The element being edited in place (clicks inside it place the caret),
+    // and how to finish that edit when the pointer goes elsewhere.
+    editingHost: (): Element | null => null,
+    finishEditing: (): void => {},
     zoneMedia: (_zone: string): void => {},
     toolDown: (_e: PointerEvent, _pt: { x: number; y: number }): boolean =>
         false,
@@ -94,7 +102,7 @@ interface SelKey {
 }
 
 export function render(): void {
-    if (ed.interacting) {
+    if (ed.interacting || ed.richEditing) {
         ed.renderPending = true;
         return;
     }
@@ -714,18 +722,7 @@ function drawPlaceholders(): void {
             e.stopPropagation();
             e.preventDefault();
             if (media) hooks.zoneMedia(z.zone);
-            else {
-                const r = paper.getBoundingClientRect();
-                hooks.editZone(
-                    z.zone,
-                    new DOMRect(
-                        r.left + pb.x,
-                        r.top + pb.y,
-                        pb.width,
-                        pb.height,
-                    ),
-                );
-            }
+            else hooks.editZone(z.zone, null);
         });
         overlay.append(g);
     }
@@ -788,6 +785,9 @@ async function sendQueued(
             ops,
             label,
             coalesce,
+            // Deleting or duplicating a zone takes its content along (not in
+            // layout mode: a layout's zones are filled by every slide).
+            zoneSlide: ed.layoutMode ? undefined : slide.deckIndex,
         });
         ok = ok && result.ok;
     }
@@ -1135,8 +1135,13 @@ function onPointerDown(e: PointerEvent): void {
         ed.slideSelection.clear();
         emit("slide-selection");
     }
-    if (e.button !== 0 || !slideRoot()) return;
     const target = e.target as Element;
+    const editing = hooks.editingHost();
+    if (editing) {
+        if (editing.contains(target)) return;
+        hooks.finishEditing();
+    }
+    if (e.button !== 0 || !slideRoot()) return;
     const handle = (target.closest("[data-handle]") as SVGElement | null)
         ?.dataset.handle as Handle | undefined;
     const pt = clientToSlide(e.clientX, e.clientY);
@@ -1237,10 +1242,11 @@ function textUnder(x: number, y: number): SVGGraphicsElement | null {
 }
 
 function onDoubleClick(e: MouseEvent): void {
+    if (hooks.editingHost()?.contains(e.target as Node)) return;
     const el = pick(e.clientX, e.clientY);
     if (!el) return;
     if (isZone(el)) {
-        hooks.editZone(zoneName(el), el.getBoundingClientRect());
+        hooks.editZone(zoneName(el), el, { x: e.clientX, y: e.clientY });
         return;
     }
     // Text inside a group is edited straight away, as in any slide editor; the
@@ -1291,6 +1297,7 @@ export function initCanvas(): void {
         }
     });
     on("model", render);
+    on("rerender", render);
 }
 
 export function setZoom(z: number): void {

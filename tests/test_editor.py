@@ -939,6 +939,125 @@ class TestSession:
         html = process_deck(deck, project, project / "deck.py")[0]["svg"]
         assert html.count("<video") == 2
 
+    def test_text_box_content_follows_its_zone(self, project: Path) -> None:
+        session = EditorSession(project / "deck.py")
+        drawing = project / "slides" / "drawing.svg"
+
+        def box(text: str) -> dict[str, object]:
+            return {
+                "action": "insert-textbox",
+                "slide": 0,
+                "file": str(drawing),
+                "hash": _hash(drawing),
+                "text": text,
+                "x": 100,
+                "y": 600,
+                "width": 800,
+                "height": 120,
+            }
+
+        result = session.apply(box("Hello **world**"), _deck(project))
+        assert result["ids"] == {"new": "zone-text"}
+        assert _deck(project).slides[0].zones == {"text": "Hello **world**"}
+        html = process_deck(_deck(project), project, project / "deck.py")[0]["svg"]
+        assert "<strong>world</strong>" in html
+
+        # Duplicating the shape duplicates the text; deleting removes it.
+        svg = SvgFile.from_bytes(drawing, drawing.read_bytes())
+        loc = _loc(svg, "zone-text")
+        session.apply(
+            {
+                "action": "svg",
+                "file": str(drawing),
+                "hash": _hash(drawing),
+                "zoneSlide": 0,
+                "ops": [{"kind": "duplicate", "loc": loc, "key": "d"}],
+            },
+            _deck(project),
+        )
+        assert _deck(project).slides[0].zones == {
+            "text": "Hello **world**",
+            "text-2": "Hello **world**",
+        }
+        session.apply(
+            {
+                "action": "svg",
+                "file": str(drawing),
+                "hash": _hash(drawing),
+                "zoneSlide": 0,
+                "ops": [{"kind": "delete", "loc": loc}],
+            },
+            _deck(project),
+        )
+        assert _deck(project).slides[0].zones == {"text-2": "Hello **world**"}
+        assert 'id="zone-text"' not in drawing.read_text()
+
+    def test_text_box_on_a_markdown_slide_writes_the_md_file(
+        self, project: Path
+    ) -> None:
+        deck_py = project / "deck.py"
+        deck_py.write_text(
+            deck_py.read_text().replace(
+                '"drawing.svg",', '"drawing.svg",\n                    md="text.md",'
+            )
+        )
+        session = EditorSession(deck_py)
+        drawing = project / "slides" / "drawing.svg"
+        md = project / "slides" / "text.md"
+        session.apply(
+            {
+                "action": "insert-textbox",
+                "slide": 0,
+                "file": str(drawing),
+                "hash": _hash(drawing),
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 100,
+            },
+            _deck(project),
+        )
+        assert md.read_text() == "# Title\n\nBody\n\n::text::\nText\n"
+        # Typing past the frame grows it in the same step.
+        svg = SvgFile.from_bytes(drawing, drawing.read_bytes())
+        session.apply(
+            {
+                "action": "zone-text",
+                "slide": 0,
+                "zone": "text",
+                "text": "Line one\n\nLine two",
+                "svg": {
+                    "file": str(drawing),
+                    "hash": _hash(drawing),
+                    "ops": [
+                        {
+                            "kind": "attrs",
+                            "loc": _loc(svg, "zone-text"),
+                            "set": {"height": "260"},
+                        }
+                    ],
+                },
+            },
+            _deck(project),
+        )
+        assert "::text::\nLine one\n\nLine two\n" in md.read_text()
+        assert 'height="260"' in drawing.read_text()
+        session.apply({"action": "undo"}, _deck(project))
+        assert 'height="100"' in drawing.read_text()
+        assert md.read_text().endswith("::text::\nText\n")
+        svg = SvgFile.from_bytes(drawing, drawing.read_bytes())
+        session.apply(
+            {
+                "action": "svg",
+                "file": str(drawing),
+                "hash": _hash(drawing),
+                "zoneSlide": 0,
+                "ops": [{"kind": "delete", "loc": _loc(svg, "zone-text")}],
+            },
+            _deck(project),
+        )
+        assert md.read_text() == "# Title\n\nBody\n"
+
     def test_insert_video_refuses_shared_svg_and_non_video(self, project: Path) -> None:
         session = EditorSession(project / "deck.py")
         layout = project / "layouts" / "two.svg"

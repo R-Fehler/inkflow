@@ -653,3 +653,22 @@ def replace_zone_text(source: str, zone: str, text: str) -> str:
     if zone == "content" and not has_markers and "content" not in spans:
         return source.rstrip() + gap + text + "\n"
     return source.rstrip() + gap + f"::{zone}::\n{text}\n"
+
+
+def remove_zone_section(source: str, zone: str) -> str:
+    """``source`` without zone ``zone``'s ``::zone::`` marker and section.
+
+    Only an explicit marker is removed; an auto-extracted heading or leading
+    content has no marker of its own and is cleared instead.
+    """
+    markers = list(_ZONE_PATTERN.finditer(source))
+    for idx, m in enumerate(markers):
+        if m.group(1) != zone:
+            continue
+        end = markers[idx + 1].start() if idx + 1 < len(markers) else len(source)
+        before = source[: m.start()].rstrip()
+        after = source[end:].lstrip("\n")
+        if not after:
+            return before + "\n" if before else ""
+        return (before + "\n\n" if before else "") + after
+    return replace_zone_text(source, zone, "")

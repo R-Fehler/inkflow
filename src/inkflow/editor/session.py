@@ -32,6 +32,7 @@ from inkflow.editor.svgops import (
     SvgOpError,
     all_ids,
     apply_ops,
+    element_at,
     file_hash,
     group,
     ungroup,
@@ -55,7 +56,7 @@ from inkflow.layout import (
 from inkflow.manifest import Deck, Image, Inline, Slide, TextBox, Video
 from inkflow.pipeline import resolve_slide_src
 from inkflow.transitions import Transition
-from inkflow.zones import replace_zone_text
+from inkflow.zones import remove_zone_section, replace_zone_text, zone_spans
 
 DECK_MODULE = "_inkflow_deck"
 _MAX_UPLOAD = 50 * 1024 * 1024
@@ -271,6 +272,7 @@ class EditorSession:
             "zone-media": self._zone_media,
             "media-props": self._media_props,
             "insert-video": self._insert_video,
+            "insert-textbox": self._insert_textbox,
             "md-text": self._md_text,
             "notes": self._notes,
             "slide": self._slide,
@@ -358,6 +360,15 @@ class EditorSession:
         svg = SvgFile.from_bytes(path, data)
         untouched = svg.to_bytes()
         ops = cast("list[dict[str, object]]", msg.get("ops") or [])
+        # A zone's content lives outside the SVG (deck.py, Markdown): deleting
+        # or duplicating the zone's shape takes its content along.
+        zone_ops: list[tuple[str, str, object]] = []
+        if isinstance(msg.get("zoneSlide"), int):
+            for op in ops:
+                if op.get("kind") in ("delete", "duplicate"):
+                    el_id = element_at(svg.root, op.get("loc")).get("id") or ""
+                    if el_id.startswith("zone-"):
+                        zone_ops.append((str(op["kind"]), el_id, op.get("key")))
         result_ids: dict[str, str] = {}
         structural = False
         for op in ops:
@@ -385,6 +396,20 @@ class EditorSession:
         }
         if renames:
             self._rename_cues(deck, path, renames, txn)
+        if zone_ops:
+            index, slide = self._deck_slide(deck, {"slide": msg["zoneSlide"]})
+            for kind, el_id, key in zone_ops:
+                zone = el_id.removeprefix("zone-")
+                if kind == "delete":
+                    self._drop_zone_content(index, slide, zone, txn)
+                else:
+                    new_id = result_ids.get(
+                        str(key if key is not None else "duplicate")
+                    )
+                    if new_id and new_id.startswith("zone-"):
+                        self._copy_zone_content(
+                            index, slide, zone, new_id.removeprefix("zone-"), txn
+                        )
         extra["ids"] = result_ids
         extra["structural"] = structural
         return str(msg.get("label") or "Edit shape")
@@ -424,6 +449,10 @@ class EditorSession:
         zone = str(msg.get("zone"))
         text = str(msg.get("text", ""))
         origin = msg.get("origin")
+        grow = msg.get("svg")
+        if isinstance(grow, dict):
+            # A text box that outgrew its frame is resized in the same step.
+            self._svg(cast("dict[str, object]", grow), deck, txn, {})
         if zone in slide.zones or (origin == "deck"):
             current = slide.zones.get(zone)
             source = self._deck_source(txn)
@@ -518,6 +547,49 @@ class EditorSession:
         self._save_deck(txn, source, code.imports)
         return f"{'Video' if isinstance(current, Video) else 'Image'} settings"
 
+    def _new_zone(
+        self, msg: dict[str, object], deck: Deck, slide: Slide, txn: _Txn, base: str
+    ) -> str:
+        """Add a zone rect to the slide's own SVG; returns the zone's name.
+
+        The name must be free in the whole composition, not just this file: a
+        layout's own ``zone-video`` (or a Markdown section of that name) would
+        otherwise take the content."""
+        path = Path(cast("str", msg.get("file")))
+        own = resolve_slide_src(slide.src, self.project_dir, deck.theme)
+        if own.resolve() != path.resolve() or not self._is_own(own, deck):
+            raise EditError(f"the {base} goes into the slide's own SVG")
+        data = txn.read(path)
+        expected = msg.get("hash")
+        if isinstance(expected, str) and expected and file_hash(data) != expected:
+            raise EditError(f"{path.name} changed on disk; wait for the reload")
+        svg = SvgFile.from_bytes(path, data)
+        taken = all_ids(svg.root) | {f"zone-{z}" for z in slide.zones}
+        try:
+            chain = resolve_chain(path, self.project_dir, deck.theme)
+        except ValueError:
+            chain = []
+        for ancestor in chain:
+            taken |= all_ids(SvgFile.from_bytes(ancestor, ancestor.read_bytes()).root)
+        md_path = self._md_file(slide)
+        if md_path is not None:
+            md = txn.read(md_path).decode("utf-8")
+            taken |= {f"zone-{z}" for z in zone_spans(md)}
+        zone_id = unique_id(svg.root, f"zone-{base}", taken)
+        box = {
+            k: float(cast("float", msg.get(k))) for k in ("x", "y", "width", "height")
+        }
+        if box["width"] <= 0 or box["height"] <= 0:
+            raise EditError(f"the {base} needs a size")
+        xml = (
+            f'<rect id="{zone_id}" x="{box["x"]:g}" y="{box["y"]:g}" '
+            + f'width="{box["width"]:g}" height="{box["height"]:g}"/>'
+        )
+        parent = msg.get("parent") or "0:"
+        apply_ops(svg, [{"kind": "insert", "parent": parent, "xml": xml}])
+        txn.write(path, svg.to_bytes())
+        return zone_id.removeprefix("zone-")
+
     def _insert_video(
         self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
     ) -> str:
@@ -530,45 +602,100 @@ class EditorSession:
         rel = self._deck_rel(Path(src))
         if Path(rel).suffix.lower() not in _VIDEO_SUFFIXES:
             raise EditError("not a video file")
-        path = Path(cast("str", msg.get("file")))
-        own = resolve_slide_src(slide.src, self.project_dir, deck.theme)
-        if own.resolve() != path.resolve() or not self._is_own(own, deck):
-            raise EditError("the video goes into the slide's own SVG")
-        data = txn.read(path)
-        expected = msg.get("hash")
-        if isinstance(expected, str) and expected and file_hash(data) != expected:
-            raise EditError(f"{path.name} changed on disk; wait for the reload")
-        svg = SvgFile.from_bytes(path, data)
-        # The zone name must be free in the whole composition, not just this
-        # file: a layout's own zone-video would otherwise take the content.
-        taken = all_ids(svg.root) | {f"zone-{z}" for z in slide.zones}
-        try:
-            chain = resolve_chain(path, self.project_dir, deck.theme)
-        except ValueError:
-            chain = []
-        for ancestor in chain:
-            taken |= all_ids(SvgFile.from_bytes(ancestor, ancestor.read_bytes()).root)
-        zone_id = unique_id(svg.root, "zone-video", taken)
-        box = {
-            k: float(cast("float", msg.get(k))) for k in ("x", "y", "width", "height")
-        }
-        if box["width"] <= 0 or box["height"] <= 0:
-            raise EditError("the video needs a size")
-        xml = (
-            f'<rect id="{zone_id}" x="{box["x"]:g}" y="{box["y"]:g}" '
-            + f'width="{box["width"]:g}" height="{box["height"]:g}"/>'
-        )
-        parent = msg.get("parent") or "0:"
-        apply_ops(svg, [{"kind": "insert", "parent": parent, "xml": xml}])
-        txn.write(path, svg.to_bytes())
-        zone = zone_id.removeprefix("zone-")
+        zone = self._new_zone(msg, deck, slide, txn, "video")
         source = self._deck_source(txn)
         code = Code()
         source.set_zone(index, zone, code.call(Video(rel)))
         self._save_deck(txn, source, code.imports)
-        extra["ids"] = {"new": zone_id}
+        extra["ids"] = {"new": f"zone-{zone}"}
         extra["structural"] = True
         return "Insert video"
+
+    def _insert_textbox(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """A text box that wraps: a new zone rect in the slide's own SVG whose
+        Markdown goes where the slide's other text lives (its ``.md`` file, else
+        ``zones={...}`` in deck.py)."""
+        index, slide = self._deck_slide(deck, msg)
+        text = str(msg.get("text") or "Text").strip() or "Text"
+        zone = self._new_zone(msg, deck, slide, txn, "text")
+        self._put_zone_text(index, slide, zone, text, txn)
+        extra["ids"] = {"new": f"zone-{zone}"}
+        extra["zone"] = zone
+        extra["structural"] = True
+        return "Insert text box"
+
+    # ── Zone content that follows its zone ──
+
+    def _md_file(self, slide: Slide) -> Path | None:
+        if slide.md is None or isinstance(slide.md, Inline):
+            return None
+        try:
+            return self._md_path(slide)
+        except Exception:
+            return None
+
+    def _put_zone_text(
+        self, index: int, slide: Slide, zone: str, text: str, txn: _Txn
+    ) -> None:
+        md_path = self._md_file(slide)
+        if md_path is not None:
+            md = txn.read(md_path).decode("utf-8")
+            txn.write(md_path, replace_zone_text(md, zone, text).encode("utf-8"))
+            return
+        source = self._deck_source(txn)
+        if isinstance(slide.md, Inline):
+            new = replace_zone_text(str(slide.md), zone, text)
+            source.set_slide_arg(index, "md", f"Inline({_py(new)})")
+            self._save_deck(txn, source, {"Inline"})
+            return
+        source.set_zone(index, zone, _py(text))
+        self._save_deck(txn, source, set())
+
+    def _drop_zone_content(
+        self, index: int, slide: Slide, zone: str, txn: _Txn
+    ) -> None:
+        """Remove what filled a zone whose shape was deleted."""
+        if zone in slide.zones:
+            source = self._deck_source(txn)
+            source.set_zone(index, zone, None)
+            self._save_deck(txn, source, set())
+            return
+        md_path = self._md_file(slide)
+        if md_path is not None:
+            md = txn.read(md_path).decode("utf-8")
+            if zone in zone_spans(md) or f"::{zone}" in md:
+                txn.write(md_path, remove_zone_section(md, zone).encode("utf-8"))
+        elif isinstance(slide.md, Inline):
+            new = remove_zone_section(str(slide.md), zone)
+            if new != str(slide.md):
+                source = self._deck_source(txn)
+                source.set_slide_arg(index, "md", f"Inline({_py(new)})")
+                self._save_deck(txn, source, {"Inline"})
+
+    def _copy_zone_content(
+        self, index: int, slide: Slide, old: str, new: str, txn: _Txn
+    ) -> None:
+        """Give a duplicated zone the same content as the one it copies."""
+        if old in slide.zones:
+            source = self._deck_source(txn)
+            code = Code()
+            source.set_zone(index, new, code.literal(slide.zones[old]))
+            self._save_deck(txn, source, code.imports)
+            return
+        md_path = self._md_file(slide)
+        md = (
+            txn.read(md_path).decode("utf-8")
+            if md_path is not None
+            else str(slide.md)
+            if isinstance(slide.md, Inline)
+            else None
+        )
+        if md is None or old not in zone_spans(md):
+            return
+        start, end = zone_spans(md)[old]
+        self._put_zone_text(index, slide, new, md[start:end], txn)
 
     def _deck_rel(self, path: Path) -> str:
         resolved = path if path.is_absolute() else self.project_dir / path
