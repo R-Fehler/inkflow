@@ -4,6 +4,7 @@
 
 ```bash
 uv run inkflow serve --deck demo/deck.py   # start server at localhost:7777
+uv run inkflow edit --deck demo/deck.py    # same server, opens the visual editor at /edit
 mise run check                      # lint + format + typecheck + test (Python and JS)
 mise run bundle                     # rebuild JS/CSS bundles from src/ts/ and src/css/
 ```
@@ -89,10 +90,22 @@ src/
                                absolute path and a canonical ref both ways; `AssetSource`
                                resolves the refs written in one file; `svg_reader` is the
                                composition reader that canonicalises each SVG as it is read
+    editor/           visual editor backend (see "The visual editor" below):
+                               provenance.py (data-ink locators stamped on the composed
+                               SVG + `locate`), svgops.py (write-back ops on one SVG:
+                               attrs/style/paint/text/insert/delete/duplicate/order/group),
+                               deckedit.py (libcst edits of deck.py: slide list, Slide(...)
+                               args, animations=[...], zones={...}, imports; keeps comments),
+                               codegen.py (DSL object -> shortest constructor source; field
+                               schemas for the property panels), session.py (one request ->
+                               one undoable whole-file step; EditorSession/History),
+                               model.py (build_model: per-slide sources, zones, cues for the
+                               editor), context.py (.inkflow/context.json for agents)
     cli/              CLI package (entry point inkflow.cli:main). _common.py holds the
                                `main` group, shared options, and the Project/Target helpers;
                                commands are grouped by area: project.py (init, setup-git,
-                               completion), present.py (serve, build, export), authoring.py
+                               completion), present.py (serve, edit, build, export), agent.py
+                               (context, render, goto, select, setup-claude), authoring.py
                                (clean, label2id, add, parent group, sync, layouts), color.py (colorize,
                                palette), verify.py. Submodules register on `main` by import.
     clean.py          SVG Inkscape metadata stripping (used by cli and pre-commit hook)
@@ -139,10 +152,15 @@ src/
     ns.py             XML namespace constants
     tui.py            terminal UI (Rich)
     presenter.html    shell template — inlined with CSS/JS at serve time
+    editor.html       visual editor shell, served at /edit (editor bundle + deck styles)
+    render.html       single-slide page `inkflow render` screenshots (render bundle)
+    claude/SKILL.md   the inkflow skill `inkflow setup-claude` installs into a project
     pdf.html          PDF export template
     bundles/          pre-built JS/CSS output (committed; no Node needed at install time)
       presenter.js    navigation, transitions, WebSocket, presenter panel
       presenter.css   all presenter styles including the sidebar panel
+      editor.js/.css  the visual editor (src/ts/editor, src/css/editor)
+      render.js       step-at-a-time single-slide renderer (src/ts/render)
     theme/            built-in theme: layouts/*.svg, icon.svg, showcase/, and
                                styles.css (per-layout zone styling for those layouts,
                                loaded for every deck — keep its rules `.layout-*`-scoped)
@@ -160,6 +178,12 @@ src/
                       <video> playback, wired in via status.ts), and deck-url.ts
                       (pure position<->fragment codec behind syncURL/readURL; the
                       only module reading location.pathname/search/hash)
+    editor/           visual editor: canvas.ts (render, hit-testing, handles, drag ->
+                      attribute plans), geom.ts (pure matrices + move/resize/rotate plans),
+                      snap.ts (smart guides), textedit.ts, insert.ts (tools, images,
+                      paste), sorter.ts, props.ts, notes.ts, toolbar.ts (shortcuts),
+                      context.ts (agent context + goto/select), net.ts (edit-op requests)
+    render/           the single-slide page behind `inkflow render`
   css/                CSS source
     shared/           theme variables, animation keyframes
     presenter/        presenter partials including pv.css (sidebar panel)
@@ -308,6 +332,11 @@ Overlays become part of the slide SVG, so they travel with it during a transitio
 
 Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop + ancestor chain), `inkflow:overlay-src`/`-hash` what goes on top. `clean.strip_preview_layers` removes both, which is what keeps a synced slide from painting its chrome twice (once from the preview, once from runtime composition) and keeps an ancestor's own overlay layers from leaking into every child. `verify` shares `plan_preview` (so it cannot disagree about staleness) and skips files outside the project dir, which `sync` would never write.
 
+**The visual editor writes the deck's own files; it has no document model of its own.**
+`inkflow edit` (or `/edit` on any `serve`) is a second page on the same server. The server builds with `process_deck(editor=True)`, which stamps every element read from a source file with `data-ink="<source index>:<child path>"` — the child path counted on the tree *as parsed from disk*, before cleaning (`clean_inkscape_tree(before_clean=...)`), so `provenance.locate` finds the same node when an edit is written back. `SlideData.edit` carries the source list, the pruned empty zones and where each zone's content was written; the presenter copy drops it (`_without_edit`), the editor gets it inside `build_model`'s model (`editor-model` message, sent after each `update` to clients that said `hello` as editors).
+The browser never writes a file: it sends `{"type":"edit-op", "action": ...}` and `editor.session.EditorSession` turns that into new bytes for SVGs (lxml, only touched nodes change), Markdown (`zones.zone_spans` mirrors the parser to replace one zone's section) or `deck.py` (libcst via `deckedit`, values generated by `codegen` from the real DSL object so the dataclass validates them). Each request is one `History` step of whole-file before/after snapshots; undo refuses if a file changed outside the editor. An SVG request carries the file hash the client rendered from and is refused when stale; results return new hashes so quick consecutive edits chain. Writes go through the normal watcher → rebuild → push, which is also how the editor, Inkscape and an agent see each other's changes. `load_deck` compiles deck.py from source each time (the bytecode cache's whole-second mtime check loads stale code after a same-size edit such as a slide reorder).
+The client previews a drag by setting attributes on the live DOM and sends the same plan (`geom.ts`: x/y/width/height for rects/images/rect-backed zones, cx/cy for ellipses, endpoints for lines, a merged leading translate for everything else, a matrix for resize/rotate of transformed elements). Objects from layouts/overlays and slides drawn straight from a shared layout are not selectable outside "Edit layout"; drawing on such a slide first gives it its own `slides/<id>.svg` built on that layout (never named like a layout, which would shadow it). `.inkflow/` (editor context, renders) ignores itself in git and is excluded from the watcher.
+
 ## Server
 
 - HTTP on port 7777 (asyncio streams, custom handler)
@@ -353,4 +382,5 @@ platformdirs>=4.0    per-user log + font directories (inkflow.logging, fonts.py)
 rich>=15.0           terminal UI
 watchfiles>=0.21     inotify-based file watcher
 websockets>=12.0     WebSocket server (uses 16.x asyncio API)
+libcst>=1.9          deck.py edits from the visual editor (formatting-preserving)
 ```

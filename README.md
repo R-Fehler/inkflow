@@ -71,6 +71,14 @@ open formats, plain text, not tied to any software or service—fully compatible
 3. **Run `inkflow serve`.** A browser tab opens with your presentation. Save a change
    in your editor and it appears instantly, without losing your place.
 
+Prefer to click and drag? **`inkflow edit`** opens a visual editor in the browser,
+in the spirit of Google Slides: a slide sorter, a canvas to select, move, resize and type on,
+and a properties panel for colours, animations and transitions.
+It writes every change straight back to the same SVG, Markdown and `deck.py` files,
+so it works alongside Inkscape, your text editor and
+[Claude Code](https://ll-nick.github.io/inkflow/editor/claude-code/):
+select something in the editor and ask Claude to change it.
+
 That's the core loop—the rest is there once you need it:
 reusable layouts that inherit from each other like master slides,
 Markdown-filled zones for text-heavy slides,
