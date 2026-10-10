@@ -713,7 +713,18 @@ body.previewing #canvas::after {
     padding: 0 7px;
 }
 
+.prop-row textarea.cell-label {
+    flex: 1;
+    min-width: 0;
+    resize: vertical;
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-line);
+    border-radius: 5px;
+    padding: 4px 7px;
+}
+
 .prop-row input:focus,
+.prop-row textarea:focus,
 .prop-row select:focus {
     outline: none;
     border-color: var(--sel);

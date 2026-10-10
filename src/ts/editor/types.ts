@@ -5,7 +5,7 @@ export interface SourceInfo {
     path: string;
     rel: string;
     hash: string;
-    role: "slide" | "layout" | "overlay";
+    role: "slide" | "layout" | "overlay" | "diagram";
     writable: boolean;
     usedBy: number[];
 }

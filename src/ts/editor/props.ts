@@ -41,7 +41,13 @@ import {
     editDiagram,
     isDiagramHref,
 } from "./drawio";
-import { diagramShapes } from "./drawioshapes";
+import {
+    cellLabel,
+    cellShape,
+    diagramShapes,
+    isDiagramCell,
+    shapesEditable,
+} from "./drawioshapes";
 import { layoutLabel, openGallery } from "./gallery";
 import {
     type Box,
@@ -884,8 +890,118 @@ function styleOps(
     );
 }
 
+// ── A draw.io diagram's shape, edited on the slide ──
+
+/** Focus a selected diagram shape's Label field (double-click on it). */
+export function focusCellLabel(_el: Element): void {
+    const area = panel.querySelector<HTMLTextAreaElement>(".cell-label");
+    area?.focus();
+    area?.select();
+}
+
+// A theme colour as the #rrggbb draw.io stores (it has no theme tokens).
+function tokenHex(token: string): string {
+    const probe = h("span", { style: `color: var(--inkflow-${token})` });
+    (slideRoot()?.parentElement ?? document.body).append(probe);
+    const hex = rgbToHex(getComputedStyle(probe).color);
+    probe.remove();
+    return hex;
+}
+
+function cellColorRow(
+    label: string,
+    current: string,
+    pick: (hex: string) => void,
+): HTMLElement {
+    const swatches = h("div", { class: "swatches" });
+    for (const t of ed.model?.colorTokens ?? []) {
+        swatches.append(
+            h("button", {
+                type: "button",
+                class: "swatch",
+                title: `${t} (as its colour now)`,
+                style: `background: var(--inkflow-${t})`,
+                onclick: () => pick(tokenHex(t)),
+            }),
+        );
+    }
+    const custom = h("input", {
+        type: "color",
+        value: current,
+        title: "Custom colour",
+    }) as HTMLInputElement;
+    custom.addEventListener("change", () => pick(custom.value));
+    swatches.append(custom);
+    return row(label, swatches);
+}
+
+function renderCellPanel(sel: Selected): void {
+    const el = sel.el;
+    const cell = el.getAttribute("data-cell-id") ?? "";
+    const themed =
+        el.closest("svg[data-drawio]")?.getAttribute("data-drawio-mode") ===
+        "themed";
+    const send = (op: SvgOp, label: string) =>
+        void sendSvgOps([{ sel, ops: [op] }], label);
+    const style = (key: string, value: string | number, label: string) =>
+        send({ kind: "cell-style", cell, key, value }, label);
+    const painted = cellShape(el).querySelector(
+        "rect, ellipse, path, polygon, circle",
+    );
+    const look = painted ? getComputedStyle(painted) : null;
+    const hex = (v: string | undefined) =>
+        v && v !== "none" ? rgbToHex(v) : "#ffffff";
+    const area = h("textarea", {
+        class: "cell-label",
+        rows: 2,
+        spellcheck: "true",
+    }) as HTMLTextAreaElement;
+    area.value = cellLabel(el);
+    area.addEventListener("change", () =>
+        send({ kind: "cell-label", cell, text: area.value }, "Shape label"),
+    );
+    area.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) area.blur();
+    });
+    panel.append(
+        section(
+            "draw.io shape",
+            row("Id", h("code", {}, el.getAttribute("id") ?? "")),
+            row("Label", area),
+            cellColorRow("Fill", hex(look?.fill), (v) =>
+                style("fillColor", v, "Shape fill"),
+            ),
+            cellColorRow("Line", hex(look?.stroke), (v) =>
+                style("strokeColor", v, "Shape line"),
+            ),
+            row(
+                "Line width",
+                numberInput(parseFloat(look?.strokeWidth ?? "1") || 1, (v) =>
+                    style("strokeWidth", v, "Shape line width"),
+                ),
+            ),
+            h(
+                "p",
+                { class: "hint" },
+                `Changes go into the diagram's draw.io source, and draw.io redraws it (its arrows follow).${themed ? " In the deck's theme, colours show as the nearest theme colour." : ""} Copying, grouping, rotating and stacking shapes stay in draw.io. Esc leaves the diagram.`,
+            ),
+            h(
+                "div",
+                { class: "btn-row" },
+                button("Leave the diagram", "Esc", () => enterGroup(null)),
+            ),
+        ),
+    );
+    panel.append(geometrySection([sel]));
+    panel.append(elementAnimations(sel));
+}
+
 function renderObjectPanel(sel: Selected): void {
     const el = sel.el;
+    if (isDiagramCell(el)) {
+        renderCellPanel(sel);
+        return;
+    }
     const src = sourceOf(sel.key);
     const zone = isZone(el);
     const movable = canTransform(el);
@@ -1603,6 +1719,7 @@ function diagramSection(sel: Selected): HTMLElement {
             ),
         ),
         showAsRow(sel, diagramMode(svg)),
+        editShapesRow(sel, svg),
         row(
             "Fit",
             selectInput(
@@ -1629,6 +1746,51 @@ function diagramSection(sel: Selected): HTMLElement {
                         "Diagram fit",
                     ),
             ),
+        ),
+    );
+}
+
+// "Edit shapes here": double-clicking the diagram selects its shapes, which
+// are then moved, resized, relabelled, recoloured or deleted on the slide, in
+// the diagram's draw.io source (editor/drawioedit.py). Off, double-click
+// opens draw.io. Kept on the picture as inkflow:drawio-edit="shapes".
+function editShapesRow(sel: Selected, svg: Element): HTMLElement {
+    const on = shapesEditable(svg);
+    const box = h("input", { type: "checkbox" }) as HTMLInputElement;
+    box.checked = on;
+    box.addEventListener("change", () => {
+        void sendSvgOps(
+            [
+                {
+                    sel,
+                    ops: [
+                        {
+                            kind: "attrs",
+                            loc: sel.loc,
+                            set: {
+                                "inkflow:drawio-edit": box.checked
+                                    ? "shapes"
+                                    : null,
+                            },
+                        },
+                    ],
+                },
+            ],
+            box.checked
+                ? "Edit diagram shapes here"
+                : "Edit diagram in draw.io",
+        );
+    });
+    return h(
+        "div",
+        {},
+        h("label", { class: "check-row" }, box, " Edit shapes here"),
+        h(
+            "p",
+            { class: "hint" },
+            on
+                ? "Double-click the diagram to select its shapes: move, resize, relabel, recolour or delete them here. draw.io redraws the diagram after each change (it needs to load, like Edit diagram)."
+                : "Double-click opens draw.io. Turn this on to edit the diagram's shapes on the slide instead; the diagram stays a draw.io diagram.",
         ),
     );
 }
@@ -2088,9 +2250,9 @@ function renderMultiPanel(): void {
 
 export function renderProps(): void {
     const active = document.activeElement;
-    if (active && panel.contains(active) && active.localName !== "button") {
+    if (active && panel.contains(active) && typingIn(active)) {
         // Do not yank the control being typed in; refresh once it loses focus.
-        // (A clicked button keeps focus too, but has nothing to lose.)
+        // (A clicked button or checkbox keeps focus too: nothing to lose.)
         refreshOnBlur = true;
         return;
     }
@@ -2102,6 +2264,14 @@ export function renderProps(): void {
 }
 
 let refreshOnBlur = false;
+
+function typingIn(el: Element): boolean {
+    if (el.localName === "textarea" || (el as HTMLElement).isContentEditable)
+        return true;
+    if (el.localName !== "input") return false;
+    const type = (el as HTMLInputElement).type;
+    return !["checkbox", "radio", "range", "button", "color"].includes(type);
+}
 
 export function initProps(): void {
     on("selection", renderProps);

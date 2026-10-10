@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TypedDict, cast
 
 from inkflow import animations as animations_module
+from inkflow import drawio
 from inkflow import transitions as transitions_module
 from inkflow.animations import Animation, Cue, PlayVideo
 from inkflow.colors import SVG_TOKENS
@@ -35,7 +36,9 @@ class SourceInfo(TypedDict):
     rel: str
     hash: str
     role: str
-    """``slide`` (the slide's own src), ``layout`` (an ancestor) or ``overlay``."""
+    """``slide`` (the slide's own src), ``layout`` (an ancestor), ``overlay``,
+    or ``diagram`` (a draw.io diagram drawn into the slide, whose shapes the
+    editor edits in its source: editor/drawioedit.py)."""
     writable: bool
     """Inside the project and not an installed package (theme/built-in)."""
     usedBy: list[int]
@@ -342,7 +345,9 @@ def is_media_zone(name: str) -> bool:
 
 def _mark_overlays(sources: list[SourceInfo]) -> None:
     for s in sources:
-        if "overlays" in Path(s["path"]).parts:
+        if drawio.is_drawio_path(Path(s["path"])):
+            s["role"] = "diagram"
+        elif "overlays" in Path(s["path"]).parts:
             s["role"] = "overlay"
 
 

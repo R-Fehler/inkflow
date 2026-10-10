@@ -83,6 +83,9 @@ def decompress(mxfile: str) -> str:
     return etree.tostring(root, encoding="unicode")
 
 
+Box = tuple[float, float, float, float]
+
+
 @dataclass(frozen=True)
 class Cell:
     """One cell of a diagram's source, as far as the slide needs it."""
@@ -91,18 +94,40 @@ class Cell:
     """``vertex`` (a shape), ``edge`` (an arrow), ``label`` (an arrow's
     label, a vertex inside an edge) or ``other`` (the root and its layers)."""
     parent: str | None
+    box: Box | None = None
+    """A shape's box (x, y, width, height) on the page: its geometry plus that
+    of the shapes it sits in (a child's geometry is relative to its parent)."""
+
+
+def model(mxfile: str) -> SvgElement:
+    """The ``<mxfile>`` element of a diagram source, every page uncompressed."""
+    return etree.fromstring(decompress(mxfile).encode("utf-8"), parser=svg_parser())
+
+
+def cell_elements(root: SvgElement) -> dict[str, tuple[SvgElement, SvgElement]]:
+    """Each cell by id: the element carrying its id (an ``<mxCell>``, or the
+    ``<UserObject>``/``<object>`` holding a cell with data) and its ``<mxCell>``.
+    The first page's cell wins when pages share ids."""
+    found: dict[str, tuple[SvgElement, SvgElement]] = {}
+    for cell in root.iter("mxCell", "UserObject", "object"):
+        inner = cell if cell.tag == "mxCell" else cell.find("mxCell")
+        cell_id = cell.get("id")
+        if inner is not None and cell_id is not None and cell_id not in found:
+            found[cell_id] = (cell, inner)
+    return found
+
+
+def _number(value: str | None) -> float:
+    try:
+        return float(value or 0)
+    except ValueError:
+        return 0.0
 
 
 def cells(mxfile: str) -> dict[str, Cell]:
     """The cells of every page of a diagram source, by id (first page wins)."""
-    root = etree.fromstring(decompress(mxfile).encode("utf-8"), parser=svg_parser())
-    raw: dict[str, tuple[str, str | None]] = {}
-    for cell in root.iter("mxCell", "UserObject", "object"):
-        # A cell with data is an <object>/<UserObject> wrapping its <mxCell>.
-        inner = cell if cell.tag == "mxCell" else cell.find("mxCell")
-        cell_id = cell.get("id")
-        if inner is None or cell_id is None or cell_id in raw:
-            continue
+    raw: dict[str, tuple[str, str | None, Box | None]] = {}
+    for cell_id, (_, inner) in cell_elements(model(mxfile)).items():
         kind = (
             "vertex"
             if inner.get("vertex") == "1"
@@ -110,16 +135,39 @@ def cells(mxfile: str) -> dict[str, Cell]:
             if inner.get("edge") == "1"
             else "other"
         )
-        raw[cell_id] = (kind, inner.get("parent"))
-    return {
-        cell_id: Cell(
-            "label"
-            if kind == "vertex" and parent and raw.get(parent, ("",))[0] == "edge"
-            else kind,
-            parent,
-        )
-        for cell_id, (kind, parent) in raw.items()
-    }
+        geometry = inner.find("mxGeometry")
+        own: Box | None = None
+        if (
+            kind == "vertex"
+            and geometry is not None
+            and geometry.get("relative") != "1"
+        ):
+            own = (
+                _number(geometry.get("x")),
+                _number(geometry.get("y")),
+                _number(geometry.get("width")),
+                _number(geometry.get("height")),
+            )
+        raw[cell_id] = (kind, inner.get("parent"), own)
+
+    def origin(cell_id: str | None, depth: int = 0) -> tuple[float, float]:
+        parent = raw.get(cell_id or "")
+        if parent is None or parent[2] is None or depth > 100:
+            return 0.0, 0.0
+        px, py = origin(parent[1], depth + 1)
+        return px + parent[2][0], py + parent[2][1]
+
+    out: dict[str, Cell] = {}
+    for cell_id, (kind, parent, own) in raw.items():
+        if kind == "vertex" and parent and raw.get(parent, ("",))[0] == "edge":
+            out[cell_id] = Cell("label", parent)
+            continue
+        box = None
+        if own is not None:
+            ox, oy = origin(parent)
+            box = (ox + own[0], oy + own[1], own[2], own[3])
+        out[cell_id] = Cell(kind, parent, box)
+    return out
 
 
 def source(data: bytes) -> str:

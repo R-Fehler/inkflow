@@ -32,6 +32,7 @@ from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, op
 from inkflow.editor import gitops, media, nativedialog, places, projects
 from inkflow.editor.codegen import Code, coerce_fields
 from inkflow.editor.deckedit import DeckEditError, DeckSource
+from inkflow.editor.drawioedit import DiagramEditError, apply_cell_ops
 from inkflow.editor.findreplace import (
     MAX_HITS,
     DeckStrings,
@@ -490,6 +491,17 @@ class EditorSession:
         expected = msg.get("hash")
         if isinstance(expected, str) and expected and file_hash(data) != expected:
             raise EditError(f"{path.name} changed on disk; wait for the reload")
+        if drawio.is_drawio_path(path):
+            # A diagram's shapes, edited in its source (editor/drawioedit.py).
+            try:
+                out = apply_cell_ops(
+                    data, cast("list[dict[str, object]]", msg.get("ops") or [])
+                )
+            except DiagramEditError as exc:
+                raise EditError(str(exc)) from exc
+            txn.write(path, out)
+            extra.update(ids={}, structural=False)
+            return str(msg.get("label") or "Edit diagram shape")
         svg = SvgFile.from_bytes(path, data)
         untouched = svg.to_bytes()
         ops = cast("list[dict[str, object]]", msg.get("ops") or [])
@@ -1264,7 +1276,8 @@ class EditorSession:
             return {"ok": True, "xml": "", "url": url, "name": "New diagram"}
         path = self._diagram_path(msg.get("path"))
         try:
-            xml = drawio.source(path.read_bytes())
+            data = path.read_bytes()
+            xml = drawio.source(data)
         except OSError as exc:
             raise EditError(f"cannot read {path.name}: {exc}") from exc
         except drawio.DrawioError as exc:
@@ -1276,6 +1289,8 @@ class EditorSession:
             "name": path.name[: -len(drawio.SUFFIX)],
             "path": str(path),
             "rel": self._deck_rel(path),
+            # A save naming it (``expect``) is refused if the file changed.
+            "hash": file_hash(data),
         }
 
     def _drawio_save(
@@ -1296,6 +1311,15 @@ class EditorSession:
         if msg.get("path"):
             path = self._diagram_path(msg.get("path"))
             label = f"Edit diagram {path.name[: -len(drawio.SUFFIX)]}"
+            expect = msg.get("expect")
+            if (
+                isinstance(expect, str)
+                and path.exists()
+                and file_hash(txn.read(path)) != expect
+            ):
+                # A redraw of a source edited again meanwhile: the next one
+                # draws the newer source.
+                raise EditError(f"{path.name} changed meanwhile; wait for the reload")
         else:
             folder = self.project_dir / "diagrams"
             n = 1
@@ -1306,7 +1330,9 @@ class EditorSession:
         txn.write(path, data)
         image = msg.get("image")
         if isinstance(image, dict):
-            self._fit_diagram_image(cast("dict[str, object]", image), data, txn)
+            self._fit_diagram_image(
+                cast("dict[str, object]", image), data, txn, msg.get("box")
+            )
         width, height = drawio.size(data) or (0.0, 0.0)
         extra.update(
             path=str(path.resolve()),
@@ -1340,8 +1366,12 @@ class EditorSession:
         return "New diagram"
 
     def _fit_diagram_image(
-        self, image: dict[str, object], data: bytes, txn: _Txn
+        self, image: dict[str, object], data: bytes, txn: _Txn, box: object = None
     ) -> None:
+        """The picture keeps its width and takes the diagram's proportions, or,
+        with ``box`` (a redraw after shapes were edited on the slide), takes
+        that box: draw.io crops a picture to its drawing, so where the page
+        sits on it moves, and the box keeps the unmoved shapes in place."""
         size = drawio.size(data)
         if not size or not size[0] or not size[1]:
             return
@@ -1353,6 +1383,15 @@ class EditorSession:
         svg = SvgFile.from_bytes(file, current)
         el = element_at(svg.root, image.get("loc"))
         if el.tag.rsplit("}", 1)[-1] != "image":
+            return
+        if isinstance(box, dict):
+            values = cast("dict[str, object]", box)
+            for key in ("x", "y", "width", "height"):
+                value = values.get(key)
+                if not isinstance(value, int | float):
+                    raise EditError(f"the picture's {key} must be a number")
+                el.set(key, f"{round(float(value), 2):g}")
+            txn.write(file, svg.to_bytes())
             return
         try:
             width = float(el.get("width") or "")

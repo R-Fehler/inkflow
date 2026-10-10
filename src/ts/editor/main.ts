@@ -15,7 +15,7 @@ import { isCropped, setCropMode, startCrop } from "./crop";
 import { initDecks, showStart } from "./decks";
 import { initDialog } from "./dialog";
 import { toast } from "./dom";
-import { diagramOf, editDiagram } from "./drawio";
+import { diagramEdited, diagramOf, editDiagram } from "./drawio";
 import { initExport } from "./exportdlg";
 import { initFind } from "./find";
 import { initGallery } from "./gallery";
@@ -25,7 +25,7 @@ import { afterRender, initInsert } from "./insert";
 import { connect } from "./net";
 import { initNotes } from "./notes";
 import { initObjects } from "./objects";
-import { initProps } from "./props";
+import { focusCellLabel, initProps } from "./props";
 import { initSorter, renderSorter } from "./sorter";
 import { currentSlide, ed, emit, on } from "./state";
 import { editingHost, editSvgText, editZone, finishTextEdit } from "./textedit";
@@ -123,6 +123,8 @@ function boot(): void {
         editDiagram(sel);
         return true;
     };
+    hooks.diagramEdited = diagramEdited;
+    hooks.cellLabel = focusCellLabel;
 
     initCanvas();
     initInsert();

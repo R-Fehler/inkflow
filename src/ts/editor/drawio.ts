@@ -9,10 +9,17 @@
 // another copy (self-hosted, offline). Messages are only taken from that
 // frame and that origin.
 
-import { connectorsTo, isStale, rerouteConnectors } from "./canvas";
+import {
+    connectorsTo,
+    isStale,
+    keyOf,
+    rerouteConnectors,
+    slideRoot,
+} from "./canvas";
 import { pictureOf } from "./crop";
 import { closeDialog, openDialog } from "./dialog";
 import { h, toast } from "./dom";
+import { drawnBox, median } from "./drawioshapes";
 import { insertDiagramImage } from "./insert";
 import { edit, request } from "./net";
 import { currentSlide, off, on, sourceOf } from "./state";
@@ -288,6 +295,286 @@ function followArrows(id: string, step: string): void {
     };
     const give = window.setTimeout(() => off("render", rendered), 10000);
     on("render", rendered);
+}
+
+// ── Redrawing a diagram whose shapes were edited on the slide ──
+//
+// Shapes edited here change the diagram's source (editor/drawioedit.py), and
+// the server patches its picture meanwhile. draw.io then draws the picture
+// from the source, in a hidden frame, into the same undo step: its arrows
+// follow the shapes again. draw.io crops a picture to its drawing, so the
+// slide's picture takes a box that keeps the unmoved shapes where they are.
+
+const redraws = new Map<string, number>();
+let redrawCount = 0;
+
+export function diagramEdited(diagram: Element, step: string): void {
+    const id = diagram.getAttribute("id");
+    if (!id) return;
+    const n = ++redrawCount;
+    window.clearTimeout(timers.get(id));
+    redraws.set(id, n);
+    // Once edits pause (held arrow keys, a quick series of changes).
+    timers.set(
+        id,
+        window.setTimeout(() => void redraw(id, step, n), 600),
+    );
+}
+
+const timers = new Map<string, number>();
+
+function drawnById(id: string): SVGSVGElement | null {
+    return (
+        (slideRoot()?.querySelector(
+            `svg[data-drawio][id="${CSS.escape(id)}"]`,
+        ) as SVGSVGElement | null) ?? null
+    );
+}
+
+// The slide's next rendering (the patched picture), or now if it is due.
+function rendered(ms = 4000): Promise<void> {
+    return new Promise((resolve) => {
+        const done = () => {
+            off("render", done);
+            window.clearTimeout(give);
+            resolve();
+        };
+        const give = window.setTimeout(done, ms);
+        on("render", done);
+    });
+}
+
+async function redraw(id: string, step: string, n: number): Promise<void> {
+    const latest = () => redraws.get(id) === n;
+    await rendered(1500);
+    const diagram = drawnById(id);
+    const path = diagram?.getAttribute("data-drawio");
+    if (!diagram || !path || !latest()) return;
+    const res = await request({ action: "drawio-load", path });
+    if (!res.ok || !latest()) return;
+    let svg: string;
+    try {
+        svg = await renderDiagram(String(res.xml ?? ""), String(res.url));
+    } catch (err) {
+        if (latest()) {
+            toast(
+                `${err instanceof Error ? err.message : String(err)}: the shape changed, and draw.io's own arrows follow it the next time draw.io opens the diagram`,
+                "error",
+            );
+        }
+        return;
+    }
+    const now = drawnById(id);
+    const src = now ? sourceOf(keyOf(now)) : null;
+    const box = now ? alignedBox(now, svg) : null;
+    if (!now || !src || !box || !latest()) return;
+    const result = await edit(
+        {
+            action: "drawio-save",
+            path,
+            svg,
+            expect: res.hash,
+            image: {
+                file: src.path,
+                hash: src.hash,
+                loc: now.getAttribute("data-ink") ?? "",
+            },
+            box,
+            coalesce: step,
+        },
+        { retrying: true },
+    );
+    if (result.ok) {
+        redraws.delete(id);
+        followArrows(id, step);
+    }
+}
+
+/**
+ * The slide picture's box for a new drawing of the diagram: draw.io crops
+ * to the drawing, so the page moves on the picture when the drawing grows or
+ * shrinks; the shapes (as the slide shows them now) stay where they are.
+ */
+function alignedBox(
+    diagram: SVGSVGElement,
+    svgText: string,
+): { x: number; y: number; width: number; height: number } | null {
+    const holder = h("div", {
+        style: "position:fixed;left:-30000px;top:0;visibility:hidden",
+        "aria-hidden": "true",
+    });
+    holder.innerHTML = svgText;
+    document.body.append(holder);
+    try {
+        const fresh = holder.querySelector("svg");
+        const oldRoot = diagram.querySelector(":scope > g");
+        const newRoot = fresh?.querySelector(":scope > g");
+        if (!fresh || !oldRoot || !newRoot) return null;
+        const dx: number[] = [];
+        const dy: number[] = [];
+        for (const cell of diagram.querySelectorAll(
+            'g[data-cell-kind="vertex"][data-cell-id]',
+        )) {
+            const id = cell.getAttribute("data-cell-id") ?? "";
+            const other = newRoot.querySelector(
+                `g[data-cell-id="${CSS.escape(id)}"]`,
+            );
+            const a = drawnBox(cell, oldRoot);
+            const b = other ? drawnBox(other, newRoot) : null;
+            if (!a || !b) continue;
+            dx.push(b.x - a.x);
+            dy.push(b.y - a.y);
+        }
+        const vbOld = diagram.viewBox.baseVal;
+        const vbNew = fresh.viewBox.baseVal;
+        if (!dx.length || !vbOld?.width || !vbNew?.width) return null;
+        const num = (name: string) =>
+            Number.parseFloat(diagram.getAttribute(name) ?? "0") || 0;
+        const sx = num("width") / vbOld.width;
+        const sy = num("height") / vbOld.height;
+        const r = (v: number) => Math.round(v * 100) / 100;
+        return {
+            x: r(num("x") + (vbNew.x - vbOld.x - median(dx)) * sx),
+            y: r(num("y") + (vbNew.y - vbOld.y - median(dy)) * sy),
+            width: r(vbNew.width * sx),
+            height: r(vbNew.height * sy),
+        };
+    } finally {
+        holder.remove();
+    }
+}
+
+// One hidden draw.io frame, kept a few minutes for the next redraw.
+let renderer: {
+    base: string;
+    frame: HTMLIFrameElement;
+    origin: string;
+    ready: Promise<void>;
+    closeTimer: number;
+} | null = null;
+let renderQueue: Promise<unknown> = Promise.resolve();
+
+function closeRenderer(): void {
+    renderer?.frame.remove();
+    renderer = null;
+}
+
+function hiddenFrame(base: string): NonNullable<typeof renderer> {
+    if (renderer && renderer.base === base) {
+        window.clearTimeout(renderer.closeTimer);
+        renderer.closeTimer = window.setTimeout(closeRenderer, 180000);
+        return renderer;
+    }
+    closeRenderer();
+    const origin = new URL(base).origin;
+    const params = new URLSearchParams({
+        embed: "1",
+        proto: "json",
+        configure: "1",
+        spin: "0",
+    });
+    const frame = h("iframe", {
+        src: `${base}${base.includes("?") ? "&" : "?"}${params}`,
+        title: "draw.io (drawing the diagram)",
+        "aria-hidden": "true",
+        tabindex: "-1",
+        style: "position:fixed;left:-30000px;top:0;width:1200px;height:800px;border:0",
+    }) as HTMLIFrameElement;
+    // draw.io focuses itself on load: never the hidden one (keyboard
+    // shortcuts must keep reaching the editor).
+    frame.inert = true;
+    const ready = new Promise<void>((resolve, reject) => {
+        const give = window.setTimeout(() => {
+            window.removeEventListener("message", onMessage);
+            reject(new Error("draw.io did not load"));
+        }, 20000);
+        const onMessage = (e: MessageEvent) => {
+            if (e.source !== frame.contentWindow || e.origin !== origin) return;
+            const msg = parseMessage(e.data);
+            if (msg?.event === "configure") {
+                frame.contentWindow?.postMessage(
+                    JSON.stringify({
+                        action: "configure",
+                        config: { compressXml: false },
+                    }),
+                    origin,
+                );
+            } else if (msg?.event === "init") {
+                window.clearTimeout(give);
+                window.removeEventListener("message", onMessage);
+                resolve();
+            }
+        };
+        window.addEventListener("message", onMessage);
+    });
+    document.body.append(frame);
+    renderer = {
+        base,
+        frame,
+        origin,
+        ready,
+        closeTimer: window.setTimeout(closeRenderer, 180000),
+    };
+    ready.catch(() => closeRenderer());
+    return renderer;
+}
+
+function parseMessage(data: unknown): Record<string, unknown> | null {
+    try {
+        return JSON.parse(String(data)) as Record<string, unknown>;
+    } catch {
+        return null;
+    }
+}
+
+/** draw.io's editable SVG of a diagram source, drawn in the hidden frame. */
+function renderDiagram(xml: string, base: string): Promise<string> {
+    const run = renderQueue.then(async () => {
+        let origin: string;
+        try {
+            origin = new URL(base).origin;
+        } catch {
+            throw new Error(`INKFLOW_DRAWIO_URL is not a web address: ${base}`);
+        }
+        const local = /^https?:\/\/(localhost|127\.|\[::1\])/.test(origin);
+        if (!navigator.onLine && !local)
+            throw new Error("This computer is offline");
+        const r = hiddenFrame(base);
+        await r.ready;
+        return new Promise<string>((resolve, reject) => {
+            const post = (msg: Record<string, unknown>) =>
+                r.frame.contentWindow?.postMessage(
+                    JSON.stringify(msg),
+                    r.origin,
+                );
+            const finish = () => {
+                window.clearTimeout(give);
+                window.removeEventListener("message", onMessage);
+                if (document.activeElement === r.frame) r.frame.blur();
+            };
+            const give = window.setTimeout(() => {
+                finish();
+                reject(new Error("draw.io did not draw the diagram"));
+            }, 20000);
+            const onMessage = (e: MessageEvent) => {
+                if (e.source !== r.frame.contentWindow || e.origin !== r.origin)
+                    return;
+                const msg = parseMessage(e.data);
+                if (msg?.event === "load") {
+                    post({ action: "export", format: "xmlsvg", spin: "0" });
+                } else if (msg?.event === "export") {
+                    finish();
+                    const svg = decodeSvg(String(msg.data ?? ""));
+                    if (svg) resolve(svg);
+                    else reject(new Error("draw.io sent no SVG"));
+                }
+            };
+            window.addEventListener("message", onMessage);
+            post({ action: "load", xml, autosave: 0 });
+        });
+    });
+    renderQueue = run.catch(() => undefined);
+    return run;
 }
 
 // ── draw.io desktop (no internet needed) ──

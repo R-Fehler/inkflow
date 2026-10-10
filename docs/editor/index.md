@@ -443,9 +443,31 @@ no longer meet their shapes and **Re-route all** puts them back. In Picture
 mode the shapes are not on the slide: arrows attached to them keep their last
 route and attach again when the diagram is drawn.
 
+**Editing the shapes on the slide.** With a drawn mode, the draw.io panel has
+**Edit shapes here**. When it is on, double-clicking the diagram enters it
+like a group: click a shape to select it, then move it, resize it, delete it,
+or change its label (double-click it, or the **Label** field), fill, line
+colour and line width in its panel; <kbd>Esc</kbd> leaves the diagram. The
+diagram stays a draw.io diagram: every change is written into its draw.io
+source (the shape's position and size, label or style), so it opens in
+draw.io exactly as you left it. The slide shows the change at once, then
+draw.io redraws the diagram in the background, so its own arrows follow the
+shapes again; the redraw joins the change's undo step, and shapes you did
+not touch stay where they are even when draw.io crops the picture
+differently. Copying, grouping, rotating, reordering and draw.io's own
+arrows stay in draw.io (**Edit diagram**, or turn the option off to make
+double-click open draw.io again).
+
+The redraw needs draw.io, loaded like **Edit diagram** (from the internet,
+or from `INKFLOW_DRAWIO_URL`). Without it the change is still saved in the
+diagram's source and shown on the slide, but draw.io's own arrows keep their
+old route until draw.io next draws the diagram (open it in draw.io, desktop
+included, and save).
+
 In the slide's SVG the choice is one attribute on the picture,
-`inkflow:drawio="inline"` or `"themed"`; the file keeps the `<image>`, so
-Inkscape and other SVG viewers still show the picture.
+`inkflow:drawio="inline"` or `"themed"` (and `inkflow:drawio-edit="shapes"`
+for editing its shapes here); the file keeps the `<image>`, so Inkscape and
+other SVG viewers still show the picture.
 
 **Where draw.io comes from.** draw.io is too big to ship with inkflow, so it
 loads from `https://embed.diagrams.net` by default and needs an internet
