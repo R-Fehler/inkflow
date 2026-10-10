@@ -297,6 +297,156 @@ function followArrows(id: string, step: string): void {
     on("render", rendered);
 }
 
+// ── Converting a diagram into the slide's own shapes (one way) ──
+
+/** Ask, then turn a diagram into plain slide shapes (editor/drawioedit.py). */
+export function convertDiagram(sel: Selected): void {
+    const image = diagramOf(sel.el);
+    const src = sourceOf(sel.key);
+    if (!image || !src?.writable) return;
+    const name = hrefOf(image).split("/").pop() ?? "the diagram";
+    const keep = h("input", { type: "checkbox", checked: true });
+    openDialog(
+        "Convert to slide shapes?",
+        h(
+            "div",
+            { class: "deck-form" },
+            h(
+                "p",
+                {},
+                "The diagram's shapes become ordinary shapes of this slide: you can ungroup, restyle and edit each one like anything else drawn here.",
+            ),
+            h(
+                "p",
+                { class: "warn" },
+                "This is one way: draw.io can no longer edit them, and draw.io's arrows become plain lines that no longer follow the shapes. Undo (Ctrl+Z) takes it back.",
+            ),
+            h(
+                "label",
+                { class: "check-row" },
+                keep,
+                ` Keep ${name} as a backup in assets/drawio/`,
+            ),
+            h(
+                "p",
+                { class: "hint" },
+                "The converted shapes link to the backup, and “Restore draw.io diagram” in their panel brings the diagram back (losing changes made to the shapes since). Without a backup the file is deleted, unless another slide still shows it.",
+            ),
+            h(
+                "div",
+                { class: "btn-row end" },
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "pbtn",
+                        onclick: () => closeDialog(),
+                    },
+                    "Cancel",
+                ),
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "pbtn primary danger",
+                        onclick: () => {
+                            closeDialog();
+                            void runConvert(
+                                sel,
+                                image,
+                                (keep as HTMLInputElement).checked,
+                            );
+                        },
+                    },
+                    "Convert",
+                ),
+            ),
+        ),
+    );
+}
+
+async function runConvert(
+    sel: Selected,
+    image: Element,
+    backup: boolean,
+): Promise<void> {
+    const src = sourceOf(sel.key);
+    if (!src) return;
+    const id = image.getAttribute("id");
+    const step = `drawio-convert-${Date.now()}`;
+    const result = await edit({
+        action: "drawio-convert",
+        file: src.path,
+        hash: src.hash,
+        loc: image.getAttribute("data-ink") ?? sel.loc,
+        backup,
+        coalesce: step,
+    });
+    if (!result.ok) return;
+    toast(
+        backup
+            ? "Converted; the draw.io diagram is kept in assets/drawio/"
+            : "Converted to slide shapes",
+        "ok",
+    );
+    // Arrows attached to its shapes meet them as slide shapes now.
+    if (id) followArrows(id, step);
+}
+
+/** A converted diagram's shapes back to the diagram, from its backup. */
+export function restoreDiagram(sel: Selected): void {
+    const src = sourceOf(sel.key);
+    const backup = sel.el.getAttribute("inkflow:drawio-backup");
+    if (!src?.writable || !backup) return;
+    openDialog(
+        "Restore the draw.io diagram?",
+        h(
+            "div",
+            { class: "deck-form" },
+            h(
+                "p",
+                {},
+                `These shapes become the draw.io diagram again (${backup.split("/").pop()}), back in diagrams/ and editable in draw.io.`,
+            ),
+            h(
+                "p",
+                { class: "warn" },
+                "Changes made to the shapes since they were converted are lost. Undo (Ctrl+Z) takes the restore back.",
+            ),
+            h(
+                "div",
+                { class: "btn-row end" },
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "pbtn",
+                        onclick: () => closeDialog(),
+                    },
+                    "Cancel",
+                ),
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "pbtn primary",
+                        onclick: () => {
+                            closeDialog();
+                            void edit({
+                                action: "drawio-restore",
+                                file: src.path,
+                                hash: src.hash,
+                                loc: sel.loc,
+                            });
+                        },
+                    },
+                    "Restore",
+                ),
+            ),
+        ),
+    );
+}
+
 // ── Redrawing a diagram whose shapes were edited on the slide ──
 //
 // Shapes edited here change the diagram's source (editor/drawioedit.py), and
