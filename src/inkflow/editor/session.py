@@ -42,7 +42,15 @@ from inkflow.charts import (
     serialize_rows,
 )
 from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, open_with
-from inkflow.editor import chartedit, gitops, media, nativedialog, places, projects
+from inkflow.editor import (
+    chartedit,
+    gitops,
+    media,
+    nativedialog,
+    places,
+    projects,
+    worktrees,
+)
 from inkflow.editor.codegen import Code, coerce_fields
 from inkflow.editor.deckedit import DeckEditError, DeckSource
 from inkflow.editor.drawioedit import DiagramEditError, apply_cell_ops
@@ -403,6 +411,8 @@ class EditorSession:
             return self._media(msg)
         if action == "git":
             return self._git(msg)
+        if action == "worktree":
+            return self._worktree(msg)
         if action in _PROJECT_ACTIONS:
             return self._project(msg, deck)
         if action == "open-apps":
@@ -1403,6 +1413,51 @@ class EditorSession:
             self.history = History()
             extra["historyCleared"] = True
         return {"ok": True, **extra, "git": gitops.status(self.project_dir)}
+
+    def _worktree(self, msg: dict[str, object]) -> dict[str, object]:
+        """The deck's git worktrees (editor/worktrees.py): list them, add one
+        for an agent to work in, merge one's branch, remove one."""
+        op = str(msg.get("op") or "list")
+
+        def text(key: str) -> str:
+            value = msg.get(key)
+            return value if isinstance(value, str) else ""
+
+        extra: dict[str, object] = {}
+        try:
+            if op == "list":
+                pass
+            elif op == "add":
+                self._local_only(msg, "add a worktree")
+                info, note = worktrees.add(
+                    self.deck_path, text("name"), text("base") or None
+                )
+                extra["worktree"] = info
+                if note:
+                    extra["note"] = note
+            elif op == "remove":
+                self._local_only(msg, "remove a worktree")
+                extra["message"] = worktrees.remove(
+                    self.deck_path, text("name"), force=msg.get("force") is True
+                )
+            elif op == "merge":
+                self._local_only(msg, "merge a branch")
+                merged = worktrees.merge(self.deck_path, text("branch"))
+                extra["message"] = merged.message
+                extra["files"] = merged.files
+                if merged.note:
+                    extra["note"] = merged.note
+                if merged.files:
+                    # The deck's files changed under the editor's undo steps.
+                    self.history = History()
+                    extra["historyCleared"] = True
+                extra["git"] = gitops.status(self.project_dir)
+            else:
+                raise EditError(f"unknown worktree operation {op!r}")
+            extra["worktrees"] = worktrees.list_worktrees(self.deck_path)
+        except gitops.GitError as exc:
+            raise EditError(str(exc)) from exc
+        return {"ok": True, **extra}
 
     def _local_only(self, msg: dict[str, object], what: str) -> None:
         # Set by the server from the connection, never by the browser.

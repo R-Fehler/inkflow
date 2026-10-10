@@ -179,8 +179,19 @@ branch and how many files changed. Its menu covers what a deck needs day to day:
   as it was then (no branch; switch back under Branches), **Restore** makes the
   deck's files what they were then as changes you can commit, and **Revert**
   undoes one commit with a new commit.
+- **Worktrees** lists the deck's other git worktrees: a branch of the deck in a
+  folder of its own, typically one a coding agent works in while you keep
+  editing (see [Editing with Claude Code](claude-code.md#working-on-a-branch)).
+  Each row shows its branch, how many commits it is ahead of and behind yours,
+  and uncommitted changes; **Compare** shows its slides next to yours. Click a
+  row for what to tell the agent, **Merge into** your branch (a fast-forward
+  when it can, else a merge commit; refused while your deck has uncommitted
+  changes; a conflict is aborted and its files named) and **Remove** (asks
+  again before losing uncommitted changes or unmerged commits). **New
+  worktree for an agent…** makes one: branch `deck/<name>` from your last
+  commit, in `.inkflow/worktrees/<name>`.
 
-Discard, pull, switching or creating a branch, and View, Restore or Revert change
+Discard, pull, switching or creating a branch, merging a worktree, and View, Restore or Revert change
 the deck's files on disk, so the editor's undo and redo history starts over after
 them; the first of these in a session says so and asks before going ahead.
 
@@ -194,14 +205,15 @@ the `git` on your computer, so your usual credentials and hooks apply; the edito
 never waits for a password prompt (a push that needs one fails with git's
 message). Files git changes are picked up like any other change, and the
 editor's own undo history starts over after them. Pushing, pulling, creating a
-repository and opening or creating decks work only from an editor page on the
-computer running `inkflow edit`.
+repository, adding, merging or removing worktrees, and opening or creating decks
+work only from an editor page on the computer running `inkflow edit`.
 
 ## Several decks, and copying between them
 
 Run `inkflow edit` once per deck. Each instance takes the next free ports
 (7777, then 7779, …), so the editors open side by side in your browser, like
-two PowerPoint windows.
+two PowerPoint windows. The terminal says so when 7777 is taken, and prints the
+address it serves on instead.
 
 Slides copy between them through the system clipboard. Select slides in the
 slide list (<kbd>Ctrl</kbd>+click adds one, <kbd>Shift</kbd>+click a range),

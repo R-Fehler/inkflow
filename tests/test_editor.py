@@ -2068,6 +2068,32 @@ def test_pick_ports_skips_busy_ones() -> None:
         assert http == port and ws != port
 
 
+def test_a_port_taken_on_ipv6_only_is_busy(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The servers bind every address of "localhost"; a program on ::1 alone
+    # (another inkflow, say) still takes the port.
+    import socket
+
+    from inkflow import server
+
+    if not socket.has_ipv6:
+        pytest.skip("no IPv6")
+    try:
+        busy = socket.socket(socket.AF_INET6)
+    except OSError:
+        pytest.skip("no IPv6")
+    with busy:
+        try:
+            busy.bind(("::1", 0))
+        except OSError:
+            pytest.skip("no IPv6 loopback")
+        busy.listen()
+        port = cast("int", busy.getsockname()[1])
+        assert not server._port_free("localhost", port)  # pyright: ignore[reportPrivateUsage]
+        monkeypatch.setattr(server, "DEFAULT_PORT", port)
+        http, ws = server.pick_ports("localhost", None, None)
+        assert http != port and ws != port
+
+
 def test_layout_previews_cover_every_layout(project: Path) -> None:
     from inkflow.editor.previews import layout_previews
 

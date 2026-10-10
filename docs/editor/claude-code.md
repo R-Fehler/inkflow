@@ -58,6 +58,7 @@ right away.
 | `inkflow goto N` | Shows slide `N` in the editor open on this deck. |
 | `inkflow select ID…` | Selects elements by id in the editor open on this deck, so Claude can point at what it means. |
 | `inkflow slide …` | Adds, deletes, duplicates, moves, hides, shows, renames or retitles slides, with their files (below). |
+| `inkflow worktree …` | A copy of the deck on a branch of its own for Claude to work in, merged when you like it ([below](#working-on-a-branch)). |
 
 With several editors running, `goto` and `select` find the right one from the
 deck's `.inkflow/context.json`.
@@ -91,6 +92,41 @@ that server, as one step in the editor's undo history: the editor shows
 server the files are changed directly, and `git` is the undo. The editor keeps its state in `.inkflow/` in the project, which ignores itself in
 git and is not watched for changes. `render` needs Chromium or Chrome, like
 `inkflow export`; one installed by Playwright is found too.
+
+## Working on a branch
+
+For a bigger change, a proposal you may not want, or two variants to choose
+from, let Claude work on a branch in a separate folder, a
+[git worktree](https://git-scm.com/docs/git-worktree), while your deck and
+editor stay exactly as they are:
+
+> make a version of this deck with a bolder colour scheme on a branch, so I can compare
+
+1. Claude runs `inkflow worktree add bolder`: a new branch `deck/bolder` from
+   the deck's last commit, checked out in `.inkflow/worktrees/bolder` at the
+   top of the repository (ignored by git, and not watched by your editor's
+   server, so nothing Claude writes there reaches your slides).
+2. It works only there, passing `--deck .inkflow/worktrees/bolder/…/deck.py`
+   to every `inkflow` command, and commits on that branch.
+3. You review it: **Compare** in the editor's Git menu shows its slides next to
+   yours (or `inkflow compare`), or open it in a second editor with
+   `inkflow edit --deck <its deck.py>` (it takes the next free port).
+4. **Merge** it into your branch, or **Remove** it.
+
+You can also start it yourself: Git menu → **New worktree for an agent…** asks
+for a name and shows what to tell Claude (with a Copy button), or the command to
+start a new Claude Code session inside the worktree. Uncommitted changes to
+your deck are not in a new worktree, which starts from the last commit, so
+commit first if Claude should build on them.
+
+| Command | What it does |
+|---|---|
+| `inkflow worktree add NAME [--base REV]` | Branch `deck/NAME` from `REV` (default: the deck's last commit) in `.inkflow/worktrees/NAME`; prints its `path:` and the `deck:` to pass as `--deck`. An existing `deck/NAME` branch is checked out as it is. |
+| `inkflow worktree list` | Every worktree of the repository: branch, commits ahead of and behind your branch, uncommitted changes. |
+| `inkflow worktree merge NAME` | Merges its branch into your deck's branch: a fast-forward when your branch has not moved, else a merge commit. Refused while your deck has uncommitted changes; a conflict is aborted (nothing merged) and the files named. |
+| `inkflow worktree remove NAME [--force]` | Removes the folder, and the `deck/NAME` branch once merged. Uncommitted changes or unmerged commits there are refused unless `--force`. |
+
+Claude does not merge or remove a worktree unless you ask it to.
 
 ## Checking the layout
 

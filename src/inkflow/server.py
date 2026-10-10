@@ -27,7 +27,9 @@ from urllib.parse import unquote
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
+from typing_extensions import override
 from watchfiles import (
+    Change,
     DefaultFilter,
     awatch,  # pyright: ignore[reportUnknownVariableType]
 )
@@ -915,16 +917,31 @@ def make_http_handler(
 
 
 class _WatchFilter(DefaultFilter):
-    """The default ignores, plus ``.inkflow/`` (editor context the server writes)."""
+    """The default ignores, plus ``.inkflow/`` (editor context the server
+    writes, and the worktrees agents work in) and ``build/``, all matched
+    below the watched folder only: a deck that itself lives in a worktree
+    under some ``.inkflow/worktrees/`` is watched like any other."""
 
     # build/ is where `inkflow build` and the editor's export write: never input.
     ignore_dirs: Sequence[str] = (*DefaultFilter.ignore_dirs, ".inkflow", "build")
+
+    def __init__(self, root: Path) -> None:
+        super().__init__()
+        self._root: str = str(root)
+
+    @override
+    def __call__(self, change: Change, path: str) -> bool:
+        rel = os.path.relpath(path, self._root)
+        if rel == os.curdir or rel.startswith(os.pardir):
+            return super().__call__(change, path)
+        return super().__call__(change, rel)
 
 
 async def _watch(
     deck_path: Path, ui: LiveUI, lock: asyncio.Lock, levels: Levels
 ) -> None:
-    async for changes in awatch(str(deck_path.parent), watch_filter=_WatchFilter()):
+    root = deck_path.parent
+    async for changes in awatch(str(root), watch_filter=_WatchFilter(root)):
         logger.debug(f"change detected in {len(changes)} file(s), rebuilding")
         async with lock:
             await rebuild(deck_path, ui, levels)
@@ -996,12 +1013,33 @@ DEFAULT_PORT = 7777
 
 
 def _port_free(host: str, port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    """Whether ``port`` can be bound on every address ``host`` names, as the
+    servers bind it (``localhost`` is 127.0.0.1 and ::1: a program on either
+    takes the port)."""
+    try:
+        infos = socket.getaddrinfo(
+            host or None, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE
+        )
+    except socket.gaierror:
+        infos = []
+    addresses = {(info[0], info[4]) for info in infos} or {
+        (socket.AF_INET, (host, port))
+    }
+    for family, address in addresses:
         try:
-            sock.bind((host, port))
+            sock = socket.socket(family, socket.SOCK_STREAM)
         except OSError:
-            return False
+            continue  # (no IPv6 here: nothing can take the port there)
+        with sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if family == socket.AF_INET6:
+                sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            try:
+                sock.bind(address)
+            except OSError as exc:
+                if exc.errno == errno.EADDRNOTAVAIL:
+                    continue
+                return False
     return True
 
 
@@ -1044,6 +1082,7 @@ async def serve(
     open_path: str | None = None,
     exporters: Exporters | None = None,
     quit_when_idle: float | None = None,
+    auto_ports: bool = False,
 ) -> None:
     """Run the server until quit. ``open_path`` (e.g. ``"/edit"``) opens a
     browser on that page once the first build is done; ``exporters`` enable
@@ -1052,19 +1091,32 @@ async def serve(
     ``quit_when_idle`` (seconds) it stops once no page has been connected for
     that long (a server started without a terminal to stop it from).
 
+    ``auto_ports``: the ports came from ``pick_ports``, not the user, so one
+    taken in the meantime (another inkflow starting at the same moment, say
+    an agent's server for its worktree) means picking the next free pair.
+
     When the editor opens another deck (or creates one), the servers close and
     start again on the same ports for that deck; open pages reconnect to it."""
+    retries = 5 if auto_ports else 0
     while True:
-        next_deck = await _serve_deck(
-            deck_path,
-            host,
-            http_port,
-            ws_port,
-            levels,
-            open_path,
-            exporters,
-            quit_when_idle,
-        )
+        try:
+            next_deck = await _serve_deck(
+                deck_path,
+                host,
+                http_port,
+                ws_port,
+                levels,
+                open_path,
+                exporters,
+                quit_when_idle,
+            )
+        except _PortBusy as busy:
+            if retries <= 0:
+                report("Error", busy.message, style="red")
+                return
+            retries -= 1
+            http_port, ws_port = pick_ports(host, None, None)
+            continue
         if next_deck is None:
             return
         report("Opening", str(next_deck))
@@ -1075,6 +1127,14 @@ async def serve(
         _editor["deck"] = None
         _editor["model"] = None
         _editor["failed_hash"] = None
+
+
+class _PortBusy(Exception):
+    """A port was taken when the server bound it."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message: str = message
 
 
 async def _quit_when_idle(shutdown: asyncio.Event, delay: float) -> None:
@@ -1133,12 +1193,9 @@ async def _serve_deck(
             http_server = await asyncio.start_server(http_handler, host, http_port)
         except OSError as e:
             if e.errno == errno.EADDRINUSE:
-                report(
-                    "Error",
-                    f"port {http_port} in use — pass --port to use another",
-                    style="red",
-                )
-                return
+                raise _PortBusy(
+                    f"port {http_port} in use — pass --port to use another"
+                ) from e
             raise
         # Other inkflow processes find this server (and its deck) here.
         instances.register(
@@ -1216,13 +1273,10 @@ async def _serve_deck(
                     await asyncio.gather(*tasks, return_exceptions=True)
             except OSError as e:
                 if e.errno == errno.EADDRINUSE:
-                    report(
-                        "Error",
-                        f"port {ws_port} in use — pass --ws-port to use another",
-                        style="red",
-                    )
-                else:
-                    raise
+                    raise _PortBusy(
+                        f"port {ws_port} in use — pass --ws-port to use another"
+                    ) from e
+                raise
     finally:
         uninstall_shutdown_handler()
         _editor["switch"] = None

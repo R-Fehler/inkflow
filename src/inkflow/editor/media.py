@@ -171,9 +171,11 @@ def import_path(project_dir: Path, source: Path) -> Arrival:
             return Arrival(source.resolve(), convert=True)
         raise _unplayable(source.suffix)
     resolved = source.resolve()
+    project = project_dir.resolve()
+    # (Its own .inkflow/ only: a deck in a worktree lives under another's.)
     if (
-        resolved.is_relative_to(project_dir.resolve())
-        and CONTEXT_DIR not in resolved.parts
+        resolved.is_relative_to(project)
+        and resolved.relative_to(project).parts[0] != CONTEXT_DIR
     ):
         return Arrival(resolved)
     staged = _staging(project_dir) / f"{secrets.token_hex(8)}.part"
