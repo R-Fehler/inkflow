@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 import shutil
 from collections.abc import Callable
@@ -98,6 +99,38 @@ def _installed(*names: str) -> Callable[[str], str | None]:
     return lambda name: f"/usr/bin/{name}" if name in names else None
 
 
+class FakePyMuPDF:
+    """Stands in for the ``pymupdf`` module: two pages, each one SVG."""
+
+    class Document:
+        page_count: int = 2
+
+        def load_page(self, page_id: int) -> FakePyMuPDF.Page:
+            return FakePyMuPDF.Page(page_id)
+
+        def close(self) -> None:
+            pass
+
+    class Page:
+        def __init__(self, page_id: int) -> None:
+            self.page_id: int = page_id
+
+        def get_svg_image(self, *, text_as_path: bool = True) -> str:
+            assert text_as_path
+            return f'<svg xmlns="{_SVG}" id="page{self.page_id}"/>'
+
+    @staticmethod
+    def open(_path: str) -> FakePyMuPDF.Document:
+        return FakePyMuPDF.Document()
+
+
+def _only(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
+    """Make ``names`` the only converters available (``pymupdf``: the extra)."""
+    monkeypatch.setattr("inkflow.pdf.shutil.which", _installed(*names))
+    fake = FakePyMuPDF if "pymupdf" in names else None
+    monkeypatch.setattr("inkflow.pdf._pymupdf", lambda: fake)
+
+
 def _images(svg: str) -> list[dict[str, str]]:
     root = parse_svg(svg)
     return [
@@ -159,7 +192,7 @@ def test_page_count(tmp_path: Path) -> None:
 def test_page_count_without_tools(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("inkflow.pdf.shutil.which", _installed())
+    _only(monkeypatch)
     path = tmp_path / "plot.pdf"
     path.write_bytes(FIGURE)
     assert pdf.page_count(path) == 2
@@ -212,6 +245,7 @@ def test_cache_is_keyed_by_content_and_page(
 @pytest.mark.parametrize(
     ("installed", "chosen"),
     [
+        ({"pymupdf", "pdftocairo", "mutool", "inkscape"}, "pymupdf"),
         ({"pdftocairo", "mutool", "inkscape"}, "pdftocairo"),
         ({"mutool", "inkscape"}, "mutool"),
         ({"inkscape"}, "inkscape"),
@@ -221,11 +255,50 @@ def test_cache_is_keyed_by_content_and_page(
 def test_converter_fallback_order(
     monkeypatch: pytest.MonkeyPatch, installed: set[str], chosen: str | None
 ) -> None:
-    monkeypatch.setattr(
-        "inkflow.pdf.shutil.which",
-        _installed(*installed),
-    )
+    _only(monkeypatch, *installed)
     assert pdf.converter() == chosen
+
+
+def test_pymupdf_converts_counts_and_has_its_own_cache_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_tool: list[list[str]]
+) -> None:
+    _only(monkeypatch, "pymupdf", "pdftocairo")
+    project = _project(tmp_path)
+    source = project / "figures" / "plot.pdf"
+    page = pdf.convert(source, 2, project)
+    assert page.read_text() == f'<svg xmlns="{_SVG}" id="page1"/>'
+    assert pdf.page_count(source) == 2
+    with pytest.raises(pdf.PdfError, match=r"page 3: plot\.pdf has 2"):
+        _ = pdf.convert(source, 3, project)
+    # Another converter draws the page anew rather than reuse this one.
+    assert pdf.convert(source, 2, project, "fake") != page
+    assert len(fake_tool) == 1
+
+
+def test_the_hint_puts_the_extra_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("inkflow.pdf.sys.prefix", "/home/me/.local/share/pipx/x")
+    assert pdf.install_hint().startswith(
+        "install inkflow's PDF extra (pipx inject inkflow pymupdf;"
+    )
+    monkeypatch.setattr("inkflow.pdf.sys.prefix", "/usr")
+    hint = pdf.install_hint()
+    assert 'pip install "inkflow[pdf]"' in hint and "AGPL" in hint
+    assert hint.index("inkflow[pdf]") < hint.index("poppler-utils")
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("pymupdf") is None, reason="the pdf extra is not installed"
+)
+def test_real_pymupdf_draws_text_as_outlines(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    source = project / "figures" / "plot.pdf"
+    assert pdf.page_count(source) == 2
+    page = pdf.convert(source, 1, project, pdf.PYMUPDF)
+    root = parse_svg(page.read_bytes())
+    assert root.get("viewBox") == "0 0 300 160"
+    assert "<text" not in page.read_text()
+    with pytest.raises(pdf.PdfError):
+        _ = pdf.convert(source, 3, project, pdf.PYMUPDF)
 
 
 def test_converter_commands() -> None:
@@ -342,7 +415,7 @@ def test_pipeline_points_every_kind_of_picture_at_its_page(
 def test_without_a_converter_a_placeholder_and_one_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("inkflow.pdf.shutil.which", _installed())
+    _only(monkeypatch)
     project = _project(tmp_path)
     _slide_svg(project, '<image href="../figures/plot.pdf#page=2" width="4"/>')
     deck = Deck(
@@ -355,6 +428,7 @@ def test_without_a_converter_a_placeholder_and_one_warning(
     with collect_logs(logging.WARNING) as warnings:
         slides = process_deck(deck, project, project / "deck.py")
     assert len(warnings) == 1
+    assert "inkflow[pdf]" in warnings[0].message
     assert "poppler-utils" in warnings[0].message
     assert "mupdf-tools" in warnings[0].message
     image, zone = _images(slides[0]["svg"])
@@ -483,7 +557,7 @@ def test_page_picker_actions(tmp_path: Path) -> None:
     (project / "deck.py").write_text(DECK_PY, encoding="utf-8")
     session = EditorSession(project / "deck.py")
     info = session.apply({"action": "pdf-pages", "path": "figures/plot.pdf"}, None)
-    assert info["pages"] == 2 and info["converter"] == "pdftocairo"
+    assert info["pages"] == 2 and info["converter"] == pdf.converter()
     assert info["ignored"] is False
     page = session.apply(
         {"action": "pdf-page", "path": "figures/plot.pdf#page=2", "page": 2}, None
@@ -544,6 +618,6 @@ def test_verify_reports_pages_and_a_missing_converter(
     issues = verify_slide(deck.slides[0], project, deck.theme, preview)
     assert ("error", "plot.pdf has 2 pages, not 5") in issues
     assert not any("media not found" in m for _, m in issues)
-    monkeypatch.setattr("inkflow.pdf.shutil.which", _installed())
+    _only(monkeypatch)
     issues = verify_slide(deck.slides[0], project, deck.theme, preview)
     assert any(level == "warn" and "poppler-utils" in m for level, m in issues)

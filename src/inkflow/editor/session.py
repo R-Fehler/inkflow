@@ -1293,7 +1293,7 @@ class EditorSession:
                 "ok": True,
                 "pages": pdf.page_count(path),
                 "converter": tool,
-                "hint": None if tool else pdf.INSTALL_HINT,
+                "hint": None if tool else pdf.install_hint(),
                 "ignored": gitops.is_ignored(self.project_dir, path),
             }
         page = msg.get("page")

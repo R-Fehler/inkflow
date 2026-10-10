@@ -1,10 +1,15 @@
 """PDF pages as pictures: a figure from a LaTeX paper, drawn as vector SVG.
 
 Browsers show no PDF in an SVG ``<image>`` or an HTML ``<img>``, so the build
-converts the page a picture names to SVG with the first converter installed:
-``pdftocairo`` (poppler), ``mutool`` (MuPDF), then Inkscape. Text becomes glyph
-outlines, so a LaTeX figure keeps its exact fonts. The page is cut to its own
-box (the crop box, what a PDF viewer shows).
+converts the page a picture names to SVG with the first converter available:
+PyMuPDF (the optional ``inkflow[pdf]`` extra, imported only here), then the
+programs ``pdftocairo`` (poppler), ``mutool`` (MuPDF) and Inkscape. Text becomes
+glyph outlines, so a LaTeX figure keeps its exact fonts. The page is cut to its
+own box (the crop box, what a PDF viewer shows).
+
+PyMuPDF is AGPL-3.0 (or commercially licensed by Artifex), so it is never a
+required dependency of inkflow, which is MIT: whoever installs the extra
+chooses to bring it into their environment.
 
 A reference picks its page with the standard fragment, ``plot.pdf#page=2``; no
 fragment means the first page. Only the PDF is a source: converted pages are a
@@ -20,16 +25,20 @@ from __future__ import annotations
 import base64
 import functools
 import hashlib
+import importlib
 import os
 import re
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from html import escape
 from pathlib import Path
+from types import ModuleType
+from typing import Protocol, cast
 from urllib.parse import unquote
 
 from inkflow import ns
@@ -40,11 +49,6 @@ from inkflow.svgio import SvgElement
 
 SOURCE_ATTR = "data-inkflow-pdf"
 """On a picture showing a converted page: the PDF reference it was written with."""
-
-INSTALL_HINT = (
-    "install poppler-utils (pdftocairo), mupdf-tools (mutool) or Inkscape"
-    + " to show PDF figures"
-)
 
 _TIMEOUT = 120
 
@@ -132,10 +136,69 @@ CONVERTERS: dict[str, Callable[[Path, int, Path], list[str]]] = {
 }
 """Converter program → its command for one page, in order of preference."""
 
+PYMUPDF = "pymupdf"
+"""The converter name of PyMuPDF, tried before every program."""
+
+
+class _Page(Protocol):
+    def get_svg_image(self, *, text_as_path: bool = True) -> str: ...
+
+
+class _Document(Protocol):
+    page_count: int
+
+    def load_page(self, page_id: int) -> _Page: ...
+
+    def close(self) -> None: ...
+
+
+@functools.cache
+def _pymupdf() -> ModuleType | None:
+    """PyMuPDF when the ``pdf`` extra is installed, imported on first use."""
+    try:
+        return importlib.import_module("pymupdf")
+    except ImportError:
+        return None
+
+
+def _open(pdf: Path) -> _Document:
+    module = _pymupdf()
+    if module is None:
+        raise PdfError("PyMuPDF is not installed")
+    opener = cast("Callable[[str], _Document]", module.open)
+    try:
+        return opener(str(pdf))
+    except Exception as exc:  # PyMuPDF raises its own types for a damaged file
+        raise PdfError(f"PyMuPDF cannot read {pdf.name}: {exc}") from exc
+
 
 def converter() -> str | None:
-    """The first converter installed, or None."""
+    """The first converter available, or None."""
+    if _pymupdf() is not None:
+        return PYMUPDF
     return next((name for name in CONVERTERS if shutil.which(name)), None)
+
+
+def install_hint() -> str:
+    """What to install to show PDF figures, the one-step route first."""
+    return (
+        f"install inkflow's PDF extra ({_extra_command()}; it brings in PyMuPDF,"
+        + " AGPL-3.0), or poppler-utils (pdftocairo), mupdf-tools (mutool)"
+        + " or Inkscape"
+    )
+
+
+def _extra_command() -> str:
+    """How this inkflow gets its ``pdf`` extra: as a uv or pipx tool, in a uv
+    project (a ``uv.lock`` beside its ``.venv``), or with pip."""
+    prefix = Path(sys.prefix)
+    if "uv" in prefix.parts and "tools" in prefix.parts:
+        return 'uv tool install --reinstall "inkflow[pdf]"'
+    if "pipx" in prefix.parts:
+        return "pipx inject inkflow pymupdf"
+    if prefix.name == ".venv" and (prefix.parent / "uv.lock").is_file():
+        return 'uv add "inkflow[pdf]"'
+    return 'pip install "inkflow[pdf]"'
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -147,8 +210,25 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
         raise PdfError(f"{command[0]} failed: {exc}") from exc
 
 
+def _with_pymupdf(pdf: Path, page: int, out: Path) -> None:
+    document = _open(pdf)
+    try:
+        if not 1 <= page <= document.page_count:
+            raise PdfError(
+                f"PyMuPDF could not convert page {page}:"
+                + f" {pdf.name} has {document.page_count}"
+            )
+        svg = document.load_page(page - 1).get_svg_image(text_as_path=True)
+    finally:
+        document.close()
+    _ = out.write_text(svg, encoding="utf-8")
+
+
 def _converted(tool: str, pdf: Path, page: int, out: Path) -> None:
     """Convert one page into ``out`` with ``tool``."""
+    if tool == PYMUPDF:
+        _with_pymupdf(pdf, page, out)
+        return
     with tempfile.TemporaryDirectory(dir=out.parent) as tmp:
         target = Path(tmp) / "page.svg"
         result = _run(CONVERTERS[tool](pdf, page, target))
@@ -183,10 +263,12 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40] or "page"
 
 
-def cache_name(pdf: Path, page: int) -> str:
-    """The converted page's file name: the PDF's content and the page are the
-    key, the PDF's name only makes the build output readable."""
-    return f"{_slug(pdf.stem)}-p{page}-{digest(pdf)[:16]}.svg"
+def cache_name(pdf: Path, page: int, tool: str) -> str:
+    """The converted page's file name: the PDF's content, the page and the
+    converter are the key (another converter draws it anew rather than serve
+    what an earlier one made); the PDF's name only makes the build readable."""
+    key = hashlib.sha256(f"{digest(pdf)}:{page}:{tool}".encode()).hexdigest()
+    return f"{_slug(pdf.stem)}-p{page}-{key[:16]}.svg"
 
 
 def convert(pdf: Path, page: int, project_dir: Path, tool: str | None = None) -> Path:
@@ -195,13 +277,13 @@ def convert(pdf: Path, page: int, project_dir: Path, tool: str | None = None) ->
     Raises `PdfError` when no converter is installed or it fails (a page past
     the end, an unreadable file).
     """
-    cache = Path(os.path.abspath(project_dir / PDF_CACHE))
-    target = cache / cache_name(pdf, page)
-    if target.is_file():
-        return target
     tool = tool or converter()
     if tool is None:
-        raise PdfError(f"no PDF converter found: {INSTALL_HINT}")
+        raise PdfError(f"no PDF converter found: {install_hint()}")
+    cache = Path(os.path.abspath(project_dir / PDF_CACHE))
+    target = cache / cache_name(pdf, page, tool)
+    if target.is_file():
+        return target
     _ = context_dir(project_dir)  # ignoring itself before anything lands in it
     cache.mkdir(parents=True, exist_ok=True)
     # Into a file of its own first: a build and the editor may convert at once.
@@ -220,6 +302,15 @@ _PAGE_OBJECT_RE = re.compile(rb"/Type\s*/Page(?![a-zA-Z])")
 
 def page_count(pdf: Path) -> int | None:
     """How many pages the PDF has, or None when nothing can tell."""
+    if _pymupdf() is not None:
+        try:
+            document = _open(pdf)
+        except PdfError:
+            return None
+        try:
+            return document.page_count
+        finally:
+            document.close()
     for command in (["pdfinfo", str(pdf)], ["mutool", "info", str(pdf)]):
         if shutil.which(command[0]) is None:
             continue
@@ -288,7 +379,7 @@ class PdfPages:
         if self.tool is None:
             if not self.warned:
                 self.warned = True
-                logger.warning(f"cannot show {name}: {INSTALL_HINT}")
+                logger.warning(f"cannot show {name}: {install_hint()}")
             return None, "no PDF converter installed"
         try:
             converted = convert(pdf, page, self.roots.project_dir, self.tool)

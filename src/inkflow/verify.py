@@ -107,7 +107,7 @@ def _check_pdfs(slide: Slide, project_dir: Path, src: Path) -> list[Issue]:
         elif page > (count := pdf.page_count(file) or page):
             issues.append(("error", f"{file.name} has {count} pages, not {page}"))
         elif pdf.converter() is None:
-            issues.append(("warn", f"{file.name} cannot show: {pdf.INSTALL_HINT}"))
+            issues.append(("warn", f"{file.name} cannot show: {pdf.install_hint()}"))
     return issues
 
 
