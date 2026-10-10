@@ -89,6 +89,7 @@ nav:
     - Built-in theme: built-in-theme/index.md
   - Visual editor:
     - Editing slides: editor/index.md
+    - Comparing two versions: editor/compare.md
     - Editing with Claude Code: editor/claude-code.md
   - Presenting:
     - Presenting a deck: presenting/index.md

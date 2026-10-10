@@ -12607,7 +12607,9 @@ ${rules}`;
     root2.adoptedStyleSheets = sheets(side);
     const wrap2 = document.createElement("div");
     wrap2.className = "cmp-root";
-    if (side.mode === "light") wrap2.dataset.theme = "light";
+    if (document.documentElement.dataset.theme === "light") {
+      wrap2.dataset.theme = "light";
+    }
     wrap2.innerHTML = slide.svg;
     const svg = wrap2.querySelector("svg");
     if (svg) {
@@ -12777,7 +12779,17 @@ ${rules}`;
     const m2 = model;
     clear(listEl);
     const rows = visibleRows(m2.pairs, onlyChanges);
-    if (!rows.length) {
+    const broken = [m2.left, m2.right].filter((s2) => s2.error);
+    for (const s2 of broken) {
+      listEl.append(
+        h(
+          "div",
+          { class: "cmp-empty error" },
+          `${s2.label} does not build: ${s2.error}`
+        )
+      );
+    }
+    if (!rows.length && !broken.length) {
       listEl.append(h("div", { class: "cmp-empty" }, "No differences"));
     }
     for (const i2 of rows) {
@@ -12810,7 +12822,16 @@ ${rules}`;
         )
       );
     }
-    listEl.querySelector(".cmp-row.active")?.scrollIntoView({ block: "nearest" });
+    revealRow();
+  }
+  function revealRow() {
+    const el2 = listEl?.querySelector(".cmp-row.active");
+    if (!listEl || !el2) return;
+    const top = el2.offsetTop;
+    if (top < listEl.scrollTop) listEl.scrollTop = top - 8;
+    else if (top + el2.offsetHeight > listEl.scrollTop + listEl.clientHeight) {
+      listEl.scrollTop = top + el2.offsetHeight - listEl.clientHeight + 8;
+    }
   }
   function selectRow(i2) {
     if (!model || i2 < 0 || i2 >= model.pairs.length) return;
@@ -12821,7 +12842,7 @@ ${rules}`;
         Number(el2.getAttribute("data-row")) === i2
       );
     });
-    listEl?.querySelector(".cmp-row.active")?.scrollIntoView({ block: "nearest" });
+    revealRow();
     renderMain();
   }
   function jump(dir) {
@@ -13476,6 +13497,14 @@ Ctrl+Z takes it back.` : `Insert ${other.label}'s slide into the working copy?`;
       }
     });
     document.addEventListener("keydown", onKey3, true);
+    new MutationObserver(() => {
+      if (!model || view2.hidden) return;
+      thumbs3.clear();
+      render2();
+    }).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"]
+    });
     document.addEventListener("inkflow:compare", (e2) => {
       const detail = e2.detail;
       if (!detail?.deck) return;

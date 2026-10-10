@@ -208,7 +208,11 @@ function slideView(
     root.adoptedStyleSheets = sheets(side);
     const wrap = document.createElement("div");
     wrap.className = "cmp-root";
-    if (side.mode === "light") wrap.dataset.theme = "light";
+    // Both sides in the colour mode the editor shows (its light/dark
+    // button); a deck whose own mode differs says so in the deck line.
+    if (document.documentElement.dataset.theme === "light") {
+        wrap.dataset.theme = "light";
+    }
     wrap.innerHTML = slide.svg;
     const svg = wrap.querySelector("svg");
     if (svg) {
@@ -406,7 +410,17 @@ function renderList(): void {
     const m = model;
     clear(listEl);
     const rows = visibleRows(m.pairs, onlyChanges);
-    if (!rows.length) {
+    const broken = [m.left, m.right].filter((s) => s.error);
+    for (const s of broken) {
+        listEl.append(
+            h(
+                "div",
+                { class: "cmp-empty error" },
+                `${s.label} does not build: ${s.error}`,
+            ),
+        );
+    }
+    if (!rows.length && !broken.length) {
         listEl.append(h("div", { class: "cmp-empty" }, "No differences"));
     }
     for (const i of rows) {
@@ -441,9 +455,19 @@ function renderList(): void {
             ),
         );
     }
-    listEl
-        .querySelector(".cmp-row.active")
-        ?.scrollIntoView({ block: "nearest" });
+    revealRow();
+}
+
+/** Scroll the list (only the list: scrollIntoView would also scroll the
+ * page sideways when the toolbar is wider than the window). */
+function revealRow(): void {
+    const el = listEl?.querySelector<HTMLElement>(".cmp-row.active");
+    if (!listEl || !el) return;
+    const top = el.offsetTop; // the list is the offset parent
+    if (top < listEl.scrollTop) listEl.scrollTop = top - 8;
+    else if (top + el.offsetHeight > listEl.scrollTop + listEl.clientHeight) {
+        listEl.scrollTop = top + el.offsetHeight - listEl.clientHeight + 8;
+    }
 }
 
 function selectRow(i: number): void {
@@ -455,9 +479,7 @@ function selectRow(i: number): void {
             Number(el.getAttribute("data-row")) === i,
         );
     });
-    listEl
-        ?.querySelector(".cmp-row.active")
-        ?.scrollIntoView({ block: "nearest" });
+    revealRow();
     renderMain();
 }
 
@@ -1232,6 +1254,15 @@ export function initCompare(): void {
         }
     });
     document.addEventListener("keydown", onKey, true);
+    // The light/dark button: draw the slides again in the other mode.
+    new MutationObserver(() => {
+        if (!model || view.hidden) return;
+        thumbs.clear();
+        render();
+    }).observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["data-theme"],
+    });
     // The worktrees list (Git menu) asks for a comparison with a deck.
     document.addEventListener("inkflow:compare", (e) => {
         const detail = (e as CustomEvent).detail as

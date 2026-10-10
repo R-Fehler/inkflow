@@ -145,6 +145,7 @@ body.compare-mode #zoom-label {
 /* The paired slide list */
 
 .cmp-list {
+    position: relative;
     overflow-y: auto;
     padding: 10px 10px 30px;
     border-right: 1px solid var(--ui-line);
@@ -244,7 +245,7 @@ body.compare-mode #zoom-label {
 }
 
 .cmp-row.s-same .cmp-row-thumbs {
-    opacity: 0.55;
+    opacity: 0.7;
 }
 
 .cmp-thumb {
@@ -543,4 +544,11 @@ button.cmp-chip {
 
 button.cmp-chip:hover {
     box-shadow: inset 0 0 0 1px var(--sel);
+}
+
+.cmp-empty.error {
+    color: var(--red);
+    text-align: left;
+    white-space: pre-wrap;
+    word-break: break-word;
 }

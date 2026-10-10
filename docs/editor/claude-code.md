@@ -58,6 +58,7 @@ right away.
 | `inkflow goto N` | Shows slide `N` in the editor open on this deck. |
 | `inkflow select ID…` | Selects elements by id in the editor open on this deck, so Claude can point at what it means. |
 | `inkflow slide …` | Adds, deletes, duplicates, moves, hides, shows, renames or retitles slides, with their files (below). |
+| `inkflow compare [LEFT] RIGHT` | Which slides differ between two versions: the working copy, a revision (`main`, `HEAD~2`) or a deck folder. One line per slide that differs (`~ 3 features: slides/features.md, notes`, `+ 4 compare`, `- 7 morph`, `↕ 5 → 6 media`); `--json` adds the changed elements; `--sheet` writes side-by-side images of only those slides (see [Comparing two versions](compare.md)). |
 
 With several editors running, `goto` and `select` find the right one from the
 deck's `.inkflow/context.json`.
@@ -91,6 +92,20 @@ that server, as one step in the editor's undo history: the editor shows
 server the files are changed directly, and `git` is the undo. The editor keeps its state in `.inkflow/` in the project, which ignores itself in
 git and is not watched for changes. `render` needs Chromium or Chrome, like
 `inkflow export`; one installed by Playwright is found too.
+
+## Reviewing a branch
+
+An agent working on a branch (or in its own git worktree) can review what it
+changed before handing over:
+
+```bash
+inkflow compare main .            # main on the left, this folder on the right
+inkflow compare main . --sheet    # .inkflow/render/compare.png: before | after
+```
+
+The author sees the same in the editor's compare view
+(**Git → Compare…**, or `inkflow edit --compare <branch or folder>`), takes
+slides over one by one, or merges the branch.
 
 ## Checking the layout
 
