@@ -186,6 +186,10 @@ at the same time and see each other's changes live.
   *Stage*) and set the deck's colours and fonts in a theme dialog.
 - **Animations, transitions and notes** from the properties panel; preview each build step,
   then present from the current slide (and come back with <kbd>Shift</kbd>+<kbd>E</kbd>).
+- **Edit together.** Share the deck on your network or VPN with an editor link and a
+  view link (`inkflow edit --share`, or the Share… button), or reach it over SSH; see who
+  is on which slide and what they selected, and undo your own changes, not theirs.
+  [More](https://ll-nick.github.io/inkflow/editor/collaborate/).
 - **Decks and git.** A start page for new and recent decks, commit/push/pull with Git LFS
   for media, export to HTML or PDF, copy slides between decks, find and replace, and undo
   for every change.

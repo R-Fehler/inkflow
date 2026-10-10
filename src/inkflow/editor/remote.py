@@ -85,10 +85,6 @@ def _offline(
         raise RemoteEditError(str(exc)) from exc
 
 
-def _ws_host(instance: instances.Instance) -> str:
-    return "localhost" if instance.host in ("", "0.0.0.0", "::") else instance.host
-
-
 def _on_server(
     instance: instances.Instance,
     deck_path: Path,
@@ -99,7 +95,7 @@ def _on_server(
     from websockets.exceptions import WebSocketException
     from websockets.sync.client import ClientConnection, connect
 
-    url = f"ws://{_ws_host(instance)}:{instance.ws_port}"
+    url = instance.ws_url()
     request_id = f"agent-{time.monotonic_ns()}"
 
     def receive(
@@ -144,7 +140,8 @@ def _on_server(
             time.sleep(0.1)
 
     try:
-        with connect(url, open_timeout=3, max_size=None, proxy=None) as ws:
+        tls = instances.loopback_tls() if instance.tls else None
+        with connect(url, open_timeout=3, max_size=None, proxy=None, ssl=tls) as ws:
             before = built(ws, deck_hash)
             if before is None:
                 raise RemoteEditError(

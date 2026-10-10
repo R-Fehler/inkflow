@@ -13,6 +13,7 @@ import pytest
 from websockets.asyncio.server import ServerConnection
 
 from inkflow import server
+from inkflow.access import Role
 from inkflow.clean import clean_inkscape_svg
 from inkflow.edit import NO_EDIT_COMMANDS
 from inkflow.editor.model import build_model
@@ -307,6 +308,17 @@ def test_only_a_page_on_this_machine_saves_ink(project: Path, local: object) -> 
     assert not (project / "ink").exists()
 
 
+def test_a_shared_editor_saves_ink_and_a_viewer_does_not(project: Path) -> None:
+    deck = load_deck(project / "deck.py")
+    session = EditorSession(project / "deck.py")
+    request = _ink_request(op="add", slide=0, strokes=[_stroke()])
+    with pytest.raises(EditError, match="only an editor"):
+        session.apply({**request, "_role": "viewer"}, deck)
+    assert not (project / "ink").exists()
+    assert session.apply({**request, "_role": "editor"}, deck)["ok"] is True
+    assert (project / "ink" / "drawn.svg").exists()
+
+
 def test_a_malformed_stroke_writes_nothing(project: Path) -> None:
     deck = load_deck(project / "deck.py")
     session = EditorSession(project / "deck.py")
@@ -437,10 +449,22 @@ class _UI:
         pass
 
 
+def _join(peer: _Peer, role: Role) -> None:
+    """Admit a fake connection as the door would (see access.py)."""
+    people = server._share.people  # pyright: ignore[reportPrivateUsage]
+    _ = people.join(peer, role, None, peer.remote_address[0])
+
+
+def _leave(*peers: _Peer) -> None:
+    for peer in peers:
+        _ = server._share.people.leave(peer)  # pyright: ignore[reportPrivateUsage]
+
+
 def test_ink_is_relayed_to_every_other_window() -> None:
     ink = {"type": "ink", "op": "erase", "slide": "intro", "ids": ["ink-a"]}
     drawer = _Peer("127.0.0.1", [json.dumps(ink)])
     audience = _Peer("192.168.1.20")
+    _join(drawer, "owner")
     clients = server._state["ws_clients"]  # pyright: ignore[reportPrivateUsage]
     clients.add(cast("ServerConnection", cast("object", audience)))
     try:
@@ -454,11 +478,34 @@ def test_ink_is_relayed_to_every_other_window() -> None:
         asyncio.run(connect())
     finally:
         clients.discard(cast("ServerConnection", cast("object", audience)))
+        _leave(drawer)
     assert [json.loads(m) for m in audience.sent] == [ink]
     assert all(json.loads(m)["type"] != "ink" for m in drawer.sent)
 
 
-def test_a_save_from_another_machine_is_refused(project: Path) -> None:
+def test_a_viewer_draws_on_no_one_elses_screen() -> None:
+    ink = {"type": "ink", "op": "draw", "slide": "intro", "id": "ink-a"}
+    viewer = _Peer("192.168.1.30", [json.dumps(ink)])
+    audience = _Peer("192.168.1.20")
+    _join(viewer, "viewer")
+    clients = server._state["ws_clients"]  # pyright: ignore[reportPrivateUsage]
+    clients.add(cast("ServerConnection", cast("object", audience)))
+    try:
+        handler = server.make_ws_handler(
+            cast("LiveUI", cast("object", _UI())), NO_EDIT_COMMANDS
+        )
+
+        async def connect() -> None:
+            await handler(cast("ServerConnection", cast("object", viewer)))
+
+        asyncio.run(connect())
+    finally:
+        clients.discard(cast("ServerConnection", cast("object", audience)))
+        _leave(viewer)
+    assert audience.sent == []
+
+
+def test_a_save_from_a_view_link_is_refused(project: Path) -> None:
     session = EditorSession(project / "deck.py")
     server._editor["deck"] = load_deck(project / "deck.py")  # pyright: ignore[reportPrivateUsage]
     request = {
@@ -469,18 +516,25 @@ def test_a_save_from_another_machine_is_refused(project: Path) -> None:
         "slide": 0,
         "strokes": [_stroke()],
         "_local": True,  # what a page claims is overwritten by the server
+        "_role": "owner",
     }
-    remote = _Peer("192.168.1.20")
+    viewer = _Peer("192.168.1.20")
+    _join(viewer, "viewer")
+    stranger = _Peer("192.168.1.21")  # never admitted at the door
+    local = _Peer("127.0.0.1")
+    _join(local, "owner")
     try:
-        asyncio.run(
-            server._handle_edit_op(  # pyright: ignore[reportPrivateUsage]
-                cast("ServerConnection", cast("object", remote)), dict(request), session
+        for peer in (viewer, stranger):
+            asyncio.run(
+                server._handle_edit_op(  # pyright: ignore[reportPrivateUsage]
+                    cast("ServerConnection", cast("object", peer)),
+                    dict(request),
+                    session,
+                )
             )
-        )
-        reply = cast("dict[str, object]", json.loads(remote.sent[0]))
-        assert reply["id"] == "ink-1" and reply["ok"] is False
+            reply = cast("dict[str, object]", json.loads(peer.sent[0]))
+            assert reply["id"] == "ink-1" and reply["ok"] is False
         assert not (project / "ink").exists()
-        local = _Peer("127.0.0.1")
         asyncio.run(
             server._handle_edit_op(  # pyright: ignore[reportPrivateUsage]
                 cast("ServerConnection", cast("object", local)), dict(request), session
@@ -490,6 +544,7 @@ def test_a_save_from_another_machine_is_refused(project: Path) -> None:
         assert (project / "ink" / "drawn.svg").exists()
     finally:
         server._editor["deck"] = None  # pyright: ignore[reportPrivateUsage]
+        _leave(viewer, local)
 
 
 def test_a_deck_with_ink_round_trips_through_load(project: Path) -> None:

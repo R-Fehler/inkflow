@@ -168,19 +168,24 @@ def test_session_git_actions(repo: Path) -> None:
     out = session.apply({"action": "git", "op": "status"}, None)
     assert cast("dict[str, object]", out["git"])["branch"] == "main"
     (repo / "slides" / "intro.md").write_text("# Changed\n", encoding="utf-8")
-    out = session.apply(
-        {"action": "git", "op": "commit", "message": "Edit", "paths": None}, None
-    )
+    commit = {"action": "git", "op": "commit", "message": "Edit", "paths": None}
+    # A shared editor (another machine) reads the history but writes none.
+    with pytest.raises(EditError, match="this machine"):
+        session.apply({**commit, "_role": "editor"}, None)
+    out = session.apply({**commit, "_local": True}, None)
     assert str(out["message"]).startswith("Committed ")
     with pytest.raises(EditError, match="this machine"):
         session.apply({"action": "git", "op": "push"}, None)
     with pytest.raises(EditError, match="unknown git operation"):
-        session.apply({"action": "git", "op": "rebase"}, None)
+        session.apply({"action": "git", "op": "rebase", "_local": True}, None)
     log = cast(
         "list[dict[str, object]]",
         session.apply({"action": "git", "op": "log"}, None)["log"],
     )
-    session.apply({"action": "git", "op": "revert", "sha": log[0]["sha"]}, None)
+    session.apply(
+        {"action": "git", "op": "revert", "sha": log[0]["sha"], "_local": True},
+        None,
+    )
     assert (repo / "slides" / "intro.md").read_text() == "# Hi\n"
 
 
@@ -357,7 +362,13 @@ def test_git_actions_that_rewrite_files_clear_the_undo_history(repo: Path) -> No
     session = EditorSession(repo / "deck.py")
     (repo / "slides" / "intro.md").write_text("# Changed\n", encoding="utf-8")
     out = session.apply(
-        {"action": "git", "op": "discard", "paths": ["talk/slides/intro.md"]}, None
+        {
+            "action": "git",
+            "op": "discard",
+            "paths": ["talk/slides/intro.md"],
+            "_local": True,
+        },
+        None,
     )
     assert out["historyCleared"] is True
     out = session.apply({"action": "git", "op": "status"}, None)
@@ -408,8 +419,11 @@ def test_favourites_and_the_default_location(
         session.apply({**local, "op": "add", "path": str(tmp_path / "nope")}, None)
     session.apply({**local, "op": "default", "path": str(talks)}, None)
     # New decks go to the default location; Open deck starts there.
-    info = session.apply({"action": "project-info"}, None)
+    info = session.apply({"action": "project-info", "_local": True}, None)
     assert info["parent"] == str(talks)
+    # A guest hears nothing of this machine's folders.
+    guest = session.apply({"action": "project-info"}, None)
+    assert guest["places"] == [] and guest["recent"] == []
     assert cast("dict[str, object]", info["places"])["default"] == str(talks)
     listing = session.apply(
         {"action": "browse", "path": str(tmp_path), "_local": True}, None

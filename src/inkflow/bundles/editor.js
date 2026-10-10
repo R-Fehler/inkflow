@@ -1252,6 +1252,335 @@
       document.documentElement.dataset.theme = msg.mode;
   }
 
+  // src/ts/shared/wsurl.ts
+  var WS_PATH = "/_inkflow/ws";
+  function socketUrl(loc) {
+    const scheme = loc.protocol === "https:" ? "wss" : "ws";
+    return `${scheme}://${loc.host || "localhost"}${WS_PATH}`;
+  }
+  var SENT_AWAY = 4001;
+
+  // src/ts/shared/identity.ts
+  var NAME_KEY = "inkflow-name";
+  var ID_KEY = "inkflow-key";
+  function read(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+  function write(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+    }
+  }
+  function storedName() {
+    const name2 = read(NAME_KEY)?.trim();
+    return name2 ? name2.slice(0, 40) : null;
+  }
+  function saveName(name2) {
+    write(NAME_KEY, name2.trim().slice(0, 40));
+  }
+  var sessionKey = null;
+  function clientKey() {
+    const stored = read(ID_KEY);
+    if (stored && /^[A-Za-z0-9_-]{16,64}$/.test(stored)) return stored;
+    if (!sessionKey) {
+      const bytes = new Uint8Array(18);
+      crypto.getRandomValues(bytes);
+      sessionKey = Array.from(
+        bytes,
+        (b2) => b2.toString(16).padStart(2, "0")
+      ).join("");
+      write(ID_KEY, sessionKey);
+    }
+    return sessionKey;
+  }
+  function initials(name2) {
+    const words = name2.trim().split(/\s+/).filter(Boolean);
+    if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+    return (words[0] ?? "?").slice(0, 2).toUpperCase();
+  }
+
+  // src/ts/editor/dialog.ts
+  var host = document.getElementById("dialog");
+  var onClose = null;
+  function openDialog(title2, body3, opts2 = {}) {
+    closeDialog();
+    onClose = opts2.onClose ?? null;
+    const box = h(
+      "div",
+      {
+        class: `dialog-box${opts2.large ? " large" : opts2.wide ? " wide" : ""}`,
+        role: "dialog"
+      },
+      h(
+        "div",
+        { class: "dialog-head" },
+        h("h2", {}, title2),
+        opts2.hint ? h("span", { class: "hint" }, opts2.hint) : null,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "dialog-close",
+            title: "Close (Esc)",
+            onclick: () => closeDialog()
+          },
+          "\xD7"
+        )
+      ),
+      h("div", { class: "dialog-body" }, body3)
+    );
+    host.append(box);
+    host.classList.add("open");
+    return box;
+  }
+  function closeDialog() {
+    if (!host.classList.contains("open")) return;
+    host.classList.remove("open");
+    clear(host);
+    const fn = onClose;
+    onClose = null;
+    fn?.();
+  }
+  function dialogOpen() {
+    return host.classList.contains("open");
+  }
+  function initDialog() {
+    host.addEventListener("pointerdown", (e2) => {
+      if (e2.target === host) closeDialog();
+    });
+    document.addEventListener(
+      "keydown",
+      (e2) => {
+        const own = e2.target?.closest?.(
+          "[data-own-escape]"
+        );
+        if (e2.key === "Escape" && dialogOpen() && !own) {
+          e2.preventDefault();
+          e2.stopPropagation();
+          closeDialog();
+        }
+      },
+      true
+    );
+    host.addEventListener("keydown", (e2) => {
+      if (e2.key !== "Escape") e2.stopPropagation();
+    });
+  }
+
+  // src/ts/editor/pathtext.ts
+  function sepOf(path) {
+    return path.includes("\\") && !path.includes("/") ? "\\" : "/";
+  }
+  function withSep(dir) {
+    const sep2 = sepOf(dir);
+    return dir.endsWith(sep2) ? dir : dir + sep2;
+  }
+  function joinPath(dir, name2) {
+    return withSep(dir) + name2;
+  }
+  function baseName(path) {
+    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+  }
+  function samePath(a2, b2) {
+    const norm = (p2) => p2.replace(/(.)[\\/]+$/, "$1");
+    return norm(a2) === norm(b2);
+  }
+  function commonPrefix(names) {
+    if (!names.length) return "";
+    let prefix = names[0];
+    for (const name2 of names.slice(1)) {
+      let i2 = 0;
+      while (i2 < prefix.length && i2 < name2.length && prefix[i2].toLowerCase() === name2[i2].toLowerCase()) {
+        i2++;
+      }
+      prefix = prefix.slice(0, i2);
+    }
+    return prefix;
+  }
+  function startingWith(names, typed) {
+    const t2 = typed.toLowerCase();
+    return names.filter((n3) => n3.toLowerCase().startsWith(t2));
+  }
+  function splitTyped(value) {
+    const i2 = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+    if (i2 < 0) return { dir: "", prefix: value };
+    return { dir: value.slice(0, i2 + 1), prefix: value.slice(i2 + 1) };
+  }
+  function assetRef(href) {
+    return href.replace(/\?v=[0-9a-f]+$/, "");
+  }
+  function isPdfRef(ref) {
+    return /\.pdf(?:[#?]|$)/i.test(ref) && !/^[a-z][a-z0-9+.-]*:/i.test(ref);
+  }
+  function pdfPage(ref) {
+    const m2 = /#(?:.*&)?page=(\d+)/i.exec(ref);
+    return m2 ? Math.max(1, Number(m2[1])) : 1;
+  }
+  function withPage(ref, page) {
+    const file = ref.replace(/#.*$/, "");
+    return page > 1 ? `${file}#page=${page}` : file;
+  }
+  function splitFileName(rel) {
+    const cut2 = rel.lastIndexOf("/");
+    const folder = cut2 < 0 ? "" : rel.slice(0, cut2);
+    const name2 = rel.slice(cut2 + 1);
+    const drawio = /\.drawio\.svg$/i.exec(name2);
+    const dot = name2.lastIndexOf(".");
+    const ext = drawio ? drawio[0] : dot > 0 ? name2.slice(dot) : "";
+    return { folder, stem: name2.slice(0, name2.length - ext.length), ext };
+  }
+  function joinFileName(folder, stem, ext) {
+    const dir = folder.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    const name2 = `${stem.trim()}${ext}`;
+    return dir ? `${dir}/${name2}` : name2;
+  }
+  function projectRel(path, projectDir) {
+    if (!path) return null;
+    if (!path.startsWith("/") && !/^[a-z]:[\\/]/i.test(path)) {
+      return path.split("/").includes("..") ? null : path;
+    }
+    const root2 = projectDir.replace(/[\\/]+$/, "");
+    if (!path.startsWith(`${root2}/`)) return null;
+    return path.slice(root2.length + 1);
+  }
+
+  // src/ts/editor/pdfpages.ts
+  var THUMBS = 24;
+  function sourceRef(image) {
+    return image.getAttribute("data-inkflow-pdf") ?? assetRef(
+      image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? ""
+    );
+  }
+  function fileName(path) {
+    return path.replace(/#.*$/, "").split(/[\\/]/).pop() ?? path;
+  }
+  async function pageUrl(path, page) {
+    const res = await request({ action: "pdf-page", path, page });
+    if (!res.ok) {
+      toast(res.error ?? `cannot show page ${page}`, "error");
+      return null;
+    }
+    return String(res.url);
+  }
+  async function choosePage(path, current2 = 1) {
+    const info4 = await request({ action: "pdf-pages", path });
+    if (!info4.ok) {
+      toast(info4.error ?? "cannot read the PDF", "error");
+      return null;
+    }
+    const name2 = fileName(path);
+    if (info4.ignored) {
+      toast(
+        `${name2} is ignored by git (see .gitignore): add it to the repository with "git add -f" to keep it`
+      );
+    }
+    if (!info4.converter) {
+      toast(`${name2} shows as a placeholder: ${String(info4.hint)}`, "error");
+      return { page: current2, url: null };
+    }
+    const pages = typeof info4.pages === "number" ? info4.pages : null;
+    if (pages === 1) {
+      const url = await pageUrl(path, 1);
+      return url ? { page: 1, url } : null;
+    }
+    return pageDialog(path, name2, pages, current2);
+  }
+  function pageDialog(path, name2, pages, current2) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish2 = (choice) => {
+        if (done) return;
+        done = true;
+        resolve(choice);
+        closeDialog();
+      };
+      const grid = h("div", { class: "pdf-pages" });
+      const urls = /* @__PURE__ */ new Map();
+      const pick2 = async (page) => {
+        const url = urls.get(page) ?? await pageUrl(path, page);
+        if (url) finish2({ page, url });
+      };
+      const count = pages ?? THUMBS;
+      for (let page = 1; page <= Math.min(count, THUMBS); page++) {
+        grid.append(
+          h(
+            "button",
+            {
+              type: "button",
+              class: `pdf-page${page === current2 ? " current" : ""}`,
+              title: `Page ${page}`,
+              "data-page": page,
+              onclick: () => void pick2(page)
+            },
+            h("span", { class: "pdf-thumb" }),
+            h("span", {}, `Page ${page}`)
+          )
+        );
+      }
+      const field = h("input", {
+        type: "number",
+        min: 1,
+        max: pages ?? null,
+        step: 1,
+        value: String(current2)
+      });
+      field.addEventListener("keydown", (e2) => {
+        if (e2.key === "Enter") void pick2(Math.max(1, Number(field.value)));
+      });
+      const body3 = h(
+        "div",
+        {},
+        grid,
+        h(
+          "div",
+          { class: "pdf-page-field" },
+          h("label", {}, "Page ", field, pages ? ` of ${pages}` : ""),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn on",
+              onclick: () => void pick2(Math.max(1, Number(field.value)))
+            },
+            "Use this page"
+          )
+        )
+      );
+      openDialog(`Which page of ${name2}?`, body3, {
+        wide: true,
+        hint: "A figure from a PDF shows one page",
+        onClose: () => finish2(null)
+      });
+      void (async () => {
+        for (const card of grid.querySelectorAll(
+          ".pdf-page"
+        )) {
+          if (done) return;
+          const page = Number(card.dataset.page);
+          const res = await request({ action: "pdf-page", path, page });
+          if (!res.ok) {
+            for (const rest of grid.querySelectorAll(
+              ".pdf-page"
+            )) {
+              if (Number(rest.dataset.page) >= page) rest.remove();
+            }
+            return;
+          }
+          const url = String(res.url);
+          urls.set(page, url);
+          card.querySelector(".pdf-thumb")?.append(
+            h("img", { src: `/${url}`, alt: `Page ${page}` })
+          );
+        }
+      })();
+    });
+  }
+
   // src/ts/editor/state.ts
   var CONNECTOR_TOOLS = {
     line: "straight",
@@ -1286,6 +1615,9 @@
     undoLabel: null,
     // what Undo would take back ("Move slide")
     redoLabel: null,
+    // Someone else's later edit to the same files keeps Undo from taking
+    // this person's last step back (their name), else null.
+    undoBlockedBy: null,
     slideSelection: /* @__PURE__ */ new Set(),
     // deck indices picked in the slide list
     focus: "canvas",
@@ -1321,6 +1653,3403 @@
   }
   function sourceOf(key) {
     return currentSlide()?.sources?.[key] ?? null;
+  }
+
+  // src/ts/editor/folderpicker.ts
+  function megabytes(bytes) {
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+    if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+  function folderPicker(start, onChange, files2) {
+    let folder = null;
+    let places = { favorites: [], default: null };
+    let filter = "";
+    let typing = 0;
+    const path = h("input", {
+      type: "text",
+      class: "folder-path",
+      spellcheck: "false",
+      autocomplete: "off",
+      title: "Type a path: Tab completes, Enter opens, \u2193 goes to the list"
+    });
+    const list4 = h("div", { class: "folder-list", role: "listbox" });
+    const where = h("div", { class: "hint folder-where" });
+    const placesRow = h("div", { class: "folder-places" });
+    const star = h("button", {
+      type: "button",
+      class: "pbtn folder-star"
+    });
+    const system = h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn",
+        hidden: true,
+        title: "Choose with this computer's own dialog"
+      },
+      "Browse\u2026"
+    );
+    const entries = () => [...list4.querySelectorAll("button.folder")].filter(
+      (b2) => !b2.hidden
+    );
+    async function go(target, opts2 = {}) {
+      const res = await request({
+        action: "browse",
+        path: target,
+        files: files2?.kind
+      });
+      if (!res.ok) {
+        if (!opts2.quiet) {
+          where.textContent = res.error ?? "Cannot open that folder";
+        }
+        return false;
+      }
+      folder = res;
+      places = folder.places ?? places;
+      system.hidden = !folder.systemPicker;
+      path.value = withSep(folder.path);
+      filter = "";
+      renderList2();
+      renderPlaces();
+      where.textContent = folder.repo ? `In the git repository at ${folder.repo}` : "Not in a git repository";
+      onChange(folder);
+      if (opts2.focus === "list") (entries()[0] ?? path).focus();
+      else if (opts2.focus === "path") path.focus();
+      return true;
+    }
+    function entry(label4, kind, onOpen, extra) {
+      const b2 = h(
+        "button",
+        {
+          type: "button",
+          class: `folder ${kind === "file" ? "file" : kind === "up" ? "up" : ""}`,
+          role: "option",
+          onclick: onOpen
+        },
+        label4,
+        extra ?? null
+      );
+      return b2;
+    }
+    function renderList2() {
+      clear(list4);
+      const f2 = folder;
+      if (!f2) return;
+      if (f2.parent && !filter) {
+        list4.append(
+          entry("\u2191 ..", "up", () => {
+            if (f2.parent) void go(f2.parent, { focus: "list" });
+          })
+        );
+      }
+      const dirs = startingWith(f2.dirs, filter);
+      for (const name2 of dirs) {
+        list4.append(
+          entry(`\u{1F4C1} ${name2}`, "dir", () => {
+            void go(joinPath(f2.path, name2), { focus: "list" });
+          })
+        );
+      }
+      const shown2 = startingWith(
+        (f2.files ?? []).map((x2) => x2.name),
+        filter
+      );
+      for (const file of f2.files ?? []) {
+        if (!shown2.includes(file.name)) continue;
+        list4.append(
+          entry(
+            `\u{1F39E} ${file.name}`,
+            "file",
+            () => files2?.onFile(joinPath(f2.path, file.name)),
+            h(
+              "span",
+              { class: "hint file-size" },
+              megabytes(file.size)
+            )
+          )
+        );
+      }
+      if (!dirs.length && !shown2.length) {
+        list4.append(
+          h(
+            "p",
+            { class: "hint folder-empty" },
+            filter ? `Nothing here starts with \u201C${filter}\u201D.` : "No folders here."
+          )
+        );
+      }
+      path.toggleAttribute("data-own-escape", !!filter);
+    }
+    async function setPlaces(op, target) {
+      const res = await request({ action: "places-set", op, path: target });
+      if (!res.ok) {
+        toast(res.error ?? "Cannot save that", "error");
+        return;
+      }
+      places = res.places;
+      renderPlaces();
+    }
+    function chip(label4, target, remove) {
+      return h(
+        "span",
+        { class: "place" },
+        h(
+          "button",
+          {
+            type: "button",
+            class: "place-go",
+            title: target,
+            onclick: () => void go(target, { focus: "list" })
+          },
+          label4
+        ),
+        remove ? h(
+          "button",
+          {
+            type: "button",
+            class: "place-remove",
+            title: "Remove from favourites",
+            onclick: remove
+          },
+          "\xD7"
+        ) : null
+      );
+    }
+    function renderPlaces() {
+      clear(placesRow);
+      const here = folder?.path ?? "";
+      const isFavorite = places.favorites.some((p2) => samePath(p2, here));
+      star.textContent = isFavorite ? "\u2605" : "\u2606";
+      star.title = isFavorite ? "Remove this folder from your favourites" : "Add this folder to your favourites";
+      star.classList.toggle("on", isFavorite);
+      if (places.default) {
+        placesRow.append(
+          chip(`\u2302 ${baseName(places.default)} (default)`, places.default)
+        );
+      }
+      for (const p2 of places.favorites) {
+        placesRow.append(
+          chip(`\u2605 ${baseName(p2)}`, p2, () => void setPlaces("remove", p2))
+        );
+      }
+      const isDefault = !!places.default && samePath(places.default, here);
+      placesRow.append(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "place-default",
+            title: isDefault ? "New decks go here and Open deck starts here; click to forget it" : "New decks go here and Open deck starts here",
+            onclick: () => void setPlaces("default", isDefault ? null : here)
+          },
+          isDefault ? "\u2713 Default location" : "Make this the default location"
+        )
+      );
+    }
+    path.addEventListener("input", () => {
+      window.clearTimeout(typing);
+      const { dir, prefix } = splitTyped(path.value);
+      if (folder && samePath(dir, folder.path)) {
+        filter = prefix;
+        renderList2();
+      } else if (dir && !prefix) {
+        typing = window.setTimeout(
+          () => void go(dir, { quiet: true }),
+          250
+        );
+      }
+    });
+    async function complete() {
+      const { dir, prefix } = splitTyped(path.value);
+      if (!folder || !samePath(dir, folder.path)) {
+        if (!dir || !await go(dir, { quiet: true })) return;
+        path.value = withSep(folder.path) + prefix;
+      }
+      const f2 = folder;
+      const matches = startingWith(f2.dirs, prefix);
+      if (matches.length === 1) {
+        await go(joinPath(f2.path, matches[0]));
+        return;
+      }
+      const common = commonPrefix(matches);
+      filter = common.length > prefix.length ? common : prefix;
+      path.value = withSep(f2.path) + filter;
+      renderList2();
+    }
+    path.addEventListener("keydown", (e2) => {
+      if (e2.key === "Tab" && !e2.shiftKey && !e2.ctrlKey && !e2.altKey) {
+        e2.preventDefault();
+        void complete();
+      } else if (e2.key === "Enter") {
+        e2.preventDefault();
+        const { dir, prefix } = splitTyped(path.value);
+        const f2 = folder;
+        if (f2 && prefix && samePath(dir, f2.path)) {
+          const exact = f2.dirs.find(
+            (d2) => d2.toLowerCase() === prefix.toLowerCase()
+          );
+          const only = startingWith(f2.dirs, prefix);
+          const into = exact ?? (only.length === 1 ? only[0] : null);
+          if (into) {
+            void go(joinPath(f2.path, into));
+            return;
+          }
+        }
+        void go(path.value);
+      } else if (e2.key === "ArrowDown") {
+        e2.preventDefault();
+        entries()[0]?.focus();
+      } else if (e2.key === "Escape" && filter && folder) {
+        e2.preventDefault();
+        path.value = withSep(folder.path);
+        filter = "";
+        renderList2();
+      }
+    });
+    list4.addEventListener("keydown", (e2) => {
+      const items = entries();
+      const at3 = items.indexOf(document.activeElement);
+      if (e2.key === "ArrowDown" || e2.key === "ArrowUp") {
+        e2.preventDefault();
+        const next = at3 + (e2.key === "ArrowDown" ? 1 : -1);
+        if (next < 0) path.focus();
+        else items[Math.min(next, items.length - 1)]?.focus();
+      } else if (e2.key === "Backspace") {
+        e2.preventDefault();
+        if (filter) {
+          path.focus();
+          path.value = path.value.slice(0, -1);
+          path.dispatchEvent(new Event("input"));
+        } else if (folder?.parent) {
+          void go(folder.parent, { focus: "list" });
+        }
+      } else if (e2.key.length === 1 && !e2.ctrlKey && !e2.metaKey && !e2.altKey && e2.key !== " ") {
+        e2.preventDefault();
+        path.focus();
+        path.value += e2.key;
+        path.dispatchEvent(new Event("input"));
+      }
+    });
+    star.addEventListener("click", () => {
+      const here = folder?.path;
+      if (!here) return;
+      const isFavorite = places.favorites.some((p2) => samePath(p2, here));
+      void setPlaces(isFavorite ? "remove" : "add", here);
+    });
+    system.addEventListener("click", async () => {
+      system.disabled = true;
+      const before = where.textContent;
+      where.textContent = "A dialog is open on this computer (it may be behind the browser)\u2026";
+      const res = await request({
+        action: "system-pick",
+        path: folder?.path ?? start,
+        files: files2?.kind,
+        title: files2 ? "Choose a video" : "Choose a folder"
+      });
+      system.disabled = false;
+      where.textContent = before;
+      if (!res.ok) {
+        toast(res.error ?? "No dialog could be shown", "error");
+        return;
+      }
+      const chosen = typeof res.path === "string" ? res.path : null;
+      if (!chosen) return;
+      if (files2) files2.onFile(chosen);
+      else void go(chosen);
+    });
+    const el2 = h(
+      "div",
+      { class: "folder-picker" },
+      h(
+        "div",
+        { class: "folder-bar" },
+        path,
+        system,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            title: "Your home folder",
+            onclick: () => void go(folder?.home ?? "~", { focus: "list" })
+          },
+          "Home"
+        ),
+        star
+      ),
+      placesRow,
+      list4,
+      where
+    );
+    void go(start);
+    return { el: el2, current: () => folder, focus: () => path.focus() };
+  }
+
+  // src/ts/editor/openwith.ts
+  var menu = document.getElementById("context-menu");
+  function fileName2(path) {
+    return path.split(/[\\/]/).pop() ?? path;
+  }
+  function inProject(path) {
+    const root2 = ed.model?.projectDir;
+    if (!path.startsWith("/")) return !path.split("/").includes("..");
+    return !!root2 && path.startsWith(`${root2}/`);
+  }
+  async function openMenu(path, x2, y2) {
+    const res = await request({ action: "open-apps", path });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot open this file", "error");
+      return;
+    }
+    const apps = res.apps ?? [];
+    clear(menu);
+    menu.append(h("div", { class: "menu-title" }, `Open ${fileName2(path)} in`));
+    for (const app of apps) {
+      menu.append(menuItem(app.label, () => void open(path, app)));
+    }
+    menu.append(
+      menuItem("Copy path", () => {
+        const root2 = ed.model?.projectDir ?? "";
+        const full = path.startsWith("/") ? path : `${root2}/${path}`;
+        void navigator.clipboard.writeText(full).then(
+          () => toast(`Copied ${full}`, "ok"),
+          () => toast(full)
+        );
+      })
+    );
+    showMenu(x2, y2);
+  }
+  async function open(path, app) {
+    const res = await request({ action: "open-file", path, app: app.id });
+    if (res.ok) toast(`Opened ${fileName2(path)} in ${app.label}`, "ok");
+    else toast(res.error ?? "Could not open the file", "error");
+  }
+  function openButton(path, label4 = "Open") {
+    if (!path || !inProject(path)) return null;
+    return h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn open-with",
+        title: `Open ${fileName2(path)} in another program`,
+        onclick: (e2) => {
+          const r2 = e2.currentTarget.getBoundingClientRect();
+          void openMenu(path, r2.left, r2.bottom + 4);
+        }
+      },
+      `${label4} \u25BE`
+    );
+  }
+
+  // src/ts/editor/videocheck.ts
+  var LONG = 10 * 60;
+  async function mediaInfo(path) {
+    const res = await request({ action: "media-info", path });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot read the video", "error");
+      return null;
+    }
+    return res;
+  }
+  function name(path) {
+    return path.split(/[\\/]/).pop() ?? path;
+  }
+  function minutes(seconds) {
+    const m2 = Math.floor(seconds / 60);
+    const s2 = Math.round(seconds % 60);
+    return `${m2}:${String(s2).padStart(2, "0")}`;
+  }
+  function describe(info4) {
+    return [
+      info4.vcodec ? `${info4.vcodec.toUpperCase()} in .${info4.container}` : `.${info4.container}`,
+      info4.width && info4.height ? `${info4.width}\xD7${info4.height}` : "",
+      info4.fps ? `${Math.round(info4.fps)} fps` : "",
+      info4.duration ? minutes(info4.duration) : "",
+      megabytes(info4.size)
+    ].filter(Boolean).join(" \xB7 ");
+  }
+  async function checkVideo(ctx) {
+    const data = await mediaInfo(ctx.path);
+    if (!data) return;
+    const issues = collect(ctx, data);
+    if (issues.length) showCheck(ctx, data, issues);
+  }
+  async function openVideoCheck(ctx) {
+    const data = await mediaInfo(ctx.path);
+    if (data) showCheck(ctx, data, collect(ctx, data));
+  }
+  function collect(ctx, data) {
+    const issues = [...data.issues];
+    if (ctx.browser && !ctx.browser.decoded) {
+      issues.unshift({
+        kind: "decode",
+        level: "error",
+        text: "This browser cannot play it: it shows as an empty box here, and in the presenter for anyone with this browser."
+      });
+    }
+    const duration = ctx.browser?.duration;
+    if (data.info.duration == null && duration && duration > LONG) {
+      issues.push({
+        kind: "length",
+        level: "info",
+        text: `It runs ${Math.round(duration / 60)} minutes. Trim start and end in its settings, or cut it in a video editor.`
+      });
+    }
+    return issues;
+  }
+  function showCheck(ctx, data, issues) {
+    const editors = h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn",
+        title: "Trim or cut it in a video editor (LosslessCut, Shotcut\u2026)"
+      },
+      "Open in\u2026"
+    );
+    editors.addEventListener("click", () => {
+      const r2 = editors.getBoundingClientRect();
+      void openMenu(ctx.path, r2.left, r2.bottom + 4);
+    });
+    openDialog(
+      "Video check",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "p",
+          { class: "hint" },
+          `${name(ctx.path)}: ${describe(data.info)}`
+        ),
+        issues.length ? h(
+          "ul",
+          { class: "video-issues" },
+          ...issues.map(
+            (i2) => h("li", { class: `issue-${i2.level}` }, i2.text)
+          )
+        ) : h(
+          "p",
+          {},
+          "Nothing to worry about: it plays in every current browser."
+        ),
+        !data.tools.ffprobe && h(
+          "p",
+          { class: "hint" },
+          "Install ffmpeg (it brings ffprobe) to see the codec, resolution and length here, and to convert in place."
+        ),
+        h(
+          "p",
+          { class: "hint" },
+          "MP4 with H.264 plays in every browser; WebM (VP9) in all but some Safari versions. Convert to one of them to be safe."
+        ),
+        h(
+          "div",
+          { class: "btn-row end" },
+          editors,
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => closeDialog()
+            },
+            "Keep as is"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              onclick: () => convertDialog(ctx.path, data, {
+                kind: "replace",
+                ctx
+              })
+            },
+            "Convert\u2026"
+          )
+        )
+      ),
+      { wide: true }
+    );
+  }
+  var PRESETS = [
+    { label: "Keep its resolution", height: null },
+    { label: "4K (2160p)", height: 2160 },
+    { label: "Full HD (1080p)", height: 1080 },
+    { label: "HD (720p)", height: 720 },
+    { label: "480p", height: 480 }
+  ];
+  async function convertForInsert(source) {
+    const data = await mediaInfo(source);
+    if (!data) return null;
+    return new Promise(
+      (resolve) => convertDialog(source, data, { kind: "insert", done: resolve })
+    );
+  }
+  function convertDialog(path, data, purpose) {
+    const info4 = data.info;
+    let format = data.remux ? "copy" : "mp4";
+    let height = null;
+    let quality = 2;
+    let audio = !!info4.acodec;
+    const inserting = purpose.kind === "insert";
+    const choices = [
+      ["mp4", "MP4 (H.264)", "Plays in every browser. The safe choice."],
+      [
+        "webm",
+        "WebM (VP9)",
+        "Smaller at the same quality; not in all Safari versions."
+      ]
+    ];
+    if (data.remux) {
+      choices.unshift([
+        "copy",
+        `Keep the video as it is (.${data.remux})`,
+        `Its ${info4.vcodec?.toUpperCase() ?? "video"} already plays in browsers: repackaged without re-encoding, in seconds and with no quality lost.`
+      ]);
+    }
+    const formats = h(
+      "div",
+      { class: "look-list" },
+      ...choices.map(([value, label4, text]) => {
+        const radio = h("input", {
+          type: "radio",
+          name: "video-format",
+          value
+        });
+        radio.checked = value === format;
+        radio.addEventListener("change", () => {
+          format = value;
+          void update();
+        });
+        return h(
+          "label",
+          { class: "look" },
+          radio,
+          h(
+            "span",
+            { class: "look-text" },
+            h("strong", {}, label4),
+            h("span", { class: "hint" }, text)
+          )
+        );
+      })
+    );
+    const size4 = h("select", {});
+    for (const p2 of PRESETS) {
+      const bigger = p2.height && info4.height && p2.height > info4.height;
+      const option2 = h(
+        "option",
+        { value: String(p2.height ?? "") },
+        p2.height ? `${p2.label}${bigger ? " (no larger than the source)" : ""}` : `${p2.label}${info4.width && info4.height ? ` (${info4.width}\xD7${info4.height})` : ""}`
+      );
+      option2.selected = p2.height === height;
+      size4.append(option2);
+    }
+    size4.addEventListener("change", () => {
+      height = size4.value ? Number(size4.value) : null;
+      void update();
+    });
+    const slider = h("input", {
+      type: "range",
+      class: "quality-slider",
+      min: "0",
+      max: String(data.qualities.length - 1),
+      step: "1",
+      value: String(quality)
+    });
+    const qualityLabel = h("span", { class: "hint" });
+    slider.addEventListener("input", () => {
+      quality = Number(slider.value);
+      void update();
+    });
+    const sound = h("input", { type: "checkbox" });
+    sound.checked = audio;
+    sound.disabled = !info4.acodec && data.tools.ffprobe;
+    sound.addEventListener("change", () => {
+      audio = sound.checked;
+      void update();
+    });
+    const estimate = h("p", { class: "video-estimate" });
+    const command = h("textarea", {
+      class: "git-message video-command",
+      rows: "3",
+      readonly: true,
+      spellcheck: "false"
+    });
+    const copy3 = h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn",
+        onclick: () => void navigator.clipboard.writeText(command.value).then(
+          () => toast(
+            "Command copied: run it in the deck's folder",
+            "ok"
+          ),
+          () => command.select()
+        )
+      },
+      "Copy command"
+    );
+    const use = h("input", { type: "checkbox" });
+    use.checked = true;
+    const progress = h("progress", {
+      max: "1",
+      value: "0",
+      hidden: true
+    });
+    const run = h(
+      "button",
+      { type: "button", class: "pbtn primary", disabled: !data.tools.ffmpeg },
+      "Convert now"
+    );
+    let job = null;
+    let finished = false;
+    async function update() {
+      qualityLabel.textContent = data.qualities[quality] ?? "";
+      size4.disabled = slider.disabled = format === "copy";
+      const res = await request({
+        action: "convert-plan",
+        path,
+        format,
+        height,
+        quality,
+        audio
+      });
+      if (!res.ok) {
+        estimate.textContent = res.error ?? "";
+        return;
+      }
+      command.value = String(res.command);
+      const bytes = res.estimate;
+      estimate.textContent = bytes ? `Roughly ${megabytes(bytes)}, from ${megabytes(info4.size)} now (a guess: it depends on the footage).` : "No size estimate without the video's length and resolution (install ffmpeg).";
+      estimate.append(
+        h("br"),
+        h("span", { class: "hint" }, `Saved as ${res.out}`)
+      );
+    }
+    run.addEventListener("click", async () => {
+      if (job) {
+        await request({ action: "convert-cancel", job });
+        return;
+      }
+      const res = await request({
+        action: "convert",
+        path,
+        format,
+        height,
+        quality,
+        audio
+      });
+      if (!res.ok || typeof res.job !== "string") {
+        toast(res.error ?? "Could not start ffmpeg", "error");
+        return;
+      }
+      job = res.job;
+      run.textContent = "Cancel";
+      progress.hidden = false;
+      const poll = async () => {
+        const st = await request({ action: "convert-status", job });
+        progress.value = Number(st.progress ?? 0);
+        if (st.state === "running") {
+          window.setTimeout(() => void poll(), 700);
+          return;
+        }
+        job = null;
+        run.textContent = inserting ? "Convert and insert" : "Convert now";
+        progress.hidden = true;
+        if (st.state !== "done" || typeof st.path !== "string") {
+          toast(
+            `Conversion stopped: ${st.error || "cancelled"}`,
+            "error"
+          );
+          return;
+        }
+        toast(`Converted to ${st.rel}`, "ok");
+        finished = true;
+        const placed = { path: st.path, rel: String(st.rel) };
+        if (purpose.kind === "insert") purpose.done(placed);
+        else if (use.checked) {
+          await edit({
+            action: "zone-media",
+            slide: purpose.ctx.slide,
+            zone: purpose.ctx.zone,
+            src: st.path
+          });
+        }
+        closeDialog();
+      };
+      void poll();
+    });
+    openDialog(
+      "Convert video",
+      h(
+        "div",
+        { class: "deck-form" },
+        h("p", { class: "hint" }, `${name(path)}: ${describe(info4)}`),
+        inserting && h(
+          "p",
+          { class: "hint warn" },
+          "Browsers cannot play this file as it is: convert it to put it on the slide."
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Format"),
+          formats
+        ),
+        h(
+          "label",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Resolution"),
+          size4
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Quality"),
+          h(
+            "div",
+            { class: "video-quality" },
+            h("span", { class: "hint" }, "Smaller"),
+            slider,
+            h("span", { class: "hint" }, "Better"),
+            qualityLabel
+          )
+        ),
+        h("label", { class: "check-row" }, sound, "Keep the sound"),
+        estimate,
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "ffmpeg"),
+          h("div", {}, command, h("div", { class: "btn-row" }, copy3))
+        ),
+        !data.tools.ffmpeg && h(
+          "p",
+          { class: "hint warn" },
+          "ffmpeg is not installed here: copy the command and run it where it is, or install ffmpeg to convert from the editor."
+        ),
+        !inserting && h(
+          "label",
+          { class: "check-row" },
+          use,
+          "Use the converted video on this slide"
+        ),
+        h("div", { class: "btn-row end" }, progress, run)
+      ),
+      {
+        wide: true,
+        // Closed before it finished: an insert is called off, and a
+        // source staged for it goes (cancelling a running ffmpeg first).
+        onClose: () => {
+          if (finished) return;
+          if (job) void request({ action: "convert-cancel", job });
+          if (purpose.kind === "insert") {
+            void request({ action: "discard-source", path });
+            purpose.done(null);
+          }
+        }
+      }
+    );
+    if (inserting) run.textContent = "Convert and insert";
+    void update();
+  }
+  function pickVideoFromDisk(start) {
+    return new Promise((resolve) => {
+      let chosen = null;
+      const picker = folderPicker(start, () => {
+      }, {
+        kind: "video",
+        onFile: (path) => {
+          chosen = path;
+          closeDialog();
+        }
+      });
+      openDialog(
+        "Insert a video from this computer",
+        h(
+          "div",
+          { class: "deck-form" },
+          h(
+            "p",
+            { class: "hint" },
+            "Pick a video: the server copies it into the deck's assets/ folder straight from disk, however big it is."
+          ),
+          picker.el
+        ),
+        { large: true, onClose: () => resolve(chosen) }
+      );
+      picker.focus();
+    });
+  }
+
+  // src/ts/editor/insert.ts
+  var overlay = document.getElementById("overlay");
+  var afterRender = {
+    ids: [],
+    editText: false
+  };
+  function setTool(tool) {
+    ed.tool = tool;
+    document.body.dataset.tool = tool;
+    emit("tool");
+  }
+  function waitForModel(pred, ms = 5e3) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish2 = (ok) => {
+        if (done) return;
+        done = true;
+        off("model", check);
+        resolve(ok);
+      };
+      const deadline = window.setTimeout(() => finish2(false), ms);
+      const check = () => {
+        const s2 = currentSlide();
+        if (s2 && pred(s2)) {
+          window.clearTimeout(deadline);
+          finish2(true);
+        }
+      };
+      on("model", check);
+    });
+  }
+  async function ensureOwnDrawing() {
+    const slide = currentSlide();
+    if (!slide) return false;
+    if (!slide.srcShared) return true;
+    if (!ed.model?.deckEditable) {
+      toast(
+        "deck.py builds its slides in code; cannot add a drawing here",
+        "error"
+      );
+      return false;
+    }
+    const deckIndex = slide.deckIndex;
+    const result = await edit({
+      action: "slide",
+      op: "detach",
+      slide: deckIndex,
+      name: slide.id ?? slide.explicitId ?? "slide"
+    });
+    if (!result.ok) return false;
+    toast("This slide now has its own SVG (built on its layout)");
+    return waitForModel((s2) => s2.deckIndex === deckIndex && !s2.srcShared);
+  }
+  function ownSource() {
+    return currentSlide()?.sources?.find((s2) => s2.role === "slide") ?? null;
+  }
+  function insertParent() {
+    const svg = slideRoot();
+    if (ed.scope?.getAttribute("data-ink")?.startsWith("0:")) {
+      return { loc: ed.scope.getAttribute("data-ink"), el: ed.scope };
+    }
+    const layers = svg ? [...svg.querySelectorAll('[data-ink-layer][data-ink^="0:"]')].filter(
+      (l2) => !l2.hasAttribute("data-ink-locked")
+    ) : [];
+    const layer2 = layers[layers.length - 1];
+    if (layer2) return { loc: layer2.getAttribute("data-ink"), el: layer2 };
+    return { loc: "0:", el: null };
+  }
+  function toParent(el2, x2, y2) {
+    const svg = slideRoot();
+    if (!el2 || !svg) return { x: x2, y: y2 };
+    const p2 = el2.getScreenCTM?.();
+    const r2 = svg.getScreenCTM();
+    if (!p2 || !r2) return { x: x2, y: y2 };
+    const m2 = multiply(invert(mat(p2)), mat(r2));
+    return { x: m2.a * x2 + m2.c * y2 + m2.e, y: m2.b * x2 + m2.d * y2 + m2.f };
+  }
+  async function insertXml(xml, base2, opts2 = {}) {
+    if (!await ensureOwnDrawing()) return false;
+    const src = ownSource();
+    if (!src) return false;
+    const parent = insertParent();
+    const ops = [...opts2.before?.() ?? []];
+    if (opts2.marker) ops.push({ kind: "ensure-marker" });
+    if (typeof xml === "function") xml = xml();
+    ops.push({ kind: "insert", parent: parent.loc, xml, base: base2, key: "new" });
+    const result = await edit({
+      action: "svg",
+      file: src.path,
+      hash: src.hash,
+      ops,
+      label: `Insert ${base2}`
+    });
+    if (!result.ok) return false;
+    const id = result.ids?.new;
+    if (id) {
+      afterRender.ids = [id];
+      afterRender.editText = !!opts2.editText;
+    }
+    return true;
+  }
+  function drawScale() {
+    const vb = slideRoot()?.viewBox.baseVal;
+    const short = vb && vb.width > 0 ? Math.min(vb.width, vb.height) : 1080;
+    return Math.max(1, Math.round(short / 1080 * 10) / 10);
+  }
+  function textScale() {
+    return (ed.model?.deckSize?.fontSize ?? 36) / 36;
+  }
+  var SHAPE_STYLE = {
+    get rect() {
+      return `class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:${fmt(4 * drawScale())}"`;
+    },
+    get ellipse() {
+      return `class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:${fmt(4 * drawScale())}"`;
+    },
+    get line() {
+      return `class="inkflow-stroke-text" style="fill:none;stroke-width:${fmt(6 * drawScale())};stroke-linecap:round"`;
+    }
+  };
+  function shapeXml(tool, a2, b2) {
+    const x2 = Math.min(a2.x, b2.x);
+    const y2 = Math.min(a2.y, b2.y);
+    const w2 = Math.abs(b2.x - a2.x);
+    const h3 = Math.abs(b2.y - a2.y);
+    switch (tool) {
+      case "rect":
+        return `<rect x="${fmt(x2)}" y="${fmt(y2)}" width="${fmt(w2)}" height="${fmt(h3)}" rx="${fmt(16 * drawScale())}" ${SHAPE_STYLE.rect}/>`;
+      default:
+        return `<ellipse cx="${fmt(x2 + w2 / 2)}" cy="${fmt(y2 + h3 / 2)}" rx="${fmt(w2 / 2)}" ry="${fmt(h3 / 2)}" ${SHAPE_STYLE.ellipse}/>`;
+    }
+  }
+  function textXml(p2) {
+    return `<text x="${fmt(p2.x)}" y="${fmt(p2.y)}" class="inkflow-fill-text" style="font-size:${fmt(56 * textScale())}px;font-family:var(--inkflow-body-font, sans-serif)">Text</text>`;
+  }
+  var draft = null;
+  function drawDraft(tool, a2, b2, ends) {
+    draft?.remove();
+    const m2 = slideToPaper();
+    const style = CONNECTOR_TOOLS[tool];
+    if (style) {
+      const r2 = route(style, ends?.a ?? a2, ends?.b ?? b2);
+      const toPaper = (p2) => ({
+        x: m2.a * p2.x + m2.e,
+        y: m2.d * p2.y + m2.f
+      });
+      draft = svgEl("path", {
+        d: pathData({ ...r2, points: r2.points.map(toPaper) }),
+        class: "draft",
+        fill: "none"
+      });
+    } else {
+      const box = transformBox(m2, {
+        x: Math.min(a2.x, b2.x),
+        y: Math.min(a2.y, b2.y),
+        width: Math.abs(b2.x - a2.x),
+        height: Math.abs(b2.y - a2.y)
+      });
+      draft = tool === "ellipse" ? svgEl("ellipse", {
+        cx: box.x + box.width / 2,
+        cy: box.y + box.height / 2,
+        rx: box.width / 2,
+        ry: box.height / 2,
+        class: "draft"
+      }) : svgEl("rect", {
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height,
+        class: "draft"
+      });
+    }
+    overlay.append(draft);
+  }
+  async function insertConnector(tool, from, to, startHit, endHit) {
+    let a2 = startHit ? startHit.site : from;
+    let b2 = endHit ? endHit.site : to;
+    if (Math.hypot(b2.x - a2.x, b2.y - a2.y) < 8) {
+      a2 = { x: from.x - 150, y: from.y };
+      b2 = { x: from.x + 150, y: from.y };
+      startHit = null;
+      endHit = null;
+    }
+    const before = [];
+    const taken = /* @__PURE__ */ new Set();
+    const attach = (hit) => {
+      if (!hit) return null;
+      let id = hit.el.getAttribute("id");
+      if (!id && keyOf(hit.el) === 0) {
+        const svg = slideRoot();
+        let n3 = 1;
+        const base2 = hit.el.localName;
+        while (svg?.querySelector(`[id="${base2}-${n3}"]`) || taken.has(`${base2}-${n3}`))
+          n3++;
+        id = `${base2}-${n3}`;
+        taken.add(id);
+        hit.el.setAttribute("id", id);
+        before.push({
+          kind: "id",
+          loc: hit.el.getAttribute("data-ink"),
+          id
+        });
+      }
+      return id ? `${id}:${hit.site.name}` : null;
+    };
+    const startAt = attach(startHit);
+    const endAt = attach(endHit);
+    const style = CONNECTOR_TOOLS[tool] ?? "straight";
+    const arrow = tool !== "line";
+    const attrs2 = [
+      `inkflow:connector="${style}"`,
+      startAt ? `inkflow:connect-start="${startAt}"` : "",
+      endAt ? `inkflow:connect-end="${endAt}"` : "",
+      arrow ? 'marker-end="url(#inkflow-arrow)"' : ""
+    ].filter(Boolean).join(" ");
+    await insertXml(
+      // Routed into the insertion parent's space once it is known (a slide
+      // drawn from a layout gets its own SVG first).
+      () => `<path d="${newConnectorPath(style, a2, b2, insertParent().el)}" ${SHAPE_STYLE.line} ${attrs2}/>`,
+      arrow ? "arrow" : "line",
+      { marker: arrow, before: () => before }
+    );
+  }
+  function onToolDown(e2, start) {
+    const tool = ed.tool;
+    if (tool === "select" || tool === "pen") return false;
+    e2.preventDefault();
+    clearSelection();
+    const paperEl = e2.currentTarget;
+    try {
+      paperEl.setPointerCapture(e2.pointerId);
+    } catch {
+    }
+    ed.interacting = true;
+    const connecting = tool in CONNECTOR_TOOLS;
+    const startHit = connecting && !e2.altKey ? siteAt(start, null) : null;
+    if (startHit) start = { x: startHit.site.x, y: startHit.site.y };
+    let endHit = null;
+    let end = start;
+    const move = (ev) => {
+      end = clientToSlide(ev.clientX, ev.clientY);
+      if (connecting) {
+        endHit = ev.altKey ? null : siteAt(end, null);
+        if (endHit) end = { x: endHit.site.x, y: endHit.site.y };
+        const under = attachTargetAt(ev.clientX, ev.clientY);
+        showSites([
+          ...under ? [
+            {
+              el: under,
+              active: endHit?.el === under ? endHit.site : null
+            }
+          ] : [],
+          ...endHit && endHit.el !== under ? [{ el: endHit.el, active: endHit.site }] : [],
+          ...startHit ? [{ el: startHit.el, active: startHit.site }] : []
+        ]);
+      }
+      if (ev.shiftKey && (tool === "rect" || tool === "ellipse")) {
+        const d2 = Math.max(
+          Math.abs(end.x - start.x),
+          Math.abs(end.y - start.y)
+        );
+        end = {
+          x: start.x + Math.sign(end.x - start.x || 1) * d2,
+          y: start.y + Math.sign(end.y - start.y || 1) * d2
+        };
+      }
+      drawDraft(
+        tool,
+        start,
+        end,
+        connecting ? {
+          a: startHit ? startHit.site : start,
+          b: endHit ? endHit.site : end
+        } : void 0
+      );
+    };
+    const up = () => {
+      paperEl.removeEventListener("pointermove", move);
+      paperEl.removeEventListener("pointerup", up);
+      draft?.remove();
+      draft = null;
+      ed.interacting = false;
+      let a2 = start;
+      let b2 = end;
+      if (connecting) {
+        showSites([]);
+        void insertConnector(tool, start, end, startHit, endHit);
+        setTool("select");
+        drawOverlay();
+        return;
+      }
+      if (tool === "text") {
+        void insertTextBox(start, end);
+        setTool("select");
+        drawOverlay();
+        return;
+      }
+      if (Math.hypot(b2.x - a2.x, b2.y - a2.y) < 8) {
+        const w2 = 360;
+        const h3 = 220;
+        a2 = { x: start.x - w2 / 2, y: start.y - h3 / 2 };
+        b2 = { x: start.x + w2 / 2, y: start.y + h3 / 2 };
+      }
+      const parent = insertParent().el;
+      const pa = toParent(parent, a2.x, a2.y);
+      const pb = toParent(parent, b2.x, b2.y);
+      void insertXml(shapeXml(tool, pa, pb), tool);
+      setTool("select");
+      if (ed.renderPending) emit("model");
+      drawOverlay();
+    };
+    paperEl.addEventListener("pointermove", move);
+    paperEl.addEventListener("pointerup", up);
+    return true;
+  }
+  async function insertTextBox(a2, b2) {
+    const slide = currentSlide();
+    if (!slide) return;
+    const vb = slideRoot()?.viewBox.baseVal;
+    const vw = vb?.width || 1920;
+    let box = {
+      x: Math.min(a2.x, b2.x),
+      y: Math.min(a2.y, b2.y),
+      width: Math.abs(b2.x - a2.x),
+      height: Math.abs(b2.y - a2.y)
+    };
+    if (box.width < 40 || box.height < 20) {
+      const k2 = textScale();
+      box = {
+        x: a2.x,
+        y: a2.y - 40 * k2,
+        width: Math.max(300 * k2, Math.min(900 * k2, vw - a2.x - 60 * k2)),
+        height: 100 * k2
+      };
+    }
+    const plain2 = ed.layoutMode || !ed.model?.deckEditable && !slide.md;
+    if (plain2) {
+      const p2 = toParent(insertParent().el, a2.x, a2.y);
+      await insertXml(textXml(p2), "text", { editText: true });
+      return;
+    }
+    if (!await ensureOwnDrawing()) return;
+    const src = ownSource();
+    const current2 = currentSlide();
+    if (!src || !current2) return;
+    const parent = insertParent();
+    const p0 = toParent(parent.el, box.x, box.y);
+    const p1 = toParent(parent.el, box.x + box.width, box.y + box.height);
+    const result = await edit({
+      action: "insert-textbox",
+      slide: current2.deckIndex,
+      file: src.path,
+      hash: src.hash,
+      parent: parent.loc,
+      x: Math.round(Math.min(p0.x, p1.x)),
+      y: Math.round(Math.min(p0.y, p1.y)),
+      width: Math.round(Math.abs(p1.x - p0.x)),
+      height: Math.round(Math.abs(p1.y - p0.y)),
+      text: "Text"
+    });
+    const id = result.ids?.new;
+    if (result.ok && id) {
+      afterRender.ids = [id];
+      afterRender.editText = true;
+    }
+  }
+  async function typeInto(el2) {
+    const slide = currentSlide();
+    const loc = el2.getAttribute("data-ink");
+    const src = slide?.sources?.[keyOf(el2)];
+    if (!slide || !loc || !src) return;
+    if (!ed.model?.deckEditable && !slide.md) {
+      toast(
+        "deck.py builds its slides in code; there is nowhere to keep the text",
+        "error"
+      );
+      return;
+    }
+    const result = await edit({
+      action: "shape-text",
+      slide: slide.deckIndex,
+      file: src.path,
+      hash: src.hash,
+      loc
+    });
+    const id = result.ids?.new;
+    if (result.ok && id) {
+      afterRender.ids = [id];
+      afterRender.editText = true;
+    }
+  }
+  function zonePlaceholder(zone) {
+    const words = zone.replace(/[-_]+/g, " ").trim() || "Text";
+    return words[0].toUpperCase() + words.slice(1);
+  }
+  async function zoneText(zone) {
+    const slide = currentSlide();
+    if (!slide) return;
+    const text = zonePlaceholder(zone);
+    const result = await edit({
+      action: "zone-text",
+      slide: slide.deckIndex,
+      zone,
+      text
+    });
+    if (!result.ok) return;
+    afterRender.ids = [`zone-${zone}`];
+    afterRender.editText = true;
+    afterRender.placeholder = text;
+  }
+  function readBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = String(reader.result);
+        resolve(url.slice(url.indexOf(",") + 1));
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+  var CHUNK = 4 * 1024 * 1024;
+  async function upload(media) {
+    if (!(media instanceof File)) {
+      const result2 = await request({
+        action: "import-path",
+        path: media.path
+      });
+      if (result2.ok && result2.convert) {
+        return convertForInsert(String(result2.source));
+      }
+      if (result2.ok && result2.path && result2.rel) {
+        return { path: result2.path, rel: result2.rel };
+      }
+      if (media.file) return upload(media.file);
+      toast(result2.error ?? "could not copy the file", "error");
+      return null;
+    }
+    const id = `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    const big = media.size > 3 * CHUNK;
+    let result = { ok: false };
+    for (let at3 = 0; at3 < media.size || at3 === 0; at3 += CHUNK) {
+      const last = at3 + CHUNK >= media.size;
+      const data = await readBase64(media.slice(at3, at3 + CHUNK));
+      result = await request({
+        action: "upload-chunk",
+        upload: id,
+        name: media.name,
+        data,
+        last
+      });
+      if (!result.ok) {
+        toast(result.error ?? "upload failed", "error");
+        return null;
+      }
+      if (big) {
+        const done = Math.min(
+          100,
+          Math.round((at3 + CHUNK) / media.size * 100)
+        );
+        toast(`Copying ${media.name}\u2026 ${done}%`);
+      }
+      if (last) break;
+    }
+    if (result.convert) return convertForInsert(String(result.source));
+    if (!result.path || !result.rel) return null;
+    return { path: result.path, rel: result.rel };
+  }
+  function droppedPath(dt) {
+    const list4 = dt?.getData("text/uri-list") ?? "";
+    const uri = list4.split(/\r?\n/).find((line) => line.startsWith("file://"));
+    if (!uri) return null;
+    try {
+      const url = new URL(uri);
+      if (url.host && url.host !== "localhost") return null;
+      return decodeURIComponent(url.pathname).replace(
+        /^\/([A-Za-z]:\/)/,
+        "$1"
+      );
+    } catch {
+      return null;
+    }
+  }
+  function naturalSize(rel) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({
+        w: img.naturalWidth || 400,
+        h: img.naturalHeight || 300
+      });
+      img.onerror = () => resolve({ w: 400, h: 300 });
+      img.src = `/${rel}`;
+    });
+  }
+  function videoSize(rel) {
+    return new Promise((resolve) => {
+      const video = document.createElement("video");
+      const fallback = { w: 1280, h: 720, decoded: false, duration: null };
+      const timer6 = window.setTimeout(() => resolve(fallback), 3e3);
+      video.preload = "metadata";
+      video.muted = true;
+      video.onloadedmetadata = () => {
+        window.clearTimeout(timer6);
+        const duration = Number.isFinite(video.duration) ? video.duration : null;
+        resolve(
+          video.videoWidth && video.videoHeight ? {
+            w: video.videoWidth,
+            h: video.videoHeight,
+            decoded: true,
+            duration
+          } : { ...fallback, duration }
+        );
+      };
+      video.onerror = () => {
+        window.clearTimeout(timer6);
+        resolve(fallback);
+      };
+      video.src = `/${rel}`;
+    });
+  }
+  var VIDEO_EXT = /\.(mp4|webm|ogg|ogv|mov|mkv|avi|m4v|wmv|flv|mpe?g|ts|mts|m2ts|3gp|3g2|mxf|vob|f4v|asf|dv)$/i;
+  var VIDEO_ACCEPT = "video/*,.mkv,.avi,.m4v,.wmv,.flv,.mpg,.mpeg,.ts,.mts,.m2ts,.3gp,.mxf,.vob,.dv";
+  function isVideo(file) {
+    return file instanceof File && file.type.startsWith("video/") || VIDEO_EXT.test(file.name);
+  }
+  var IMAGE_ACCEPT = "image/*,.pdf,application/pdf";
+  function isImage(file) {
+    return file instanceof File && (file.type.startsWith("image/") || file.type === "application/pdf") || /\.(png|jpe?g|gif|webp|svg|pdf)$/i.test(file.name);
+  }
+  async function insertVideoFile(file, at3) {
+    if (!await ensureOwnDrawing()) return;
+    const up = await upload(file);
+    const src = ownSource();
+    const slide = currentSlide();
+    if (!up || !src || !slide) return;
+    const size4 = await videoSize(up.rel);
+    const vb = slideRoot()?.viewBox.baseVal;
+    const vw = vb?.width || 1920;
+    const vh = vb?.height || 1080;
+    const k2 = Math.min(vw * 0.6 / size4.w, vh * 0.6 / size4.h);
+    const w2 = size4.w * k2;
+    const h3 = size4.h * k2;
+    const cx = Math.min(Math.max(at3?.x ?? vw / 2, w2 / 2), vw - w2 / 2);
+    const cy = Math.min(Math.max(at3?.y ?? vh / 2, h3 / 2), vh - h3 / 2);
+    const parent = insertParent();
+    const a2 = toParent(parent.el, cx - w2 / 2, cy - h3 / 2);
+    const b2 = toParent(parent.el, cx + w2 / 2, cy + h3 / 2);
+    const result = await edit({
+      action: "insert-video",
+      slide: slide.deckIndex,
+      file: src.path,
+      hash: src.hash,
+      parent: parent.loc,
+      x: Math.round(Math.min(a2.x, b2.x)),
+      y: Math.round(Math.min(a2.y, b2.y)),
+      width: Math.round(Math.abs(b2.x - a2.x)),
+      height: Math.round(Math.abs(b2.y - a2.y)),
+      src: up.path
+    });
+    const id = result.ids?.new;
+    if (result.ok && id) {
+      afterRender.ids = [id];
+      void checkVideo({
+        path: up.path,
+        slide: slide.deckIndex,
+        zone: id.replace(/^zone-/, ""),
+        browser: size4
+      });
+    }
+  }
+  async function insertVideo() {
+    const file = await pickFile(VIDEO_ACCEPT);
+    if (file) await insertVideoFile(file);
+  }
+  async function insertFile(file, at3) {
+    const zone = at3 ? mediaZoneAt(at3.clientX, at3.clientY) : null;
+    if (zone) {
+      await fillZone(zone, file);
+      return;
+    }
+    if (isImage(file)) await insertImageFile(file, at3);
+    else await insertVideoFile(file, at3);
+  }
+  async function insertImageFile(file, at3) {
+    if (!await ensureOwnDrawing()) return;
+    const up = await upload(file);
+    const src = ownSource();
+    if (!up || !src) return;
+    let href = relativePath(src.path, up.path);
+    let shown2 = up.rel;
+    if (isPdfRef(up.path)) {
+      const choice = await choosePage(up.path);
+      if (!choice) return;
+      href = withPage(href, choice.page);
+      shown2 = choice.url;
+    }
+    const size4 = shown2 ? await naturalSize(shown2) : { w: 400, h: 300 };
+    const svg = slideRoot();
+    const vb = svg?.viewBox.baseVal;
+    const maxW = (vb?.width || 1920) * 0.5;
+    const maxH = (vb?.height || 1080) * 0.5;
+    const k2 = Math.min(1, maxW / size4.w, maxH / size4.h);
+    const w2 = size4.w * k2;
+    const h3 = size4.h * k2;
+    const cx = at3?.x ?? (vb?.width || 1920) / 2;
+    const cy = at3?.y ?? (vb?.height || 1080) / 2;
+    const parent = insertParent().el;
+    const p2 = toParent(parent, cx - w2 / 2, cy - h3 / 2);
+    await insertXml(
+      `<image href="${href}" x="${fmt(p2.x)}" y="${fmt(p2.y)}" width="${fmt(w2)}" height="${fmt(h3)}" preserveAspectRatio="xMidYMid meet"/>`,
+      "image"
+    );
+  }
+  async function insertDiagramImage(path, width, height) {
+    if (!await ensureOwnDrawing()) return false;
+    const src = ownSource();
+    if (!src) return false;
+    const svg = slideRoot();
+    const vb = svg?.viewBox.baseVal;
+    const slideW = vb?.width || 1920;
+    const slideH = vb?.height || 1080;
+    const k2 = Math.min(1, slideW * 0.6 / width, slideH * 0.6 / height);
+    const w2 = width * k2;
+    const ht = height * k2;
+    const parent = insertParent().el;
+    const p2 = toParent(parent, (slideW - w2) / 2, (slideH - ht) / 2);
+    return insertXml(
+      `<image href="${relativePath(src.path, path)}" x="${fmt(p2.x)}" y="${fmt(p2.y)}" width="${fmt(w2)}" height="${fmt(ht)}" preserveAspectRatio="xMidYMid meet"/>`,
+      "diagram"
+    );
+  }
+  function pickFile(accept) {
+    return new Promise((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = accept;
+      input.onchange = () => resolve(input.files?.[0] ?? null);
+      input.click();
+    });
+  }
+  async function insertImage() {
+    const file = await pickFile(IMAGE_ACCEPT);
+    if (file) await insertImageFile(file);
+  }
+  var MEDIA_ACCEPT = `${IMAGE_ACCEPT},${VIDEO_ACCEPT}`;
+  async function fillZone(zone, file) {
+    const slide = currentSlide();
+    if (!slide) return;
+    const up = await upload(file);
+    if (!up) return;
+    const choice = isPdfRef(up.path) ? await choosePage(up.path) : null;
+    if (isPdfRef(up.path) && !choice) return;
+    const result = await edit({
+      action: "zone-media",
+      slide: slide.deckIndex,
+      zone,
+      src: up.path,
+      page: choice?.page ?? null,
+      fit: slide.zones[zone]?.fit ?? "cover"
+    });
+    if (result.ok && isVideo(file)) {
+      void checkVideo({
+        path: up.path,
+        slide: slide.deckIndex,
+        zone,
+        browser: await videoSize(up.rel)
+      });
+    }
+  }
+  async function zoneMedia(zone) {
+    const file = await pickFile(MEDIA_ACCEPT);
+    if (file) await fillZone(zone, file);
+  }
+  function cleanForPaste(el2) {
+    const copy3 = el2.cloneNode(true);
+    for (const node of [copy3, ...copy3.querySelectorAll("*")]) {
+      if (node.hasAttribute("data-inkflow-pdf")) {
+        node.setAttribute("href", sourceRef(node));
+        node.removeAttribute("xlink:href");
+      }
+      for (const attr of [...node.attributes]) {
+        const name2 = attr.name;
+        if (name2.startsWith("data-")) node.removeAttribute(name2);
+        else if (name2 === "xlink:href") {
+          node.setAttribute("href", assetRef(attr.value));
+          node.removeAttribute(name2);
+        } else if (["href", "src", "poster"].includes(name2)) {
+          node.setAttribute(name2, assetRef(attr.value));
+        } else if (name2.includes(":") && !name2.startsWith("xml:")) {
+          node.removeAttribute(name2);
+        } else if (name2 === "class") {
+          const kept = attr.value.split(/\s+/).filter((c2) => c2 && !c2.startsWith("anim-"));
+          if (kept.length) node.setAttribute("class", kept.join(" "));
+          else node.removeAttribute("class");
+        }
+      }
+      node.style?.removeProperty?.("visibility");
+    }
+    return new XMLSerializer().serializeToString(copy3);
+  }
+  function initInsert() {
+    hooks.toolDown = onToolDown;
+    hooks.typeInto = (el2) => void typeInto(el2);
+    hooks.zoneMedia = (zone) => void zoneMedia(zone);
+    hooks.zoneText = (zone) => void zoneText(zone);
+    hooks.selectAfterRender = (ids) => {
+      afterRender.ids = ids;
+    };
+    const canvas2 = document.getElementById("canvas");
+    canvas2.addEventListener("dragover", (e2) => {
+      if (e2.dataTransfer?.types.includes("Files")) {
+        e2.preventDefault();
+        canvas2.classList.add("drop");
+      }
+    });
+    canvas2.addEventListener("dragleave", () => canvas2.classList.remove("drop"));
+    canvas2.addEventListener("drop", (e2) => {
+      canvas2.classList.remove("drop");
+      const file = e2.dataTransfer?.files?.[0];
+      if (!file) return;
+      e2.preventDefault();
+      const at3 = {
+        ...clientToSlide(e2.clientX, e2.clientY),
+        clientX: e2.clientX,
+        clientY: e2.clientY
+      };
+      const path = droppedPath(e2.dataTransfer);
+      void insertFile(path ? { path, name: file.name, file } : file, at3);
+    });
+    document.addEventListener("paste", (e2) => {
+      const target = e2.target;
+      if (target.closest("textarea, input")) return;
+      const file = [...e2.clipboardData?.files ?? []].find(
+        (f2) => f2.type.startsWith("image/") || f2.type === "application/pdf" || isVideo(f2)
+      );
+      if (file) {
+        e2.preventDefault();
+        void insertFile(file);
+        return;
+      }
+      e2.preventDefault();
+      void pasteText(e2.clipboardData?.getData("text/plain") ?? "");
+    });
+  }
+
+  // src/ts/editor/clipboard.ts
+  var PREFIX = "inkflow-clipboard:";
+  var lastCopied = null;
+  async function put(payload) {
+    const text = PREFIX + JSON.stringify(payload);
+    lastCopied = text;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      toast("Copied for this tab only: the browser blocked the clipboard");
+    }
+  }
+  function selectedSlides() {
+    const picked = [...ed.slideSelection].sort((a2, b2) => a2 - b2);
+    return picked.length ? picked : [ed.current];
+  }
+  async function copySlides(indices = selectedSlides()) {
+    const result = await request({ action: "copy-slides", slides: indices });
+    if (!result.ok) {
+      toast(result.error ?? "could not copy", "error");
+      return false;
+    }
+    const bundle = result.bundle;
+    await put(bundle);
+    const dropped = bundle.dropped ?? [];
+    const n3 = indices.length;
+    toast(
+      `Copied ${n3} slide${n3 > 1 ? "s" : ""}` + (dropped.length ? `; left out ${dropped.join(", ")}` : "")
+    );
+    return true;
+  }
+  async function cutSlides() {
+    const indices = selectedSlides();
+    if (!await copySlides(indices)) return;
+    const result = await edit({
+      action: "slide",
+      op: "delete",
+      slides: indices
+    });
+    if (result.ok) {
+      ed.slideSelection.clear();
+      ed.current = Math.max(0, Math.min(...indices) - 1);
+      emit("slide");
+    }
+  }
+  function imageRefs(xml) {
+    const refs = /* @__PURE__ */ new Set();
+    for (const m2 of xml.matchAll(
+      /<image\b[^>]*?\b(?:xlink:)?href="([^"]*)"/g
+    )) {
+      if (!/^(data:|https?:|#|\/)/.test(m2[1])) refs.add(m2[1]);
+    }
+    return [...refs];
+  }
+  async function copyObjects(cut2 = false) {
+    const sels = ed.selection.filter((s2) => s2.el.localName !== "foreignObject");
+    if (!sels.length) return false;
+    const fragments = sels.map((s2) => cleanForPaste(s2.el));
+    const refs = fragments.flatMap(imageRefs);
+    let files2 = {};
+    if (refs.length) {
+      const result = await request({ action: "copy-assets", refs });
+      files2 = result.files ?? {};
+    }
+    await put({
+      type: "inkflow-objects",
+      version: 1,
+      project: ed.model?.projectDir,
+      sourceFile: currentSlide()?.sources?.[sels[0].key]?.path ?? "",
+      fragments,
+      files: files2
+    });
+    const n3 = sels.length;
+    toast(`${cut2 ? "Cut" : "Copied"} ${n3} object${n3 > 1 ? "s" : ""}`);
+    if (cut2) emit("delete");
+    return true;
+  }
+  function copy() {
+    if (ed.selection.length) void copyObjects();
+    else void copySlides();
+  }
+  function cut() {
+    if (ed.selection.some((s2) => canTransform(s2.el))) void copyObjects(true);
+    else void cutSlides();
+  }
+  async function pasteSlides(bundle) {
+    const after = ed.current;
+    const result = await edit({ action: "paste-slides", after, bundle });
+    if (!result.ok) return;
+    const n3 = result.pasted;
+    toast(`Pasted ${n3} slide${n3 > 1 ? "s" : ""}`, "ok");
+    ed.slideSelection.clear();
+    afterSlides = after + 1;
+  }
+  var afterSlides = null;
+  function followPastedSlides() {
+    if (afterSlides != null && afterSlides < (ed.model?.slides.length ?? 0)) {
+      const target = afterSlides;
+      afterSlides = null;
+      gotoSlide(target);
+    }
+  }
+  async function pasteObjects(bundle) {
+    if (!await ensureOwnDrawing()) return;
+    const src = ownSource();
+    if (!src) return;
+    const sameFile = bundle.sourceFile === src.path;
+    clearSelection();
+    const result = await edit({
+      action: "paste-objects",
+      file: src.path,
+      hash: src.hash,
+      parent: insertParent().loc,
+      fragments: bundle.fragments,
+      files: bundle.files,
+      // Copies on the same slide are offset so they do not hide the original.
+      offset: sameFile ? [24, 24] : null
+    });
+    if (result.ok && result.ids) afterRender.ids = Object.values(result.ids);
+  }
+  async function pasteText(text) {
+    const raw = text.startsWith(PREFIX) ? text : lastCopied;
+    if (!raw?.startsWith(PREFIX)) return;
+    let bundle;
+    try {
+      bundle = JSON.parse(raw.slice(PREFIX.length));
+    } catch {
+      toast("The clipboard holds damaged inkflow data", "error");
+      return;
+    }
+    if (bundle.type === "inkflow-slides") await pasteSlides(bundle);
+    else if (bundle.type === "inkflow-objects") await pasteObjects(bundle);
+  }
+  async function pasteFromClipboard() {
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      text = lastCopied ?? "";
+    }
+    await pasteText(text);
+  }
+
+  // src/ts/editor/gallery.ts
+  var LABELS = {
+    numbered: ["Blank", "Background and slide number"],
+    title: ["Title only", "A title; draw the rest"],
+    content: ["Title and content", "The everyday text slide"],
+    "two-cols": ["Two columns", "Side by side under one title"],
+    "three-cols": ["Three columns", "Three short columns"],
+    comparison: ["Comparison", "Two headed columns"],
+    agenda: ["Agenda", "A numbered outline"],
+    quad: ["Four quadrants", "A two-by-two grid"],
+    "three-cards": ["Three cards", "An image over text, three times"],
+    "media-left": ["Media and text", "Image or video on the left"],
+    "media-right": ["Text and media", "Image or video on the right"],
+    "title-media": ["Title and media", "One large image or video"],
+    "full-media": ["Full-bleed media", "A photo or video edge to edge"],
+    cover: ["Cover", "The opening slide"],
+    section: ["Section header", "Divides the deck into parts"],
+    center: ["Centered", "One centered block"],
+    fact: ["Big number", "One number or claim"],
+    quote: ["Quote", "A pull quote with attribution"],
+    end: ["Closing", "The last slide"],
+    "poster-3col": ["Poster, three columns", "Title band, sections, footer"],
+    "poster-2col": ["Poster, two columns", "Title band, sections, footer"],
+    "poster-landscape-3col": [
+      "Landscape poster, three columns",
+      "Title band, sections, footer"
+    ],
+    "poster-landscape-4col": [
+      "Landscape poster, four columns",
+      "Title band, sections, footer"
+    ]
+  };
+  var root = document.getElementById("gallery");
+  var cache = null;
+  function layoutLabel(name2) {
+    return LABELS[name2]?.[0] ?? name2;
+  }
+  async function previews() {
+    if (cache) return cache;
+    const result = await request({ action: "layout-previews" });
+    if (!result.ok) {
+      toast(result.error ?? "could not load the layouts", "error");
+      return [];
+    }
+    cache = result.layouts;
+    return cache;
+  }
+  function thumbnail(p2) {
+    const box = h("div", { class: "gallery-thumb" });
+    box.innerHTML = p2.svg;
+    const svg = box.querySelector("svg");
+    if (svg) {
+      const vb = parseViewBox(svg.getAttribute("viewBox"));
+      box.style.aspectRatio = `${vb.w} / ${vb.h}`;
+      svg.setAttribute("width", "100%");
+      svg.setAttribute("height", "100%");
+      svg.querySelectorAll(".anim-pending").forEach((el2) => {
+        el2.classList.remove("anim-pending");
+      });
+      for (const z of p2.emptyZones) {
+        if (z.zone === "slide-number" || z.zone === "slide-total") continue;
+        box.append(
+          h(
+            "div",
+            {
+              class: "gallery-media",
+              style: `left:${z.x / vb.w * 100}%;top:${z.y / vb.h * 100}%;width:${z.width / vb.w * 100}%;height:${z.height / vb.h * 100}%`
+            },
+            "Image or video"
+          )
+        );
+      }
+    }
+    return box;
+  }
+  function lostZones(p2) {
+    const slide = currentSlide();
+    if (!slide) return [];
+    const used = /* @__PURE__ */ new Set([
+      ...Object.keys(slide.zoneOrigins ?? {}),
+      ...Object.keys(slide.zones)
+    ]);
+    return [...used].filter((z) => !p2.zones.includes(z));
+  }
+  function close() {
+    root.classList.remove("open");
+    clear(root);
+  }
+  async function openGallery(opts2) {
+    if (!ed.model?.deckEditable) {
+      toast(
+        "deck.py builds its slide list in code; change it there",
+        "error"
+      );
+      return;
+    }
+    clear(root);
+    const grid = h(
+      "div",
+      { class: "gallery-grid" },
+      h("p", { class: "hint" }, "Rendering layouts\u2026")
+    );
+    const title2 = opts2.mode === "insert" ? "New slide" : "Change layout";
+    root.append(
+      h(
+        "div",
+        { class: "gallery-box", role: "dialog", "aria-label": title2 },
+        h(
+          "div",
+          { class: "gallery-head" },
+          h("h2", {}, title2),
+          h(
+            "span",
+            { class: "hint" },
+            opts2.mode === "insert" ? "Every layout, in this deck's theme" : "The slide keeps its content; zones the new layout lacks are not shown"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: close,
+              title: "Close (Esc)"
+            },
+            "\xD7"
+          )
+        ),
+        grid
+      )
+    );
+    root.classList.add("open");
+    const layouts = await previews();
+    clear(grid);
+    for (const p2 of layouts) {
+      const [label4, description] = LABELS[p2.name] ?? [p2.name, ""];
+      const lost = opts2.mode === "change" ? lostZones(p2) : [];
+      const current2 = opts2.mode === "change" && p2.name === opts2.current;
+      const card = h(
+        "button",
+        {
+          type: "button",
+          class: `gallery-card${current2 ? " current" : ""}`,
+          title: p2.name,
+          onclick: () => void choose(p2, opts2, lost)
+        },
+        thumbnail(p2),
+        h(
+          "div",
+          { class: "gallery-label" },
+          h("strong", {}, label4),
+          p2.source === "local" && h("span", { class: "badge" }, "project")
+        ),
+        description && h("div", { class: "gallery-desc" }, description),
+        lost.length > 0 && h(
+          "div",
+          { class: "gallery-warn" },
+          `Hides: ${lost.join(", ")}`
+        )
+      );
+      grid.append(card);
+    }
+    (grid.querySelector(".current") ?? grid.querySelector("button"))?.scrollIntoView({
+      block: "nearest"
+    });
+    grid.querySelector(".current, button")?.focus();
+  }
+  async function choose(p2, opts2, lost) {
+    if (opts2.mode === "insert") {
+      close();
+      await newSlide(p2.name, opts2.after);
+      return;
+    }
+    if (p2.name === opts2.current) {
+      close();
+      return;
+    }
+    if (lost.length && !window.confirm(
+      `${layoutLabel(p2.name)} has no ${lost.join(", ")} zone; that content stays in your files but is not shown. Switch anyway?`
+    )) {
+      return;
+    }
+    close();
+    const slide = currentSlide();
+    if (!slide) return;
+    await edit({
+      action: "slide",
+      op: "layout",
+      slide: slide.deckIndex,
+      layout: p2.name
+    });
+  }
+  function initGallery() {
+    on("model", () => {
+      cache = null;
+    });
+    root.addEventListener("pointerdown", (e2) => {
+      if (e2.target === root) close();
+    });
+    document.addEventListener(
+      "keydown",
+      (e2) => {
+        if (e2.key === "Escape" && root.classList.contains("open")) {
+          e2.stopPropagation();
+          close();
+        }
+      },
+      true
+    );
+  }
+
+  // src/ts/editor/rename.ts
+  function plural(n3, word) {
+    return `${n3} ${word}${n3 === 1 ? "" : "s"}`;
+  }
+  function relOf(path) {
+    if (!path) return null;
+    const rel = projectRel(
+      path.replace(/[?#].*$/, ""),
+      ed.model?.projectDir ?? ""
+    );
+    return rel && !rel.startsWith("_theme/") && !rel.startsWith("_pdf/") ? rel : null;
+  }
+  function renameButton(path, label4 = "Rename\u2026") {
+    const rel = relOf(path);
+    if (!rel) return null;
+    return h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn open-with",
+        title: `Give ${rel} another name or folder; every reference follows`,
+        onclick: () => void renameFile(rel)
+      },
+      label4
+    );
+  }
+  function summaryLine(p2) {
+    if (!p2.references) return "Nothing refers to it: only the file moves.";
+    return `Updates ${plural(p2.references, "reference")} in ${plural(p2.files, "file")}.`;
+  }
+  function previewBody(p2, opts2) {
+    const box = h("div", { class: "rename-preview" });
+    if (opts2.moves && p2.moves.length) {
+      box.append(
+        h("p", { class: "rename-msg rename-head" }, "Files"),
+        h(
+          "ul",
+          { class: "rename-list" },
+          ...p2.moves.map(
+            (m2) => h(
+              "li",
+              {},
+              h("code", { class: "rename-code" }, m2.from),
+              " \u2192 ",
+              h("code", { class: "rename-code" }, m2.to)
+            )
+          )
+        )
+      );
+    }
+    if (p2.shared.length) {
+      box.append(
+        h("p", { class: "rename-msg rename-head" }, "Stay as they are"),
+        h(
+          "ul",
+          { class: "rename-list" },
+          ...p2.shared.map(
+            (s2) => h("li", {}, h("code", { class: "rename-code" }, s2))
+          )
+        )
+      );
+    }
+    box.append(h("p", { class: "rename-msg rename-summary" }, summaryLine(p2)));
+    for (const [old, now] of Object.entries(p2.ids)) {
+      box.append(
+        h(
+          "p",
+          { class: "hint" },
+          `The slide id ${old} becomes ${now}; its saved ink follows${p2.links ? `, and ${plural(p2.links, "slide: link")} ${p2.links === 1 ? "is" : "are"} rewritten` : ""}.`
+        )
+      );
+    }
+    if (p2.edits.length) {
+      const byFile = /* @__PURE__ */ new Map();
+      for (const e2 of p2.edits) {
+        const list5 = byFile.get(e2.file) ?? [];
+        list5.push(e2);
+        byFile.set(e2.file, list5);
+      }
+      const list4 = h("ul", { class: "rename-list" });
+      for (const [file, edits] of byFile) {
+        list4.append(
+          h(
+            "li",
+            {},
+            h("code", { class: "rename-code" }, file),
+            h(
+              "ul",
+              {},
+              ...edits.map(
+                (e2) => h(
+                  "li",
+                  { class: "hint" },
+                  `${e2.kind}: `,
+                  h("code", { class: "rename-code" }, e2.old),
+                  " \u2192 ",
+                  h("code", { class: "rename-code" }, e2.new)
+                )
+              )
+            )
+          )
+        );
+      }
+      box.append(
+        h(
+          "details",
+          { class: "rename-details" },
+          h("summary", {}, "Show the references"),
+          list4
+        )
+      );
+    }
+    for (const w2 of p2.warnings) {
+      box.append(h("p", { class: "rename-msg rename-warning" }, w2));
+    }
+    return box;
+  }
+  function renameDialog(opts2) {
+    const status3 = h("div", { class: "rename-status" });
+    const go = h(
+      "button",
+      { type: "button", class: "pbtn primary", disabled: true },
+      "Rename"
+    );
+    const cancel2 = h(
+      "button",
+      { type: "button", class: "pbtn", onclick: () => closeDialog() },
+      "Cancel"
+    );
+    let token = 0;
+    let timer6 = 0;
+    let last = null;
+    const refresh2 = async () => {
+      const mine = ++token;
+      const req = opts2.build();
+      go.disabled = true;
+      if (typeof req === "string") {
+        status3.className = "rename-status";
+        status3.replaceChildren(h("p", { class: "rename-msg hint" }, req));
+        return;
+      }
+      status3.className = "rename-status busy";
+      const res = await request({ ...req, dryRun: true });
+      if (mine !== token) return;
+      if (!res.ok) {
+        last = null;
+        status3.className = "rename-status error";
+        status3.replaceChildren(
+          h(
+            "p",
+            { class: "rename-msg" },
+            res.error ?? "This name cannot be used"
+          )
+        );
+        return;
+      }
+      last = res.rename;
+      status3.className = "rename-status";
+      status3.replaceChildren(previewBody(last, { moves: opts2.moves }));
+      go.disabled = false;
+    };
+    const schedule2 = () => {
+      window.clearTimeout(timer6);
+      timer6 = window.setTimeout(() => void refresh2(), 200);
+    };
+    for (const input of opts2.inputs) {
+      input.addEventListener("input", schedule2);
+      input.addEventListener("change", schedule2);
+      input.addEventListener("keydown", (e2) => {
+        if (e2.key === "Enter" && !go.disabled) {
+          e2.preventDefault();
+          go.click();
+        }
+      });
+    }
+    go.addEventListener("click", async () => {
+      const req = opts2.build();
+      if (typeof req === "string") return;
+      go.disabled = true;
+      const res = await edit(req);
+      if (!res.ok) {
+        status3.className = "rename-status error";
+        status3.replaceChildren(
+          h("p", { class: "rename-msg" }, res.error ?? "Rename failed")
+        );
+        return;
+      }
+      const p2 = res.rename ?? last;
+      closeDialog();
+      toast(
+        `${res.label ?? "Renamed"}${p2?.references ? ` \xB7 ${plural(p2.references, "reference")} updated` : ""}`,
+        "ok"
+      );
+      opts2.done(p2);
+    });
+    openDialog(
+      opts2.title,
+      h(
+        "div",
+        { class: "rename-body" },
+        opts2.fields,
+        status3,
+        h("div", { class: "rename-actions" }, cancel2, go)
+      ),
+      { hint: opts2.hint }
+    );
+    opts2.inputs[opts2.inputs.length - 1]?.focus();
+    opts2.inputs[opts2.inputs.length - 1]?.select();
+    status3.replaceChildren(
+      h("p", { class: "hint" }, "Type a new name to see what changes.")
+    );
+  }
+  async function renameFile(path, done = () => {
+  }) {
+    const rel = relOf(path);
+    if (!rel) {
+      toast("Only the deck's own files can be renamed", "error");
+      return;
+    }
+    const { folder, stem, ext } = splitFileName(rel);
+    const folderInput = h("input", {
+      type: "text",
+      value: folder,
+      spellcheck: "false",
+      placeholder: "(the deck's folder)",
+      title: "The folder, relative to deck.py; a new one is created"
+    });
+    const nameInput = h("input", {
+      type: "text",
+      value: stem,
+      spellcheck: "false",
+      title: "Letters, digits, - and _"
+    });
+    const fields = h(
+      "div",
+      { class: "rename-fields" },
+      h(
+        "label",
+        { class: "rename-row" },
+        h("span", { class: "rename-label" }, "Folder"),
+        folderInput
+      ),
+      h(
+        "label",
+        { class: "rename-row" },
+        h("span", { class: "rename-label" }, "Name"),
+        nameInput,
+        h(
+          "code",
+          { class: "rename-ext", title: "The extension stays" },
+          ext
+        )
+      )
+    );
+    renameDialog({
+      title: `Rename ${rel.split("/").pop() ?? rel}`,
+      hint: "Every slide, Markdown file and deck.py line that names it follows",
+      fields,
+      inputs: [folderInput, nameInput],
+      moves: false,
+      build: () => {
+        if (!nameInput.value.trim()) return "Give it a name.";
+        const to = joinFileName(folderInput.value, nameInput.value, ext);
+        if (to === rel) return "Type a new name to see what changes.";
+        return { action: "rename", from: rel, to };
+      },
+      done: () => done()
+    });
+  }
+  function renameSlideFiles(deckIndex) {
+    const slide = ed.model?.slides[deckIndex];
+    if (!slide) return;
+    const current2 = slide.md?.kind === "file" && slide.md.rel ? splitFileName(slide.md.rel).stem : slide.srcRel && !slide.srcShared ? splitFileName(slide.srcRel).stem : slide.id ?? "";
+    const nameInput = h("input", {
+      type: "text",
+      value: current2,
+      spellcheck: "false",
+      title: "Letters, digits, - and _ (no folder, no extension)"
+    });
+    const keep = h("input", { type: "checkbox" });
+    const id = slide.id ?? "";
+    const fields = h(
+      "div",
+      { class: "rename-fields" },
+      h(
+        "label",
+        { class: "rename-row" },
+        h("span", { class: "rename-label" }, "Name"),
+        nameInput
+      ),
+      slide.explicitId ? h(
+        "p",
+        { class: "hint" },
+        `Its id stays ${slide.explicitId} (set in deck.py).`
+      ) : h(
+        "label",
+        {
+          class: "rename-check",
+          title: "Write id= into deck.py so links and ink keep the old id"
+        },
+        keep,
+        ` Keep the slide id ${id}`
+      )
+    );
+    renameDialog({
+      title: "Rename slide files",
+      hint: "Its drawing, Markdown, notes and ink get the new name",
+      fields,
+      inputs: [nameInput],
+      moves: true,
+      build: () => {
+        const stem = nameInput.value.trim();
+        if (!stem) return "Give it a name.";
+        return {
+          action: "rename",
+          slide: deckIndex,
+          stem,
+          keepId: keep.checked
+        };
+      },
+      done: () => {
+      }
+    });
+    keep.addEventListener(
+      "change",
+      () => nameInput.dispatchEvent(new Event("input"))
+    );
+  }
+  function size(bytes) {
+    if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
+    if (bytes >= 1e3) return `${Math.round(bytes / 1e3)} KB`;
+    return `${bytes} B`;
+  }
+  async function openFiles() {
+    const res = await request({ action: "files" });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot list the deck's files", "error");
+      return;
+    }
+    const files2 = res.files ?? [];
+    const unused = files2.filter((f2) => !f2.uses);
+    const picked = /* @__PURE__ */ new Set();
+    const list4 = h("div", { class: "files-list" });
+    const deleteBtn = h(
+      "button",
+      { type: "button", class: "pbtn", disabled: true },
+      "Delete unused\u2026"
+    );
+    const sync = () => {
+      deleteBtn.disabled = !picked.size;
+      deleteBtn.textContent = picked.size ? `Delete ${plural(picked.size, "file")}\u2026` : "Delete unused\u2026";
+    };
+    let folder = null;
+    for (const f2 of files2) {
+      const { folder: dir } = splitFileName(f2.path);
+      if (dir !== folder) {
+        folder = dir;
+        list4.append(h("div", { class: "files-folder" }, `${dir || "."}/`));
+      }
+      const check = h("input", {
+        type: "checkbox",
+        disabled: f2.uses > 0,
+        title: f2.uses ? "In use" : "Pick it to delete"
+      });
+      check.addEventListener("change", () => {
+        if (check.checked) picked.add(f2.path);
+        else picked.delete(f2.path);
+        sync();
+      });
+      list4.append(
+        h(
+          "div",
+          { class: `files-row${f2.uses ? "" : " unused"}` },
+          check,
+          h(
+            "code",
+            { class: "rename-code files-name", title: f2.path },
+            f2.path.split("/").pop() ?? f2.path
+          ),
+          h(
+            "span",
+            { class: "files-uses" },
+            f2.uses ? plural(f2.uses, "use") : "unused"
+          ),
+          h("span", { class: "files-size" }, size(f2.size)),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn open-with",
+              title: "Give it another name or folder; every reference follows",
+              onclick: () => void renameFile(f2.path, () => void openFiles())
+            },
+            "Rename\u2026"
+          )
+        )
+      );
+    }
+    deleteBtn.addEventListener("click", async () => {
+      const paths = [...picked];
+      if (!window.confirm(
+        `Delete ${plural(paths.length, "file")} nothing uses?
+
+${paths.join("\n")}
+
+Undo brings them back.`
+      )) {
+        return;
+      }
+      const r2 = await edit({ action: "delete-files", paths });
+      if (r2.ok) {
+        toast(r2.label ?? "Deleted", "ok");
+        void openFiles();
+      }
+    });
+    const selectUnused = h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn",
+        disabled: !unused.length,
+        onclick: () => {
+          for (const row4 of list4.querySelectorAll(
+            ".files-row.unused input"
+          )) {
+            row4.checked = true;
+          }
+          for (const f2 of unused) picked.add(f2.path);
+          sync();
+        }
+      },
+      "Pick all unused"
+    );
+    const body3 = h(
+      "div",
+      { class: "files-body" },
+      files2.length ? list4 : h("p", { class: "hint" }, "No files yet."),
+      h(
+        "div",
+        { class: "rename-actions" },
+        h(
+          "span",
+          { class: "hint rename-count" },
+          `${plural(files2.length, "file")} \xB7 ${unused.length} unused`
+        ),
+        selectUnused,
+        deleteBtn
+      )
+    );
+    openDialog("Files", body3, {
+      wide: true,
+      hint: "Pictures, videos, data, diagrams and slide files; a use is a reference in a slide, Markdown or deck.py"
+    });
+  }
+
+  // src/ts/editor/sections.ts
+  function sectionOf(sections2, i2) {
+    for (let k2 = 0; k2 < sections2.length; k2++) {
+      const s2 = sections2[k2];
+      if (i2 >= s2.start && i2 < s2.start + s2.count) return k2;
+    }
+    return null;
+  }
+  function sectionSlides(sections2, k2) {
+    const s2 = sections2[k2];
+    if (!s2) return [];
+    return Array.from({ length: s2.count }, (_2, j2) => s2.start + j2);
+  }
+  function unsectioned(sections2, n3) {
+    return sections2.length ? sections2[0].start : n3;
+  }
+  function sorterRows(n3, sections2, collapsed2) {
+    const rows = [];
+    for (let i2 = 0; i2 < unsectioned(sections2, n3); i2++) {
+      rows.push({ kind: "slide", index: i2 });
+    }
+    sections2.forEach((s2, k2) => {
+      rows.push({ kind: "header", section: k2 });
+      if (collapsed2(k2)) return;
+      for (let j2 = 0; j2 < s2.count; j2++) {
+        rows.push({ kind: "slide", index: s2.start + j2 });
+      }
+    });
+    return rows;
+  }
+  function sectionBlocks(n3, sections2) {
+    const blocks2 = [];
+    const first = unsectioned(sections2, n3);
+    if (first > 0 || !sections2.length) {
+      blocks2.push({
+        section: null,
+        slides: Array.from({ length: first }, (_2, i2) => i2)
+      });
+    }
+    sections2.forEach((_2, k2) => {
+      blocks2.push({ section: k2, slides: sectionSlides(sections2, k2) });
+    });
+    return blocks2;
+  }
+  function moveRequest(sections2, moved, insertAt, section2) {
+    const slides = [...new Set(moved)].sort((a2, b2) => a2 - b2);
+    if (!slides.length) return null;
+    const to = insertAt - slides.filter((i2) => i2 < insertAt).length;
+    const contiguous = slides.every((v2, j2) => v2 === slides[0] + j2);
+    const sameSection = slides.every((i2) => sectionOf(sections2, i2) === section2);
+    if (contiguous && sameSection && to === slides[0]) return null;
+    return { slides, to, section: section2 };
+  }
+  function dropOnSlide(sections2, i2, after) {
+    return { insertAt: after ? i2 + 1 : i2, section: sectionOf(sections2, i2) };
+  }
+  function dropOnHeader(sections2, k2) {
+    return { insertAt: sections2[k2].start, section: k2 };
+  }
+  function sectionMoveTo(k2, gap) {
+    const to = gap > k2 ? gap - 1 : gap;
+    return to === k2 ? null : to;
+  }
+  function sectionGapAtSlide(sections2, i2) {
+    const k2 = sectionOf(sections2, i2);
+    if (k2 == null) return 0;
+    const s2 = sections2[k2];
+    return i2 - s2.start < s2.count / 2 ? k2 : k2 + 1;
+  }
+  function sectionKeys(sections2) {
+    const seen = /* @__PURE__ */ new Map();
+    return sections2.map((s2) => {
+      const n3 = (seen.get(s2.name) ?? 0) + 1;
+      seen.set(s2.name, n3);
+      return n3 > 1 ? `${s2.name}#${n3}` : s2.name;
+    });
+  }
+
+  // src/ts/editor/sectionui.ts
+  function sections() {
+    return ed.model?.sections ?? [];
+  }
+  var collapsedKeys = null;
+  var collapsedDeck = "";
+  function storageKey() {
+    return `inkflow-editor-collapsed:${ed.model?.deckPath ?? ""}`;
+  }
+  function collapsedSet() {
+    const deck = ed.model?.deckPath ?? "";
+    if (collapsedKeys && collapsedDeck === deck) return collapsedKeys;
+    collapsedDeck = deck;
+    collapsedKeys = /* @__PURE__ */ new Set();
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey()) ?? "[]");
+      if (Array.isArray(saved)) {
+        for (const k2 of saved)
+          if (typeof k2 === "string") collapsedKeys.add(k2);
+      }
+    } catch {
+    }
+    return collapsedKeys;
+  }
+  function saveCollapsed() {
+    try {
+      localStorage.setItem(storageKey(), JSON.stringify([...collapsedSet()]));
+    } catch {
+    }
+  }
+  function isCollapsed(k2) {
+    const key = sectionKeys(sections())[k2];
+    return key != null && collapsedSet().has(key);
+  }
+  function setCollapsed(k2, on2) {
+    const key = sectionKeys(sections())[k2];
+    if (key == null) return;
+    if (on2) collapsedSet().add(key);
+    else collapsedSet().delete(key);
+    saveCollapsed();
+    emit("sections");
+  }
+  function setAllCollapsed(on2) {
+    const set = collapsedSet();
+    for (const key of sectionKeys(sections())) {
+      if (on2) set.add(key);
+      else set.delete(key);
+    }
+    saveCollapsed();
+    emit("sections");
+  }
+  function revealCurrent() {
+    const k2 = sectionOf(sections(), ed.current);
+    if (k2 == null || !isCollapsed(k2)) return false;
+    const key = sectionKeys(sections())[k2];
+    collapsedSet().delete(key);
+    saveCollapsed();
+    return true;
+  }
+  async function sectionEdit(req) {
+    const result = await edit({
+      action: "slide",
+      follow: ed.current,
+      ...req
+    });
+    if (result.ok && typeof result.select === "number") {
+      followSelect(result.select);
+    }
+    return result.ok;
+  }
+  async function moveSlidesTo(slides, insertAt, section2) {
+    const move = moveRequest(sections(), slides, insertAt, section2);
+    if (!move) return;
+    if (await sectionEdit({ op: "move", ...move })) ed.slideSelection.clear();
+  }
+  async function moveSectionToGap(k2, gap) {
+    const to = sectionMoveTo(k2, gap);
+    if (to == null) return;
+    await sectionEdit({ op: "section-move", section: k2, to });
+  }
+  async function addSectionAt(slide) {
+    const name2 = await askName("Add section", "New section");
+    if (name2 == null) return;
+    await sectionEdit({ op: "section-add", slide, name: name2 });
+  }
+  async function removeSection(k2, withSlides) {
+    const s2 = sections()[k2];
+    if (!s2) return;
+    if (withSlides && !window.confirm(
+      `Remove section \u201C${s2.name}\u201D and its ${s2.count} slide${s2.count === 1 ? "" : "s"} from the deck? (Their files stay on disk.)`
+    )) {
+      return;
+    }
+    await sectionEdit({ op: "section-remove", section: k2, slides: withSlides });
+  }
+  function selectSection(k2) {
+    const indices = sectionSlides(sections(), k2);
+    ed.focus = "sorter";
+    ed.slideSelection.clear();
+    if (!indices.length) {
+      emit("slide-selection");
+      return;
+    }
+    for (const i2 of indices) ed.slideSelection.add(i2);
+    if (!indices.includes(ed.current)) gotoSlide(indices[0]);
+    emit("slide-selection");
+  }
+  function askName(title2, initial) {
+    return new Promise((resolve) => {
+      let answer = null;
+      const input = h("input", {
+        type: "text",
+        class: "section-name-input",
+        value: initial,
+        "aria-label": "Section name"
+      });
+      const ok = h(
+        "button",
+        { type: "submit", class: "pbtn primary" },
+        "Add"
+      );
+      const form = h(
+        "form",
+        { class: "section-name-form" },
+        input,
+        ok
+      );
+      form.addEventListener("submit", (e2) => {
+        e2.preventDefault();
+        const name2 = input.value.trim();
+        if (!name2) return;
+        answer = name2;
+        closeDialog();
+      });
+      openDialog(title2, form, { onClose: () => resolve(answer) });
+      input.focus();
+      input.select();
+    });
+  }
+  function startRename(k2, nameEl) {
+    const s2 = sections()[k2];
+    if (!s2 || !ed.model?.deckEditable) return;
+    const input = h("input", {
+      type: "text",
+      class: "section-rename",
+      value: s2.name,
+      "aria-label": "Section name"
+    });
+    let done = false;
+    const finish2 = (commit) => {
+      if (done) return;
+      done = true;
+      const name2 = input.value.trim();
+      if (commit && name2 && name2 !== s2.name) {
+        void sectionEdit({ op: "section-rename", section: k2, name: name2 });
+      } else {
+        emit("sections");
+      }
+    };
+    input.addEventListener("keydown", (e2) => {
+      e2.stopPropagation();
+      if (e2.key === "Enter") {
+        e2.preventDefault();
+        finish2(true);
+      } else if (e2.key === "Escape") {
+        e2.preventDefault();
+        finish2(false);
+      }
+    });
+    input.addEventListener("blur", () => finish2(true));
+    for (const ev of ["click", "dblclick", "pointerdown", "dragstart"]) {
+      input.addEventListener(ev, (e2) => e2.stopPropagation());
+    }
+    nameEl.replaceChildren(input);
+    input.focus();
+    input.select();
+  }
+  var renameNext = null;
+  function openSectionMenu(x2, y2, k2) {
+    const menu6 = document.getElementById("context-menu");
+    const s2 = sections()[k2];
+    if (!s2) return;
+    const editable = !!ed.model?.deckEditable;
+    const n3 = sections().length;
+    menu6.replaceChildren();
+    menu6.append(
+      menuItem(
+        "Rename\u2026",
+        () => {
+          renameNext = k2;
+          emit("sections");
+        },
+        !editable
+      ),
+      menuItem(
+        "Select all slides in section",
+        () => selectSection(k2),
+        s2.count === 0
+      ),
+      menuItem(
+        "Move section up",
+        () => void moveSectionToGap(k2, k2 - 1),
+        !editable || k2 === 0
+      ),
+      menuItem(
+        "Move section down",
+        () => void moveSectionToGap(k2, k2 + 2),
+        !editable || k2 === n3 - 1
+      ),
+      menuItem(
+        isCollapsed(k2) ? "Expand" : "Collapse",
+        () => setCollapsed(k2, !isCollapsed(k2))
+      ),
+      menuItem("Collapse all", () => setAllCollapsed(true)),
+      menuItem("Expand all", () => setAllCollapsed(false)),
+      menuItem(
+        "Remove section",
+        () => void removeSection(k2, false),
+        !editable
+      ),
+      menuItem(
+        "Remove section and its slides\u2026",
+        () => void removeSection(k2, true),
+        !editable || s2.count === 0
+      )
+    );
+    showMenu(x2, y2);
+  }
+  function sectionHeader(k2, view3, onClick) {
+    const s2 = sections()[k2];
+    const collapsed2 = isCollapsed(k2);
+    const editable = !!ed.model?.deckEditable;
+    const name2 = h("span", { class: "section-name" }, s2.name);
+    const caret = h(
+      "button",
+      {
+        type: "button",
+        class: "section-caret",
+        title: collapsed2 ? "Expand section" : "Collapse section",
+        "aria-expanded": collapsed2 ? "false" : "true",
+        onclick: (e2) => {
+          e2.stopPropagation();
+          setCollapsed(k2, !collapsed2);
+        }
+      },
+      icon("down", 14)
+    );
+    const head = h(
+      "div",
+      {
+        class: `section-head ${view3}-section-head${collapsed2 ? " collapsed" : ""}`,
+        draggable: editable ? "true" : null,
+        "data-section": k2,
+        title: `${s2.name}: ${s2.count} slide${s2.count === 1 ? "" : "s"}${editable ? " (drag to move the section, double-click to rename)" : ""}`
+      },
+      caret,
+      name2,
+      h(
+        "span",
+        { class: "section-count" },
+        s2.count === 0 ? "empty" : String(s2.count)
+      )
+    );
+    name2.addEventListener("dblclick", (e2) => {
+      e2.stopPropagation();
+      startRename(k2, name2);
+    });
+    head.addEventListener("click", (e2) => onClick?.(e2));
+    head.addEventListener("contextmenu", (e2) => {
+      e2.preventDefault();
+      e2.stopPropagation();
+      openSectionMenu(e2.clientX, e2.clientY, k2);
+    });
+    if (renameNext === k2) {
+      renameNext = null;
+      queueMicrotask(() => startRename(k2, name2));
+    }
+    return head;
+  }
+
+  // src/ts/editor/sorter.ts
+  var list = document.getElementById("sorter-list");
+  var addBtn = document.getElementById("sorter-add");
+  var menu2 = document.getElementById("context-menu");
+  function pickSlide(i2, e2) {
+    ed.focus = "sorter";
+    if (e2.shiftKey) {
+      const [a2, b2] = [Math.min(ed.current, i2), Math.max(ed.current, i2)];
+      for (let k2 = a2; k2 <= b2; k2++) ed.slideSelection.add(k2);
+      emit("slide-selection");
+      return;
+    }
+    if (e2.ctrlKey || e2.metaKey) {
+      if (!ed.slideSelection.size) ed.slideSelection.add(ed.current);
+      if (ed.slideSelection.has(i2)) ed.slideSelection.delete(i2);
+      else ed.slideSelection.add(i2);
+      emit("slide-selection");
+      if (ed.slideSelection.has(i2)) gotoSlide(i2);
+      return;
+    }
+    ed.slideSelection.clear();
+    if (i2 === ed.current) emit("slide-selection");
+    else gotoSlide(i2);
+  }
+  async function deleteSlides() {
+    const indices = [...ed.slideSelection].sort((a2, b2) => a2 - b2);
+    if (indices.length <= 1) {
+      await deleteSlide(indices[0] ?? ed.current);
+      return;
+    }
+    if (!window.confirm(
+      `Delete ${indices.length} slides from the deck? (Their files stay on disk.)`
+    )) {
+      return;
+    }
+    const result = await edit({
+      action: "slide",
+      op: "delete",
+      slides: indices
+    });
+    if (result.ok) {
+      ed.slideSelection.clear();
+      ed.current = Math.max(0, indices[0] - 1);
+      emit("slide");
+    }
+  }
+  function gotoSlide(deckIndex) {
+    const n3 = ed.model?.slides.length ?? 0;
+    if (!n3) return;
+    const i2 = Math.max(0, Math.min(n3 - 1, deckIndex));
+    if (i2 === ed.current) return;
+    ed.current = i2;
+    ed.selection = [];
+    ed.scope = null;
+    emit("slide");
+  }
+  var Thumbs = class {
+    cache = /* @__PURE__ */ new Map();
+    used = /* @__PURE__ */ new Map();
+    begin() {
+      this.used = /* @__PURE__ */ new Map();
+    }
+    end() {
+      this.cache = this.used;
+    }
+    thumb(slide) {
+      const box = h("div", { class: "thumb" });
+      if (slide.visibleIndex == null) {
+        box.append(h("div", { class: "thumb-hidden" }, icon("eyeOff", 18)));
+        return box;
+      }
+      const data = ed.slides[slide.visibleIndex];
+      if (!data) return box;
+      const cached = this.cache.get(data.svg);
+      if (cached && !this.used.has(data.svg)) {
+        this.used.set(data.svg, cached);
+        return cached;
+      }
+      this.used.set(data.svg, box);
+      box.innerHTML = data.svg;
+      const svg = box.querySelector("svg");
+      if (svg) {
+        const vb = parseViewBox(svg.getAttribute("viewBox"));
+        svg.setAttribute("width", "100%");
+        svg.setAttribute("height", "100%");
+        svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+        svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
+        box.style.aspectRatio = `${vb.w} / ${vb.h}`;
+        svg.querySelectorAll(".anim-pending").forEach((el2) => {
+          el2.classList.remove("anim-pending");
+        });
+        svg.querySelectorAll("video").forEach((v2) => {
+          v2.removeAttribute("autoplay");
+        });
+      }
+      return box;
+    }
+  };
+  var thumbs = new Thumbs();
+  var dragging = { now: null };
+  function dragSlides(i2) {
+    if (ed.slideSelection.size > 1 && ed.slideSelection.has(i2)) {
+      return [...ed.slideSelection].sort((a2, b2) => a2 - b2);
+    }
+    return [i2];
+  }
+  var DROP_MARKS = ["drop-before", "drop-after", "drop-into"];
+  function clearDropMarks(root2) {
+    root2.querySelectorAll(".drop-before, .drop-after, .drop-into").forEach(
+      (el2) => {
+        el2.classList.remove(...DROP_MARKS);
+      }
+    );
+  }
+  function markGap(root2, gap, last) {
+    clearDropMarks(root2);
+    const head = root2.querySelector(`.section-head[data-section="${gap}"]`);
+    if (head) head.classList.add("drop-before");
+    else last?.classList.add("drop-after");
+  }
+  function headerGap(head, k2, e2) {
+    const r2 = head.getBoundingClientRect();
+    const lower = e2.clientY > r2.top + r2.height / 2;
+    const s2 = sections()[k2];
+    return lower && (isCollapsed(k2) || !s2?.count) ? k2 + 1 : k2;
+  }
+  function dropAtEnd(drag) {
+    const all = sections();
+    if (drag.kind === "section") {
+      void moveSectionToGap(drag.section, all.length);
+      return;
+    }
+    const n3 = ed.model?.slides.length ?? 0;
+    void moveSlidesTo(drag.slides, n3, all.length ? all.length - 1 : null);
+  }
+  function slideItem(slide, i2) {
+    const item = h(
+      "div",
+      {
+        class: `sorter-item${i2 === ed.current ? " active" : ""}${ed.slideSelection.has(i2) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
+        draggable: ed.model?.deckEditable ? "true" : null,
+        title: slide.title ?? slide.id ?? slide.src,
+        "data-index": i2
+      },
+      h("span", { class: "sorter-num" }, String(i2 + 1)),
+      thumbs.thumb(slide)
+    );
+    item.addEventListener("click", (e2) => pickSlide(i2, e2));
+    item.addEventListener("contextmenu", (e2) => {
+      e2.preventDefault();
+      ed.focus = "sorter";
+      if (!ed.slideSelection.has(i2)) {
+        ed.slideSelection.clear();
+        gotoSlide(i2);
+      }
+      openSlideMenu(e2.clientX, e2.clientY, i2);
+    });
+    item.addEventListener("dragstart", (e2) => {
+      dragging.now = { kind: "slides", slides: dragSlides(i2) };
+      e2.dataTransfer?.setData("text/plain", String(i2));
+      item.classList.add("dragging");
+    });
+    item.addEventListener("dragend", () => {
+      dragging.now = null;
+      item.classList.remove("dragging");
+      clearDropMarks(list);
+    });
+    item.addEventListener("dragover", (e2) => {
+      const drag = dragging.now;
+      if (!drag) return;
+      e2.preventDefault();
+      e2.stopPropagation();
+      if (drag.kind === "section") {
+        const gap = sectionGapAtSlide(sections(), i2);
+        markGap(list, gap, list.lastElementChild);
+        return;
+      }
+      const r2 = item.getBoundingClientRect();
+      clearDropMarks(list);
+      item.classList.add(
+        e2.clientY > r2.top + r2.height / 2 ? "drop-after" : "drop-before"
+      );
+    });
+    item.addEventListener("drop", (e2) => {
+      e2.preventDefault();
+      e2.stopPropagation();
+      const drag = dragging.now;
+      clearDropMarks(list);
+      if (!drag) return;
+      if (drag.kind === "section") {
+        const gap = sectionGapAtSlide(sections(), i2);
+        void moveSectionToGap(drag.section, gap);
+        return;
+      }
+      const r2 = item.getBoundingClientRect();
+      const after = e2.clientY > r2.top + r2.height / 2;
+      const target = dropOnSlide(sections(), i2, after);
+      void moveSlidesTo(drag.slides, target.insertAt, target.section);
+    });
+    return item;
+  }
+  function headerItem(k2) {
+    const head = sectionHeader(k2, "sorter", (e2) => {
+      if (e2.ctrlKey || e2.metaKey || e2.shiftKey) selectSection(k2);
+    });
+    head.addEventListener("dragstart", (e2) => {
+      dragging.now = { kind: "section", section: k2 };
+      e2.dataTransfer?.setData("text/plain", `section:${k2}`);
+      head.classList.add("dragging");
+    });
+    head.addEventListener("dragend", () => {
+      dragging.now = null;
+      head.classList.remove("dragging");
+      clearDropMarks(list);
+    });
+    head.addEventListener("dragover", (e2) => {
+      const drag = dragging.now;
+      if (!drag) return;
+      e2.preventDefault();
+      e2.stopPropagation();
+      if (drag.kind === "section") {
+        markGap(list, headerGap(head, k2, e2), list.lastElementChild);
+        return;
+      }
+      clearDropMarks(list);
+      head.classList.add("drop-into");
+    });
+    head.addEventListener("drop", (e2) => {
+      e2.preventDefault();
+      e2.stopPropagation();
+      const drag = dragging.now;
+      clearDropMarks(list);
+      if (!drag) return;
+      if (drag.kind === "section") {
+        void moveSectionToGap(drag.section, headerGap(head, k2, e2));
+        return;
+      }
+      const target = dropOnHeader(sections(), k2);
+      void moveSlidesTo(drag.slides, target.insertAt, target.section);
+    });
+    return head;
+  }
+  function renderSorter() {
+    clear(list);
+    thumbs.begin();
+    const slides = ed.model?.slides ?? [];
+    for (const row4 of sorterRows(slides.length, sections(), isCollapsed)) {
+      list.append(
+        row4.kind === "header" ? headerItem(row4.section) : slideItem(slides[row4.index], row4.index)
+      );
+    }
+    thumbs.end();
+    list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+    emit("sorter");
+  }
+  function initListDrop() {
+    list.addEventListener("dragover", (e2) => {
+      const drag = dragging.now;
+      if (!drag || e2.target !== list) return;
+      e2.preventDefault();
+      if (drag.kind === "section") {
+        markGap(list, sections().length, list.lastElementChild);
+      } else {
+        clearDropMarks(list);
+        list.lastElementChild?.classList.add("drop-after");
+      }
+    });
+    list.addEventListener("drop", (e2) => {
+      const drag = dragging.now;
+      if (!drag || e2.target !== list) return;
+      e2.preventDefault();
+      clearDropMarks(list);
+      dropAtEnd(drag);
+    });
+  }
+  function followSelect(i2) {
+    pendingSelect = i2;
+  }
+  async function newSlide(layout, after = ed.current) {
+    const result = await edit({
+      action: "slide",
+      op: "new",
+      after,
+      layout,
+      name: "slide"
+    });
+    if (result.ok && result.select != null) pendingSelect = result.select;
+  }
+  async function newSlideLike(i2 = ed.current) {
+    const result = await edit({
+      action: "slide",
+      op: "new",
+      after: i2,
+      like: i2,
+      name: "slide"
+    });
+    if (result.ok && result.select != null) pendingSelect = result.select;
+  }
+  async function duplicateSlide(i2 = ed.current) {
+    const result = await edit({ action: "slide", op: "duplicate", slide: i2 });
+    if (result.ok && result.select != null) pendingSelect = result.select;
+  }
+  async function deleteSlide(i2 = ed.current) {
+    const slide = ed.model?.slides[i2];
+    if (!slide) return;
+    const name2 = slide.title ?? slide.id ?? `slide ${i2 + 1}`;
+    if (!window.confirm(
+      `Delete \u201C${name2}\u201D from the deck? (Its files stay on disk.)`
+    )) {
+      return;
+    }
+    const result = await edit({ action: "slide", op: "delete", slide: i2 });
+    if (result.ok) {
+      ed.current = Math.max(0, i2 - 1);
+      emit("slide");
+    }
+  }
+  async function toggleHidden(i2 = ed.current) {
+    const slide = ed.model?.slides[i2];
+    if (!slide) return;
+    await edit({
+      action: "slide",
+      op: "hide",
+      slide: i2,
+      hidden: slide.visible
+    });
+  }
+  var pendingSelect = null;
+  function closeMenu() {
+    menu2.classList.remove("open");
+    clear(menu2);
+  }
+  function menuItem(label4, fn, disabled = false) {
+    return h(
+      "button",
+      {
+        type: "button",
+        class: "menu-item",
+        disabled,
+        onclick: () => {
+          closeMenu();
+          fn();
+        }
+      },
+      label4
+    );
+  }
+  function openSlideMenu(x2, y2, i2) {
+    const slide = ed.model?.slides[i2];
+    const editable = !!ed.model?.deckEditable;
+    const many = ed.slideSelection.size > 1;
+    clear(menu2);
+    menu2.append(
+      menuItem(
+        many ? `Copy ${ed.slideSelection.size} slides` : "Copy",
+        () => void copySlides()
+      )
+    );
+    menu2.append(
+      menuItem(
+        many ? "Cut slides" : "Cut",
+        () => void cutSlides(),
+        !editable
+      )
+    );
+    menu2.append(
+      menuItem(
+        "Paste after this slide",
+        () => void pasteFromClipboard(),
+        !editable
+      )
+    );
+    if (many) {
+      menu2.append(
+        menuItem(
+          `Delete ${ed.slideSelection.size} slides`,
+          () => void deleteSlides(),
+          !editable
+        )
+      );
+      showMenu(x2, y2);
+      return;
+    }
+    menu2.append(
+      menuItem(
+        "New slide after\u2026",
+        () => void openGallery({ mode: "insert", after: i2 }),
+        !editable
+      )
+    );
+    menu2.append(menuItem("Duplicate", () => void duplicateSlide(i2), !editable));
+    menu2.append(
+      menuItem(
+        slide?.visible ? "Hide (skip in presentation)" : "Show",
+        () => void toggleHidden(i2),
+        !editable
+      )
+    );
+    menu2.append(
+      menuItem("Rename files\u2026", () => renameSlideFiles(i2), !editable)
+    );
+    menu2.append(menuItem("Delete", () => void deleteSlide(i2), !editable));
+    menu2.append(
+      menuItem("Add section here\u2026", () => void addSectionAt(i2), !editable)
+    );
+    showMenu(x2, y2);
+  }
+  function showMenu(x2, y2) {
+    menu2.classList.add("open");
+    const r2 = menu2.getBoundingClientRect();
+    menu2.style.left = `${Math.min(x2, window.innerWidth - r2.width - 8)}px`;
+    menu2.style.top = `${Math.min(y2, window.innerHeight - r2.height - 8)}px`;
+  }
+  function initSorter() {
+    on("model", () => {
+      followPastedSlides();
+      const n3 = ed.model?.slides.length ?? 0;
+      if (pendingSelect != null && pendingSelect < n3) {
+        ed.current = pendingSelect;
+        pendingSelect = null;
+        emit("slide");
+      }
+      if (ed.current >= n3) ed.current = Math.max(0, n3 - 1);
+      renderSorter();
+    });
+    on("slide", () => {
+      revealCurrent();
+      renderSorter();
+    });
+    on("slide-selection", renderSorter);
+    on("sections", renderSorter);
+    initListDrop();
+    addBtn.addEventListener("click", () => {
+      if (!ed.model?.deckEditable) {
+        toast(
+          "deck.py builds its slides in code; add slides there",
+          "error"
+        );
+        return;
+      }
+      void openGallery({ mode: "insert", after: ed.current });
+    });
+    document.addEventListener("pointerdown", (e2) => {
+      if (!menu2.contains(e2.target)) closeMenu();
+    });
+    document.addEventListener("keydown", (e2) => {
+      if (e2.key === "Escape") closeMenu();
+    });
+  }
+
+  // src/ts/editor/collab.ts
+  var collab = {
+    me: null,
+    people: []
+  };
+  function others() {
+    return collab.people.filter((p2) => p2.id !== collab.me?.id);
+  }
+  function deckIndexOf(p2) {
+    if (p2.slide == null) return null;
+    if (p2.page !== "presenter") return p2.slide;
+    const s2 = ed.model?.slides.find((x2) => x2.visibleIndex === p2.slide);
+    return s2 ? s2.deckIndex : null;
+  }
+  function editorsOn(i2) {
+    return others().filter((p2) => p2.page === "editor" && deckIndexOf(p2) === i2);
+  }
+  function myName() {
+    return storedName() ?? collab.me?.name ?? "";
+  }
+  var timer = 0;
+  var lastSent = "";
+  function sendPresence(now = false) {
+    window.clearTimeout(timer);
+    const go = () => {
+      const msg = {
+        type: "presence",
+        page: "editor",
+        key: clientKey(),
+        ...myName() ? { name: myName() } : {},
+        slide: ed.current,
+        selection: ed.selection.map((s2) => s2.loc),
+        editing: ed.richEditing ? "text" : null
+      };
+      const text = JSON.stringify(msg);
+      if (text === lastSent) return;
+      lastSent = text;
+      sendRaw(msg);
+    };
+    if (now) go();
+    else timer = window.setTimeout(go, 120);
+  }
+  function presenceConnected() {
+    lastSent = "";
+    sendPresence(true);
+  }
+  function welcome(msg) {
+    collab.me = {
+      id: String(msg.id ?? ""),
+      role: String(msg.role ?? "owner"),
+      color: String(msg.color ?? "#1c7ed6"),
+      name: String(msg.name ?? "")
+    };
+    document.body.dataset.role = collab.me.role;
+    document.body.classList.toggle("guest", collab.me.role !== "owner");
+    const share = document.getElementById("btn-share");
+    if (share) share.hidden = collab.me.role !== "owner";
+    if (collab.me.role !== "owner" && !storedName()) askName2();
+    renderPeople();
+  }
+  function setPeople(people) {
+    collab.people = people;
+    renderPeople();
+    paintDots();
+    drawOverlay();
+  }
+  var host2 = document.getElementById("people");
+  function avatar(p2, me) {
+    const where = p2.page === "presenter" ? `presenting, slide ${(p2.slide ?? 0) + 1}` : p2.slide != null ? `slide ${p2.slide + 1}` : "";
+    const role = p2.role === "viewer" ? "viewer" : p2.role === "owner" ? "owner" : "editor";
+    return h(
+      "span",
+      {
+        class: `avatar${me ? " me" : ""}${p2.page === "presenter" ? " presenting" : ""}`,
+        style: `--who:${p2.color}`,
+        title: `${p2.name}${me ? " (you)" : ""} \xB7 ${role}${where ? ` \xB7 ${where}` : ""}`,
+        "data-person": p2.id,
+        onclick: me ? () => askName2() : () => {
+          const i2 = deckIndexOf(p2);
+          if (i2 != null) gotoSlide(i2);
+        }
+      },
+      initials(p2.name || "?")
+    );
+  }
+  function renderPeople() {
+    if (!host2) return;
+    clear(host2);
+    const people = collab.people;
+    host2.hidden = people.length < 2 && collab.me?.role === "owner";
+    const mine = people.find((p2) => p2.id === collab.me?.id);
+    if (mine) host2.append(avatar(mine, true));
+    for (const p2 of others()) host2.append(avatar(p2, false));
+  }
+  function paintDots() {
+    for (const old of document.querySelectorAll(".peer-dots")) old.remove();
+    const byIndex = /* @__PURE__ */ new Map();
+    for (const p2 of others()) {
+      const i2 = deckIndexOf(p2);
+      if (i2 == null) continue;
+      byIndex.set(i2, [...byIndex.get(i2) ?? [], p2]);
+    }
+    for (const [i2, people] of byIndex) {
+      const item = document.querySelector(`.sorter-item[data-index="${i2}"]`);
+      if (!item) continue;
+      item.append(
+        h(
+          "span",
+          { class: "peer-dots" },
+          ...people.map(
+            (p2) => h("span", {
+              class: "peer-dot",
+              style: `background:${p2.color}`,
+              title: p2.name
+            })
+          )
+        )
+      );
+    }
+  }
+  function drawPeers(overlay3) {
+    const svg = slideRoot();
+    if (!svg) return;
+    for (const p2 of editorsOn(ed.current)) {
+      let labelled = false;
+      for (const loc of p2.selection) {
+        const el2 = svg.querySelector(`[data-ink="${CSS.escape(loc)}"]`);
+        if (!(el2 instanceof SVGGraphicsElement)) continue;
+        const corners = outlineOf(el2);
+        if (!corners) continue;
+        const g2 = svgEl("g", {
+          class: "peer-sel",
+          style: `--who:${p2.color}`
+        });
+        g2.append(
+          svgEl("polygon", {
+            points: corners.map((c2) => `${c2.x},${c2.y}`).join(" "),
+            class: "peer-outline"
+          })
+        );
+        if (!labelled) {
+          labelled = true;
+          const top = corners.reduce(
+            (a2, b2) => b2.y < a2.y || b2.y === a2.y && b2.x < a2.x ? b2 : a2
+          );
+          const label4 = svgEl("text", {
+            x: top.x,
+            y: top.y - 5,
+            class: "peer-label"
+          });
+          label4.textContent = p2.editing ? `${p2.name} (typing)` : p2.name;
+          g2.append(label4);
+        }
+        overlay3.append(g2);
+      }
+    }
+  }
+  function askName2() {
+    const input = h("input", {
+      type: "text",
+      value: myName(),
+      maxlength: "40",
+      placeholder: "Your name",
+      "aria-label": "Your name"
+    });
+    const done = () => {
+      const name2 = input.value.trim();
+      if (!name2) return;
+      saveName(name2);
+      closeDialog();
+      sendPresence(true);
+    };
+    input.addEventListener("keydown", (e2) => {
+      if (e2.key === "Enter") done();
+    });
+    const body3 = h(
+      "div",
+      { class: "name-dialog" },
+      h(
+        "p",
+        {},
+        "The others editing this deck see you by this name, and your selection in your colour."
+      ),
+      input,
+      h(
+        "div",
+        { class: "dialog-actions" },
+        h(
+          "button",
+          { type: "button", class: "pbtn primary", onclick: done },
+          "OK"
+        )
+      )
+    );
+    openDialog("Your name", body3);
+    window.setTimeout(() => input.select(), 0);
+  }
+  function initCollab() {
+    hooks.drawPeers = drawPeers;
+    on("selection", () => sendPresence());
+    on("render", () => sendPresence());
+    on("model", () => sendPresence());
+    on("sorter", paintDots);
   }
 
   // src/ts/editor/net.ts
@@ -1361,22 +5090,27 @@
     return new Promise((resolve) => waiting.push(resolve));
   }
   function connect(port) {
-    const host4 = location.hostname || "localhost";
-    const sock = new WebSocket(`ws://${host4}:${port}`);
+    const sock = new WebSocket(socketUrl(location));
     ws = sock;
     sock.onopen = () => {
+      presenceConnected();
       sock.send(JSON.stringify({ type: "hello", role: "editor" }));
       document.body.classList.remove("offline");
       for (const resolve of waiting) resolve();
       waiting = [];
       for (const fn of connectHooks) fn();
     };
-    sock.onclose = () => {
+    sock.onclose = (ev) => {
       document.body.classList.add("offline");
       for (const resolve of pending.values()) {
         resolve({ ok: false, error: "disconnected from the server" });
       }
       pending.clear();
+      if (ev.code === SENT_AWAY) {
+        stopped = true;
+        sentAway(ev.reason);
+        return;
+      }
       if (!stopped) window.setTimeout(() => connect(port), 1500);
     };
     sock.onmessage = (event) => {
@@ -1426,6 +5160,15 @@
         case "agent-edit":
           agentEdit(msg);
           break;
+        case "history":
+          setHistory(msg);
+          break;
+        case "welcome":
+          welcome(msg);
+          break;
+        case "presence":
+          setPeople(msg.people ?? []);
+          break;
         case "notify":
           toast(String(msg.message ?? ""));
           break;
@@ -1439,12 +5182,24 @@
     ed.canRedo = h3.canRedo ?? ed.canRedo;
     if ("undoLabel" in h3) ed.undoLabel = h3.undoLabel ?? null;
     if ("redoLabel" in h3) ed.redoLabel = h3.redoLabel ?? null;
+    if ("undoBlockedBy" in h3) ed.undoBlockedBy = h3.undoBlockedBy ?? null;
     emit("history");
+  }
+  function sentAway(reason) {
+    const box = document.getElementById("build-error");
+    if (box) {
+      box.textContent = `Disconnected: ${reason || "this link no longer opens the deck"}. Ask the person sharing it for a new link.`;
+      box.classList.add("show");
+    }
   }
   function agentEdit(msg) {
     setHistory(msg);
     const label4 = String(msg.label ?? "Agent: changed the deck");
     const step2 = msg.step;
+    if (!msg.mine) {
+      toast(label4, "info");
+      return;
+    }
     toast(label4, "info", {
       label: "Undo",
       run: () => {
@@ -1462,15 +5217,44 @@
     }
     const id = nextId++;
     const sock = ws;
+    const base2 = req.action === "undo" || req.action === "redo" ? {} : ed.model?.build != null ? { baseBuild: ed.model.build } : {};
     return new Promise((resolve) => {
       pending.set(id, resolve);
-      sock.send(JSON.stringify({ type: "edit-op", id, ...req }));
+      sock.send(JSON.stringify({ type: "edit-op", id, ...base2, ...req }));
     });
   }
   var pendingTimer = 0;
+  function newerBuild(than, ms = 4e3) {
+    return new Promise((resolve) => {
+      const now = () => ed.model?.build != null && ed.model.build !== than;
+      if (now()) {
+        resolve(true);
+        return;
+      }
+      const done = (ok) => {
+        window.clearTimeout(timer6);
+        off("model", check);
+        resolve(ok);
+      };
+      const check = () => {
+        if (now()) done(true);
+      };
+      const timer6 = window.setTimeout(() => done(false), ms);
+      on("model", check);
+    });
+  }
   var TRANSIENT = /since the last build|wait for the reload/;
   async function edit(req, opts2 = {}) {
     const result = await request(req);
+    if (!result.ok && result.stale && opts2.quietStale) return result;
+    if (!result.ok && result.stale) {
+      toast(
+        result.error ?? "Changed by someone else meanwhile \u2014 updated",
+        "error"
+      );
+      emit("stale");
+      return result;
+    }
     if (!result.ok && !(opts2.retrying && TRANSIENT.test(result.error ?? ""))) {
       toast(result.error ?? "edit failed", "error");
     }
@@ -1505,10 +5289,10 @@
   }
 
   // src/ts/editor/snap.ts
-  function targetsFor(slide, others) {
+  function targetsFor(slide, others2) {
     const xs = [slide.x, slide.x + slide.width / 2, slide.x + slide.width];
     const ys = [slide.y, slide.y + slide.height / 2, slide.y + slide.height];
-    for (const b2 of others) {
+    for (const b2 of others2) {
       xs.push(b2.x, b2.x + b2.width / 2, b2.x + b2.width);
       ys.push(b2.y, b2.y + b2.height / 2, b2.y + b2.height);
     }
@@ -1574,8 +5358,8 @@
   // src/ts/editor/canvas.ts
   var canvas = document.getElementById("canvas");
   var paper = document.getElementById("paper");
-  var host = document.getElementById("slide-host");
-  var overlay = document.getElementById("overlay");
+  var host3 = document.getElementById("slide-host");
+  var overlay2 = document.getElementById("overlay");
   var NON_ZONES = /* @__PURE__ */ new Set(["zone-slide-number", "zone-slide-total"]);
   var DRAG_THRESHOLD = 3;
   var SNAP_PX = 6;
@@ -1609,10 +5393,13 @@
     // Select these ids once the rebuild that holds them has rendered.
     selectAfterRender: (_ids) => {
     },
-    toolDown: (_e, _pt) => false
+    toolDown: (_e, _pt) => false,
+    // Draws the others' selections on this slide (collab.ts).
+    drawPeers: (_overlay) => {
+    }
   };
   function slideRoot() {
-    return host.querySelector(":scope > svg");
+    return host3.querySelector(":scope > svg");
   }
   function viewBoxSize() {
     const svg = slideRoot();
@@ -1637,9 +5424,9 @@
     paper.style.height = `${ph}px`;
     svg?.setAttribute("width", String(pw));
     svg?.setAttribute("height", String(ph));
-    overlay.setAttribute("width", String(pw));
-    overlay.setAttribute("height", String(ph));
-    overlay.setAttribute("viewBox", `0 0 ${pw} ${ph}`);
+    overlay2.setAttribute("width", String(pw));
+    overlay2.setAttribute("height", String(ph));
+    overlay2.setAttribute("viewBox", `0 0 ${pw} ${ph}`);
     canvas.classList.toggle("zoomed", ed.zoom > 0);
     canvas.style.padding = ed.zoom > 0 ? `${Math.round(canvas.clientHeight / 2)}px ${Math.round(canvas.clientWidth / 2)}px` : "";
     drawOverlay();
@@ -1659,10 +5446,10 @@
     if (ed.rebuilt) ed.structuralPending = false;
     ed.rebuilt = false;
     const data = currentRendered();
-    host.innerHTML = data ? data.svg : "";
+    host3.innerHTML = data ? data.svg : "";
     const hidden = currentSlide();
     if (!data && hidden && !hidden.visible) {
-      host.append(
+      host3.append(
         h(
           "div",
           { class: "hidden-note" },
@@ -1691,7 +5478,7 @@
       svg.style.display = "block";
       prepareForEditing(svg);
     }
-    ed.scope = scopeKey ? host.querySelector(`[data-ink="${scopeKey}"]`) : null;
+    ed.scope = scopeKey ? host3.querySelector(`[data-ink="${scopeKey}"]`) : null;
     ed.selection = [];
     for (const k2 of keep) {
       const el2 = findElement(k2, trustLoc);
@@ -1872,7 +5659,7 @@
   }
   function mediaZoneAt(clientX, clientY) {
     const inside = (r2) => clientX >= r2.left && clientX <= r2.right && clientY >= r2.top && clientY <= r2.bottom;
-    for (const el2 of overlay.querySelectorAll("[data-media-zone]")) {
+    for (const el2 of overlay2.querySelectorAll("[data-media-zone]")) {
       if (inside(el2.getBoundingClientRect()))
         return el2.getAttribute("data-media-zone");
     }
@@ -2069,6 +5856,9 @@
       class: cls
     });
   }
+  function outlineOf(el2) {
+    return elementCorners(el2);
+  }
   function elementCorners(el2) {
     try {
       const measured = measure(el2);
@@ -2128,22 +5918,23 @@
     }
   }
   function drawOverlay() {
-    while (overlay.firstChild) overlay.removeChild(overlay.firstChild);
+    while (overlay2.firstChild) overlay2.removeChild(overlay2.firstChild);
     const svg = slideRoot();
     if (!svg) return;
     drawPlaceholders();
+    hooks.drawPeers(overlay2);
     if (ed.scope) {
       const c2 = elementCorners(ed.scope);
-      if (c2) overlay.append(poly(c2, "scope-outline"));
+      if (c2) overlay2.append(poly(c2, "scope-outline"));
     }
     if (hoverEl && !ed.selection.some((s2) => s2.el === hoverEl)) {
       const c2 = elementCorners(hoverEl);
-      if (c2) overlay.append(poly(c2, "hover-outline"));
+      if (c2) overlay2.append(poly(c2, "hover-outline"));
     }
     for (const s2 of ed.selection) {
       const c2 = elementCorners(s2.el);
       if (c2) {
-        overlay.append(
+        overlay2.append(
           poly(
             c2,
             canTransform(s2.el) ? "sel-outline" : "sel-outline content-only"
@@ -2171,7 +5962,7 @@
           class: `handle endpoint${attached ? " attached" : ""}`
         });
         handle.dataset.handle = `c-${which}`;
-        overlay.append(handle);
+        overlay2.append(handle);
       }
       const bend = connectorRoute(connector)?.bend;
       if (bend) {
@@ -2185,13 +5976,13 @@
           class: `handle bend ${bend.axis === "x" ? "ew" : "ns"}`
         });
         handle.dataset.handle = "c-bend";
-        overlay.append(handle);
+        overlay2.append(handle);
       }
     }
     if (box && ed.step == null) {
       const pb = toPaperBox(box);
       if (ed.selection.length > 1) {
-        overlay.append(
+        overlay2.append(
           svgEl("rect", {
             x: pb.x,
             y: pb.y,
@@ -2203,7 +5994,7 @@
       }
       const top = handlePoint("n", pb);
       const rot = handlePoint("rot", pb);
-      overlay.append(
+      overlay2.append(
         svgEl("line", {
           x1: top.x,
           y1: top.y,
@@ -2222,7 +6013,7 @@
       const frames = ed.selection.some(
         (s2) => s2.el.localName === "svg" && !s2.el.hasAttribute("data-drawio") && !s2.el.classList.contains("inkflow-chart") || isDiagramCell(s2.el)
       );
-      if (!ed.cropMode && !frames) overlay.append(rh);
+      if (!ed.cropMode && !frames) overlay2.append(rh);
       for (const h3 of HANDLES) {
         const p2 = handlePoint(h3, pb);
         const r2 = svgEl("rect", {
@@ -2233,12 +6024,12 @@
           class: `handle h-${h3}`
         });
         r2.dataset.handle = h3;
-        overlay.append(r2);
+        overlay2.append(r2);
       }
     }
     for (const x2 of guides.xs) {
       const p2 = toPaperBox({ x: x2, y: 0, width: 0, height: slideSize().height });
-      overlay.append(
+      overlay2.append(
         svgEl("line", {
           x1: p2.x,
           y1: p2.y,
@@ -2250,7 +6041,7 @@
     }
     for (const y2 of guides.ys) {
       const p2 = toPaperBox({ x: 0, y: y2, width: slideSize().width, height: 0 });
-      overlay.append(
+      overlay2.append(
         svgEl("line", {
           x1: p2.x,
           y1: p2.y,
@@ -2262,7 +6053,7 @@
     }
     if (marquee) {
       const p2 = toPaperBox(marquee);
-      overlay.append(
+      overlay2.append(
         svgEl("rect", {
           x: p2.x,
           y: p2.y,
@@ -2290,7 +6081,7 @@
       preserveAspectRatio: image.getAttribute("preserveAspectRatio") ?? "xMidYMid meet",
       class: "crop-ghost"
     });
-    overlay.append(ghost, poly(c2, "crop-extent"));
+    overlay2.append(ghost, poly(c2, "crop-extent"));
   }
   var MEDIA_ZONES = /media|image|img|picture|photo|figure|video|logo/;
   function drawPlaceholders() {
@@ -2314,7 +6105,7 @@
         class: "placeholder-outline"
       });
       if (media) outline.setAttribute("data-media-zone", z.zone);
-      overlay.append(outline);
+      overlay2.append(outline);
       const g2 = svgEl("g", { class: "placeholder" });
       const text = media ? `+ media \xB7 ${z.zone}` : `+ ${z.zone}`;
       const w2 = 14 + text.length * 7.2;
@@ -2337,7 +6128,7 @@
         if (media) hooks.zoneMedia(z.zone);
         else hooks.zoneText(z.zone);
       });
-      overlay.append(g2);
+      overlay2.append(g2);
     }
   }
   var CONNECTOR = "inkflow:connector";
@@ -2440,7 +6231,7 @@
       for (const s2 of sitesOf(el2) ?? []) {
         const p2 = apply(m2, s2);
         const on2 = active3?.name === s2.name && Math.hypot(active3.x - s2.x, active3.y - s2.y) < 0.5;
-        overlay.append(
+        overlay2.append(
           svgEl("circle", {
             cx: p2.x,
             cy: p2.y,
@@ -3470,17 +7261,17 @@
     return same ? null : next;
   }
   function parseClipboard(text) {
-    const body2 = text.replace(/\r\n?/g, "\n").replace(/\n$/, "");
-    const sep2 = body2.includes("	") ? "	" : body2.includes(",") ? "," : "	";
+    const body3 = text.replace(/\r\n?/g, "\n").replace(/\n$/, "");
+    const sep2 = body3.includes("	") ? "	" : body3.includes(",") ? "," : "	";
     const rows = [];
     let row4 = [];
     let cell = "";
     let quoted = false;
     let i2 = 0;
-    while (i2 < body2.length) {
-      const ch = body2[i2];
+    while (i2 < body3.length) {
+      const ch = body3[i2];
       if (quoted) {
-        if (ch === '"' && body2[i2 + 1] === '"') {
+        if (ch === '"' && body3[i2 + 1] === '"') {
           cell += '"';
           i2 += 2;
           continue;
@@ -3522,7 +7313,7 @@
   function pasteCells(grid, row4, col, cells) {
     const columns = [...grid.columns];
     const rows = grid.rows.map((r2) => [...r2]);
-    let body2 = cells;
+    let body3 = cells;
     if (row4 < 0) {
       const head = cells[0] ?? [];
       head.forEach((name2, j2) => {
@@ -3534,18 +7325,18 @@
         }
         columns[c2] = name2.trim() || columns[c2];
       });
-      body2 = cells.slice(1);
+      body3 = cells.slice(1);
       row4 = 0;
     }
     const width = Math.max(
       columns.length,
-      col + Math.max(0, ...body2.map((r2) => r2.length))
+      col + Math.max(0, ...body3.map((r2) => r2.length))
     );
     while (columns.length < width) {
       columns.push(uniqueName(columns, `column ${columns.length + 1}`));
     }
     for (const r2 of rows) while (r2.length < width) r2.push("");
-    body2.forEach((line, i2) => {
+    body3.forEach((line, i2) => {
       while (rows.length <= row4 + i2) rows.push(blankRow(width));
       line.forEach((value, j2) => {
         rows[row4 + i2][col + j2] = value;
@@ -3589,8 +7380,8 @@
   }
   function renameColumn(grid, at3, wanted, s2) {
     const old = grid.columns[at3];
-    const others = grid.columns.filter((_2, i2) => i2 !== at3);
-    const name2 = uniqueName(others, wanted.trim() || old);
+    const others2 = grid.columns.filter((_2, i2) => i2 !== at3);
+    const name2 = uniqueName(others2, wanted.trim() || old);
     const columns = grid.columns.map((c2, i2) => i2 === at3 ? name2 : c2);
     return {
       grid: { columns, rows: grid.rows.map((r2) => [...r2]) },
@@ -3607,3474 +7398,6 @@
       columns: [...grid.columns],
       rows: grid.rows.filter((r2) => r2.some((v2) => v2.trim() !== ""))
     };
-  }
-
-  // src/ts/editor/dialog.ts
-  var host2 = document.getElementById("dialog");
-  var onClose = null;
-  function openDialog(title2, body2, opts2 = {}) {
-    closeDialog();
-    onClose = opts2.onClose ?? null;
-    const box = h(
-      "div",
-      {
-        class: `dialog-box${opts2.large ? " large" : opts2.wide ? " wide" : ""}`,
-        role: "dialog"
-      },
-      h(
-        "div",
-        { class: "dialog-head" },
-        h("h2", {}, title2),
-        opts2.hint ? h("span", { class: "hint" }, opts2.hint) : null,
-        h(
-          "button",
-          {
-            type: "button",
-            class: "dialog-close",
-            title: "Close (Esc)",
-            onclick: () => closeDialog()
-          },
-          "\xD7"
-        )
-      ),
-      h("div", { class: "dialog-body" }, body2)
-    );
-    host2.append(box);
-    host2.classList.add("open");
-    return box;
-  }
-  function closeDialog() {
-    if (!host2.classList.contains("open")) return;
-    host2.classList.remove("open");
-    clear(host2);
-    const fn = onClose;
-    onClose = null;
-    fn?.();
-  }
-  function dialogOpen() {
-    return host2.classList.contains("open");
-  }
-  function initDialog() {
-    host2.addEventListener("pointerdown", (e2) => {
-      if (e2.target === host2) closeDialog();
-    });
-    document.addEventListener(
-      "keydown",
-      (e2) => {
-        const own = e2.target?.closest?.(
-          "[data-own-escape]"
-        );
-        if (e2.key === "Escape" && dialogOpen() && !own) {
-          e2.preventDefault();
-          e2.stopPropagation();
-          closeDialog();
-        }
-      },
-      true
-    );
-    host2.addEventListener("keydown", (e2) => {
-      if (e2.key !== "Escape") e2.stopPropagation();
-    });
-  }
-
-  // src/ts/editor/gallery.ts
-  var LABELS = {
-    numbered: ["Blank", "Background and slide number"],
-    title: ["Title only", "A title; draw the rest"],
-    content: ["Title and content", "The everyday text slide"],
-    "two-cols": ["Two columns", "Side by side under one title"],
-    "three-cols": ["Three columns", "Three short columns"],
-    comparison: ["Comparison", "Two headed columns"],
-    agenda: ["Agenda", "A numbered outline"],
-    quad: ["Four quadrants", "A two-by-two grid"],
-    "three-cards": ["Three cards", "An image over text, three times"],
-    "media-left": ["Media and text", "Image or video on the left"],
-    "media-right": ["Text and media", "Image or video on the right"],
-    "title-media": ["Title and media", "One large image or video"],
-    "full-media": ["Full-bleed media", "A photo or video edge to edge"],
-    cover: ["Cover", "The opening slide"],
-    section: ["Section header", "Divides the deck into parts"],
-    center: ["Centered", "One centered block"],
-    fact: ["Big number", "One number or claim"],
-    quote: ["Quote", "A pull quote with attribution"],
-    end: ["Closing", "The last slide"],
-    "poster-3col": ["Poster, three columns", "Title band, sections, footer"],
-    "poster-2col": ["Poster, two columns", "Title band, sections, footer"],
-    "poster-landscape-3col": [
-      "Landscape poster, three columns",
-      "Title band, sections, footer"
-    ],
-    "poster-landscape-4col": [
-      "Landscape poster, four columns",
-      "Title band, sections, footer"
-    ]
-  };
-  var root = document.getElementById("gallery");
-  var cache = null;
-  function layoutLabel(name2) {
-    return LABELS[name2]?.[0] ?? name2;
-  }
-  async function previews() {
-    if (cache) return cache;
-    const result = await request({ action: "layout-previews" });
-    if (!result.ok) {
-      toast(result.error ?? "could not load the layouts", "error");
-      return [];
-    }
-    cache = result.layouts;
-    return cache;
-  }
-  function thumbnail(p2) {
-    const box = h("div", { class: "gallery-thumb" });
-    box.innerHTML = p2.svg;
-    const svg = box.querySelector("svg");
-    if (svg) {
-      const vb = parseViewBox(svg.getAttribute("viewBox"));
-      box.style.aspectRatio = `${vb.w} / ${vb.h}`;
-      svg.setAttribute("width", "100%");
-      svg.setAttribute("height", "100%");
-      svg.querySelectorAll(".anim-pending").forEach((el2) => {
-        el2.classList.remove("anim-pending");
-      });
-      for (const z of p2.emptyZones) {
-        if (z.zone === "slide-number" || z.zone === "slide-total") continue;
-        box.append(
-          h(
-            "div",
-            {
-              class: "gallery-media",
-              style: `left:${z.x / vb.w * 100}%;top:${z.y / vb.h * 100}%;width:${z.width / vb.w * 100}%;height:${z.height / vb.h * 100}%`
-            },
-            "Image or video"
-          )
-        );
-      }
-    }
-    return box;
-  }
-  function lostZones(p2) {
-    const slide = currentSlide();
-    if (!slide) return [];
-    const used = /* @__PURE__ */ new Set([
-      ...Object.keys(slide.zoneOrigins ?? {}),
-      ...Object.keys(slide.zones)
-    ]);
-    return [...used].filter((z) => !p2.zones.includes(z));
-  }
-  function close() {
-    root.classList.remove("open");
-    clear(root);
-  }
-  async function openGallery(opts2) {
-    if (!ed.model?.deckEditable) {
-      toast(
-        "deck.py builds its slide list in code; change it there",
-        "error"
-      );
-      return;
-    }
-    clear(root);
-    const grid = h(
-      "div",
-      { class: "gallery-grid" },
-      h("p", { class: "hint" }, "Rendering layouts\u2026")
-    );
-    const title2 = opts2.mode === "insert" ? "New slide" : "Change layout";
-    root.append(
-      h(
-        "div",
-        { class: "gallery-box", role: "dialog", "aria-label": title2 },
-        h(
-          "div",
-          { class: "gallery-head" },
-          h("h2", {}, title2),
-          h(
-            "span",
-            { class: "hint" },
-            opts2.mode === "insert" ? "Every layout, in this deck's theme" : "The slide keeps its content; zones the new layout lacks are not shown"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn",
-              onclick: close,
-              title: "Close (Esc)"
-            },
-            "\xD7"
-          )
-        ),
-        grid
-      )
-    );
-    root.classList.add("open");
-    const layouts = await previews();
-    clear(grid);
-    for (const p2 of layouts) {
-      const [label4, description] = LABELS[p2.name] ?? [p2.name, ""];
-      const lost = opts2.mode === "change" ? lostZones(p2) : [];
-      const current2 = opts2.mode === "change" && p2.name === opts2.current;
-      const card = h(
-        "button",
-        {
-          type: "button",
-          class: `gallery-card${current2 ? " current" : ""}`,
-          title: p2.name,
-          onclick: () => void choose(p2, opts2, lost)
-        },
-        thumbnail(p2),
-        h(
-          "div",
-          { class: "gallery-label" },
-          h("strong", {}, label4),
-          p2.source === "local" && h("span", { class: "badge" }, "project")
-        ),
-        description && h("div", { class: "gallery-desc" }, description),
-        lost.length > 0 && h(
-          "div",
-          { class: "gallery-warn" },
-          `Hides: ${lost.join(", ")}`
-        )
-      );
-      grid.append(card);
-    }
-    (grid.querySelector(".current") ?? grid.querySelector("button"))?.scrollIntoView({
-      block: "nearest"
-    });
-    grid.querySelector(".current, button")?.focus();
-  }
-  async function choose(p2, opts2, lost) {
-    if (opts2.mode === "insert") {
-      close();
-      await newSlide(p2.name, opts2.after);
-      return;
-    }
-    if (p2.name === opts2.current) {
-      close();
-      return;
-    }
-    if (lost.length && !window.confirm(
-      `${layoutLabel(p2.name)} has no ${lost.join(", ")} zone; that content stays in your files but is not shown. Switch anyway?`
-    )) {
-      return;
-    }
-    close();
-    const slide = currentSlide();
-    if (!slide) return;
-    await edit({
-      action: "slide",
-      op: "layout",
-      slide: slide.deckIndex,
-      layout: p2.name
-    });
-  }
-  function initGallery() {
-    on("model", () => {
-      cache = null;
-    });
-    root.addEventListener("pointerdown", (e2) => {
-      if (e2.target === root) close();
-    });
-    document.addEventListener(
-      "keydown",
-      (e2) => {
-        if (e2.key === "Escape" && root.classList.contains("open")) {
-          e2.stopPropagation();
-          close();
-        }
-      },
-      true
-    );
-  }
-
-  // src/ts/editor/pathtext.ts
-  function sepOf(path) {
-    return path.includes("\\") && !path.includes("/") ? "\\" : "/";
-  }
-  function withSep(dir) {
-    const sep2 = sepOf(dir);
-    return dir.endsWith(sep2) ? dir : dir + sep2;
-  }
-  function joinPath(dir, name2) {
-    return withSep(dir) + name2;
-  }
-  function baseName(path) {
-    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
-  }
-  function samePath(a2, b2) {
-    const norm = (p2) => p2.replace(/(.)[\\/]+$/, "$1");
-    return norm(a2) === norm(b2);
-  }
-  function commonPrefix(names) {
-    if (!names.length) return "";
-    let prefix = names[0];
-    for (const name2 of names.slice(1)) {
-      let i2 = 0;
-      while (i2 < prefix.length && i2 < name2.length && prefix[i2].toLowerCase() === name2[i2].toLowerCase()) {
-        i2++;
-      }
-      prefix = prefix.slice(0, i2);
-    }
-    return prefix;
-  }
-  function startingWith(names, typed) {
-    const t2 = typed.toLowerCase();
-    return names.filter((n3) => n3.toLowerCase().startsWith(t2));
-  }
-  function splitTyped(value) {
-    const i2 = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
-    if (i2 < 0) return { dir: "", prefix: value };
-    return { dir: value.slice(0, i2 + 1), prefix: value.slice(i2 + 1) };
-  }
-  function assetRef(href) {
-    return href.replace(/\?v=[0-9a-f]+$/, "");
-  }
-  function isPdfRef(ref) {
-    return /\.pdf(?:[#?]|$)/i.test(ref) && !/^[a-z][a-z0-9+.-]*:/i.test(ref);
-  }
-  function pdfPage(ref) {
-    const m2 = /#(?:.*&)?page=(\d+)/i.exec(ref);
-    return m2 ? Math.max(1, Number(m2[1])) : 1;
-  }
-  function withPage(ref, page) {
-    const file = ref.replace(/#.*$/, "");
-    return page > 1 ? `${file}#page=${page}` : file;
-  }
-  function splitFileName(rel) {
-    const cut2 = rel.lastIndexOf("/");
-    const folder = cut2 < 0 ? "" : rel.slice(0, cut2);
-    const name2 = rel.slice(cut2 + 1);
-    const drawio = /\.drawio\.svg$/i.exec(name2);
-    const dot = name2.lastIndexOf(".");
-    const ext = drawio ? drawio[0] : dot > 0 ? name2.slice(dot) : "";
-    return { folder, stem: name2.slice(0, name2.length - ext.length), ext };
-  }
-  function joinFileName(folder, stem, ext) {
-    const dir = folder.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-    const name2 = `${stem.trim()}${ext}`;
-    return dir ? `${dir}/${name2}` : name2;
-  }
-  function projectRel(path, projectDir) {
-    if (!path) return null;
-    if (!path.startsWith("/") && !/^[a-z]:[\\/]/i.test(path)) {
-      return path.split("/").includes("..") ? null : path;
-    }
-    const root2 = projectDir.replace(/[\\/]+$/, "");
-    if (!path.startsWith(`${root2}/`)) return null;
-    return path.slice(root2.length + 1);
-  }
-
-  // src/ts/editor/rename.ts
-  function plural(n3, word) {
-    return `${n3} ${word}${n3 === 1 ? "" : "s"}`;
-  }
-  function relOf(path) {
-    if (!path) return null;
-    const rel = projectRel(
-      path.replace(/[?#].*$/, ""),
-      ed.model?.projectDir ?? ""
-    );
-    return rel && !rel.startsWith("_theme/") && !rel.startsWith("_pdf/") ? rel : null;
-  }
-  function renameButton(path, label4 = "Rename\u2026") {
-    const rel = relOf(path);
-    if (!rel) return null;
-    return h(
-      "button",
-      {
-        type: "button",
-        class: "pbtn open-with",
-        title: `Give ${rel} another name or folder; every reference follows`,
-        onclick: () => void renameFile(rel)
-      },
-      label4
-    );
-  }
-  function summaryLine(p2) {
-    if (!p2.references) return "Nothing refers to it: only the file moves.";
-    return `Updates ${plural(p2.references, "reference")} in ${plural(p2.files, "file")}.`;
-  }
-  function previewBody(p2, opts2) {
-    const box = h("div", { class: "rename-preview" });
-    if (opts2.moves && p2.moves.length) {
-      box.append(
-        h("p", { class: "rename-msg rename-head" }, "Files"),
-        h(
-          "ul",
-          { class: "rename-list" },
-          ...p2.moves.map(
-            (m2) => h(
-              "li",
-              {},
-              h("code", { class: "rename-code" }, m2.from),
-              " \u2192 ",
-              h("code", { class: "rename-code" }, m2.to)
-            )
-          )
-        )
-      );
-    }
-    if (p2.shared.length) {
-      box.append(
-        h("p", { class: "rename-msg rename-head" }, "Stay as they are"),
-        h(
-          "ul",
-          { class: "rename-list" },
-          ...p2.shared.map(
-            (s2) => h("li", {}, h("code", { class: "rename-code" }, s2))
-          )
-        )
-      );
-    }
-    box.append(h("p", { class: "rename-msg rename-summary" }, summaryLine(p2)));
-    for (const [old, now] of Object.entries(p2.ids)) {
-      box.append(
-        h(
-          "p",
-          { class: "hint" },
-          `The slide id ${old} becomes ${now}; its saved ink follows${p2.links ? `, and ${plural(p2.links, "slide: link")} ${p2.links === 1 ? "is" : "are"} rewritten` : ""}.`
-        )
-      );
-    }
-    if (p2.edits.length) {
-      const byFile = /* @__PURE__ */ new Map();
-      for (const e2 of p2.edits) {
-        const list5 = byFile.get(e2.file) ?? [];
-        list5.push(e2);
-        byFile.set(e2.file, list5);
-      }
-      const list4 = h("ul", { class: "rename-list" });
-      for (const [file, edits] of byFile) {
-        list4.append(
-          h(
-            "li",
-            {},
-            h("code", { class: "rename-code" }, file),
-            h(
-              "ul",
-              {},
-              ...edits.map(
-                (e2) => h(
-                  "li",
-                  { class: "hint" },
-                  `${e2.kind}: `,
-                  h("code", { class: "rename-code" }, e2.old),
-                  " \u2192 ",
-                  h("code", { class: "rename-code" }, e2.new)
-                )
-              )
-            )
-          )
-        );
-      }
-      box.append(
-        h(
-          "details",
-          { class: "rename-details" },
-          h("summary", {}, "Show the references"),
-          list4
-        )
-      );
-    }
-    for (const w2 of p2.warnings) {
-      box.append(h("p", { class: "rename-msg rename-warning" }, w2));
-    }
-    return box;
-  }
-  function renameDialog(opts2) {
-    const status2 = h("div", { class: "rename-status" });
-    const go = h(
-      "button",
-      { type: "button", class: "pbtn primary", disabled: true },
-      "Rename"
-    );
-    const cancel2 = h(
-      "button",
-      { type: "button", class: "pbtn", onclick: () => closeDialog() },
-      "Cancel"
-    );
-    let token = 0;
-    let timer5 = 0;
-    let last = null;
-    const refresh2 = async () => {
-      const mine = ++token;
-      const req = opts2.build();
-      go.disabled = true;
-      if (typeof req === "string") {
-        status2.className = "rename-status";
-        status2.replaceChildren(h("p", { class: "rename-msg hint" }, req));
-        return;
-      }
-      status2.className = "rename-status busy";
-      const res = await request({ ...req, dryRun: true });
-      if (mine !== token) return;
-      if (!res.ok) {
-        last = null;
-        status2.className = "rename-status error";
-        status2.replaceChildren(
-          h(
-            "p",
-            { class: "rename-msg" },
-            res.error ?? "This name cannot be used"
-          )
-        );
-        return;
-      }
-      last = res.rename;
-      status2.className = "rename-status";
-      status2.replaceChildren(previewBody(last, { moves: opts2.moves }));
-      go.disabled = false;
-    };
-    const schedule2 = () => {
-      window.clearTimeout(timer5);
-      timer5 = window.setTimeout(() => void refresh2(), 200);
-    };
-    for (const input of opts2.inputs) {
-      input.addEventListener("input", schedule2);
-      input.addEventListener("change", schedule2);
-      input.addEventListener("keydown", (e2) => {
-        if (e2.key === "Enter" && !go.disabled) {
-          e2.preventDefault();
-          go.click();
-        }
-      });
-    }
-    go.addEventListener("click", async () => {
-      const req = opts2.build();
-      if (typeof req === "string") return;
-      go.disabled = true;
-      const res = await edit(req);
-      if (!res.ok) {
-        status2.className = "rename-status error";
-        status2.replaceChildren(
-          h("p", { class: "rename-msg" }, res.error ?? "Rename failed")
-        );
-        return;
-      }
-      const p2 = res.rename ?? last;
-      closeDialog();
-      toast(
-        `${res.label ?? "Renamed"}${p2?.references ? ` \xB7 ${plural(p2.references, "reference")} updated` : ""}`,
-        "ok"
-      );
-      opts2.done(p2);
-    });
-    openDialog(
-      opts2.title,
-      h(
-        "div",
-        { class: "rename-body" },
-        opts2.fields,
-        status2,
-        h("div", { class: "rename-actions" }, cancel2, go)
-      ),
-      { hint: opts2.hint }
-    );
-    opts2.inputs[opts2.inputs.length - 1]?.focus();
-    opts2.inputs[opts2.inputs.length - 1]?.select();
-    status2.replaceChildren(
-      h("p", { class: "hint" }, "Type a new name to see what changes.")
-    );
-  }
-  async function renameFile(path, done = () => {
-  }) {
-    const rel = relOf(path);
-    if (!rel) {
-      toast("Only the deck's own files can be renamed", "error");
-      return;
-    }
-    const { folder, stem, ext } = splitFileName(rel);
-    const folderInput = h("input", {
-      type: "text",
-      value: folder,
-      spellcheck: "false",
-      placeholder: "(the deck's folder)",
-      title: "The folder, relative to deck.py; a new one is created"
-    });
-    const nameInput = h("input", {
-      type: "text",
-      value: stem,
-      spellcheck: "false",
-      title: "Letters, digits, - and _"
-    });
-    const fields = h(
-      "div",
-      { class: "rename-fields" },
-      h(
-        "label",
-        { class: "rename-row" },
-        h("span", { class: "rename-label" }, "Folder"),
-        folderInput
-      ),
-      h(
-        "label",
-        { class: "rename-row" },
-        h("span", { class: "rename-label" }, "Name"),
-        nameInput,
-        h(
-          "code",
-          { class: "rename-ext", title: "The extension stays" },
-          ext
-        )
-      )
-    );
-    renameDialog({
-      title: `Rename ${rel.split("/").pop() ?? rel}`,
-      hint: "Every slide, Markdown file and deck.py line that names it follows",
-      fields,
-      inputs: [folderInput, nameInput],
-      moves: false,
-      build: () => {
-        if (!nameInput.value.trim()) return "Give it a name.";
-        const to = joinFileName(folderInput.value, nameInput.value, ext);
-        if (to === rel) return "Type a new name to see what changes.";
-        return { action: "rename", from: rel, to };
-      },
-      done: () => done()
-    });
-  }
-  function renameSlideFiles(deckIndex) {
-    const slide = ed.model?.slides[deckIndex];
-    if (!slide) return;
-    const current2 = slide.md?.kind === "file" && slide.md.rel ? splitFileName(slide.md.rel).stem : slide.srcRel && !slide.srcShared ? splitFileName(slide.srcRel).stem : slide.id ?? "";
-    const nameInput = h("input", {
-      type: "text",
-      value: current2,
-      spellcheck: "false",
-      title: "Letters, digits, - and _ (no folder, no extension)"
-    });
-    const keep = h("input", { type: "checkbox" });
-    const id = slide.id ?? "";
-    const fields = h(
-      "div",
-      { class: "rename-fields" },
-      h(
-        "label",
-        { class: "rename-row" },
-        h("span", { class: "rename-label" }, "Name"),
-        nameInput
-      ),
-      slide.explicitId ? h(
-        "p",
-        { class: "hint" },
-        `Its id stays ${slide.explicitId} (set in deck.py).`
-      ) : h(
-        "label",
-        {
-          class: "rename-check",
-          title: "Write id= into deck.py so links and ink keep the old id"
-        },
-        keep,
-        ` Keep the slide id ${id}`
-      )
-    );
-    renameDialog({
-      title: "Rename slide files",
-      hint: "Its drawing, Markdown, notes and ink get the new name",
-      fields,
-      inputs: [nameInput],
-      moves: true,
-      build: () => {
-        const stem = nameInput.value.trim();
-        if (!stem) return "Give it a name.";
-        return {
-          action: "rename",
-          slide: deckIndex,
-          stem,
-          keepId: keep.checked
-        };
-      },
-      done: () => {
-      }
-    });
-    keep.addEventListener(
-      "change",
-      () => nameInput.dispatchEvent(new Event("input"))
-    );
-  }
-  function size(bytes) {
-    if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
-    if (bytes >= 1e3) return `${Math.round(bytes / 1e3)} KB`;
-    return `${bytes} B`;
-  }
-  async function openFiles() {
-    const res = await request({ action: "files" });
-    if (!res.ok) {
-      toast(res.error ?? "Cannot list the deck's files", "error");
-      return;
-    }
-    const files2 = res.files ?? [];
-    const unused = files2.filter((f2) => !f2.uses);
-    const picked = /* @__PURE__ */ new Set();
-    const list4 = h("div", { class: "files-list" });
-    const deleteBtn = h(
-      "button",
-      { type: "button", class: "pbtn", disabled: true },
-      "Delete unused\u2026"
-    );
-    const sync = () => {
-      deleteBtn.disabled = !picked.size;
-      deleteBtn.textContent = picked.size ? `Delete ${plural(picked.size, "file")}\u2026` : "Delete unused\u2026";
-    };
-    let folder = null;
-    for (const f2 of files2) {
-      const { folder: dir } = splitFileName(f2.path);
-      if (dir !== folder) {
-        folder = dir;
-        list4.append(h("div", { class: "files-folder" }, `${dir || "."}/`));
-      }
-      const check = h("input", {
-        type: "checkbox",
-        disabled: f2.uses > 0,
-        title: f2.uses ? "In use" : "Pick it to delete"
-      });
-      check.addEventListener("change", () => {
-        if (check.checked) picked.add(f2.path);
-        else picked.delete(f2.path);
-        sync();
-      });
-      list4.append(
-        h(
-          "div",
-          { class: `files-row${f2.uses ? "" : " unused"}` },
-          check,
-          h(
-            "code",
-            { class: "rename-code files-name", title: f2.path },
-            f2.path.split("/").pop() ?? f2.path
-          ),
-          h(
-            "span",
-            { class: "files-uses" },
-            f2.uses ? plural(f2.uses, "use") : "unused"
-          ),
-          h("span", { class: "files-size" }, size(f2.size)),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn open-with",
-              title: "Give it another name or folder; every reference follows",
-              onclick: () => void renameFile(f2.path, () => void openFiles())
-            },
-            "Rename\u2026"
-          )
-        )
-      );
-    }
-    deleteBtn.addEventListener("click", async () => {
-      const paths = [...picked];
-      if (!window.confirm(
-        `Delete ${plural(paths.length, "file")} nothing uses?
-
-${paths.join("\n")}
-
-Undo brings them back.`
-      )) {
-        return;
-      }
-      const r2 = await edit({ action: "delete-files", paths });
-      if (r2.ok) {
-        toast(r2.label ?? "Deleted", "ok");
-        void openFiles();
-      }
-    });
-    const selectUnused = h(
-      "button",
-      {
-        type: "button",
-        class: "pbtn",
-        disabled: !unused.length,
-        onclick: () => {
-          for (const row4 of list4.querySelectorAll(
-            ".files-row.unused input"
-          )) {
-            row4.checked = true;
-          }
-          for (const f2 of unused) picked.add(f2.path);
-          sync();
-        }
-      },
-      "Pick all unused"
-    );
-    const body2 = h(
-      "div",
-      { class: "files-body" },
-      files2.length ? list4 : h("p", { class: "hint" }, "No files yet."),
-      h(
-        "div",
-        { class: "rename-actions" },
-        h(
-          "span",
-          { class: "hint rename-count" },
-          `${plural(files2.length, "file")} \xB7 ${unused.length} unused`
-        ),
-        selectUnused,
-        deleteBtn
-      )
-    );
-    openDialog("Files", body2, {
-      wide: true,
-      hint: "Pictures, videos, data, diagrams and slide files; a use is a reference in a slide, Markdown or deck.py"
-    });
-  }
-
-  // src/ts/editor/sections.ts
-  function sectionOf(sections2, i2) {
-    for (let k2 = 0; k2 < sections2.length; k2++) {
-      const s2 = sections2[k2];
-      if (i2 >= s2.start && i2 < s2.start + s2.count) return k2;
-    }
-    return null;
-  }
-  function sectionSlides(sections2, k2) {
-    const s2 = sections2[k2];
-    if (!s2) return [];
-    return Array.from({ length: s2.count }, (_2, j2) => s2.start + j2);
-  }
-  function unsectioned(sections2, n3) {
-    return sections2.length ? sections2[0].start : n3;
-  }
-  function sorterRows(n3, sections2, collapsed2) {
-    const rows = [];
-    for (let i2 = 0; i2 < unsectioned(sections2, n3); i2++) {
-      rows.push({ kind: "slide", index: i2 });
-    }
-    sections2.forEach((s2, k2) => {
-      rows.push({ kind: "header", section: k2 });
-      if (collapsed2(k2)) return;
-      for (let j2 = 0; j2 < s2.count; j2++) {
-        rows.push({ kind: "slide", index: s2.start + j2 });
-      }
-    });
-    return rows;
-  }
-  function sectionBlocks(n3, sections2) {
-    const blocks2 = [];
-    const first = unsectioned(sections2, n3);
-    if (first > 0 || !sections2.length) {
-      blocks2.push({
-        section: null,
-        slides: Array.from({ length: first }, (_2, i2) => i2)
-      });
-    }
-    sections2.forEach((_2, k2) => {
-      blocks2.push({ section: k2, slides: sectionSlides(sections2, k2) });
-    });
-    return blocks2;
-  }
-  function moveRequest(sections2, moved, insertAt, section2) {
-    const slides = [...new Set(moved)].sort((a2, b2) => a2 - b2);
-    if (!slides.length) return null;
-    const to = insertAt - slides.filter((i2) => i2 < insertAt).length;
-    const contiguous = slides.every((v2, j2) => v2 === slides[0] + j2);
-    const sameSection = slides.every((i2) => sectionOf(sections2, i2) === section2);
-    if (contiguous && sameSection && to === slides[0]) return null;
-    return { slides, to, section: section2 };
-  }
-  function dropOnSlide(sections2, i2, after) {
-    return { insertAt: after ? i2 + 1 : i2, section: sectionOf(sections2, i2) };
-  }
-  function dropOnHeader(sections2, k2) {
-    return { insertAt: sections2[k2].start, section: k2 };
-  }
-  function sectionMoveTo(k2, gap) {
-    const to = gap > k2 ? gap - 1 : gap;
-    return to === k2 ? null : to;
-  }
-  function sectionGapAtSlide(sections2, i2) {
-    const k2 = sectionOf(sections2, i2);
-    if (k2 == null) return 0;
-    const s2 = sections2[k2];
-    return i2 - s2.start < s2.count / 2 ? k2 : k2 + 1;
-  }
-  function sectionKeys(sections2) {
-    const seen = /* @__PURE__ */ new Map();
-    return sections2.map((s2) => {
-      const n3 = (seen.get(s2.name) ?? 0) + 1;
-      seen.set(s2.name, n3);
-      return n3 > 1 ? `${s2.name}#${n3}` : s2.name;
-    });
-  }
-
-  // src/ts/editor/sectionui.ts
-  function sections() {
-    return ed.model?.sections ?? [];
-  }
-  var collapsedKeys = null;
-  var collapsedDeck = "";
-  function storageKey() {
-    return `inkflow-editor-collapsed:${ed.model?.deckPath ?? ""}`;
-  }
-  function collapsedSet() {
-    const deck = ed.model?.deckPath ?? "";
-    if (collapsedKeys && collapsedDeck === deck) return collapsedKeys;
-    collapsedDeck = deck;
-    collapsedKeys = /* @__PURE__ */ new Set();
-    try {
-      const saved = JSON.parse(localStorage.getItem(storageKey()) ?? "[]");
-      if (Array.isArray(saved)) {
-        for (const k2 of saved)
-          if (typeof k2 === "string") collapsedKeys.add(k2);
-      }
-    } catch {
-    }
-    return collapsedKeys;
-  }
-  function saveCollapsed() {
-    try {
-      localStorage.setItem(storageKey(), JSON.stringify([...collapsedSet()]));
-    } catch {
-    }
-  }
-  function isCollapsed(k2) {
-    const key = sectionKeys(sections())[k2];
-    return key != null && collapsedSet().has(key);
-  }
-  function setCollapsed(k2, on2) {
-    const key = sectionKeys(sections())[k2];
-    if (key == null) return;
-    if (on2) collapsedSet().add(key);
-    else collapsedSet().delete(key);
-    saveCollapsed();
-    emit("sections");
-  }
-  function setAllCollapsed(on2) {
-    const set = collapsedSet();
-    for (const key of sectionKeys(sections())) {
-      if (on2) set.add(key);
-      else set.delete(key);
-    }
-    saveCollapsed();
-    emit("sections");
-  }
-  function revealCurrent() {
-    const k2 = sectionOf(sections(), ed.current);
-    if (k2 == null || !isCollapsed(k2)) return false;
-    const key = sectionKeys(sections())[k2];
-    collapsedSet().delete(key);
-    saveCollapsed();
-    return true;
-  }
-  async function sectionEdit(req) {
-    const result = await edit({
-      action: "slide",
-      follow: ed.current,
-      ...req
-    });
-    if (result.ok && typeof result.select === "number") {
-      followSelect(result.select);
-    }
-    return result.ok;
-  }
-  async function moveSlidesTo(slides, insertAt, section2) {
-    const move = moveRequest(sections(), slides, insertAt, section2);
-    if (!move) return;
-    if (await sectionEdit({ op: "move", ...move })) ed.slideSelection.clear();
-  }
-  async function moveSectionToGap(k2, gap) {
-    const to = sectionMoveTo(k2, gap);
-    if (to == null) return;
-    await sectionEdit({ op: "section-move", section: k2, to });
-  }
-  async function addSectionAt(slide) {
-    const name2 = await askName("Add section", "New section");
-    if (name2 == null) return;
-    await sectionEdit({ op: "section-add", slide, name: name2 });
-  }
-  async function removeSection(k2, withSlides) {
-    const s2 = sections()[k2];
-    if (!s2) return;
-    if (withSlides && !window.confirm(
-      `Remove section \u201C${s2.name}\u201D and its ${s2.count} slide${s2.count === 1 ? "" : "s"} from the deck? (Their files stay on disk.)`
-    )) {
-      return;
-    }
-    await sectionEdit({ op: "section-remove", section: k2, slides: withSlides });
-  }
-  function selectSection(k2) {
-    const indices = sectionSlides(sections(), k2);
-    ed.focus = "sorter";
-    ed.slideSelection.clear();
-    if (!indices.length) {
-      emit("slide-selection");
-      return;
-    }
-    for (const i2 of indices) ed.slideSelection.add(i2);
-    if (!indices.includes(ed.current)) gotoSlide(indices[0]);
-    emit("slide-selection");
-  }
-  function askName(title2, initial) {
-    return new Promise((resolve) => {
-      let answer = null;
-      const input = h("input", {
-        type: "text",
-        class: "section-name-input",
-        value: initial,
-        "aria-label": "Section name"
-      });
-      const ok = h(
-        "button",
-        { type: "submit", class: "pbtn primary" },
-        "Add"
-      );
-      const form = h(
-        "form",
-        { class: "section-name-form" },
-        input,
-        ok
-      );
-      form.addEventListener("submit", (e2) => {
-        e2.preventDefault();
-        const name2 = input.value.trim();
-        if (!name2) return;
-        answer = name2;
-        closeDialog();
-      });
-      openDialog(title2, form, { onClose: () => resolve(answer) });
-      input.focus();
-      input.select();
-    });
-  }
-  function startRename(k2, nameEl) {
-    const s2 = sections()[k2];
-    if (!s2 || !ed.model?.deckEditable) return;
-    const input = h("input", {
-      type: "text",
-      class: "section-rename",
-      value: s2.name,
-      "aria-label": "Section name"
-    });
-    let done = false;
-    const finish2 = (commit) => {
-      if (done) return;
-      done = true;
-      const name2 = input.value.trim();
-      if (commit && name2 && name2 !== s2.name) {
-        void sectionEdit({ op: "section-rename", section: k2, name: name2 });
-      } else {
-        emit("sections");
-      }
-    };
-    input.addEventListener("keydown", (e2) => {
-      e2.stopPropagation();
-      if (e2.key === "Enter") {
-        e2.preventDefault();
-        finish2(true);
-      } else if (e2.key === "Escape") {
-        e2.preventDefault();
-        finish2(false);
-      }
-    });
-    input.addEventListener("blur", () => finish2(true));
-    for (const ev of ["click", "dblclick", "pointerdown", "dragstart"]) {
-      input.addEventListener(ev, (e2) => e2.stopPropagation());
-    }
-    nameEl.replaceChildren(input);
-    input.focus();
-    input.select();
-  }
-  var renameNext = null;
-  function openSectionMenu(x2, y2, k2) {
-    const menu6 = document.getElementById("context-menu");
-    const s2 = sections()[k2];
-    if (!s2) return;
-    const editable = !!ed.model?.deckEditable;
-    const n3 = sections().length;
-    menu6.replaceChildren();
-    menu6.append(
-      menuItem(
-        "Rename\u2026",
-        () => {
-          renameNext = k2;
-          emit("sections");
-        },
-        !editable
-      ),
-      menuItem(
-        "Select all slides in section",
-        () => selectSection(k2),
-        s2.count === 0
-      ),
-      menuItem(
-        "Move section up",
-        () => void moveSectionToGap(k2, k2 - 1),
-        !editable || k2 === 0
-      ),
-      menuItem(
-        "Move section down",
-        () => void moveSectionToGap(k2, k2 + 2),
-        !editable || k2 === n3 - 1
-      ),
-      menuItem(
-        isCollapsed(k2) ? "Expand" : "Collapse",
-        () => setCollapsed(k2, !isCollapsed(k2))
-      ),
-      menuItem("Collapse all", () => setAllCollapsed(true)),
-      menuItem("Expand all", () => setAllCollapsed(false)),
-      menuItem(
-        "Remove section",
-        () => void removeSection(k2, false),
-        !editable
-      ),
-      menuItem(
-        "Remove section and its slides\u2026",
-        () => void removeSection(k2, true),
-        !editable || s2.count === 0
-      )
-    );
-    showMenu(x2, y2);
-  }
-  function sectionHeader(k2, view3, onClick) {
-    const s2 = sections()[k2];
-    const collapsed2 = isCollapsed(k2);
-    const editable = !!ed.model?.deckEditable;
-    const name2 = h("span", { class: "section-name" }, s2.name);
-    const caret = h(
-      "button",
-      {
-        type: "button",
-        class: "section-caret",
-        title: collapsed2 ? "Expand section" : "Collapse section",
-        "aria-expanded": collapsed2 ? "false" : "true",
-        onclick: (e2) => {
-          e2.stopPropagation();
-          setCollapsed(k2, !collapsed2);
-        }
-      },
-      icon("down", 14)
-    );
-    const head = h(
-      "div",
-      {
-        class: `section-head ${view3}-section-head${collapsed2 ? " collapsed" : ""}`,
-        draggable: editable ? "true" : null,
-        "data-section": k2,
-        title: `${s2.name}: ${s2.count} slide${s2.count === 1 ? "" : "s"}${editable ? " (drag to move the section, double-click to rename)" : ""}`
-      },
-      caret,
-      name2,
-      h(
-        "span",
-        { class: "section-count" },
-        s2.count === 0 ? "empty" : String(s2.count)
-      )
-    );
-    name2.addEventListener("dblclick", (e2) => {
-      e2.stopPropagation();
-      startRename(k2, name2);
-    });
-    head.addEventListener("click", (e2) => onClick?.(e2));
-    head.addEventListener("contextmenu", (e2) => {
-      e2.preventDefault();
-      e2.stopPropagation();
-      openSectionMenu(e2.clientX, e2.clientY, k2);
-    });
-    if (renameNext === k2) {
-      renameNext = null;
-      queueMicrotask(() => startRename(k2, name2));
-    }
-    return head;
-  }
-
-  // src/ts/editor/sorter.ts
-  var list = document.getElementById("sorter-list");
-  var addBtn = document.getElementById("sorter-add");
-  var menu = document.getElementById("context-menu");
-  function pickSlide(i2, e2) {
-    ed.focus = "sorter";
-    if (e2.shiftKey) {
-      const [a2, b2] = [Math.min(ed.current, i2), Math.max(ed.current, i2)];
-      for (let k2 = a2; k2 <= b2; k2++) ed.slideSelection.add(k2);
-      emit("slide-selection");
-      return;
-    }
-    if (e2.ctrlKey || e2.metaKey) {
-      if (!ed.slideSelection.size) ed.slideSelection.add(ed.current);
-      if (ed.slideSelection.has(i2)) ed.slideSelection.delete(i2);
-      else ed.slideSelection.add(i2);
-      emit("slide-selection");
-      if (ed.slideSelection.has(i2)) gotoSlide(i2);
-      return;
-    }
-    ed.slideSelection.clear();
-    if (i2 === ed.current) emit("slide-selection");
-    else gotoSlide(i2);
-  }
-  async function deleteSlides() {
-    const indices = [...ed.slideSelection].sort((a2, b2) => a2 - b2);
-    if (indices.length <= 1) {
-      await deleteSlide(indices[0] ?? ed.current);
-      return;
-    }
-    if (!window.confirm(
-      `Delete ${indices.length} slides from the deck? (Their files stay on disk.)`
-    )) {
-      return;
-    }
-    const result = await edit({
-      action: "slide",
-      op: "delete",
-      slides: indices
-    });
-    if (result.ok) {
-      ed.slideSelection.clear();
-      ed.current = Math.max(0, indices[0] - 1);
-      emit("slide");
-    }
-  }
-  function gotoSlide(deckIndex) {
-    const n3 = ed.model?.slides.length ?? 0;
-    if (!n3) return;
-    const i2 = Math.max(0, Math.min(n3 - 1, deckIndex));
-    if (i2 === ed.current) return;
-    ed.current = i2;
-    ed.selection = [];
-    ed.scope = null;
-    emit("slide");
-  }
-  var Thumbs = class {
-    cache = /* @__PURE__ */ new Map();
-    used = /* @__PURE__ */ new Map();
-    begin() {
-      this.used = /* @__PURE__ */ new Map();
-    }
-    end() {
-      this.cache = this.used;
-    }
-    thumb(slide) {
-      const box = h("div", { class: "thumb" });
-      if (slide.visibleIndex == null) {
-        box.append(h("div", { class: "thumb-hidden" }, icon("eyeOff", 18)));
-        return box;
-      }
-      const data = ed.slides[slide.visibleIndex];
-      if (!data) return box;
-      const cached = this.cache.get(data.svg);
-      if (cached && !this.used.has(data.svg)) {
-        this.used.set(data.svg, cached);
-        return cached;
-      }
-      this.used.set(data.svg, box);
-      box.innerHTML = data.svg;
-      const svg = box.querySelector("svg");
-      if (svg) {
-        const vb = parseViewBox(svg.getAttribute("viewBox"));
-        svg.setAttribute("width", "100%");
-        svg.setAttribute("height", "100%");
-        svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-        svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
-        box.style.aspectRatio = `${vb.w} / ${vb.h}`;
-        svg.querySelectorAll(".anim-pending").forEach((el2) => {
-          el2.classList.remove("anim-pending");
-        });
-        svg.querySelectorAll("video").forEach((v2) => {
-          v2.removeAttribute("autoplay");
-        });
-      }
-      return box;
-    }
-  };
-  var thumbs = new Thumbs();
-  var dragging = { now: null };
-  function dragSlides(i2) {
-    if (ed.slideSelection.size > 1 && ed.slideSelection.has(i2)) {
-      return [...ed.slideSelection].sort((a2, b2) => a2 - b2);
-    }
-    return [i2];
-  }
-  var DROP_MARKS = ["drop-before", "drop-after", "drop-into"];
-  function clearDropMarks(root2) {
-    root2.querySelectorAll(".drop-before, .drop-after, .drop-into").forEach(
-      (el2) => {
-        el2.classList.remove(...DROP_MARKS);
-      }
-    );
-  }
-  function markGap(root2, gap, last) {
-    clearDropMarks(root2);
-    const head = root2.querySelector(`.section-head[data-section="${gap}"]`);
-    if (head) head.classList.add("drop-before");
-    else last?.classList.add("drop-after");
-  }
-  function headerGap(head, k2, e2) {
-    const r2 = head.getBoundingClientRect();
-    const lower = e2.clientY > r2.top + r2.height / 2;
-    const s2 = sections()[k2];
-    return lower && (isCollapsed(k2) || !s2?.count) ? k2 + 1 : k2;
-  }
-  function dropAtEnd(drag) {
-    const all = sections();
-    if (drag.kind === "section") {
-      void moveSectionToGap(drag.section, all.length);
-      return;
-    }
-    const n3 = ed.model?.slides.length ?? 0;
-    void moveSlidesTo(drag.slides, n3, all.length ? all.length - 1 : null);
-  }
-  function slideItem(slide, i2) {
-    const item = h(
-      "div",
-      {
-        class: `sorter-item${i2 === ed.current ? " active" : ""}${ed.slideSelection.has(i2) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
-        draggable: ed.model?.deckEditable ? "true" : null,
-        title: slide.title ?? slide.id ?? slide.src,
-        "data-index": i2
-      },
-      h("span", { class: "sorter-num" }, String(i2 + 1)),
-      thumbs.thumb(slide)
-    );
-    item.addEventListener("click", (e2) => pickSlide(i2, e2));
-    item.addEventListener("contextmenu", (e2) => {
-      e2.preventDefault();
-      ed.focus = "sorter";
-      if (!ed.slideSelection.has(i2)) {
-        ed.slideSelection.clear();
-        gotoSlide(i2);
-      }
-      openSlideMenu(e2.clientX, e2.clientY, i2);
-    });
-    item.addEventListener("dragstart", (e2) => {
-      dragging.now = { kind: "slides", slides: dragSlides(i2) };
-      e2.dataTransfer?.setData("text/plain", String(i2));
-      item.classList.add("dragging");
-    });
-    item.addEventListener("dragend", () => {
-      dragging.now = null;
-      item.classList.remove("dragging");
-      clearDropMarks(list);
-    });
-    item.addEventListener("dragover", (e2) => {
-      const drag = dragging.now;
-      if (!drag) return;
-      e2.preventDefault();
-      e2.stopPropagation();
-      if (drag.kind === "section") {
-        const gap = sectionGapAtSlide(sections(), i2);
-        markGap(list, gap, list.lastElementChild);
-        return;
-      }
-      const r2 = item.getBoundingClientRect();
-      clearDropMarks(list);
-      item.classList.add(
-        e2.clientY > r2.top + r2.height / 2 ? "drop-after" : "drop-before"
-      );
-    });
-    item.addEventListener("drop", (e2) => {
-      e2.preventDefault();
-      e2.stopPropagation();
-      const drag = dragging.now;
-      clearDropMarks(list);
-      if (!drag) return;
-      if (drag.kind === "section") {
-        const gap = sectionGapAtSlide(sections(), i2);
-        void moveSectionToGap(drag.section, gap);
-        return;
-      }
-      const r2 = item.getBoundingClientRect();
-      const after = e2.clientY > r2.top + r2.height / 2;
-      const target = dropOnSlide(sections(), i2, after);
-      void moveSlidesTo(drag.slides, target.insertAt, target.section);
-    });
-    return item;
-  }
-  function headerItem(k2) {
-    const head = sectionHeader(k2, "sorter", (e2) => {
-      if (e2.ctrlKey || e2.metaKey || e2.shiftKey) selectSection(k2);
-    });
-    head.addEventListener("dragstart", (e2) => {
-      dragging.now = { kind: "section", section: k2 };
-      e2.dataTransfer?.setData("text/plain", `section:${k2}`);
-      head.classList.add("dragging");
-    });
-    head.addEventListener("dragend", () => {
-      dragging.now = null;
-      head.classList.remove("dragging");
-      clearDropMarks(list);
-    });
-    head.addEventListener("dragover", (e2) => {
-      const drag = dragging.now;
-      if (!drag) return;
-      e2.preventDefault();
-      e2.stopPropagation();
-      if (drag.kind === "section") {
-        markGap(list, headerGap(head, k2, e2), list.lastElementChild);
-        return;
-      }
-      clearDropMarks(list);
-      head.classList.add("drop-into");
-    });
-    head.addEventListener("drop", (e2) => {
-      e2.preventDefault();
-      e2.stopPropagation();
-      const drag = dragging.now;
-      clearDropMarks(list);
-      if (!drag) return;
-      if (drag.kind === "section") {
-        void moveSectionToGap(drag.section, headerGap(head, k2, e2));
-        return;
-      }
-      const target = dropOnHeader(sections(), k2);
-      void moveSlidesTo(drag.slides, target.insertAt, target.section);
-    });
-    return head;
-  }
-  function renderSorter() {
-    clear(list);
-    thumbs.begin();
-    const slides = ed.model?.slides ?? [];
-    for (const row4 of sorterRows(slides.length, sections(), isCollapsed)) {
-      list.append(
-        row4.kind === "header" ? headerItem(row4.section) : slideItem(slides[row4.index], row4.index)
-      );
-    }
-    thumbs.end();
-    list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
-  }
-  function initListDrop() {
-    list.addEventListener("dragover", (e2) => {
-      const drag = dragging.now;
-      if (!drag || e2.target !== list) return;
-      e2.preventDefault();
-      if (drag.kind === "section") {
-        markGap(list, sections().length, list.lastElementChild);
-      } else {
-        clearDropMarks(list);
-        list.lastElementChild?.classList.add("drop-after");
-      }
-    });
-    list.addEventListener("drop", (e2) => {
-      const drag = dragging.now;
-      if (!drag || e2.target !== list) return;
-      e2.preventDefault();
-      clearDropMarks(list);
-      dropAtEnd(drag);
-    });
-  }
-  function followSelect(i2) {
-    pendingSelect = i2;
-  }
-  async function newSlide(layout, after = ed.current) {
-    const result = await edit({
-      action: "slide",
-      op: "new",
-      after,
-      layout,
-      name: "slide"
-    });
-    if (result.ok && result.select != null) pendingSelect = result.select;
-  }
-  async function newSlideLike(i2 = ed.current) {
-    const result = await edit({
-      action: "slide",
-      op: "new",
-      after: i2,
-      like: i2,
-      name: "slide"
-    });
-    if (result.ok && result.select != null) pendingSelect = result.select;
-  }
-  async function duplicateSlide(i2 = ed.current) {
-    const result = await edit({ action: "slide", op: "duplicate", slide: i2 });
-    if (result.ok && result.select != null) pendingSelect = result.select;
-  }
-  async function deleteSlide(i2 = ed.current) {
-    const slide = ed.model?.slides[i2];
-    if (!slide) return;
-    const name2 = slide.title ?? slide.id ?? `slide ${i2 + 1}`;
-    if (!window.confirm(
-      `Delete \u201C${name2}\u201D from the deck? (Its files stay on disk.)`
-    )) {
-      return;
-    }
-    const result = await edit({ action: "slide", op: "delete", slide: i2 });
-    if (result.ok) {
-      ed.current = Math.max(0, i2 - 1);
-      emit("slide");
-    }
-  }
-  async function toggleHidden(i2 = ed.current) {
-    const slide = ed.model?.slides[i2];
-    if (!slide) return;
-    await edit({
-      action: "slide",
-      op: "hide",
-      slide: i2,
-      hidden: slide.visible
-    });
-  }
-  var pendingSelect = null;
-  function closeMenu() {
-    menu.classList.remove("open");
-    clear(menu);
-  }
-  function menuItem(label4, fn, disabled = false) {
-    return h(
-      "button",
-      {
-        type: "button",
-        class: "menu-item",
-        disabled,
-        onclick: () => {
-          closeMenu();
-          fn();
-        }
-      },
-      label4
-    );
-  }
-  function openSlideMenu(x2, y2, i2) {
-    const slide = ed.model?.slides[i2];
-    const editable = !!ed.model?.deckEditable;
-    const many = ed.slideSelection.size > 1;
-    clear(menu);
-    menu.append(
-      menuItem(
-        many ? `Copy ${ed.slideSelection.size} slides` : "Copy",
-        () => void copySlides()
-      )
-    );
-    menu.append(
-      menuItem(
-        many ? "Cut slides" : "Cut",
-        () => void cutSlides(),
-        !editable
-      )
-    );
-    menu.append(
-      menuItem(
-        "Paste after this slide",
-        () => void pasteFromClipboard(),
-        !editable
-      )
-    );
-    if (many) {
-      menu.append(
-        menuItem(
-          `Delete ${ed.slideSelection.size} slides`,
-          () => void deleteSlides(),
-          !editable
-        )
-      );
-      showMenu(x2, y2);
-      return;
-    }
-    menu.append(
-      menuItem(
-        "New slide after\u2026",
-        () => void openGallery({ mode: "insert", after: i2 }),
-        !editable
-      )
-    );
-    menu.append(menuItem("Duplicate", () => void duplicateSlide(i2), !editable));
-    menu.append(
-      menuItem(
-        slide?.visible ? "Hide (skip in presentation)" : "Show",
-        () => void toggleHidden(i2),
-        !editable
-      )
-    );
-    menu.append(
-      menuItem("Rename files\u2026", () => renameSlideFiles(i2), !editable)
-    );
-    menu.append(menuItem("Delete", () => void deleteSlide(i2), !editable));
-    menu.append(
-      menuItem("Add section here\u2026", () => void addSectionAt(i2), !editable)
-    );
-    showMenu(x2, y2);
-  }
-  function showMenu(x2, y2) {
-    menu.classList.add("open");
-    const r2 = menu.getBoundingClientRect();
-    menu.style.left = `${Math.min(x2, window.innerWidth - r2.width - 8)}px`;
-    menu.style.top = `${Math.min(y2, window.innerHeight - r2.height - 8)}px`;
-  }
-  function initSorter() {
-    on("model", () => {
-      followPastedSlides();
-      const n3 = ed.model?.slides.length ?? 0;
-      if (pendingSelect != null && pendingSelect < n3) {
-        ed.current = pendingSelect;
-        pendingSelect = null;
-        emit("slide");
-      }
-      if (ed.current >= n3) ed.current = Math.max(0, n3 - 1);
-      renderSorter();
-    });
-    on("slide", () => {
-      revealCurrent();
-      renderSorter();
-    });
-    on("slide-selection", renderSorter);
-    on("sections", renderSorter);
-    initListDrop();
-    addBtn.addEventListener("click", () => {
-      if (!ed.model?.deckEditable) {
-        toast(
-          "deck.py builds its slides in code; add slides there",
-          "error"
-        );
-        return;
-      }
-      void openGallery({ mode: "insert", after: ed.current });
-    });
-    document.addEventListener("pointerdown", (e2) => {
-      if (!menu.contains(e2.target)) closeMenu();
-    });
-    document.addEventListener("keydown", (e2) => {
-      if (e2.key === "Escape") closeMenu();
-    });
-  }
-
-  // src/ts/editor/clipboard.ts
-  var PREFIX = "inkflow-clipboard:";
-  var lastCopied = null;
-  async function put(payload) {
-    const text = PREFIX + JSON.stringify(payload);
-    lastCopied = text;
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      toast("Copied for this tab only: the browser blocked the clipboard");
-    }
-  }
-  function selectedSlides() {
-    const picked = [...ed.slideSelection].sort((a2, b2) => a2 - b2);
-    return picked.length ? picked : [ed.current];
-  }
-  async function copySlides(indices = selectedSlides()) {
-    const result = await request({ action: "copy-slides", slides: indices });
-    if (!result.ok) {
-      toast(result.error ?? "could not copy", "error");
-      return false;
-    }
-    const bundle = result.bundle;
-    await put(bundle);
-    const dropped = bundle.dropped ?? [];
-    const n3 = indices.length;
-    toast(
-      `Copied ${n3} slide${n3 > 1 ? "s" : ""}` + (dropped.length ? `; left out ${dropped.join(", ")}` : "")
-    );
-    return true;
-  }
-  async function cutSlides() {
-    const indices = selectedSlides();
-    if (!await copySlides(indices)) return;
-    const result = await edit({
-      action: "slide",
-      op: "delete",
-      slides: indices
-    });
-    if (result.ok) {
-      ed.slideSelection.clear();
-      ed.current = Math.max(0, Math.min(...indices) - 1);
-      emit("slide");
-    }
-  }
-  function imageRefs(xml) {
-    const refs = /* @__PURE__ */ new Set();
-    for (const m2 of xml.matchAll(
-      /<image\b[^>]*?\b(?:xlink:)?href="([^"]*)"/g
-    )) {
-      if (!/^(data:|https?:|#|\/)/.test(m2[1])) refs.add(m2[1]);
-    }
-    return [...refs];
-  }
-  async function copyObjects(cut2 = false) {
-    const sels = ed.selection.filter((s2) => s2.el.localName !== "foreignObject");
-    if (!sels.length) return false;
-    const fragments = sels.map((s2) => cleanForPaste(s2.el));
-    const refs = fragments.flatMap(imageRefs);
-    let files2 = {};
-    if (refs.length) {
-      const result = await request({ action: "copy-assets", refs });
-      files2 = result.files ?? {};
-    }
-    await put({
-      type: "inkflow-objects",
-      version: 1,
-      project: ed.model?.projectDir,
-      sourceFile: currentSlide()?.sources?.[sels[0].key]?.path ?? "",
-      fragments,
-      files: files2
-    });
-    const n3 = sels.length;
-    toast(`${cut2 ? "Cut" : "Copied"} ${n3} object${n3 > 1 ? "s" : ""}`);
-    if (cut2) emit("delete");
-    return true;
-  }
-  function copy() {
-    if (ed.selection.length) void copyObjects();
-    else void copySlides();
-  }
-  function cut() {
-    if (ed.selection.some((s2) => canTransform(s2.el))) void copyObjects(true);
-    else void cutSlides();
-  }
-  async function pasteSlides(bundle) {
-    const after = ed.current;
-    const result = await edit({ action: "paste-slides", after, bundle });
-    if (!result.ok) return;
-    const n3 = result.pasted;
-    toast(`Pasted ${n3} slide${n3 > 1 ? "s" : ""}`, "ok");
-    ed.slideSelection.clear();
-    afterSlides = after + 1;
-  }
-  var afterSlides = null;
-  function followPastedSlides() {
-    if (afterSlides != null && afterSlides < (ed.model?.slides.length ?? 0)) {
-      const target = afterSlides;
-      afterSlides = null;
-      gotoSlide(target);
-    }
-  }
-  async function pasteObjects(bundle) {
-    if (!await ensureOwnDrawing()) return;
-    const src = ownSource();
-    if (!src) return;
-    const sameFile = bundle.sourceFile === src.path;
-    clearSelection();
-    const result = await edit({
-      action: "paste-objects",
-      file: src.path,
-      hash: src.hash,
-      parent: insertParent().loc,
-      fragments: bundle.fragments,
-      files: bundle.files,
-      // Copies on the same slide are offset so they do not hide the original.
-      offset: sameFile ? [24, 24] : null
-    });
-    if (result.ok && result.ids) afterRender.ids = Object.values(result.ids);
-  }
-  async function pasteText(text) {
-    const raw = text.startsWith(PREFIX) ? text : lastCopied;
-    if (!raw?.startsWith(PREFIX)) return;
-    let bundle;
-    try {
-      bundle = JSON.parse(raw.slice(PREFIX.length));
-    } catch {
-      toast("The clipboard holds damaged inkflow data", "error");
-      return;
-    }
-    if (bundle.type === "inkflow-slides") await pasteSlides(bundle);
-    else if (bundle.type === "inkflow-objects") await pasteObjects(bundle);
-  }
-  async function pasteFromClipboard() {
-    let text = "";
-    try {
-      text = await navigator.clipboard.readText();
-    } catch {
-      text = lastCopied ?? "";
-    }
-    await pasteText(text);
-  }
-
-  // src/ts/editor/pdfpages.ts
-  var THUMBS = 24;
-  function sourceRef(image) {
-    return image.getAttribute("data-inkflow-pdf") ?? assetRef(
-      image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? ""
-    );
-  }
-  function fileName(path) {
-    return path.replace(/#.*$/, "").split(/[\\/]/).pop() ?? path;
-  }
-  async function pageUrl(path, page) {
-    const res = await request({ action: "pdf-page", path, page });
-    if (!res.ok) {
-      toast(res.error ?? `cannot show page ${page}`, "error");
-      return null;
-    }
-    return String(res.url);
-  }
-  async function choosePage(path, current2 = 1) {
-    const info4 = await request({ action: "pdf-pages", path });
-    if (!info4.ok) {
-      toast(info4.error ?? "cannot read the PDF", "error");
-      return null;
-    }
-    const name2 = fileName(path);
-    if (info4.ignored) {
-      toast(
-        `${name2} is ignored by git (see .gitignore): add it to the repository with "git add -f" to keep it`
-      );
-    }
-    if (!info4.converter) {
-      toast(`${name2} shows as a placeholder: ${String(info4.hint)}`, "error");
-      return { page: current2, url: null };
-    }
-    const pages = typeof info4.pages === "number" ? info4.pages : null;
-    if (pages === 1) {
-      const url = await pageUrl(path, 1);
-      return url ? { page: 1, url } : null;
-    }
-    return pageDialog(path, name2, pages, current2);
-  }
-  function pageDialog(path, name2, pages, current2) {
-    return new Promise((resolve) => {
-      let done = false;
-      const finish2 = (choice) => {
-        if (done) return;
-        done = true;
-        resolve(choice);
-        closeDialog();
-      };
-      const grid = h("div", { class: "pdf-pages" });
-      const urls = /* @__PURE__ */ new Map();
-      const pick2 = async (page) => {
-        const url = urls.get(page) ?? await pageUrl(path, page);
-        if (url) finish2({ page, url });
-      };
-      const count = pages ?? THUMBS;
-      for (let page = 1; page <= Math.min(count, THUMBS); page++) {
-        grid.append(
-          h(
-            "button",
-            {
-              type: "button",
-              class: `pdf-page${page === current2 ? " current" : ""}`,
-              title: `Page ${page}`,
-              "data-page": page,
-              onclick: () => void pick2(page)
-            },
-            h("span", { class: "pdf-thumb" }),
-            h("span", {}, `Page ${page}`)
-          )
-        );
-      }
-      const field = h("input", {
-        type: "number",
-        min: 1,
-        max: pages ?? null,
-        step: 1,
-        value: String(current2)
-      });
-      field.addEventListener("keydown", (e2) => {
-        if (e2.key === "Enter") void pick2(Math.max(1, Number(field.value)));
-      });
-      const body2 = h(
-        "div",
-        {},
-        grid,
-        h(
-          "div",
-          { class: "pdf-page-field" },
-          h("label", {}, "Page ", field, pages ? ` of ${pages}` : ""),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn on",
-              onclick: () => void pick2(Math.max(1, Number(field.value)))
-            },
-            "Use this page"
-          )
-        )
-      );
-      openDialog(`Which page of ${name2}?`, body2, {
-        wide: true,
-        hint: "A figure from a PDF shows one page",
-        onClose: () => finish2(null)
-      });
-      void (async () => {
-        for (const card of grid.querySelectorAll(
-          ".pdf-page"
-        )) {
-          if (done) return;
-          const page = Number(card.dataset.page);
-          const res = await request({ action: "pdf-page", path, page });
-          if (!res.ok) {
-            for (const rest of grid.querySelectorAll(
-              ".pdf-page"
-            )) {
-              if (Number(rest.dataset.page) >= page) rest.remove();
-            }
-            return;
-          }
-          const url = String(res.url);
-          urls.set(page, url);
-          card.querySelector(".pdf-thumb")?.append(
-            h("img", { src: `/${url}`, alt: `Page ${page}` })
-          );
-        }
-      })();
-    });
-  }
-
-  // src/ts/editor/folderpicker.ts
-  function megabytes(bytes) {
-    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-    if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
-    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  }
-  function folderPicker(start, onChange, files2) {
-    let folder = null;
-    let places = { favorites: [], default: null };
-    let filter = "";
-    let typing = 0;
-    const path = h("input", {
-      type: "text",
-      class: "folder-path",
-      spellcheck: "false",
-      autocomplete: "off",
-      title: "Type a path: Tab completes, Enter opens, \u2193 goes to the list"
-    });
-    const list4 = h("div", { class: "folder-list", role: "listbox" });
-    const where = h("div", { class: "hint folder-where" });
-    const placesRow = h("div", { class: "folder-places" });
-    const star = h("button", {
-      type: "button",
-      class: "pbtn folder-star"
-    });
-    const system = h(
-      "button",
-      {
-        type: "button",
-        class: "pbtn",
-        hidden: true,
-        title: "Choose with this computer's own dialog"
-      },
-      "Browse\u2026"
-    );
-    const entries = () => [...list4.querySelectorAll("button.folder")].filter(
-      (b2) => !b2.hidden
-    );
-    async function go(target, opts2 = {}) {
-      const res = await request({
-        action: "browse",
-        path: target,
-        files: files2?.kind
-      });
-      if (!res.ok) {
-        if (!opts2.quiet) {
-          where.textContent = res.error ?? "Cannot open that folder";
-        }
-        return false;
-      }
-      folder = res;
-      places = folder.places ?? places;
-      system.hidden = !folder.systemPicker;
-      path.value = withSep(folder.path);
-      filter = "";
-      renderList2();
-      renderPlaces();
-      where.textContent = folder.repo ? `In the git repository at ${folder.repo}` : "Not in a git repository";
-      onChange(folder);
-      if (opts2.focus === "list") (entries()[0] ?? path).focus();
-      else if (opts2.focus === "path") path.focus();
-      return true;
-    }
-    function entry(label4, kind, onOpen, extra) {
-      const b2 = h(
-        "button",
-        {
-          type: "button",
-          class: `folder ${kind === "file" ? "file" : kind === "up" ? "up" : ""}`,
-          role: "option",
-          onclick: onOpen
-        },
-        label4,
-        extra ?? null
-      );
-      return b2;
-    }
-    function renderList2() {
-      clear(list4);
-      const f2 = folder;
-      if (!f2) return;
-      if (f2.parent && !filter) {
-        list4.append(
-          entry("\u2191 ..", "up", () => {
-            if (f2.parent) void go(f2.parent, { focus: "list" });
-          })
-        );
-      }
-      const dirs = startingWith(f2.dirs, filter);
-      for (const name2 of dirs) {
-        list4.append(
-          entry(`\u{1F4C1} ${name2}`, "dir", () => {
-            void go(joinPath(f2.path, name2), { focus: "list" });
-          })
-        );
-      }
-      const shown2 = startingWith(
-        (f2.files ?? []).map((x2) => x2.name),
-        filter
-      );
-      for (const file of f2.files ?? []) {
-        if (!shown2.includes(file.name)) continue;
-        list4.append(
-          entry(
-            `\u{1F39E} ${file.name}`,
-            "file",
-            () => files2?.onFile(joinPath(f2.path, file.name)),
-            h(
-              "span",
-              { class: "hint file-size" },
-              megabytes(file.size)
-            )
-          )
-        );
-      }
-      if (!dirs.length && !shown2.length) {
-        list4.append(
-          h(
-            "p",
-            { class: "hint folder-empty" },
-            filter ? `Nothing here starts with \u201C${filter}\u201D.` : "No folders here."
-          )
-        );
-      }
-      path.toggleAttribute("data-own-escape", !!filter);
-    }
-    async function setPlaces(op, target) {
-      const res = await request({ action: "places-set", op, path: target });
-      if (!res.ok) {
-        toast(res.error ?? "Cannot save that", "error");
-        return;
-      }
-      places = res.places;
-      renderPlaces();
-    }
-    function chip(label4, target, remove) {
-      return h(
-        "span",
-        { class: "place" },
-        h(
-          "button",
-          {
-            type: "button",
-            class: "place-go",
-            title: target,
-            onclick: () => void go(target, { focus: "list" })
-          },
-          label4
-        ),
-        remove ? h(
-          "button",
-          {
-            type: "button",
-            class: "place-remove",
-            title: "Remove from favourites",
-            onclick: remove
-          },
-          "\xD7"
-        ) : null
-      );
-    }
-    function renderPlaces() {
-      clear(placesRow);
-      const here = folder?.path ?? "";
-      const isFavorite = places.favorites.some((p2) => samePath(p2, here));
-      star.textContent = isFavorite ? "\u2605" : "\u2606";
-      star.title = isFavorite ? "Remove this folder from your favourites" : "Add this folder to your favourites";
-      star.classList.toggle("on", isFavorite);
-      if (places.default) {
-        placesRow.append(
-          chip(`\u2302 ${baseName(places.default)} (default)`, places.default)
-        );
-      }
-      for (const p2 of places.favorites) {
-        placesRow.append(
-          chip(`\u2605 ${baseName(p2)}`, p2, () => void setPlaces("remove", p2))
-        );
-      }
-      const isDefault = !!places.default && samePath(places.default, here);
-      placesRow.append(
-        h(
-          "button",
-          {
-            type: "button",
-            class: "place-default",
-            title: isDefault ? "New decks go here and Open deck starts here; click to forget it" : "New decks go here and Open deck starts here",
-            onclick: () => void setPlaces("default", isDefault ? null : here)
-          },
-          isDefault ? "\u2713 Default location" : "Make this the default location"
-        )
-      );
-    }
-    path.addEventListener("input", () => {
-      window.clearTimeout(typing);
-      const { dir, prefix } = splitTyped(path.value);
-      if (folder && samePath(dir, folder.path)) {
-        filter = prefix;
-        renderList2();
-      } else if (dir && !prefix) {
-        typing = window.setTimeout(
-          () => void go(dir, { quiet: true }),
-          250
-        );
-      }
-    });
-    async function complete() {
-      const { dir, prefix } = splitTyped(path.value);
-      if (!folder || !samePath(dir, folder.path)) {
-        if (!dir || !await go(dir, { quiet: true })) return;
-        path.value = withSep(folder.path) + prefix;
-      }
-      const f2 = folder;
-      const matches = startingWith(f2.dirs, prefix);
-      if (matches.length === 1) {
-        await go(joinPath(f2.path, matches[0]));
-        return;
-      }
-      const common = commonPrefix(matches);
-      filter = common.length > prefix.length ? common : prefix;
-      path.value = withSep(f2.path) + filter;
-      renderList2();
-    }
-    path.addEventListener("keydown", (e2) => {
-      if (e2.key === "Tab" && !e2.shiftKey && !e2.ctrlKey && !e2.altKey) {
-        e2.preventDefault();
-        void complete();
-      } else if (e2.key === "Enter") {
-        e2.preventDefault();
-        const { dir, prefix } = splitTyped(path.value);
-        const f2 = folder;
-        if (f2 && prefix && samePath(dir, f2.path)) {
-          const exact = f2.dirs.find(
-            (d2) => d2.toLowerCase() === prefix.toLowerCase()
-          );
-          const only = startingWith(f2.dirs, prefix);
-          const into = exact ?? (only.length === 1 ? only[0] : null);
-          if (into) {
-            void go(joinPath(f2.path, into));
-            return;
-          }
-        }
-        void go(path.value);
-      } else if (e2.key === "ArrowDown") {
-        e2.preventDefault();
-        entries()[0]?.focus();
-      } else if (e2.key === "Escape" && filter && folder) {
-        e2.preventDefault();
-        path.value = withSep(folder.path);
-        filter = "";
-        renderList2();
-      }
-    });
-    list4.addEventListener("keydown", (e2) => {
-      const items = entries();
-      const at3 = items.indexOf(document.activeElement);
-      if (e2.key === "ArrowDown" || e2.key === "ArrowUp") {
-        e2.preventDefault();
-        const next = at3 + (e2.key === "ArrowDown" ? 1 : -1);
-        if (next < 0) path.focus();
-        else items[Math.min(next, items.length - 1)]?.focus();
-      } else if (e2.key === "Backspace") {
-        e2.preventDefault();
-        if (filter) {
-          path.focus();
-          path.value = path.value.slice(0, -1);
-          path.dispatchEvent(new Event("input"));
-        } else if (folder?.parent) {
-          void go(folder.parent, { focus: "list" });
-        }
-      } else if (e2.key.length === 1 && !e2.ctrlKey && !e2.metaKey && !e2.altKey && e2.key !== " ") {
-        e2.preventDefault();
-        path.focus();
-        path.value += e2.key;
-        path.dispatchEvent(new Event("input"));
-      }
-    });
-    star.addEventListener("click", () => {
-      const here = folder?.path;
-      if (!here) return;
-      const isFavorite = places.favorites.some((p2) => samePath(p2, here));
-      void setPlaces(isFavorite ? "remove" : "add", here);
-    });
-    system.addEventListener("click", async () => {
-      system.disabled = true;
-      const before = where.textContent;
-      where.textContent = "A dialog is open on this computer (it may be behind the browser)\u2026";
-      const res = await request({
-        action: "system-pick",
-        path: folder?.path ?? start,
-        files: files2?.kind,
-        title: files2 ? "Choose a video" : "Choose a folder"
-      });
-      system.disabled = false;
-      where.textContent = before;
-      if (!res.ok) {
-        toast(res.error ?? "No dialog could be shown", "error");
-        return;
-      }
-      const chosen = typeof res.path === "string" ? res.path : null;
-      if (!chosen) return;
-      if (files2) files2.onFile(chosen);
-      else void go(chosen);
-    });
-    const el2 = h(
-      "div",
-      { class: "folder-picker" },
-      h(
-        "div",
-        { class: "folder-bar" },
-        path,
-        system,
-        h(
-          "button",
-          {
-            type: "button",
-            class: "pbtn",
-            title: "Your home folder",
-            onclick: () => void go(folder?.home ?? "~", { focus: "list" })
-          },
-          "Home"
-        ),
-        star
-      ),
-      placesRow,
-      list4,
-      where
-    );
-    void go(start);
-    return { el: el2, current: () => folder, focus: () => path.focus() };
-  }
-
-  // src/ts/editor/openwith.ts
-  var menu2 = document.getElementById("context-menu");
-  function fileName2(path) {
-    return path.split(/[\\/]/).pop() ?? path;
-  }
-  function inProject(path) {
-    const root2 = ed.model?.projectDir;
-    if (!path.startsWith("/")) return !path.split("/").includes("..");
-    return !!root2 && path.startsWith(`${root2}/`);
-  }
-  async function openMenu(path, x2, y2) {
-    const res = await request({ action: "open-apps", path });
-    if (!res.ok) {
-      toast(res.error ?? "Cannot open this file", "error");
-      return;
-    }
-    const apps = res.apps ?? [];
-    clear(menu2);
-    menu2.append(h("div", { class: "menu-title" }, `Open ${fileName2(path)} in`));
-    for (const app of apps) {
-      menu2.append(menuItem(app.label, () => void open(path, app)));
-    }
-    menu2.append(
-      menuItem("Copy path", () => {
-        const root2 = ed.model?.projectDir ?? "";
-        const full = path.startsWith("/") ? path : `${root2}/${path}`;
-        void navigator.clipboard.writeText(full).then(
-          () => toast(`Copied ${full}`, "ok"),
-          () => toast(full)
-        );
-      })
-    );
-    showMenu(x2, y2);
-  }
-  async function open(path, app) {
-    const res = await request({ action: "open-file", path, app: app.id });
-    if (res.ok) toast(`Opened ${fileName2(path)} in ${app.label}`, "ok");
-    else toast(res.error ?? "Could not open the file", "error");
-  }
-  function openButton(path, label4 = "Open") {
-    if (!path || !inProject(path)) return null;
-    return h(
-      "button",
-      {
-        type: "button",
-        class: "pbtn open-with",
-        title: `Open ${fileName2(path)} in another program`,
-        onclick: (e2) => {
-          const r2 = e2.currentTarget.getBoundingClientRect();
-          void openMenu(path, r2.left, r2.bottom + 4);
-        }
-      },
-      `${label4} \u25BE`
-    );
-  }
-
-  // src/ts/editor/videocheck.ts
-  var LONG = 10 * 60;
-  async function mediaInfo(path) {
-    const res = await request({ action: "media-info", path });
-    if (!res.ok) {
-      toast(res.error ?? "Cannot read the video", "error");
-      return null;
-    }
-    return res;
-  }
-  function name(path) {
-    return path.split(/[\\/]/).pop() ?? path;
-  }
-  function minutes(seconds) {
-    const m2 = Math.floor(seconds / 60);
-    const s2 = Math.round(seconds % 60);
-    return `${m2}:${String(s2).padStart(2, "0")}`;
-  }
-  function describe(info4) {
-    return [
-      info4.vcodec ? `${info4.vcodec.toUpperCase()} in .${info4.container}` : `.${info4.container}`,
-      info4.width && info4.height ? `${info4.width}\xD7${info4.height}` : "",
-      info4.fps ? `${Math.round(info4.fps)} fps` : "",
-      info4.duration ? minutes(info4.duration) : "",
-      megabytes(info4.size)
-    ].filter(Boolean).join(" \xB7 ");
-  }
-  async function checkVideo(ctx) {
-    const data = await mediaInfo(ctx.path);
-    if (!data) return;
-    const issues = collect(ctx, data);
-    if (issues.length) showCheck(ctx, data, issues);
-  }
-  async function openVideoCheck(ctx) {
-    const data = await mediaInfo(ctx.path);
-    if (data) showCheck(ctx, data, collect(ctx, data));
-  }
-  function collect(ctx, data) {
-    const issues = [...data.issues];
-    if (ctx.browser && !ctx.browser.decoded) {
-      issues.unshift({
-        kind: "decode",
-        level: "error",
-        text: "This browser cannot play it: it shows as an empty box here, and in the presenter for anyone with this browser."
-      });
-    }
-    const duration = ctx.browser?.duration;
-    if (data.info.duration == null && duration && duration > LONG) {
-      issues.push({
-        kind: "length",
-        level: "info",
-        text: `It runs ${Math.round(duration / 60)} minutes. Trim start and end in its settings, or cut it in a video editor.`
-      });
-    }
-    return issues;
-  }
-  function showCheck(ctx, data, issues) {
-    const editors = h(
-      "button",
-      {
-        type: "button",
-        class: "pbtn",
-        title: "Trim or cut it in a video editor (LosslessCut, Shotcut\u2026)"
-      },
-      "Open in\u2026"
-    );
-    editors.addEventListener("click", () => {
-      const r2 = editors.getBoundingClientRect();
-      void openMenu(ctx.path, r2.left, r2.bottom + 4);
-    });
-    openDialog(
-      "Video check",
-      h(
-        "div",
-        { class: "git-form" },
-        h(
-          "p",
-          { class: "hint" },
-          `${name(ctx.path)}: ${describe(data.info)}`
-        ),
-        issues.length ? h(
-          "ul",
-          { class: "video-issues" },
-          ...issues.map(
-            (i2) => h("li", { class: `issue-${i2.level}` }, i2.text)
-          )
-        ) : h(
-          "p",
-          {},
-          "Nothing to worry about: it plays in every current browser."
-        ),
-        !data.tools.ffprobe && h(
-          "p",
-          { class: "hint" },
-          "Install ffmpeg (it brings ffprobe) to see the codec, resolution and length here, and to convert in place."
-        ),
-        h(
-          "p",
-          { class: "hint" },
-          "MP4 with H.264 plays in every browser; WebM (VP9) in all but some Safari versions. Convert to one of them to be safe."
-        ),
-        h(
-          "div",
-          { class: "btn-row end" },
-          editors,
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn",
-              onclick: () => closeDialog()
-            },
-            "Keep as is"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn primary",
-              onclick: () => convertDialog(ctx.path, data, {
-                kind: "replace",
-                ctx
-              })
-            },
-            "Convert\u2026"
-          )
-        )
-      ),
-      { wide: true }
-    );
-  }
-  var PRESETS = [
-    { label: "Keep its resolution", height: null },
-    { label: "4K (2160p)", height: 2160 },
-    { label: "Full HD (1080p)", height: 1080 },
-    { label: "HD (720p)", height: 720 },
-    { label: "480p", height: 480 }
-  ];
-  async function convertForInsert(source) {
-    const data = await mediaInfo(source);
-    if (!data) return null;
-    return new Promise(
-      (resolve) => convertDialog(source, data, { kind: "insert", done: resolve })
-    );
-  }
-  function convertDialog(path, data, purpose) {
-    const info4 = data.info;
-    let format = data.remux ? "copy" : "mp4";
-    let height = null;
-    let quality = 2;
-    let audio = !!info4.acodec;
-    const inserting = purpose.kind === "insert";
-    const choices = [
-      ["mp4", "MP4 (H.264)", "Plays in every browser. The safe choice."],
-      [
-        "webm",
-        "WebM (VP9)",
-        "Smaller at the same quality; not in all Safari versions."
-      ]
-    ];
-    if (data.remux) {
-      choices.unshift([
-        "copy",
-        `Keep the video as it is (.${data.remux})`,
-        `Its ${info4.vcodec?.toUpperCase() ?? "video"} already plays in browsers: repackaged without re-encoding, in seconds and with no quality lost.`
-      ]);
-    }
-    const formats = h(
-      "div",
-      { class: "look-list" },
-      ...choices.map(([value, label4, text]) => {
-        const radio = h("input", {
-          type: "radio",
-          name: "video-format",
-          value
-        });
-        radio.checked = value === format;
-        radio.addEventListener("change", () => {
-          format = value;
-          void update();
-        });
-        return h(
-          "label",
-          { class: "look" },
-          radio,
-          h(
-            "span",
-            { class: "look-text" },
-            h("strong", {}, label4),
-            h("span", { class: "hint" }, text)
-          )
-        );
-      })
-    );
-    const size4 = h("select", {});
-    for (const p2 of PRESETS) {
-      const bigger = p2.height && info4.height && p2.height > info4.height;
-      const option2 = h(
-        "option",
-        { value: String(p2.height ?? "") },
-        p2.height ? `${p2.label}${bigger ? " (no larger than the source)" : ""}` : `${p2.label}${info4.width && info4.height ? ` (${info4.width}\xD7${info4.height})` : ""}`
-      );
-      option2.selected = p2.height === height;
-      size4.append(option2);
-    }
-    size4.addEventListener("change", () => {
-      height = size4.value ? Number(size4.value) : null;
-      void update();
-    });
-    const slider = h("input", {
-      type: "range",
-      class: "quality-slider",
-      min: "0",
-      max: String(data.qualities.length - 1),
-      step: "1",
-      value: String(quality)
-    });
-    const qualityLabel = h("span", { class: "hint" });
-    slider.addEventListener("input", () => {
-      quality = Number(slider.value);
-      void update();
-    });
-    const sound = h("input", { type: "checkbox" });
-    sound.checked = audio;
-    sound.disabled = !info4.acodec && data.tools.ffprobe;
-    sound.addEventListener("change", () => {
-      audio = sound.checked;
-      void update();
-    });
-    const estimate = h("p", { class: "video-estimate" });
-    const command = h("textarea", {
-      class: "git-message video-command",
-      rows: "3",
-      readonly: true,
-      spellcheck: "false"
-    });
-    const copy2 = h(
-      "button",
-      {
-        type: "button",
-        class: "pbtn",
-        onclick: () => void navigator.clipboard.writeText(command.value).then(
-          () => toast(
-            "Command copied: run it in the deck's folder",
-            "ok"
-          ),
-          () => command.select()
-        )
-      },
-      "Copy command"
-    );
-    const use = h("input", { type: "checkbox" });
-    use.checked = true;
-    const progress = h("progress", {
-      max: "1",
-      value: "0",
-      hidden: true
-    });
-    const run = h(
-      "button",
-      { type: "button", class: "pbtn primary", disabled: !data.tools.ffmpeg },
-      "Convert now"
-    );
-    let job = null;
-    let finished = false;
-    async function update() {
-      qualityLabel.textContent = data.qualities[quality] ?? "";
-      size4.disabled = slider.disabled = format === "copy";
-      const res = await request({
-        action: "convert-plan",
-        path,
-        format,
-        height,
-        quality,
-        audio
-      });
-      if (!res.ok) {
-        estimate.textContent = res.error ?? "";
-        return;
-      }
-      command.value = String(res.command);
-      const bytes = res.estimate;
-      estimate.textContent = bytes ? `Roughly ${megabytes(bytes)}, from ${megabytes(info4.size)} now (a guess: it depends on the footage).` : "No size estimate without the video's length and resolution (install ffmpeg).";
-      estimate.append(
-        h("br"),
-        h("span", { class: "hint" }, `Saved as ${res.out}`)
-      );
-    }
-    run.addEventListener("click", async () => {
-      if (job) {
-        await request({ action: "convert-cancel", job });
-        return;
-      }
-      const res = await request({
-        action: "convert",
-        path,
-        format,
-        height,
-        quality,
-        audio
-      });
-      if (!res.ok || typeof res.job !== "string") {
-        toast(res.error ?? "Could not start ffmpeg", "error");
-        return;
-      }
-      job = res.job;
-      run.textContent = "Cancel";
-      progress.hidden = false;
-      const poll = async () => {
-        const st = await request({ action: "convert-status", job });
-        progress.value = Number(st.progress ?? 0);
-        if (st.state === "running") {
-          window.setTimeout(() => void poll(), 700);
-          return;
-        }
-        job = null;
-        run.textContent = inserting ? "Convert and insert" : "Convert now";
-        progress.hidden = true;
-        if (st.state !== "done" || typeof st.path !== "string") {
-          toast(
-            `Conversion stopped: ${st.error || "cancelled"}`,
-            "error"
-          );
-          return;
-        }
-        toast(`Converted to ${st.rel}`, "ok");
-        finished = true;
-        const placed = { path: st.path, rel: String(st.rel) };
-        if (purpose.kind === "insert") purpose.done(placed);
-        else if (use.checked) {
-          await edit({
-            action: "zone-media",
-            slide: purpose.ctx.slide,
-            zone: purpose.ctx.zone,
-            src: st.path
-          });
-        }
-        closeDialog();
-      };
-      void poll();
-    });
-    openDialog(
-      "Convert video",
-      h(
-        "div",
-        { class: "deck-form" },
-        h("p", { class: "hint" }, `${name(path)}: ${describe(info4)}`),
-        inserting && h(
-          "p",
-          { class: "hint warn" },
-          "Browsers cannot play this file as it is: convert it to put it on the slide."
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Format"),
-          formats
-        ),
-        h(
-          "label",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Resolution"),
-          size4
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Quality"),
-          h(
-            "div",
-            { class: "video-quality" },
-            h("span", { class: "hint" }, "Smaller"),
-            slider,
-            h("span", { class: "hint" }, "Better"),
-            qualityLabel
-          )
-        ),
-        h("label", { class: "check-row" }, sound, "Keep the sound"),
-        estimate,
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "ffmpeg"),
-          h("div", {}, command, h("div", { class: "btn-row" }, copy2))
-        ),
-        !data.tools.ffmpeg && h(
-          "p",
-          { class: "hint warn" },
-          "ffmpeg is not installed here: copy the command and run it where it is, or install ffmpeg to convert from the editor."
-        ),
-        !inserting && h(
-          "label",
-          { class: "check-row" },
-          use,
-          "Use the converted video on this slide"
-        ),
-        h("div", { class: "btn-row end" }, progress, run)
-      ),
-      {
-        wide: true,
-        // Closed before it finished: an insert is called off, and a
-        // source staged for it goes (cancelling a running ffmpeg first).
-        onClose: () => {
-          if (finished) return;
-          if (job) void request({ action: "convert-cancel", job });
-          if (purpose.kind === "insert") {
-            void request({ action: "discard-source", path });
-            purpose.done(null);
-          }
-        }
-      }
-    );
-    if (inserting) run.textContent = "Convert and insert";
-    void update();
-  }
-  function pickVideoFromDisk(start) {
-    return new Promise((resolve) => {
-      let chosen = null;
-      const picker = folderPicker(start, () => {
-      }, {
-        kind: "video",
-        onFile: (path) => {
-          chosen = path;
-          closeDialog();
-        }
-      });
-      openDialog(
-        "Insert a video from this computer",
-        h(
-          "div",
-          { class: "deck-form" },
-          h(
-            "p",
-            { class: "hint" },
-            "Pick a video: the server copies it into the deck's assets/ folder straight from disk, however big it is."
-          ),
-          picker.el
-        ),
-        { large: true, onClose: () => resolve(chosen) }
-      );
-      picker.focus();
-    });
-  }
-
-  // src/ts/editor/insert.ts
-  var overlay2 = document.getElementById("overlay");
-  var afterRender = {
-    ids: [],
-    editText: false
-  };
-  function setTool(tool) {
-    ed.tool = tool;
-    document.body.dataset.tool = tool;
-    emit("tool");
-  }
-  function waitForModel(pred, ms = 5e3) {
-    return new Promise((resolve) => {
-      let done = false;
-      const finish2 = (ok) => {
-        if (done) return;
-        done = true;
-        off("model", check);
-        resolve(ok);
-      };
-      const deadline = window.setTimeout(() => finish2(false), ms);
-      const check = () => {
-        const s2 = currentSlide();
-        if (s2 && pred(s2)) {
-          window.clearTimeout(deadline);
-          finish2(true);
-        }
-      };
-      on("model", check);
-    });
-  }
-  async function ensureOwnDrawing() {
-    const slide = currentSlide();
-    if (!slide) return false;
-    if (!slide.srcShared) return true;
-    if (!ed.model?.deckEditable) {
-      toast(
-        "deck.py builds its slides in code; cannot add a drawing here",
-        "error"
-      );
-      return false;
-    }
-    const deckIndex = slide.deckIndex;
-    const result = await edit({
-      action: "slide",
-      op: "detach",
-      slide: deckIndex,
-      name: slide.id ?? slide.explicitId ?? "slide"
-    });
-    if (!result.ok) return false;
-    toast("This slide now has its own SVG (built on its layout)");
-    return waitForModel((s2) => s2.deckIndex === deckIndex && !s2.srcShared);
-  }
-  function ownSource() {
-    return currentSlide()?.sources?.find((s2) => s2.role === "slide") ?? null;
-  }
-  function insertParent() {
-    const svg = slideRoot();
-    if (ed.scope?.getAttribute("data-ink")?.startsWith("0:")) {
-      return { loc: ed.scope.getAttribute("data-ink"), el: ed.scope };
-    }
-    const layers = svg ? [...svg.querySelectorAll('[data-ink-layer][data-ink^="0:"]')].filter(
-      (l2) => !l2.hasAttribute("data-ink-locked")
-    ) : [];
-    const layer2 = layers[layers.length - 1];
-    if (layer2) return { loc: layer2.getAttribute("data-ink"), el: layer2 };
-    return { loc: "0:", el: null };
-  }
-  function toParent(el2, x2, y2) {
-    const svg = slideRoot();
-    if (!el2 || !svg) return { x: x2, y: y2 };
-    const p2 = el2.getScreenCTM?.();
-    const r2 = svg.getScreenCTM();
-    if (!p2 || !r2) return { x: x2, y: y2 };
-    const m2 = multiply(invert(mat(p2)), mat(r2));
-    return { x: m2.a * x2 + m2.c * y2 + m2.e, y: m2.b * x2 + m2.d * y2 + m2.f };
-  }
-  async function insertXml(xml, base2, opts2 = {}) {
-    if (!await ensureOwnDrawing()) return false;
-    const src = ownSource();
-    if (!src) return false;
-    const parent = insertParent();
-    const ops = [...opts2.before?.() ?? []];
-    if (opts2.marker) ops.push({ kind: "ensure-marker" });
-    if (typeof xml === "function") xml = xml();
-    ops.push({ kind: "insert", parent: parent.loc, xml, base: base2, key: "new" });
-    const result = await edit({
-      action: "svg",
-      file: src.path,
-      hash: src.hash,
-      ops,
-      label: `Insert ${base2}`
-    });
-    if (!result.ok) return false;
-    const id = result.ids?.new;
-    if (id) {
-      afterRender.ids = [id];
-      afterRender.editText = !!opts2.editText;
-    }
-    return true;
-  }
-  function drawScale() {
-    const vb = slideRoot()?.viewBox.baseVal;
-    const short = vb && vb.width > 0 ? Math.min(vb.width, vb.height) : 1080;
-    return Math.max(1, Math.round(short / 1080 * 10) / 10);
-  }
-  function textScale() {
-    return (ed.model?.deckSize?.fontSize ?? 36) / 36;
-  }
-  var SHAPE_STYLE = {
-    get rect() {
-      return `class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:${fmt(4 * drawScale())}"`;
-    },
-    get ellipse() {
-      return `class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:${fmt(4 * drawScale())}"`;
-    },
-    get line() {
-      return `class="inkflow-stroke-text" style="fill:none;stroke-width:${fmt(6 * drawScale())};stroke-linecap:round"`;
-    }
-  };
-  function shapeXml(tool, a2, b2) {
-    const x2 = Math.min(a2.x, b2.x);
-    const y2 = Math.min(a2.y, b2.y);
-    const w2 = Math.abs(b2.x - a2.x);
-    const h3 = Math.abs(b2.y - a2.y);
-    switch (tool) {
-      case "rect":
-        return `<rect x="${fmt(x2)}" y="${fmt(y2)}" width="${fmt(w2)}" height="${fmt(h3)}" rx="${fmt(16 * drawScale())}" ${SHAPE_STYLE.rect}/>`;
-      default:
-        return `<ellipse cx="${fmt(x2 + w2 / 2)}" cy="${fmt(y2 + h3 / 2)}" rx="${fmt(w2 / 2)}" ry="${fmt(h3 / 2)}" ${SHAPE_STYLE.ellipse}/>`;
-    }
-  }
-  function textXml(p2) {
-    return `<text x="${fmt(p2.x)}" y="${fmt(p2.y)}" class="inkflow-fill-text" style="font-size:${fmt(56 * textScale())}px;font-family:var(--inkflow-body-font, sans-serif)">Text</text>`;
-  }
-  var draft = null;
-  function drawDraft(tool, a2, b2, ends) {
-    draft?.remove();
-    const m2 = slideToPaper();
-    const style = CONNECTOR_TOOLS[tool];
-    if (style) {
-      const r2 = route(style, ends?.a ?? a2, ends?.b ?? b2);
-      const toPaper = (p2) => ({
-        x: m2.a * p2.x + m2.e,
-        y: m2.d * p2.y + m2.f
-      });
-      draft = svgEl("path", {
-        d: pathData({ ...r2, points: r2.points.map(toPaper) }),
-        class: "draft",
-        fill: "none"
-      });
-    } else {
-      const box = transformBox(m2, {
-        x: Math.min(a2.x, b2.x),
-        y: Math.min(a2.y, b2.y),
-        width: Math.abs(b2.x - a2.x),
-        height: Math.abs(b2.y - a2.y)
-      });
-      draft = tool === "ellipse" ? svgEl("ellipse", {
-        cx: box.x + box.width / 2,
-        cy: box.y + box.height / 2,
-        rx: box.width / 2,
-        ry: box.height / 2,
-        class: "draft"
-      }) : svgEl("rect", {
-        x: box.x,
-        y: box.y,
-        width: box.width,
-        height: box.height,
-        class: "draft"
-      });
-    }
-    overlay2.append(draft);
-  }
-  async function insertConnector(tool, from, to, startHit, endHit) {
-    let a2 = startHit ? startHit.site : from;
-    let b2 = endHit ? endHit.site : to;
-    if (Math.hypot(b2.x - a2.x, b2.y - a2.y) < 8) {
-      a2 = { x: from.x - 150, y: from.y };
-      b2 = { x: from.x + 150, y: from.y };
-      startHit = null;
-      endHit = null;
-    }
-    const before = [];
-    const taken = /* @__PURE__ */ new Set();
-    const attach = (hit) => {
-      if (!hit) return null;
-      let id = hit.el.getAttribute("id");
-      if (!id && keyOf(hit.el) === 0) {
-        const svg = slideRoot();
-        let n3 = 1;
-        const base2 = hit.el.localName;
-        while (svg?.querySelector(`[id="${base2}-${n3}"]`) || taken.has(`${base2}-${n3}`))
-          n3++;
-        id = `${base2}-${n3}`;
-        taken.add(id);
-        hit.el.setAttribute("id", id);
-        before.push({
-          kind: "id",
-          loc: hit.el.getAttribute("data-ink"),
-          id
-        });
-      }
-      return id ? `${id}:${hit.site.name}` : null;
-    };
-    const startAt = attach(startHit);
-    const endAt = attach(endHit);
-    const style = CONNECTOR_TOOLS[tool] ?? "straight";
-    const arrow = tool !== "line";
-    const attrs2 = [
-      `inkflow:connector="${style}"`,
-      startAt ? `inkflow:connect-start="${startAt}"` : "",
-      endAt ? `inkflow:connect-end="${endAt}"` : "",
-      arrow ? 'marker-end="url(#inkflow-arrow)"' : ""
-    ].filter(Boolean).join(" ");
-    await insertXml(
-      // Routed into the insertion parent's space once it is known (a slide
-      // drawn from a layout gets its own SVG first).
-      () => `<path d="${newConnectorPath(style, a2, b2, insertParent().el)}" ${SHAPE_STYLE.line} ${attrs2}/>`,
-      arrow ? "arrow" : "line",
-      { marker: arrow, before: () => before }
-    );
-  }
-  function onToolDown(e2, start) {
-    const tool = ed.tool;
-    if (tool === "select" || tool === "pen") return false;
-    e2.preventDefault();
-    clearSelection();
-    const paperEl = e2.currentTarget;
-    try {
-      paperEl.setPointerCapture(e2.pointerId);
-    } catch {
-    }
-    ed.interacting = true;
-    const connecting = tool in CONNECTOR_TOOLS;
-    const startHit = connecting && !e2.altKey ? siteAt(start, null) : null;
-    if (startHit) start = { x: startHit.site.x, y: startHit.site.y };
-    let endHit = null;
-    let end = start;
-    const move = (ev) => {
-      end = clientToSlide(ev.clientX, ev.clientY);
-      if (connecting) {
-        endHit = ev.altKey ? null : siteAt(end, null);
-        if (endHit) end = { x: endHit.site.x, y: endHit.site.y };
-        const under = attachTargetAt(ev.clientX, ev.clientY);
-        showSites([
-          ...under ? [
-            {
-              el: under,
-              active: endHit?.el === under ? endHit.site : null
-            }
-          ] : [],
-          ...endHit && endHit.el !== under ? [{ el: endHit.el, active: endHit.site }] : [],
-          ...startHit ? [{ el: startHit.el, active: startHit.site }] : []
-        ]);
-      }
-      if (ev.shiftKey && (tool === "rect" || tool === "ellipse")) {
-        const d2 = Math.max(
-          Math.abs(end.x - start.x),
-          Math.abs(end.y - start.y)
-        );
-        end = {
-          x: start.x + Math.sign(end.x - start.x || 1) * d2,
-          y: start.y + Math.sign(end.y - start.y || 1) * d2
-        };
-      }
-      drawDraft(
-        tool,
-        start,
-        end,
-        connecting ? {
-          a: startHit ? startHit.site : start,
-          b: endHit ? endHit.site : end
-        } : void 0
-      );
-    };
-    const up = () => {
-      paperEl.removeEventListener("pointermove", move);
-      paperEl.removeEventListener("pointerup", up);
-      draft?.remove();
-      draft = null;
-      ed.interacting = false;
-      let a2 = start;
-      let b2 = end;
-      if (connecting) {
-        showSites([]);
-        void insertConnector(tool, start, end, startHit, endHit);
-        setTool("select");
-        drawOverlay();
-        return;
-      }
-      if (tool === "text") {
-        void insertTextBox(start, end);
-        setTool("select");
-        drawOverlay();
-        return;
-      }
-      if (Math.hypot(b2.x - a2.x, b2.y - a2.y) < 8) {
-        const w2 = 360;
-        const h3 = 220;
-        a2 = { x: start.x - w2 / 2, y: start.y - h3 / 2 };
-        b2 = { x: start.x + w2 / 2, y: start.y + h3 / 2 };
-      }
-      const parent = insertParent().el;
-      const pa = toParent(parent, a2.x, a2.y);
-      const pb = toParent(parent, b2.x, b2.y);
-      void insertXml(shapeXml(tool, pa, pb), tool);
-      setTool("select");
-      if (ed.renderPending) emit("model");
-      drawOverlay();
-    };
-    paperEl.addEventListener("pointermove", move);
-    paperEl.addEventListener("pointerup", up);
-    return true;
-  }
-  async function insertTextBox(a2, b2) {
-    const slide = currentSlide();
-    if (!slide) return;
-    const vb = slideRoot()?.viewBox.baseVal;
-    const vw = vb?.width || 1920;
-    let box = {
-      x: Math.min(a2.x, b2.x),
-      y: Math.min(a2.y, b2.y),
-      width: Math.abs(b2.x - a2.x),
-      height: Math.abs(b2.y - a2.y)
-    };
-    if (box.width < 40 || box.height < 20) {
-      const k2 = textScale();
-      box = {
-        x: a2.x,
-        y: a2.y - 40 * k2,
-        width: Math.max(300 * k2, Math.min(900 * k2, vw - a2.x - 60 * k2)),
-        height: 100 * k2
-      };
-    }
-    const plain2 = ed.layoutMode || !ed.model?.deckEditable && !slide.md;
-    if (plain2) {
-      const p2 = toParent(insertParent().el, a2.x, a2.y);
-      await insertXml(textXml(p2), "text", { editText: true });
-      return;
-    }
-    if (!await ensureOwnDrawing()) return;
-    const src = ownSource();
-    const current2 = currentSlide();
-    if (!src || !current2) return;
-    const parent = insertParent();
-    const p0 = toParent(parent.el, box.x, box.y);
-    const p1 = toParent(parent.el, box.x + box.width, box.y + box.height);
-    const result = await edit({
-      action: "insert-textbox",
-      slide: current2.deckIndex,
-      file: src.path,
-      hash: src.hash,
-      parent: parent.loc,
-      x: Math.round(Math.min(p0.x, p1.x)),
-      y: Math.round(Math.min(p0.y, p1.y)),
-      width: Math.round(Math.abs(p1.x - p0.x)),
-      height: Math.round(Math.abs(p1.y - p0.y)),
-      text: "Text"
-    });
-    const id = result.ids?.new;
-    if (result.ok && id) {
-      afterRender.ids = [id];
-      afterRender.editText = true;
-    }
-  }
-  async function typeInto(el2) {
-    const slide = currentSlide();
-    const loc = el2.getAttribute("data-ink");
-    const src = slide?.sources?.[keyOf(el2)];
-    if (!slide || !loc || !src) return;
-    if (!ed.model?.deckEditable && !slide.md) {
-      toast(
-        "deck.py builds its slides in code; there is nowhere to keep the text",
-        "error"
-      );
-      return;
-    }
-    const result = await edit({
-      action: "shape-text",
-      slide: slide.deckIndex,
-      file: src.path,
-      hash: src.hash,
-      loc
-    });
-    const id = result.ids?.new;
-    if (result.ok && id) {
-      afterRender.ids = [id];
-      afterRender.editText = true;
-    }
-  }
-  function zonePlaceholder(zone) {
-    const words = zone.replace(/[-_]+/g, " ").trim() || "Text";
-    return words[0].toUpperCase() + words.slice(1);
-  }
-  async function zoneText(zone) {
-    const slide = currentSlide();
-    if (!slide) return;
-    const text = zonePlaceholder(zone);
-    const result = await edit({
-      action: "zone-text",
-      slide: slide.deckIndex,
-      zone,
-      text
-    });
-    if (!result.ok) return;
-    afterRender.ids = [`zone-${zone}`];
-    afterRender.editText = true;
-    afterRender.placeholder = text;
-  }
-  function readBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const url = String(reader.result);
-        resolve(url.slice(url.indexOf(",") + 1));
-      };
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-  }
-  var CHUNK = 4 * 1024 * 1024;
-  async function upload(media) {
-    if (!(media instanceof File)) {
-      const result2 = await request({
-        action: "import-path",
-        path: media.path
-      });
-      if (result2.ok && result2.convert) {
-        return convertForInsert(String(result2.source));
-      }
-      if (result2.ok && result2.path && result2.rel) {
-        return { path: result2.path, rel: result2.rel };
-      }
-      if (media.file) return upload(media.file);
-      toast(result2.error ?? "could not copy the file", "error");
-      return null;
-    }
-    const id = `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-    const big = media.size > 3 * CHUNK;
-    let result = { ok: false };
-    for (let at3 = 0; at3 < media.size || at3 === 0; at3 += CHUNK) {
-      const last = at3 + CHUNK >= media.size;
-      const data = await readBase64(media.slice(at3, at3 + CHUNK));
-      result = await request({
-        action: "upload-chunk",
-        upload: id,
-        name: media.name,
-        data,
-        last
-      });
-      if (!result.ok) {
-        toast(result.error ?? "upload failed", "error");
-        return null;
-      }
-      if (big) {
-        const done = Math.min(
-          100,
-          Math.round((at3 + CHUNK) / media.size * 100)
-        );
-        toast(`Copying ${media.name}\u2026 ${done}%`);
-      }
-      if (last) break;
-    }
-    if (result.convert) return convertForInsert(String(result.source));
-    if (!result.path || !result.rel) return null;
-    return { path: result.path, rel: result.rel };
-  }
-  function droppedPath(dt) {
-    const list4 = dt?.getData("text/uri-list") ?? "";
-    const uri = list4.split(/\r?\n/).find((line) => line.startsWith("file://"));
-    if (!uri) return null;
-    try {
-      const url = new URL(uri);
-      if (url.host && url.host !== "localhost") return null;
-      return decodeURIComponent(url.pathname).replace(
-        /^\/([A-Za-z]:\/)/,
-        "$1"
-      );
-    } catch {
-      return null;
-    }
-  }
-  function naturalSize(rel) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve({
-        w: img.naturalWidth || 400,
-        h: img.naturalHeight || 300
-      });
-      img.onerror = () => resolve({ w: 400, h: 300 });
-      img.src = `/${rel}`;
-    });
-  }
-  function videoSize(rel) {
-    return new Promise((resolve) => {
-      const video = document.createElement("video");
-      const fallback = { w: 1280, h: 720, decoded: false, duration: null };
-      const timer5 = window.setTimeout(() => resolve(fallback), 3e3);
-      video.preload = "metadata";
-      video.muted = true;
-      video.onloadedmetadata = () => {
-        window.clearTimeout(timer5);
-        const duration = Number.isFinite(video.duration) ? video.duration : null;
-        resolve(
-          video.videoWidth && video.videoHeight ? {
-            w: video.videoWidth,
-            h: video.videoHeight,
-            decoded: true,
-            duration
-          } : { ...fallback, duration }
-        );
-      };
-      video.onerror = () => {
-        window.clearTimeout(timer5);
-        resolve(fallback);
-      };
-      video.src = `/${rel}`;
-    });
-  }
-  var VIDEO_EXT = /\.(mp4|webm|ogg|ogv|mov|mkv|avi|m4v|wmv|flv|mpe?g|ts|mts|m2ts|3gp|3g2|mxf|vob|f4v|asf|dv)$/i;
-  var VIDEO_ACCEPT = "video/*,.mkv,.avi,.m4v,.wmv,.flv,.mpg,.mpeg,.ts,.mts,.m2ts,.3gp,.mxf,.vob,.dv";
-  function isVideo(file) {
-    return file instanceof File && file.type.startsWith("video/") || VIDEO_EXT.test(file.name);
-  }
-  var IMAGE_ACCEPT = "image/*,.pdf,application/pdf";
-  function isImage(file) {
-    return file instanceof File && (file.type.startsWith("image/") || file.type === "application/pdf") || /\.(png|jpe?g|gif|webp|svg|pdf)$/i.test(file.name);
-  }
-  async function insertVideoFile(file, at3) {
-    if (!await ensureOwnDrawing()) return;
-    const up = await upload(file);
-    const src = ownSource();
-    const slide = currentSlide();
-    if (!up || !src || !slide) return;
-    const size4 = await videoSize(up.rel);
-    const vb = slideRoot()?.viewBox.baseVal;
-    const vw = vb?.width || 1920;
-    const vh = vb?.height || 1080;
-    const k2 = Math.min(vw * 0.6 / size4.w, vh * 0.6 / size4.h);
-    const w2 = size4.w * k2;
-    const h3 = size4.h * k2;
-    const cx = Math.min(Math.max(at3?.x ?? vw / 2, w2 / 2), vw - w2 / 2);
-    const cy = Math.min(Math.max(at3?.y ?? vh / 2, h3 / 2), vh - h3 / 2);
-    const parent = insertParent();
-    const a2 = toParent(parent.el, cx - w2 / 2, cy - h3 / 2);
-    const b2 = toParent(parent.el, cx + w2 / 2, cy + h3 / 2);
-    const result = await edit({
-      action: "insert-video",
-      slide: slide.deckIndex,
-      file: src.path,
-      hash: src.hash,
-      parent: parent.loc,
-      x: Math.round(Math.min(a2.x, b2.x)),
-      y: Math.round(Math.min(a2.y, b2.y)),
-      width: Math.round(Math.abs(b2.x - a2.x)),
-      height: Math.round(Math.abs(b2.y - a2.y)),
-      src: up.path
-    });
-    const id = result.ids?.new;
-    if (result.ok && id) {
-      afterRender.ids = [id];
-      void checkVideo({
-        path: up.path,
-        slide: slide.deckIndex,
-        zone: id.replace(/^zone-/, ""),
-        browser: size4
-      });
-    }
-  }
-  async function insertVideo() {
-    const file = await pickFile(VIDEO_ACCEPT);
-    if (file) await insertVideoFile(file);
-  }
-  async function insertFile(file, at3) {
-    const zone = at3 ? mediaZoneAt(at3.clientX, at3.clientY) : null;
-    if (zone) {
-      await fillZone(zone, file);
-      return;
-    }
-    if (isImage(file)) await insertImageFile(file, at3);
-    else await insertVideoFile(file, at3);
-  }
-  async function insertImageFile(file, at3) {
-    if (!await ensureOwnDrawing()) return;
-    const up = await upload(file);
-    const src = ownSource();
-    if (!up || !src) return;
-    let href = relativePath(src.path, up.path);
-    let shown2 = up.rel;
-    if (isPdfRef(up.path)) {
-      const choice = await choosePage(up.path);
-      if (!choice) return;
-      href = withPage(href, choice.page);
-      shown2 = choice.url;
-    }
-    const size4 = shown2 ? await naturalSize(shown2) : { w: 400, h: 300 };
-    const svg = slideRoot();
-    const vb = svg?.viewBox.baseVal;
-    const maxW = (vb?.width || 1920) * 0.5;
-    const maxH = (vb?.height || 1080) * 0.5;
-    const k2 = Math.min(1, maxW / size4.w, maxH / size4.h);
-    const w2 = size4.w * k2;
-    const h3 = size4.h * k2;
-    const cx = at3?.x ?? (vb?.width || 1920) / 2;
-    const cy = at3?.y ?? (vb?.height || 1080) / 2;
-    const parent = insertParent().el;
-    const p2 = toParent(parent, cx - w2 / 2, cy - h3 / 2);
-    await insertXml(
-      `<image href="${href}" x="${fmt(p2.x)}" y="${fmt(p2.y)}" width="${fmt(w2)}" height="${fmt(h3)}" preserveAspectRatio="xMidYMid meet"/>`,
-      "image"
-    );
-  }
-  async function insertDiagramImage(path, width, height) {
-    if (!await ensureOwnDrawing()) return false;
-    const src = ownSource();
-    if (!src) return false;
-    const svg = slideRoot();
-    const vb = svg?.viewBox.baseVal;
-    const slideW = vb?.width || 1920;
-    const slideH = vb?.height || 1080;
-    const k2 = Math.min(1, slideW * 0.6 / width, slideH * 0.6 / height);
-    const w2 = width * k2;
-    const ht = height * k2;
-    const parent = insertParent().el;
-    const p2 = toParent(parent, (slideW - w2) / 2, (slideH - ht) / 2);
-    return insertXml(
-      `<image href="${relativePath(src.path, path)}" x="${fmt(p2.x)}" y="${fmt(p2.y)}" width="${fmt(w2)}" height="${fmt(ht)}" preserveAspectRatio="xMidYMid meet"/>`,
-      "diagram"
-    );
-  }
-  function pickFile(accept) {
-    return new Promise((resolve) => {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = accept;
-      input.onchange = () => resolve(input.files?.[0] ?? null);
-      input.click();
-    });
-  }
-  async function insertImage() {
-    const file = await pickFile(IMAGE_ACCEPT);
-    if (file) await insertImageFile(file);
-  }
-  var MEDIA_ACCEPT = `${IMAGE_ACCEPT},${VIDEO_ACCEPT}`;
-  async function fillZone(zone, file) {
-    const slide = currentSlide();
-    if (!slide) return;
-    const up = await upload(file);
-    if (!up) return;
-    const choice = isPdfRef(up.path) ? await choosePage(up.path) : null;
-    if (isPdfRef(up.path) && !choice) return;
-    const result = await edit({
-      action: "zone-media",
-      slide: slide.deckIndex,
-      zone,
-      src: up.path,
-      page: choice?.page ?? null,
-      fit: slide.zones[zone]?.fit ?? "cover"
-    });
-    if (result.ok && isVideo(file)) {
-      void checkVideo({
-        path: up.path,
-        slide: slide.deckIndex,
-        zone,
-        browser: await videoSize(up.rel)
-      });
-    }
-  }
-  async function zoneMedia(zone) {
-    const file = await pickFile(MEDIA_ACCEPT);
-    if (file) await fillZone(zone, file);
-  }
-  function cleanForPaste(el2) {
-    const copy2 = el2.cloneNode(true);
-    for (const node of [copy2, ...copy2.querySelectorAll("*")]) {
-      if (node.hasAttribute("data-inkflow-pdf")) {
-        node.setAttribute("href", sourceRef(node));
-        node.removeAttribute("xlink:href");
-      }
-      for (const attr of [...node.attributes]) {
-        const name2 = attr.name;
-        if (name2.startsWith("data-")) node.removeAttribute(name2);
-        else if (name2 === "xlink:href") {
-          node.setAttribute("href", assetRef(attr.value));
-          node.removeAttribute(name2);
-        } else if (["href", "src", "poster"].includes(name2)) {
-          node.setAttribute(name2, assetRef(attr.value));
-        } else if (name2.includes(":") && !name2.startsWith("xml:")) {
-          node.removeAttribute(name2);
-        } else if (name2 === "class") {
-          const kept = attr.value.split(/\s+/).filter((c2) => c2 && !c2.startsWith("anim-"));
-          if (kept.length) node.setAttribute("class", kept.join(" "));
-          else node.removeAttribute("class");
-        }
-      }
-      node.style?.removeProperty?.("visibility");
-    }
-    return new XMLSerializer().serializeToString(copy2);
-  }
-  function initInsert() {
-    hooks.toolDown = onToolDown;
-    hooks.typeInto = (el2) => void typeInto(el2);
-    hooks.zoneMedia = (zone) => void zoneMedia(zone);
-    hooks.zoneText = (zone) => void zoneText(zone);
-    hooks.selectAfterRender = (ids) => {
-      afterRender.ids = ids;
-    };
-    const canvas2 = document.getElementById("canvas");
-    canvas2.addEventListener("dragover", (e2) => {
-      if (e2.dataTransfer?.types.includes("Files")) {
-        e2.preventDefault();
-        canvas2.classList.add("drop");
-      }
-    });
-    canvas2.addEventListener("dragleave", () => canvas2.classList.remove("drop"));
-    canvas2.addEventListener("drop", (e2) => {
-      canvas2.classList.remove("drop");
-      const file = e2.dataTransfer?.files?.[0];
-      if (!file) return;
-      e2.preventDefault();
-      const at3 = {
-        ...clientToSlide(e2.clientX, e2.clientY),
-        clientX: e2.clientX,
-        clientY: e2.clientY
-      };
-      const path = droppedPath(e2.dataTransfer);
-      void insertFile(path ? { path, name: file.name, file } : file, at3);
-    });
-    document.addEventListener("paste", (e2) => {
-      const target = e2.target;
-      if (target.closest("textarea, input")) return;
-      const file = [...e2.clipboardData?.files ?? []].find(
-        (f2) => f2.type.startsWith("image/") || f2.type === "application/pdf" || isVideo(f2)
-      );
-      if (file) {
-        e2.preventDefault();
-        void insertFile(file);
-        return;
-      }
-      e2.preventDefault();
-      void pasteText(e2.clipboardData?.getData("text/plain") ?? "");
-    });
   }
 
   // src/ts/editor/chart.ts
@@ -7165,7 +7488,7 @@ Undo brings them back.`
   function openChartDialog(target, initial, initialSettings) {
     let grid = initial;
     let settings2 = initialSettings;
-    let timer5 = 0;
+    let timer6 = 0;
     let asked = 0;
     let size4 = newChartBox();
     if (target.kind === "edit") {
@@ -7177,10 +7500,10 @@ Undo brings them back.`
     const fields = h("div", { class: "chart-fields" });
     const preview = h("div", { class: "chart-preview" });
     preview.style.aspectRatio = `${size4.width} / ${size4.height}`;
-    const status2 = h("span", { class: "hint chart-status" });
+    const status3 = h("span", { class: "hint chart-status" });
     const schedule2 = () => {
-      window.clearTimeout(timer5);
-      timer5 = window.setTimeout(() => void drawPreview(), 200);
+      window.clearTimeout(timer6);
+      timer6 = window.setTimeout(() => void drawPreview(), 200);
     };
     async function drawPreview() {
       const mine = ++asked;
@@ -7196,10 +7519,10 @@ Undo brings them back.`
       });
       if (mine !== asked) return;
       if (!res.ok) {
-        status2.textContent = res.error ?? "Cannot draw the chart";
+        status3.textContent = res.error ?? "Cannot draw the chart";
         return;
       }
-      status2.textContent = "";
+      status3.textContent = "";
       preview.innerHTML = String(res.svg ?? "");
     }
     function cellInput(row4, col, value) {
@@ -7281,7 +7604,7 @@ Undo brings them back.`
           )
         )
       );
-      const body3 = grid.rows.map(
+      const body4 = grid.rows.map(
         (cells, r2) => h(
           "tr",
           {},
@@ -7307,7 +7630,7 @@ Undo brings them back.`
           )
         )
       );
-      table.append(h("thead", {}, head), h("tbody", {}, ...body3));
+      table.append(h("thead", {}, head), h("tbody", {}, ...body4));
     }
     table.addEventListener("paste", (e2) => {
       const input = e2.target;
@@ -7589,7 +7912,7 @@ Undo brings them back.`
         "Paste cells copied from a spreadsheet into any cell."
       )
     );
-    const body2 = h(
+    const body3 = h(
       "div",
       { class: "chart-dialog" },
       h(
@@ -7604,7 +7927,7 @@ Undo brings them back.`
         fields,
         h("h3", {}, "Preview"),
         preview,
-        status2
+        status3
       ),
       h(
         "div",
@@ -7634,7 +7957,7 @@ Undo brings them back.`
         )
       )
     );
-    openDialog(target.kind === "insert" ? "Insert chart" : "Chart data", body2, {
+    openDialog(target.kind === "insert" ? "Insert chart" : "Chart data", body3, {
       large: true
     });
     renderAll();
@@ -7785,14 +8108,14 @@ Undo brings them back.`
     let exitAfterSave = false;
     let saving = false;
     let loaded = false;
-    const status2 = h("p", {}, `Loading draw.io from ${origin}\u2026`);
+    const status3 = h("p", {}, `Loading draw.io from ${origin}\u2026`);
     const note = h(
       "div",
       { class: "drawio-note" },
       h(
         "div",
         { class: "drawio-note-card" },
-        status2,
+        status3,
         h(
           "div",
           { class: "btn-row" },
@@ -7822,7 +8145,7 @@ Undo brings them back.`
     open2 = wrap2;
     const slow = window.setTimeout(() => {
       if (loaded) return;
-      status2.textContent = `draw.io did not load from ${origin}. Is this computer offline? Draw the diagram in draw.io desktop instead.`;
+      status3.textContent = `draw.io did not load from ${origin}. Is this computer offline? Draw the diagram in draw.io desktop instead.`;
       note.classList.add("failed");
     }, 15e3);
     const post = (msg) => frame.contentWindow?.postMessage(JSON.stringify(msg), origin);
@@ -8276,7 +8599,7 @@ Undo brings them back.`
   }
 
   // src/ts/editor/objects.ts
-  var host3 = document.getElementById("objects");
+  var host4 = document.getElementById("objects");
   var body = document.getElementById("props-body");
   var tabs = document.getElementById("panel-tabs");
   var NAMES = {
@@ -8497,8 +8820,8 @@ Undo brings them back.`
     return !!src && (src.role === "slide" || src.role === "ink") && src.writable;
   }
   function renderObjects() {
-    if (host3.hidden) return;
-    clear(host3);
+    if (host4.hidden) return;
+    clear(host4);
     const svg = slideRoot();
     if (!svg) return;
     const top = [...svg.querySelectorAll("[data-ink-top], [data-ink-layer]")].filter((el2) => {
@@ -8508,24 +8831,24 @@ Undo brings them back.`
       return !parent || !svg.contains(parent);
     }).reverse();
     if (!top.length) {
-      host3.append(h("p", { class: "hint" }, "No objects on this slide."));
+      host4.append(h("p", { class: "hint" }, "No objects on this slide."));
       return;
     }
-    host3.append(
+    host4.append(
       h(
         "p",
         { class: "hint" },
         "Top of the stack first. Middle-click (or Alt+click) on the slide steps through overlapping objects."
       )
     );
-    for (const el2 of top) host3.append(...row(el2, 0));
+    for (const el2 of top) host4.append(...row(el2, 0));
   }
   function showTab(tab) {
     for (const b2 of tabs.querySelectorAll("[data-tab]")) {
       b2.classList.toggle("on", b2.dataset.tab === tab);
       b2.setAttribute("aria-selected", String(b2.dataset.tab === tab));
     }
-    host3.hidden = tab !== "objects";
+    host4.hidden = tab !== "objects";
     body.hidden = tab === "objects";
     try {
       localStorage.setItem("inkflow-editor-tab", tab);
@@ -8715,12 +9038,12 @@ Undo brings them back.`
 
   // src/ts/editor/props.ts
   var panel = document.getElementById("props-body");
-  function section(title2, ...body2) {
+  function section(title2, ...body3) {
     return h(
       "section",
       { class: "props-section" },
       h("h3", {}, title2),
-      ...body2.filter((b2) => !!b2)
+      ...body3.filter((b2) => !!b2)
     );
   }
   function row2(label4, ...controls) {
@@ -9294,7 +9617,7 @@ Undo brings them back.`
       ...types.map((t2) => ({ value: t2.type, label: t2.type }))
     ];
     const send = (spec) => void edit({ action: "slide", op: "transition", slide: di, spec });
-    const body2 = [
+    const body3 = [
       row2(
         "Type",
         selectInput(opts2, value, (v2) => {
@@ -9306,7 +9629,7 @@ Undo brings them back.`
     if (current2) {
       const info4 = typeInfo(types, current2.type);
       if (info4) {
-        body2.push(
+        body3.push(
           fieldsEditor(
             info4.fields,
             current2.fields,
@@ -9315,7 +9638,7 @@ Undo brings them back.`
         );
       }
     }
-    return section("Transition into this slide", ...body2);
+    return section("Transition into this slide", ...body3);
   }
   function triggerLabel(t2) {
     if (t2 === "with-previous") return "with previous";
@@ -9487,7 +9810,7 @@ Undo brings them back.`
     const id = sel.el.getAttribute("id");
     const di = slide.deckIndex;
     const editable = slide.animationsEditable && model2.deckEditable;
-    const body2 = h("div", { class: "anim-list" });
+    const body3 = h("div", { class: "anim-list" });
     const elementName = isZone(sel.el) ? zoneName(sel.el) : id;
     const steps = cueSteps(slide.animations, slideRoot());
     slide.animations.forEach((cue, index) => {
@@ -9530,7 +9853,7 @@ Undo brings them back.`
           });
         })
       );
-      body2.append(
+      body3.append(
         h(
           "div",
           { class: "anim-card" },
@@ -9568,9 +9891,9 @@ Undo brings them back.`
           }
         });
       });
-      body2.append(add);
+      body3.append(add);
     } else if (!slide.animationsEditable) {
-      body2.append(
+      body3.append(
         h(
           "p",
           { class: "hint" },
@@ -9578,7 +9901,7 @@ Undo brings them back.`
         )
       );
     }
-    return section("Animations", body2);
+    return section("Animations", body3);
   }
   function animationPicker(all, video, prompt) {
     const groups = {};
@@ -9834,7 +10157,7 @@ Undo brings them back.`
       const where = origin === "deck" ? "deck.py zones=" : origin === "md-file" ? `${slide.md?.rel ?? "Markdown"} (whole file)` : slide.md?.rel ? `${slide.md.rel} \xB7 ::${name2}::` : "deck.py";
       const textFile = origin === "deck" || !slide.md?.path ? ed.model?.deckPath : slide.md.path;
       const isMedia = !!media && (media.kind === "image" || media.kind === "video" || media.kind === "chart");
-      const body2 = [
+      const body3 = [
         h(
           "div",
           { class: "source-hint" },
@@ -9843,7 +10166,7 @@ Undo brings them back.`
         )
       ];
       if (media?.kind === "chart") {
-        body2.push(
+        body3.push(
           h(
             "div",
             { class: "source-hint" },
@@ -9862,7 +10185,7 @@ Undo brings them back.`
           )
         );
       } else if (media && (media.kind === "image" || media.kind === "video")) {
-        body2.push(
+        body3.push(
           h(
             "div",
             { class: "source-hint" },
@@ -9886,10 +10209,10 @@ Undo brings them back.`
           })
         );
         const video = media.kind === "video" ? videoOf(el2) : null;
-        if (video) body2.push(previewButton(video, button));
+        if (video) body3.push(previewButton(video, button));
         if (media.kind === "video" && media.src) {
           const src2 = media.src;
-          body2.push(
+          body3.push(
             button(
               "Check & convert\u2026",
               "Can every browser play it? Convert it to MP4 or WebM, smaller or at another resolution",
@@ -9902,7 +10225,7 @@ Undo brings them back.`
           );
         }
       } else {
-        body2.push(
+        body3.push(
           button(
             "Edit text",
             "Edit this zone's Markdown (double-click)",
@@ -9912,7 +10235,7 @@ Undo brings them back.`
           )
         );
       }
-      panel.append(section("Content", ...body2));
+      panel.append(section("Content", ...body3));
       if (media && (media.kind === "image" || media.kind === "video")) {
         panel.append(mediaSection(slide, name2, media));
       }
@@ -11082,7 +11405,7 @@ Undo brings them back.`
     if (isZone(el2)) return "box";
     return "shape";
   }
-  function read(el2, prop) {
+  function read2(el2, prop) {
     const inline2 = el2.style?.getPropertyValue(prop).trim();
     return inline2 || el2.getAttribute(prop);
   }
@@ -11112,7 +11435,7 @@ Undo brings them back.`
       kind,
       tag: el2.localName,
       classes: [...el2.classList].filter((c2) => PAINT_CLASS.test(c2)),
-      props: Object.fromEntries(names.map((n3) => [n3, read(el2, n3)])),
+      props: Object.fromEntries(names.map((n3) => [n3, read2(el2, n3)])),
       radius: { rx: el2.getAttribute("rx"), ry: el2.getAttribute("ry") },
       showShape: el2.getAttribute(SHOW_SHAPE) === "true"
     };
@@ -11175,7 +11498,7 @@ Undo brings them back.`
   var panel2 = document.getElementById("find-panel");
   var hits = [];
   var active = -1;
-  var timer = 0;
+  var timer2 = 0;
   var opts = { matchCase: false, wholeWord: false, regex: false };
   var scope = "deck";
   function el(sel) {
@@ -11222,8 +11545,8 @@ Undo brings them back.`
     renderResults();
   }
   function schedule() {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(() => void search(), 220);
+    window.clearTimeout(timer2);
+    timer2 = window.setTimeout(() => void search(), 220);
   }
   function fileLabel(path) {
     const root2 = ed.model?.projectDir ?? "";
@@ -11231,18 +11554,18 @@ Undo brings them back.`
   }
   function renderResults(error2) {
     const list4 = el(".find-results");
-    const status2 = el(".find-status");
+    const status3 = el(".find-status");
     clear(list4);
     if (error2) {
-      status2.textContent = error2;
+      status3.textContent = error2;
       return;
     }
     if (!query()) {
-      status2.textContent = "";
+      status3.textContent = "";
       return;
     }
     const slides = new Set(hits.flatMap(slidesOf));
-    status2.textContent = hits.length ? `${hits.length}${hits.length >= 500 ? "+" : ""} match${hits.length === 1 ? "" : "es"} on ${slides.size} slide${slides.size === 1 ? "" : "s"}` : "No matches";
+    status3.textContent = hits.length ? `${hits.length}${hits.length >= 500 ? "+" : ""} match${hits.length === 1 ? "" : "es"} on ${slides.size} slide${slides.size === 1 ? "" : "s"}` : "No matches";
     let lastGroup = "";
     hits.forEach((hit, i2) => {
       const on2 = slidesOf(hit);
@@ -11763,6 +12086,68 @@ Undo brings them back.`
     on("sections", renderGrid);
   }
 
+  // src/ts/editor/conflict.ts
+  function showConflict(why, mine, useMine) {
+    const area2 = h("textarea", {
+      readonly: true,
+      "aria-label": "Your version"
+    });
+    area2.value = mine;
+    const copy3 = () => {
+      area2.select();
+      const done = () => toast("Your version copied", "ok");
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(mine).then(done, () => {
+          document.execCommand("copy");
+          done();
+        });
+      } else {
+        document.execCommand("copy");
+        done();
+      }
+    };
+    const body3 = h(
+      "div",
+      { class: "conflict-dialog" },
+      h(
+        "p",
+        {},
+        `${why.replace(/[.;:]?\s*$/, ".")} Yours is below: copy what you need, or put it back in place of theirs.`
+      ),
+      area2,
+      h(
+        "div",
+        { class: "dialog-actions" },
+        h(
+          "button",
+          { type: "button", class: "pbtn", onclick: copy3 },
+          "Copy"
+        ),
+        useMine ? h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            onclick: async () => {
+              if (await useMine()) closeDialog();
+            }
+          },
+          "Use mine instead"
+        ) : null,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn primary",
+            onclick: () => closeDialog()
+          },
+          "Keep theirs"
+        )
+      )
+    );
+    openDialog("Changed by someone else", body3, { wide: true });
+  }
+
   // src/ts/editor/richtext.ts
   var Unsupported = class extends Error {
   };
@@ -12062,6 +12447,12 @@ $$`;
     if (!spans.length || loose) return [el2.textContent ?? ""];
     return spans.map((s2) => s2.textContent ?? "");
   }
+  async function zoneUnchanged(refused, deckIndex, zone, seen) {
+    if (!await newerBuild(refused)) return false;
+    const now = ed.model?.slides[deckIndex]?.zoneText?.[zone];
+    return now != null && sameMarkdown(now, seen);
+  }
+  var CHANGED = /changed (on disk|.* meanwhile)/;
   function editSvgText(el2, sourcePath, hash, loc) {
     void finishTextEdit();
     const rect = el2.getBoundingClientRect();
@@ -12100,6 +12491,8 @@ $$`;
     autosize();
     area2.focus();
     area2.select();
+    const startHash = hash();
+    const startBuild = ed.model?.build;
     active2 = {
       commit: async () => {
         el2.style.visibility = "";
@@ -12108,13 +12501,18 @@ $$`;
         if (lines.length === 1 && !el2.querySelector("tspan")) {
           el2.textContent = lines[0];
         }
-        await edit({
+        const request2 = {
           action: "svg",
           file: sourcePath,
-          hash: hash(),
+          hash: startHash,
           ops: [{ kind: "text", loc, lines }],
-          label: "Edit text"
-        });
+          label: "Edit text",
+          ...startBuild != null ? { baseBuild: startBuild } : {}
+        };
+        const result = await edit(request2);
+        if (!result.ok && (result.stale || CHANGED.test(result.error ?? ""))) {
+          showConflict(result.error ?? "", lines.join("\n"), null);
+        }
       },
       cancel: () => {
         el2.style.visibility = "";
@@ -12155,6 +12553,16 @@ $$`;
     area2.dispatchEvent(new Event("input"));
     area2.focus();
   }
+  async function putBack(deckIndex, zone, text, origin) {
+    const result = await edit({
+      action: "zone-text",
+      slide: deckIndex,
+      zone,
+      text,
+      origin
+    });
+    return result.ok;
+  }
   function editZoneText(zone) {
     void finishTextEdit();
     const slide = currentSlide();
@@ -12172,13 +12580,22 @@ $$`;
     const area2 = h("textarea", { class: "zone-editor", spellcheck: "true" });
     area2.value = original;
     let sent2 = original;
-    let timer5 = 0;
+    let timer6 = 0;
     const coalesce = `zone-${deckIndex}-${zone}-${Date.now()}`;
+    let base2 = ed.model?.build;
+    const follow = () => {
+      const now = ed.model?.slides[deckIndex]?.zoneText?.[zone];
+      if (ed.model?.build != null && now != null && sameMarkdown(now, sent2)) {
+        base2 = ed.model.build;
+      }
+    };
+    on("model", follow);
     const send = async () => {
-      window.clearTimeout(timer5);
+      window.clearTimeout(timer6);
       if (area2.value === sent2) return;
       const before = sent2;
       sent2 = area2.value;
+      const refused = base2;
       const result = await edit(
         {
           action: "zone-text",
@@ -12186,20 +12603,41 @@ $$`;
           zone,
           text: area2.value,
           origin,
-          coalesce
+          coalesce,
+          ...base2 != null ? { baseBuild: base2 } : {}
         },
-        { retrying: true }
+        { retrying: true, quietStale: true }
       );
+      if (!result.ok && result.stale && await zoneUnchanged(refused, deckIndex, zone, before)) {
+        base2 = ed.model?.build;
+        sent2 = before;
+        void send();
+        return;
+      }
+      if (!result.ok && result.stale) {
+        const mine = area2.value;
+        stopped2 = true;
+        void finishTextEdit();
+        showConflict(
+          result.error ?? "",
+          mine,
+          () => putBack(deckIndex, zone, mine, origin)
+        );
+        return;
+      }
       if (!result.ok) {
         sent2 = before;
-        timer5 = window.setTimeout(() => void send(), 800);
+        timer6 = window.setTimeout(() => {
+          if (!stopped2) void send();
+        }, 800);
       }
     };
+    let stopped2 = false;
     area2.addEventListener("input", () => {
-      window.clearTimeout(timer5);
-      timer5 = window.setTimeout(() => void send(), 450);
+      window.clearTimeout(timer6);
+      timer6 = window.setTimeout(() => void send(), 450);
     });
-    const button5 = (name2, title2, fn) => h(
+    const button6 = (name2, title2, fn) => h(
       "button",
       {
         type: "button",
@@ -12216,14 +12654,14 @@ $$`;
       "div",
       { class: "zone-toolbar" },
       h("span", { class: "zone-label" }, `${zone} \xB7 Markdown`),
-      button5("B", "Bold (Ctrl+B)", () => wrapSelection(area2, "**")),
-      button5("I", "Italic (Ctrl+I)", () => wrapSelection(area2, "*")),
-      button5("H", "Heading", () => prefixLines(area2, "## ")),
-      button5("\u2022", "Bullet list", () => prefixLines(area2, "- ")),
-      button5("1.", "Numbered list", () => prefixLines(area2, "1. ")),
-      button5("`", "Code", () => wrapSelection(area2, "`")),
-      button5("\u2211", "Math", () => wrapSelection(area2, "$")),
-      button5("\u23F5", "Reveal on click: insert a ::step:: marker", () => {
+      button6("B", "Bold (Ctrl+B)", () => wrapSelection(area2, "**")),
+      button6("I", "Italic (Ctrl+I)", () => wrapSelection(area2, "*")),
+      button6("H", "Heading", () => prefixLines(area2, "## ")),
+      button6("\u2022", "Bullet list", () => prefixLines(area2, "- ")),
+      button6("1.", "Numbered list", () => prefixLines(area2, "1. ")),
+      button6("`", "Code", () => wrapSelection(area2, "`")),
+      button6("\u2211", "Math", () => wrapSelection(area2, "$")),
+      button6("\u23F5", "Reveal on click: insert a ::step:: marker", () => {
         const pos = area2.selectionStart;
         area2.value = `${area2.value.slice(0, pos)}
 ::step::
@@ -12252,9 +12690,11 @@ ${area2.value.slice(pos)}`;
     active2 = {
       commit: async () => {
         await send();
+        off("model", follow);
       },
       cancel: () => {
-        window.clearTimeout(timer5);
+        window.clearTimeout(timer6);
+        off("model", follow);
         if (sent2 !== original) {
           area2.value = original;
           void send();
@@ -12323,6 +12763,7 @@ ${area2.value.slice(pos)}`;
     if (!sameMarkdown(start, slide.zoneText?.[zone] ?? "")) return false;
     const fo = el2;
     const deckIndex = slide.deckIndex;
+    const startBuild = ed.model?.build;
     ed.richEditing = true;
     richHost = content2;
     fo.classList.add("rich-editing");
@@ -12382,15 +12823,30 @@ ${area2.value.slice(pos)}`;
           return;
         }
         if (!md.trim() && removeEmptyBox(fo, zone, deckIndex)) return;
-        const result = await edit({
-          action: "zone-text",
-          slide: deckIndex,
-          zone,
-          text: md,
-          origin,
-          svg: grow
-        });
+        const save4 = (base2) => edit(
+          {
+            action: "zone-text",
+            slide: deckIndex,
+            zone,
+            text: md,
+            origin,
+            svg: grow,
+            ...base2 != null ? { baseBuild: base2 } : {}
+          },
+          { quietStale: true }
+        );
+        let result = await save4(startBuild);
+        if (!result.ok && result.stale && await zoneUnchanged(startBuild, deckIndex, zone, start)) {
+          result = await save4(ed.model?.build);
+        }
         if (!result.ok) emit("rerender");
+        if (!result.ok && result.stale) {
+          showConflict(
+            result.error ?? "",
+            md,
+            () => putBack(deckIndex, zone, md, origin)
+          );
+        }
       },
       cancel: () => {
         cleanup();
@@ -12627,14 +13083,14 @@ ${area2.value.slice(pos)}`;
   function addRow2(cell) {
     const row4 = cell.parentElement;
     const table = row4.closest("table");
-    let body2 = table.tBodies[0];
-    if (!body2) {
-      body2 = document.createElement("tbody");
-      table.append(body2);
+    let body3 = table.tBodies[0];
+    if (!body3) {
+      body3 = document.createElement("tbody");
+      table.append(body3);
     }
     const tr = document.createElement("tr");
     for (const c2 of row4.children) tr.append(newCell("td", c2));
-    if (row4.parentElement?.localName === "thead") body2.prepend(tr);
+    if (row4.parentElement?.localName === "thead") body3.prepend(tr);
     else row4.after(tr);
   }
   function addColumn2(cell) {
@@ -12726,7 +13182,7 @@ ${area2.value.slice(pos)}`;
     field.value = original || (isNew ? "x" : "");
     const block = h("input", { type: "checkbox" });
     block.checked = chip.classList.contains("block");
-    const status2 = h("span", { class: "formula-status" });
+    const status3 = h("span", { class: "formula-status" });
     const pop = h(
       "div",
       { class: "formula-pop" },
@@ -12735,7 +13191,7 @@ ${area2.value.slice(pos)}`;
         "div",
         { class: "formula-row" },
         h("label", {}, block, " On its own line"),
-        status2,
+        status3,
         h(
           "button",
           {
@@ -12778,10 +13234,10 @@ ${area2.value.slice(pos)}`;
         closeFormula(false);
       }
     });
-    let timer5 = 0;
+    let timer6 = 0;
     let seq = 0;
     const renderNow = async () => {
-      window.clearTimeout(timer5);
+      window.clearTimeout(timer6);
       const latex = field.value.trim();
       if (!latex) return;
       const mine = ++seq;
@@ -12793,11 +13249,11 @@ ${area2.value.slice(pos)}`;
       });
       if (mine !== seq || formula2 !== self) return;
       if (!result.ok) {
-        status2.textContent = result.error ?? "cannot render";
+        status3.textContent = result.error ?? "cannot render";
         pop.classList.add("error");
         return;
       }
-      status2.textContent = "";
+      status3.textContent = "";
       pop.classList.remove("error");
       if (wantBlock !== self.chip.classList.contains("block")) {
         self.chip = swapKind(content2, self.chip, wantBlock);
@@ -12809,8 +13265,8 @@ ${area2.value.slice(pos)}`;
       placePop(pop, self.chip);
     };
     field.addEventListener("input", () => {
-      window.clearTimeout(timer5);
-      timer5 = window.setTimeout(() => void renderNow(), 250);
+      window.clearTimeout(timer6);
+      timer6 = window.setTimeout(() => void renderNow(), 250);
     });
     block.addEventListener("change", () => void renderNow());
     chip.classList.add("editing");
@@ -12958,8 +13414,8 @@ ${area2.value.slice(pos)}`;
       changed(content2);
     });
     const swatches = h("div", { class: "fmt-colors" });
-    const host4 = content2.closest("svg");
-    const css = host4 ? getComputedStyle(host4) : null;
+    const host5 = content2.closest("svg");
+    const css = host5 ? getComputedStyle(host5) : null;
     swatches.append(
       btn(
         "A",
@@ -13246,6 +13702,10 @@ ${area2.value.slice(pos)}`;
     undoBtn.disabled = !ed.canUndo;
     redoBtn.disabled = !ed.canRedo;
     undoBtn.title = historyTitle("Undo", ed.canUndo && ed.undoLabel, "Ctrl+Z");
+    if (ed.canUndo && ed.undoBlockedBy) {
+      undoBtn.title += ` \u2014 ${ed.undoBlockedBy} changed the same file after you`;
+    }
+    undoBtn.classList.toggle("blocked", !!(ed.canUndo && ed.undoBlockedBy));
     redoBtn.title = historyTitle(
       "Redo",
       ed.canRedo && ed.redoLabel,
@@ -14014,15 +14474,15 @@ ${area2.value.slice(pos)}`;
 ${rules}`;
   }
   function slideView(side, slide, cls) {
-    const host4 = h("div", {
+    const host5 = h("div", {
       class: `cmp-slide ${cls}`
     });
     if (!slide?.svg) {
-      host4.classList.add("empty");
-      host4.textContent = slide ? "hidden slide" : `not in ${side.label || "this version"}`;
-      return host4;
+      host5.classList.add("empty");
+      host5.textContent = slide ? "hidden slide" : `not in ${side.label || "this version"}`;
+      return host5;
     }
-    const root2 = host4.attachShadow({ mode: "open" });
+    const root2 = host5.attachShadow({ mode: "open" });
     root2.adoptedStyleSheets = sheets(side);
     const wrap2 = document.createElement("div");
     wrap2.className = "cmp-root";
@@ -14036,7 +14496,7 @@ ${rules}`;
       svg.setAttribute("width", "100%");
       svg.setAttribute("height", "100%");
       svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-      host4.style.aspectRatio = `${vb.w} / ${vb.h}`;
+      host5.style.aspectRatio = `${vb.w} / ${vb.h}`;
       svg.querySelectorAll(".anim-pending").forEach((el2) => {
         el2.classList.remove("anim-pending");
       });
@@ -14044,10 +14504,10 @@ ${rules}`;
         v2.removeAttribute("autoplay");
         v2.removeAttribute("controls");
       });
-      host4.svg = svg;
+      host5.svg = svg;
     }
     root2.append(wrap2);
-    return host4;
+    return host5;
   }
   var thumbs3 = /* @__PURE__ */ new Map();
   function thumb(side, index) {
@@ -14697,20 +15157,20 @@ ${UNDO_NOTICE}` : question)) {
           go();
         }
       });
-      const others = (data.worktrees ?? []).filter(
+      const others2 = (data.worktrees ?? []).filter(
         (w2) => !w2.current && w2.deck
       );
-      const inTree = new Set(others.map((w2) => w2.branch));
+      const inTree = new Set(others2.map((w2) => w2.branch));
       const branches = (data.branches ?? []).filter(
         (b2) => b2 !== data.branch && !inTree.has(b2)
       );
-      if (others.length || branches.length) {
+      if (others2.length || branches.length) {
         sections2.push(
           h("h3", {}, "A branch or worktree"),
           h(
             "div",
             { class: "git-list" },
-            ...others.map(
+            ...others2.map(
               (w2) => h(
                 "div",
                 { class: "git-row" },
@@ -14954,7 +15414,7 @@ ${UNDO_NOTICE}` : question)) {
   }
 
   // src/ts/editor/context.ts
-  var timer2 = 0;
+  var timer3 = 0;
   function snapshot2() {
     const slide = currentSlide();
     const visible = ed.model?.slides.filter((s2) => s2.visible).length ?? 0;
@@ -14994,8 +15454,8 @@ ${UNDO_NOTICE}` : question)) {
     };
   }
   function report() {
-    window.clearTimeout(timer2);
-    timer2 = window.setTimeout(() => {
+    window.clearTimeout(timer3);
+    timer3 = window.setTimeout(() => {
       sendRaw({ type: "editor-context", context: snapshot2() });
     }, 250);
   }
@@ -15489,12 +15949,12 @@ Decks: new, open, recent` : "Decks";
       spellcheck: "false",
       title: "Where to save it, relative to deck.py"
     });
-    const status2 = h("div", { class: "export-status" });
+    const status3 = h("div", { class: "export-status" });
     const go = h("button", { type: "button", class: "pbtn primary" }, "Export");
     go.addEventListener("click", async () => {
       go.disabled = true;
-      status2.textContent = f2.format === "pdf" ? "Rendering pages\u2026" : "Building\u2026";
-      status2.className = "export-status busy";
+      status3.textContent = f2.format === "pdf" ? "Rendering pages\u2026" : "Building\u2026";
+      status3.className = "export-status busy";
       const result = await request({
         action: "export",
         format: f2.format,
@@ -15503,13 +15963,13 @@ Decks: new, open, recent` : "Decks";
       });
       go.disabled = false;
       if (!result.ok) {
-        status2.className = "export-status error";
-        status2.textContent = result.error ?? "export failed";
+        status3.className = "export-status error";
+        status3.textContent = result.error ?? "export failed";
         return;
       }
       const r2 = result;
-      status2.className = "export-status done";
-      status2.replaceChildren(
+      status3.className = "export-status done";
+      status3.replaceChildren(
         h("span", {}, `Saved to ${r2.rel} \xB7 ${size2(r2.size)}`),
         h(
           "a",
@@ -15529,7 +15989,7 @@ Decks: new, open, recent` : "Decks";
         print?.line ?? null
       ),
       h("div", { class: "export-row" }, output, go),
-      status2
+      status3
     );
   }
   function openExport() {
@@ -15684,17 +16144,17 @@ Decks: new, open, recent` : "Decks";
     primary.focus();
   }
   async function openPackDialog() {
-    const body2 = h(
+    const body3 = h(
       "div",
       { class: "git-form pack-dialog" },
       h("p", { class: "hint" }, "Checking the deck\u2026")
     );
-    openDialog("Pack deck", body2, { wide: true, hint: PACK_HELP });
+    openDialog("Pack deck", body3, { wide: true, hint: PACK_HELP });
     const res = await request({ action: "pack", op: "plan" });
-    if (!body2.isConnected) return;
-    body2.replaceChildren();
+    if (!body3.isConnected) return;
+    body3.replaceChildren();
     if (!res.ok) {
-      body2.append(h("p", { class: "hint warn" }, res.error ?? "cannot pack"));
+      body3.append(h("p", { class: "hint warn" }, res.error ?? "cannot pack"));
       return;
     }
     const summary2 = res.pack;
@@ -15702,7 +16162,7 @@ Decks: new, open, recent` : "Decks";
     const copies = summary2.assets?.copies ?? [];
     const warnings = summary2.fonts?.warnings ?? [];
     if (!summary2.steps.length) {
-      body2.append(
+      body3.append(
         h(
           "p",
           {},
@@ -15710,9 +16170,9 @@ Decks: new, open, recent` : "Decks";
         )
       );
     } else {
-      body2.append(h("p", {}, "Packing will:"), list3(summary2.steps));
+      body3.append(h("p", {}, "Packing will:"), list3(summary2.steps));
       if (copies.length) {
-        body2.append(
+        body3.append(
           h(
             "details",
             {},
@@ -15723,13 +16183,13 @@ Decks: new, open, recent` : "Decks";
       }
     }
     if (warnings.length) {
-      body2.append(
+      body3.append(
         h("p", { class: "hint warn" }, "Font licences:"),
         list3(warnings, "pack-list warn")
       );
     }
     if (remaining.length) {
-      body2.append(
+      body3.append(
         h(
           "p",
           { class: "hint" },
@@ -15757,7 +16217,7 @@ Decks: new, open, recent` : "Decks";
       "Pack"
     );
     pack.disabled = !summary2.steps.length;
-    body2.append(
+    body3.append(
       h(
         "div",
         { class: "btn-row end" },
@@ -15824,8 +16284,8 @@ Decks: new, open, recent` : "Decks";
   function defaultHost(info4) {
     return info4.configured?.host ?? info4.suggested ?? "github";
   }
-  function filesFor(info4, host4, release) {
-    return info4.hosts[host4].files.filter((f2) => release || !f2.release);
+  function filesFor(info4, host5, release) {
+    return info4.hosts[host5].files.filter((f2) => release || !f2.release);
   }
   function fileAction(file) {
     if (file.exists === "inkflow") return "update";
@@ -15888,7 +16348,7 @@ Decks: new, open, recent` : "Decks";
       return;
     }
     const info4 = res.publish;
-    let host4 = defaultHost(info4);
+    let host5 = defaultHost(info4);
     const release = h("input", { type: "checkbox" });
     release.checked = info4.configured?.release ?? false;
     const readme = h("input", { type: "checkbox" });
@@ -15899,9 +16359,9 @@ Decks: new, open, recent` : "Decks";
         name: "publish-host",
         value
       });
-      radio.checked = value === host4;
+      radio.checked = value === host5;
       radio.addEventListener("change", () => {
-        host4 = value;
+        host5 = value;
         update();
       });
       return h(
@@ -15923,7 +16383,7 @@ Decks: new, open, recent` : "Decks";
     const files2 = h("div", { class: "git-files" });
     const where = h("div", {});
     const notes = h("div", { class: "publish-notes" });
-    const write = h(
+    const write2 = h(
       "button",
       { type: "button", class: "pbtn primary", onclick: () => void run() },
       "Write files"
@@ -15931,8 +16391,8 @@ Decks: new, open, recent` : "Decks";
     release.addEventListener("change", () => update());
     readme.addEventListener("change", () => update());
     function update() {
-      const hostInfo = info4.hosts[host4];
-      const list4 = filesFor(info4, host4, release.checked);
+      const hostInfo = info4.hosts[host5];
+      const list4 = filesFor(info4, host5, release.checked);
       const rows = list4.map((f2) => fileRow(fileAction(f2), f2.path));
       if (readme.checked && info4.readme !== "linked") {
         const missing = info4.readme === "missing";
@@ -15945,25 +16405,25 @@ Decks: new, open, recent` : "Decks";
           (w2) => h("p", { class: "hint warn publish-note" }, w2)
         )
       );
-      write.textContent = list4.some((f2) => f2.exists !== "none") ? "Update files" : "Write files";
+      write2.textContent = list4.some((f2) => f2.exists !== "none") ? "Update files" : "Write files";
     }
     async function run() {
-      const list4 = filesFor(info4, host4, release.checked);
+      const list4 = filesFor(info4, host5, release.checked);
       const theirs = list4.filter((f2) => f2.exists === "other");
       if (theirs.length && !confirm(
         `${theirs.map((f2) => f2.path).join(", ")} exists already and was not written by inkflow. Replace it?`
       ))
         return;
-      write.disabled = true;
+      write2.disabled = true;
       const out = await edit({
         action: "publish",
         op: "setup",
-        host: host4,
+        host: host5,
         release: release.checked,
         readme: readme.checked,
         force: list4.some((f2) => f2.exists !== "none")
       });
-      write.disabled = false;
+      write2.disabled = false;
       if (!out.ok) return;
       done(out);
     }
@@ -15972,7 +16432,7 @@ Decks: new, open, recent` : "Decks";
       const steps = out.steps ?? [];
       const url = out.url ?? null;
       const note = out.note ?? null;
-      const message = `Publish the slides on ${HOST_NAMES[host4]}`;
+      const message = `Publish the slides on ${HOST_NAMES[host5]}`;
       const commitBtn = (push) => h(
         "button",
         {
@@ -15985,7 +16445,7 @@ Decks: new, open, recent` : "Decks";
         push ? "Commit and push" : "Commit"
       );
       openDialog(
-        `Publishing on ${HOST_NAMES[host4]}`,
+        `Publishing on ${HOST_NAMES[host5]}`,
         h(
           "div",
           { class: "git-form publish-form" },
@@ -16087,7 +16547,7 @@ Decks: new, open, recent` : "Decks";
           where
         ),
         notes,
-        h("div", { class: "btn-row end" }, write)
+        h("div", { class: "btn-row end" }, write2)
       ),
       { wide: true, hint: info4.remote ?? "no remote yet" }
     );
@@ -16879,11 +17339,11 @@ Continue?`)) return null;
     return res.ok ? res.worktrees : [];
   }
   async function worktreeSection() {
-    const others = (await worktreeList()).filter((w2) => !w2.main);
+    const others2 = (await worktreeList()).filter((w2) => !w2.main);
     return [
       h("div", { class: "menu-sep" }),
       h("div", { class: "menu-title" }, "Worktrees"),
-      ...others.map(
+      ...others2.map(
         (wt) => h(
           "div",
           { class: "menu-wt" },
@@ -17115,12 +17575,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       { wide: true }
     );
   }
-  var timer3 = 0;
+  var timer4 = 0;
   function initGit() {
     button3.addEventListener("click", () => void openMenu3());
     on("model", () => {
-      window.clearTimeout(timer3);
-      timer3 = window.setTimeout(() => void refreshGit(), 600);
+      window.clearTimeout(timer4);
+      timer4 = window.setTimeout(() => void refreshGit(), 600);
     });
   }
 
@@ -17348,7 +17808,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       last
     };
   }
-  function outlineOf(points, style, simulate, last) {
+  function outlineOf2(points, style, simulate, last) {
     return R(points, strokeOptions(style, simulate, last));
   }
   function round(v2, decimals) {
@@ -17490,7 +17950,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return `ink-${Array.from(bytes, (b2) => b2.toString(36).padStart(2, "0")).join("")}`;
   }
   function finish(live, points, tolerance = 0.1) {
-    const outline = outlineOf(points, live, live.simulate, true);
+    const outline = outlineOf2(points, live, live.simulate, true);
     const stroke = {
       id: live.id,
       tool: live.tool,
@@ -17549,9 +18009,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     lastPenAt = -Infinity;
     swallowUntil = -Infinity;
     swallowAt = { x: Number.NaN, y: Number.NaN };
-    constructor(host4) {
-      this.host = host4;
-      const s2 = host4.surface;
+    constructor(host5) {
+      this.host = host5;
+      const s2 = host5.surface;
       s2.addEventListener("pointerdown", (e2) => this.down(e2), {
         capture: true
       });
@@ -17725,7 +18185,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         const pts = g2.predicted.length ? g2.points.concat(g2.predicted) : g2.points;
         g2.path.setAttribute(
           "d",
-          pathData2(outlineOf(pts, g2.live, g2.live.simulate, false), 2)
+          pathData2(outlineOf2(pts, g2.live, g2.live.simulate, false), 2)
         );
         if (g2.points.length > g2.sent) {
           this.host.onDraw?.(g2.live, g2.sent, g2.points.slice(g2.sent));
@@ -18206,12 +18666,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   // src/ts/editor/notes.ts
   var area = document.getElementById("notes-input");
   var label3 = document.getElementById("notes-file");
-  var timer4 = 0;
+  var timer5 = 0;
   var slideIndex = -1;
   var sent = "";
   var burst = "";
   async function save2() {
-    window.clearTimeout(timer4);
+    window.clearTimeout(timer5);
     const slide = ed.model?.slides[slideIndex];
     if (!slide || area.value === sent) return;
     const before = sent;
@@ -18228,7 +18688,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     );
     if (!result.ok) {
       sent = before;
-      timer4 = window.setTimeout(() => void save2(), 800);
+      timer5 = window.setTimeout(() => void save2(), 800);
     }
   }
   function load() {
@@ -18246,8 +18706,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       burst = `notes-${Date.now()}`;
     });
     area.addEventListener("input", () => {
-      window.clearTimeout(timer4);
-      timer4 = window.setTimeout(() => void save2(), 600);
+      window.clearTimeout(timer5);
+      timer5 = window.setTimeout(() => void save2(), 600);
     });
     area.addEventListener("blur", () => void save2());
     area.addEventListener("keydown", (e2) => e2.stopPropagation());
@@ -18255,6 +18715,1861 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       void save2().then(load);
     });
     on("model", load);
+  }
+
+  // node_modules/.pnpm/qrcode-generator@2.0.4/node_modules/qrcode-generator/dist/qrcode.mjs
+  var qrcode = function(typeNumber, errorCorrectionLevel) {
+    const PAD0 = 236;
+    const PAD1 = 17;
+    let _typeNumber = typeNumber;
+    const _errorCorrectionLevel = QRErrorCorrectionLevel[errorCorrectionLevel];
+    let _modules = null;
+    let _moduleCount = 0;
+    let _dataCache = null;
+    const _dataList = [];
+    const _this = {};
+    const makeImpl = function(test, maskPattern) {
+      _moduleCount = _typeNumber * 4 + 17;
+      _modules = (function(moduleCount) {
+        const modules = new Array(moduleCount);
+        for (let row4 = 0; row4 < moduleCount; row4 += 1) {
+          modules[row4] = new Array(moduleCount);
+          for (let col = 0; col < moduleCount; col += 1) {
+            modules[row4][col] = null;
+          }
+        }
+        return modules;
+      })(_moduleCount);
+      setupPositionProbePattern(0, 0);
+      setupPositionProbePattern(_moduleCount - 7, 0);
+      setupPositionProbePattern(0, _moduleCount - 7);
+      setupPositionAdjustPattern();
+      setupTimingPattern();
+      setupTypeInfo(test, maskPattern);
+      if (_typeNumber >= 7) {
+        setupTypeNumber(test);
+      }
+      if (_dataCache == null) {
+        _dataCache = createData(_typeNumber, _errorCorrectionLevel, _dataList);
+      }
+      mapData(_dataCache, maskPattern);
+    };
+    const setupPositionProbePattern = function(row4, col) {
+      for (let r2 = -1; r2 <= 7; r2 += 1) {
+        if (row4 + r2 <= -1 || _moduleCount <= row4 + r2) continue;
+        for (let c2 = -1; c2 <= 7; c2 += 1) {
+          if (col + c2 <= -1 || _moduleCount <= col + c2) continue;
+          if (0 <= r2 && r2 <= 6 && (c2 == 0 || c2 == 6) || 0 <= c2 && c2 <= 6 && (r2 == 0 || r2 == 6) || 2 <= r2 && r2 <= 4 && 2 <= c2 && c2 <= 4) {
+            _modules[row4 + r2][col + c2] = true;
+          } else {
+            _modules[row4 + r2][col + c2] = false;
+          }
+        }
+      }
+    };
+    const getBestMaskPattern = function() {
+      let minLostPoint = 0;
+      let pattern = 0;
+      for (let i2 = 0; i2 < 8; i2 += 1) {
+        makeImpl(true, i2);
+        const lostPoint = QRUtil.getLostPoint(_this);
+        if (i2 == 0 || minLostPoint > lostPoint) {
+          minLostPoint = lostPoint;
+          pattern = i2;
+        }
+      }
+      return pattern;
+    };
+    const setupTimingPattern = function() {
+      for (let r2 = 8; r2 < _moduleCount - 8; r2 += 1) {
+        if (_modules[r2][6] != null) {
+          continue;
+        }
+        _modules[r2][6] = r2 % 2 == 0;
+      }
+      for (let c2 = 8; c2 < _moduleCount - 8; c2 += 1) {
+        if (_modules[6][c2] != null) {
+          continue;
+        }
+        _modules[6][c2] = c2 % 2 == 0;
+      }
+    };
+    const setupPositionAdjustPattern = function() {
+      const pos = QRUtil.getPatternPosition(_typeNumber);
+      for (let i2 = 0; i2 < pos.length; i2 += 1) {
+        for (let j2 = 0; j2 < pos.length; j2 += 1) {
+          const row4 = pos[i2];
+          const col = pos[j2];
+          if (_modules[row4][col] != null) {
+            continue;
+          }
+          for (let r2 = -2; r2 <= 2; r2 += 1) {
+            for (let c2 = -2; c2 <= 2; c2 += 1) {
+              if (r2 == -2 || r2 == 2 || c2 == -2 || c2 == 2 || r2 == 0 && c2 == 0) {
+                _modules[row4 + r2][col + c2] = true;
+              } else {
+                _modules[row4 + r2][col + c2] = false;
+              }
+            }
+          }
+        }
+      }
+    };
+    const setupTypeNumber = function(test) {
+      const bits = QRUtil.getBCHTypeNumber(_typeNumber);
+      for (let i2 = 0; i2 < 18; i2 += 1) {
+        const mod = !test && (bits >> i2 & 1) == 1;
+        _modules[Math.floor(i2 / 3)][i2 % 3 + _moduleCount - 8 - 3] = mod;
+      }
+      for (let i2 = 0; i2 < 18; i2 += 1) {
+        const mod = !test && (bits >> i2 & 1) == 1;
+        _modules[i2 % 3 + _moduleCount - 8 - 3][Math.floor(i2 / 3)] = mod;
+      }
+    };
+    const setupTypeInfo = function(test, maskPattern) {
+      const data = _errorCorrectionLevel << 3 | maskPattern;
+      const bits = QRUtil.getBCHTypeInfo(data);
+      for (let i2 = 0; i2 < 15; i2 += 1) {
+        const mod = !test && (bits >> i2 & 1) == 1;
+        if (i2 < 6) {
+          _modules[i2][8] = mod;
+        } else if (i2 < 8) {
+          _modules[i2 + 1][8] = mod;
+        } else {
+          _modules[_moduleCount - 15 + i2][8] = mod;
+        }
+      }
+      for (let i2 = 0; i2 < 15; i2 += 1) {
+        const mod = !test && (bits >> i2 & 1) == 1;
+        if (i2 < 8) {
+          _modules[8][_moduleCount - i2 - 1] = mod;
+        } else if (i2 < 9) {
+          _modules[8][15 - i2 - 1 + 1] = mod;
+        } else {
+          _modules[8][15 - i2 - 1] = mod;
+        }
+      }
+      _modules[_moduleCount - 8][8] = !test;
+    };
+    const mapData = function(data, maskPattern) {
+      let inc = -1;
+      let row4 = _moduleCount - 1;
+      let bitIndex = 7;
+      let byteIndex = 0;
+      const maskFunc = QRUtil.getMaskFunction(maskPattern);
+      for (let col = _moduleCount - 1; col > 0; col -= 2) {
+        if (col == 6) col -= 1;
+        while (true) {
+          for (let c2 = 0; c2 < 2; c2 += 1) {
+            if (_modules[row4][col - c2] == null) {
+              let dark = false;
+              if (byteIndex < data.length) {
+                dark = (data[byteIndex] >>> bitIndex & 1) == 1;
+              }
+              const mask = maskFunc(row4, col - c2);
+              if (mask) {
+                dark = !dark;
+              }
+              _modules[row4][col - c2] = dark;
+              bitIndex -= 1;
+              if (bitIndex == -1) {
+                byteIndex += 1;
+                bitIndex = 7;
+              }
+            }
+          }
+          row4 += inc;
+          if (row4 < 0 || _moduleCount <= row4) {
+            row4 -= inc;
+            inc = -inc;
+            break;
+          }
+        }
+      }
+    };
+    const createBytes = function(buffer, rsBlocks) {
+      let offset = 0;
+      let maxDcCount = 0;
+      let maxEcCount = 0;
+      const dcdata = new Array(rsBlocks.length);
+      const ecdata = new Array(rsBlocks.length);
+      for (let r2 = 0; r2 < rsBlocks.length; r2 += 1) {
+        const dcCount = rsBlocks[r2].dataCount;
+        const ecCount = rsBlocks[r2].totalCount - dcCount;
+        maxDcCount = Math.max(maxDcCount, dcCount);
+        maxEcCount = Math.max(maxEcCount, ecCount);
+        dcdata[r2] = new Array(dcCount);
+        for (let i2 = 0; i2 < dcdata[r2].length; i2 += 1) {
+          dcdata[r2][i2] = 255 & buffer.getBuffer()[i2 + offset];
+        }
+        offset += dcCount;
+        const rsPoly = QRUtil.getErrorCorrectPolynomial(ecCount);
+        const rawPoly = qrPolynomial(dcdata[r2], rsPoly.getLength() - 1);
+        const modPoly = rawPoly.mod(rsPoly);
+        ecdata[r2] = new Array(rsPoly.getLength() - 1);
+        for (let i2 = 0; i2 < ecdata[r2].length; i2 += 1) {
+          const modIndex = i2 + modPoly.getLength() - ecdata[r2].length;
+          ecdata[r2][i2] = modIndex >= 0 ? modPoly.getAt(modIndex) : 0;
+        }
+      }
+      let totalCodeCount = 0;
+      for (let i2 = 0; i2 < rsBlocks.length; i2 += 1) {
+        totalCodeCount += rsBlocks[i2].totalCount;
+      }
+      const data = new Array(totalCodeCount);
+      let index = 0;
+      for (let i2 = 0; i2 < maxDcCount; i2 += 1) {
+        for (let r2 = 0; r2 < rsBlocks.length; r2 += 1) {
+          if (i2 < dcdata[r2].length) {
+            data[index] = dcdata[r2][i2];
+            index += 1;
+          }
+        }
+      }
+      for (let i2 = 0; i2 < maxEcCount; i2 += 1) {
+        for (let r2 = 0; r2 < rsBlocks.length; r2 += 1) {
+          if (i2 < ecdata[r2].length) {
+            data[index] = ecdata[r2][i2];
+            index += 1;
+          }
+        }
+      }
+      return data;
+    };
+    const createData = function(typeNumber2, errorCorrectionLevel2, dataList) {
+      const rsBlocks = QRRSBlock.getRSBlocks(typeNumber2, errorCorrectionLevel2);
+      const buffer = qrBitBuffer();
+      for (let i2 = 0; i2 < dataList.length; i2 += 1) {
+        const data = dataList[i2];
+        buffer.put(data.getMode(), 4);
+        buffer.put(data.getLength(), QRUtil.getLengthInBits(data.getMode(), typeNumber2));
+        data.write(buffer);
+      }
+      let totalDataCount = 0;
+      for (let i2 = 0; i2 < rsBlocks.length; i2 += 1) {
+        totalDataCount += rsBlocks[i2].dataCount;
+      }
+      if (buffer.getLengthInBits() > totalDataCount * 8) {
+        throw "code length overflow. (" + buffer.getLengthInBits() + ">" + totalDataCount * 8 + ")";
+      }
+      if (buffer.getLengthInBits() + 4 <= totalDataCount * 8) {
+        buffer.put(0, 4);
+      }
+      while (buffer.getLengthInBits() % 8 != 0) {
+        buffer.putBit(false);
+      }
+      while (true) {
+        if (buffer.getLengthInBits() >= totalDataCount * 8) {
+          break;
+        }
+        buffer.put(PAD0, 8);
+        if (buffer.getLengthInBits() >= totalDataCount * 8) {
+          break;
+        }
+        buffer.put(PAD1, 8);
+      }
+      return createBytes(buffer, rsBlocks);
+    };
+    _this.addData = function(data, mode2) {
+      mode2 = mode2 || "Byte";
+      let newData = null;
+      switch (mode2) {
+        case "Numeric":
+          newData = qrNumber(data);
+          break;
+        case "Alphanumeric":
+          newData = qrAlphaNum(data);
+          break;
+        case "Byte":
+          newData = qr8BitByte(data);
+          break;
+        case "Kanji":
+          newData = qrKanji(data);
+          break;
+        default:
+          throw "mode:" + mode2;
+      }
+      _dataList.push(newData);
+      _dataCache = null;
+    };
+    _this.isDark = function(row4, col) {
+      if (row4 < 0 || _moduleCount <= row4 || col < 0 || _moduleCount <= col) {
+        throw row4 + "," + col;
+      }
+      return _modules[row4][col];
+    };
+    _this.getModuleCount = function() {
+      return _moduleCount;
+    };
+    _this.make = function() {
+      if (_typeNumber < 1) {
+        let typeNumber2 = 1;
+        for (; typeNumber2 < 40; typeNumber2++) {
+          const rsBlocks = QRRSBlock.getRSBlocks(typeNumber2, _errorCorrectionLevel);
+          const buffer = qrBitBuffer();
+          for (let i2 = 0; i2 < _dataList.length; i2++) {
+            const data = _dataList[i2];
+            buffer.put(data.getMode(), 4);
+            buffer.put(data.getLength(), QRUtil.getLengthInBits(data.getMode(), typeNumber2));
+            data.write(buffer);
+          }
+          let totalDataCount = 0;
+          for (let i2 = 0; i2 < rsBlocks.length; i2++) {
+            totalDataCount += rsBlocks[i2].dataCount;
+          }
+          if (buffer.getLengthInBits() <= totalDataCount * 8) {
+            break;
+          }
+        }
+        _typeNumber = typeNumber2;
+      }
+      makeImpl(false, getBestMaskPattern());
+    };
+    _this.createTableTag = function(cellSize, margin) {
+      cellSize = cellSize || 2;
+      margin = typeof margin == "undefined" ? cellSize * 4 : margin;
+      let qrHtml = "";
+      qrHtml += '<table style="';
+      qrHtml += " border-width: 0px; border-style: none;";
+      qrHtml += " border-collapse: collapse;";
+      qrHtml += " padding: 0px; margin: " + margin + "px;";
+      qrHtml += '">';
+      qrHtml += "<tbody>";
+      for (let r2 = 0; r2 < _this.getModuleCount(); r2 += 1) {
+        qrHtml += "<tr>";
+        for (let c2 = 0; c2 < _this.getModuleCount(); c2 += 1) {
+          qrHtml += '<td style="';
+          qrHtml += " border-width: 0px; border-style: none;";
+          qrHtml += " border-collapse: collapse;";
+          qrHtml += " padding: 0px; margin: 0px;";
+          qrHtml += " width: " + cellSize + "px;";
+          qrHtml += " height: " + cellSize + "px;";
+          qrHtml += " background-color: ";
+          qrHtml += _this.isDark(r2, c2) ? "#000000" : "#ffffff";
+          qrHtml += ";";
+          qrHtml += '"/>';
+        }
+        qrHtml += "</tr>";
+      }
+      qrHtml += "</tbody>";
+      qrHtml += "</table>";
+      return qrHtml;
+    };
+    _this.createSvgTag = function(cellSize, margin, alt, title2) {
+      let opts2 = {};
+      if (typeof arguments[0] == "object") {
+        opts2 = arguments[0];
+        cellSize = opts2.cellSize;
+        margin = opts2.margin;
+        alt = opts2.alt;
+        title2 = opts2.title;
+      }
+      cellSize = cellSize || 2;
+      margin = typeof margin == "undefined" ? cellSize * 4 : margin;
+      alt = typeof alt === "string" ? { text: alt } : alt || {};
+      alt.text = alt.text || null;
+      alt.id = alt.text ? alt.id || "qrcode-description" : null;
+      title2 = typeof title2 === "string" ? { text: title2 } : title2 || {};
+      title2.text = title2.text || null;
+      title2.id = title2.text ? title2.id || "qrcode-title" : null;
+      const size4 = _this.getModuleCount() * cellSize + margin * 2;
+      let c2, mc, r2, mr, qrSvg2 = "", rect;
+      rect = "l" + cellSize + ",0 0," + cellSize + " -" + cellSize + ",0 0,-" + cellSize + "z ";
+      qrSvg2 += '<svg version="1.1" xmlns="http://www.w3.org/2000/svg"';
+      qrSvg2 += !opts2.scalable ? ' width="' + size4 + 'px" height="' + size4 + 'px"' : "";
+      qrSvg2 += ' viewBox="0 0 ' + size4 + " " + size4 + '" ';
+      qrSvg2 += ' preserveAspectRatio="xMinYMin meet"';
+      qrSvg2 += title2.text || alt.text ? ' role="img" aria-labelledby="' + escapeXml([title2.id, alt.id].join(" ").trim()) + '"' : "";
+      qrSvg2 += ">";
+      qrSvg2 += title2.text ? '<title id="' + escapeXml(title2.id) + '">' + escapeXml(title2.text) + "</title>" : "";
+      qrSvg2 += alt.text ? '<description id="' + escapeXml(alt.id) + '">' + escapeXml(alt.text) + "</description>" : "";
+      qrSvg2 += '<rect width="100%" height="100%" fill="white" cx="0" cy="0"/>';
+      qrSvg2 += '<path d="';
+      for (r2 = 0; r2 < _this.getModuleCount(); r2 += 1) {
+        mr = r2 * cellSize + margin;
+        for (c2 = 0; c2 < _this.getModuleCount(); c2 += 1) {
+          if (_this.isDark(r2, c2)) {
+            mc = c2 * cellSize + margin;
+            qrSvg2 += "M" + mc + "," + mr + rect;
+          }
+        }
+      }
+      qrSvg2 += '" stroke="transparent" fill="black"/>';
+      qrSvg2 += "</svg>";
+      return qrSvg2;
+    };
+    _this.createDataURL = function(cellSize, margin) {
+      cellSize = cellSize || 2;
+      margin = typeof margin == "undefined" ? cellSize * 4 : margin;
+      const size4 = _this.getModuleCount() * cellSize + margin * 2;
+      const min = margin;
+      const max = size4 - margin;
+      return createDataURL(size4, size4, function(x2, y2) {
+        if (min <= x2 && x2 < max && min <= y2 && y2 < max) {
+          const c2 = Math.floor((x2 - min) / cellSize);
+          const r2 = Math.floor((y2 - min) / cellSize);
+          return _this.isDark(r2, c2) ? 0 : 1;
+        } else {
+          return 1;
+        }
+      });
+    };
+    _this.createImgTag = function(cellSize, margin, alt) {
+      cellSize = cellSize || 2;
+      margin = typeof margin == "undefined" ? cellSize * 4 : margin;
+      const size4 = _this.getModuleCount() * cellSize + margin * 2;
+      let img = "";
+      img += "<img";
+      img += ' src="';
+      img += _this.createDataURL(cellSize, margin);
+      img += '"';
+      img += ' width="';
+      img += size4;
+      img += '"';
+      img += ' height="';
+      img += size4;
+      img += '"';
+      if (alt) {
+        img += ' alt="';
+        img += escapeXml(alt);
+        img += '"';
+      }
+      img += "/>";
+      return img;
+    };
+    const escapeXml = function(s2) {
+      let escaped = "";
+      for (let i2 = 0; i2 < s2.length; i2 += 1) {
+        const c2 = s2.charAt(i2);
+        switch (c2) {
+          case "<":
+            escaped += "&lt;";
+            break;
+          case ">":
+            escaped += "&gt;";
+            break;
+          case "&":
+            escaped += "&amp;";
+            break;
+          case '"':
+            escaped += "&quot;";
+            break;
+          default:
+            escaped += c2;
+            break;
+        }
+      }
+      return escaped;
+    };
+    const _createHalfASCII = function(margin) {
+      const cellSize = 1;
+      margin = typeof margin == "undefined" ? cellSize * 2 : margin;
+      const size4 = _this.getModuleCount() * cellSize + margin * 2;
+      const min = margin;
+      const max = size4 - margin;
+      let y2, x2, r1, r2, p2;
+      const blocks2 = {
+        "\u2588\u2588": "\u2588",
+        "\u2588 ": "\u2580",
+        " \u2588": "\u2584",
+        "  ": " "
+      };
+      const blocksLastLineNoMargin = {
+        "\u2588\u2588": "\u2580",
+        "\u2588 ": "\u2580",
+        " \u2588": " ",
+        "  ": " "
+      };
+      let ascii = "";
+      for (y2 = 0; y2 < size4; y2 += 2) {
+        r1 = Math.floor((y2 - min) / cellSize);
+        r2 = Math.floor((y2 + 1 - min) / cellSize);
+        for (x2 = 0; x2 < size4; x2 += 1) {
+          p2 = "\u2588";
+          if (min <= x2 && x2 < max && min <= y2 && y2 < max && _this.isDark(r1, Math.floor((x2 - min) / cellSize))) {
+            p2 = " ";
+          }
+          if (min <= x2 && x2 < max && min <= y2 + 1 && y2 + 1 < max && _this.isDark(r2, Math.floor((x2 - min) / cellSize))) {
+            p2 += " ";
+          } else {
+            p2 += "\u2588";
+          }
+          ascii += margin < 1 && y2 + 1 >= max ? blocksLastLineNoMargin[p2] : blocks2[p2];
+        }
+        ascii += "\n";
+      }
+      if (size4 % 2 && margin > 0) {
+        return ascii.substring(0, ascii.length - size4 - 1) + Array(size4 + 1).join("\u2580");
+      }
+      return ascii.substring(0, ascii.length - 1);
+    };
+    _this.createASCII = function(cellSize, margin) {
+      cellSize = cellSize || 1;
+      if (cellSize < 2) {
+        return _createHalfASCII(margin);
+      }
+      cellSize -= 1;
+      margin = typeof margin == "undefined" ? cellSize * 2 : margin;
+      const size4 = _this.getModuleCount() * cellSize + margin * 2;
+      const min = margin;
+      const max = size4 - margin;
+      let y2, x2, r2, p2;
+      const white = Array(cellSize + 1).join("\u2588\u2588");
+      const black = Array(cellSize + 1).join("  ");
+      let ascii = "";
+      let line = "";
+      for (y2 = 0; y2 < size4; y2 += 1) {
+        r2 = Math.floor((y2 - min) / cellSize);
+        line = "";
+        for (x2 = 0; x2 < size4; x2 += 1) {
+          p2 = 1;
+          if (min <= x2 && x2 < max && min <= y2 && y2 < max && _this.isDark(r2, Math.floor((x2 - min) / cellSize))) {
+            p2 = 0;
+          }
+          line += p2 ? white : black;
+        }
+        for (r2 = 0; r2 < cellSize; r2 += 1) {
+          ascii += line + "\n";
+        }
+      }
+      return ascii.substring(0, ascii.length - 1);
+    };
+    _this.renderTo2dContext = function(context, cellSize) {
+      cellSize = cellSize || 2;
+      const length = _this.getModuleCount();
+      for (let row4 = 0; row4 < length; row4++) {
+        for (let col = 0; col < length; col++) {
+          context.fillStyle = _this.isDark(row4, col) ? "black" : "white";
+          context.fillRect(col * cellSize, row4 * cellSize, cellSize, cellSize);
+        }
+      }
+    };
+    return _this;
+  };
+  qrcode.stringToBytes = function(s2) {
+    const bytes = [];
+    for (let i2 = 0; i2 < s2.length; i2 += 1) {
+      const c2 = s2.charCodeAt(i2);
+      bytes.push(c2 & 255);
+    }
+    return bytes;
+  };
+  qrcode.createStringToBytes = function(unicodeData, numChars) {
+    const unicodeMap = (function() {
+      const bin = base64DecodeInputStream(unicodeData);
+      const read3 = function() {
+        const b2 = bin.read();
+        if (b2 == -1) throw "eof";
+        return b2;
+      };
+      let count = 0;
+      const unicodeMap2 = {};
+      while (true) {
+        const b0 = bin.read();
+        if (b0 == -1) break;
+        const b1 = read3();
+        const b2 = read3();
+        const b3 = read3();
+        const k2 = String.fromCharCode(b0 << 8 | b1);
+        const v2 = b2 << 8 | b3;
+        unicodeMap2[k2] = v2;
+        count += 1;
+      }
+      if (count != numChars) {
+        throw count + " != " + numChars;
+      }
+      return unicodeMap2;
+    })();
+    const unknownChar = "?".charCodeAt(0);
+    return function(s2) {
+      const bytes = [];
+      for (let i2 = 0; i2 < s2.length; i2 += 1) {
+        const c2 = s2.charCodeAt(i2);
+        if (c2 < 128) {
+          bytes.push(c2);
+        } else {
+          const b2 = unicodeMap[s2.charAt(i2)];
+          if (typeof b2 == "number") {
+            if ((b2 & 255) == b2) {
+              bytes.push(b2);
+            } else {
+              bytes.push(b2 >>> 8);
+              bytes.push(b2 & 255);
+            }
+          } else {
+            bytes.push(unknownChar);
+          }
+        }
+      }
+      return bytes;
+    };
+  };
+  var QRMode = {
+    MODE_NUMBER: 1 << 0,
+    MODE_ALPHA_NUM: 1 << 1,
+    MODE_8BIT_BYTE: 1 << 2,
+    MODE_KANJI: 1 << 3
+  };
+  var QRErrorCorrectionLevel = {
+    L: 1,
+    M: 0,
+    Q: 3,
+    H: 2
+  };
+  var QRMaskPattern = {
+    PATTERN000: 0,
+    PATTERN001: 1,
+    PATTERN010: 2,
+    PATTERN011: 3,
+    PATTERN100: 4,
+    PATTERN101: 5,
+    PATTERN110: 6,
+    PATTERN111: 7
+  };
+  var QRUtil = (function() {
+    const PATTERN_POSITION_TABLE = [
+      [],
+      [6, 18],
+      [6, 22],
+      [6, 26],
+      [6, 30],
+      [6, 34],
+      [6, 22, 38],
+      [6, 24, 42],
+      [6, 26, 46],
+      [6, 28, 50],
+      [6, 30, 54],
+      [6, 32, 58],
+      [6, 34, 62],
+      [6, 26, 46, 66],
+      [6, 26, 48, 70],
+      [6, 26, 50, 74],
+      [6, 30, 54, 78],
+      [6, 30, 56, 82],
+      [6, 30, 58, 86],
+      [6, 34, 62, 90],
+      [6, 28, 50, 72, 94],
+      [6, 26, 50, 74, 98],
+      [6, 30, 54, 78, 102],
+      [6, 28, 54, 80, 106],
+      [6, 32, 58, 84, 110],
+      [6, 30, 58, 86, 114],
+      [6, 34, 62, 90, 118],
+      [6, 26, 50, 74, 98, 122],
+      [6, 30, 54, 78, 102, 126],
+      [6, 26, 52, 78, 104, 130],
+      [6, 30, 56, 82, 108, 134],
+      [6, 34, 60, 86, 112, 138],
+      [6, 30, 58, 86, 114, 142],
+      [6, 34, 62, 90, 118, 146],
+      [6, 30, 54, 78, 102, 126, 150],
+      [6, 24, 50, 76, 102, 128, 154],
+      [6, 28, 54, 80, 106, 132, 158],
+      [6, 32, 58, 84, 110, 136, 162],
+      [6, 26, 54, 82, 110, 138, 166],
+      [6, 30, 58, 86, 114, 142, 170]
+    ];
+    const G15 = 1 << 10 | 1 << 8 | 1 << 5 | 1 << 4 | 1 << 2 | 1 << 1 | 1 << 0;
+    const G18 = 1 << 12 | 1 << 11 | 1 << 10 | 1 << 9 | 1 << 8 | 1 << 5 | 1 << 2 | 1 << 0;
+    const G15_MASK = 1 << 14 | 1 << 12 | 1 << 10 | 1 << 4 | 1 << 1;
+    const _this = {};
+    const getBCHDigit = function(data) {
+      let digit = 0;
+      while (data != 0) {
+        digit += 1;
+        data >>>= 1;
+      }
+      return digit;
+    };
+    _this.getBCHTypeInfo = function(data) {
+      let d2 = data << 10;
+      while (getBCHDigit(d2) - getBCHDigit(G15) >= 0) {
+        d2 ^= G15 << getBCHDigit(d2) - getBCHDigit(G15);
+      }
+      return (data << 10 | d2) ^ G15_MASK;
+    };
+    _this.getBCHTypeNumber = function(data) {
+      let d2 = data << 12;
+      while (getBCHDigit(d2) - getBCHDigit(G18) >= 0) {
+        d2 ^= G18 << getBCHDigit(d2) - getBCHDigit(G18);
+      }
+      return data << 12 | d2;
+    };
+    _this.getPatternPosition = function(typeNumber) {
+      return PATTERN_POSITION_TABLE[typeNumber - 1];
+    };
+    _this.getMaskFunction = function(maskPattern) {
+      switch (maskPattern) {
+        case QRMaskPattern.PATTERN000:
+          return function(i2, j2) {
+            return (i2 + j2) % 2 == 0;
+          };
+        case QRMaskPattern.PATTERN001:
+          return function(i2, j2) {
+            return i2 % 2 == 0;
+          };
+        case QRMaskPattern.PATTERN010:
+          return function(i2, j2) {
+            return j2 % 3 == 0;
+          };
+        case QRMaskPattern.PATTERN011:
+          return function(i2, j2) {
+            return (i2 + j2) % 3 == 0;
+          };
+        case QRMaskPattern.PATTERN100:
+          return function(i2, j2) {
+            return (Math.floor(i2 / 2) + Math.floor(j2 / 3)) % 2 == 0;
+          };
+        case QRMaskPattern.PATTERN101:
+          return function(i2, j2) {
+            return i2 * j2 % 2 + i2 * j2 % 3 == 0;
+          };
+        case QRMaskPattern.PATTERN110:
+          return function(i2, j2) {
+            return (i2 * j2 % 2 + i2 * j2 % 3) % 2 == 0;
+          };
+        case QRMaskPattern.PATTERN111:
+          return function(i2, j2) {
+            return (i2 * j2 % 3 + (i2 + j2) % 2) % 2 == 0;
+          };
+        default:
+          throw "bad maskPattern:" + maskPattern;
+      }
+    };
+    _this.getErrorCorrectPolynomial = function(errorCorrectLength) {
+      let a2 = qrPolynomial([1], 0);
+      for (let i2 = 0; i2 < errorCorrectLength; i2 += 1) {
+        a2 = a2.multiply(qrPolynomial([1, QRMath.gexp(i2)], 0));
+      }
+      return a2;
+    };
+    _this.getLengthInBits = function(mode2, type) {
+      if (1 <= type && type < 10) {
+        switch (mode2) {
+          case QRMode.MODE_NUMBER:
+            return 10;
+          case QRMode.MODE_ALPHA_NUM:
+            return 9;
+          case QRMode.MODE_8BIT_BYTE:
+            return 8;
+          case QRMode.MODE_KANJI:
+            return 8;
+          default:
+            throw "mode:" + mode2;
+        }
+      } else if (type < 27) {
+        switch (mode2) {
+          case QRMode.MODE_NUMBER:
+            return 12;
+          case QRMode.MODE_ALPHA_NUM:
+            return 11;
+          case QRMode.MODE_8BIT_BYTE:
+            return 16;
+          case QRMode.MODE_KANJI:
+            return 10;
+          default:
+            throw "mode:" + mode2;
+        }
+      } else if (type < 41) {
+        switch (mode2) {
+          case QRMode.MODE_NUMBER:
+            return 14;
+          case QRMode.MODE_ALPHA_NUM:
+            return 13;
+          case QRMode.MODE_8BIT_BYTE:
+            return 16;
+          case QRMode.MODE_KANJI:
+            return 12;
+          default:
+            throw "mode:" + mode2;
+        }
+      } else {
+        throw "type:" + type;
+      }
+    };
+    _this.getLostPoint = function(qrcode2) {
+      const moduleCount = qrcode2.getModuleCount();
+      let lostPoint = 0;
+      for (let row4 = 0; row4 < moduleCount; row4 += 1) {
+        for (let col = 0; col < moduleCount; col += 1) {
+          let sameCount = 0;
+          const dark = qrcode2.isDark(row4, col);
+          for (let r2 = -1; r2 <= 1; r2 += 1) {
+            if (row4 + r2 < 0 || moduleCount <= row4 + r2) {
+              continue;
+            }
+            for (let c2 = -1; c2 <= 1; c2 += 1) {
+              if (col + c2 < 0 || moduleCount <= col + c2) {
+                continue;
+              }
+              if (r2 == 0 && c2 == 0) {
+                continue;
+              }
+              if (dark == qrcode2.isDark(row4 + r2, col + c2)) {
+                sameCount += 1;
+              }
+            }
+          }
+          if (sameCount > 5) {
+            lostPoint += 3 + sameCount - 5;
+          }
+        }
+      }
+      ;
+      for (let row4 = 0; row4 < moduleCount - 1; row4 += 1) {
+        for (let col = 0; col < moduleCount - 1; col += 1) {
+          let count = 0;
+          if (qrcode2.isDark(row4, col)) count += 1;
+          if (qrcode2.isDark(row4 + 1, col)) count += 1;
+          if (qrcode2.isDark(row4, col + 1)) count += 1;
+          if (qrcode2.isDark(row4 + 1, col + 1)) count += 1;
+          if (count == 0 || count == 4) {
+            lostPoint += 3;
+          }
+        }
+      }
+      for (let row4 = 0; row4 < moduleCount; row4 += 1) {
+        for (let col = 0; col < moduleCount - 6; col += 1) {
+          if (qrcode2.isDark(row4, col) && !qrcode2.isDark(row4, col + 1) && qrcode2.isDark(row4, col + 2) && qrcode2.isDark(row4, col + 3) && qrcode2.isDark(row4, col + 4) && !qrcode2.isDark(row4, col + 5) && qrcode2.isDark(row4, col + 6)) {
+            lostPoint += 40;
+          }
+        }
+      }
+      for (let col = 0; col < moduleCount; col += 1) {
+        for (let row4 = 0; row4 < moduleCount - 6; row4 += 1) {
+          if (qrcode2.isDark(row4, col) && !qrcode2.isDark(row4 + 1, col) && qrcode2.isDark(row4 + 2, col) && qrcode2.isDark(row4 + 3, col) && qrcode2.isDark(row4 + 4, col) && !qrcode2.isDark(row4 + 5, col) && qrcode2.isDark(row4 + 6, col)) {
+            lostPoint += 40;
+          }
+        }
+      }
+      let darkCount = 0;
+      for (let col = 0; col < moduleCount; col += 1) {
+        for (let row4 = 0; row4 < moduleCount; row4 += 1) {
+          if (qrcode2.isDark(row4, col)) {
+            darkCount += 1;
+          }
+        }
+      }
+      const ratio = Math.abs(100 * darkCount / moduleCount / moduleCount - 50) / 5;
+      lostPoint += ratio * 10;
+      return lostPoint;
+    };
+    return _this;
+  })();
+  var QRMath = (function() {
+    const EXP_TABLE = new Array(256);
+    const LOG_TABLE = new Array(256);
+    for (let i2 = 0; i2 < 8; i2 += 1) {
+      EXP_TABLE[i2] = 1 << i2;
+    }
+    for (let i2 = 8; i2 < 256; i2 += 1) {
+      EXP_TABLE[i2] = EXP_TABLE[i2 - 4] ^ EXP_TABLE[i2 - 5] ^ EXP_TABLE[i2 - 6] ^ EXP_TABLE[i2 - 8];
+    }
+    for (let i2 = 0; i2 < 255; i2 += 1) {
+      LOG_TABLE[EXP_TABLE[i2]] = i2;
+    }
+    const _this = {};
+    _this.glog = function(n3) {
+      if (n3 < 1) {
+        throw "glog(" + n3 + ")";
+      }
+      return LOG_TABLE[n3];
+    };
+    _this.gexp = function(n3) {
+      while (n3 < 0) {
+        n3 += 255;
+      }
+      while (n3 >= 256) {
+        n3 -= 255;
+      }
+      return EXP_TABLE[n3];
+    };
+    return _this;
+  })();
+  var qrPolynomial = function(num3, shift) {
+    if (typeof num3.length == "undefined") {
+      throw num3.length + "/" + shift;
+    }
+    const _num = (function() {
+      let offset = 0;
+      while (offset < num3.length && num3[offset] == 0) {
+        offset += 1;
+      }
+      const _num2 = new Array(num3.length - offset + shift);
+      for (let i2 = 0; i2 < num3.length - offset; i2 += 1) {
+        _num2[i2] = num3[i2 + offset];
+      }
+      return _num2;
+    })();
+    const _this = {};
+    _this.getAt = function(index) {
+      return _num[index];
+    };
+    _this.getLength = function() {
+      return _num.length;
+    };
+    _this.multiply = function(e2) {
+      const num4 = new Array(_this.getLength() + e2.getLength() - 1);
+      for (let i2 = 0; i2 < _this.getLength(); i2 += 1) {
+        for (let j2 = 0; j2 < e2.getLength(); j2 += 1) {
+          num4[i2 + j2] ^= QRMath.gexp(QRMath.glog(_this.getAt(i2)) + QRMath.glog(e2.getAt(j2)));
+        }
+      }
+      return qrPolynomial(num4, 0);
+    };
+    _this.mod = function(e2) {
+      if (_this.getLength() - e2.getLength() < 0) {
+        return _this;
+      }
+      const ratio = QRMath.glog(_this.getAt(0)) - QRMath.glog(e2.getAt(0));
+      const num4 = new Array(_this.getLength());
+      for (let i2 = 0; i2 < _this.getLength(); i2 += 1) {
+        num4[i2] = _this.getAt(i2);
+      }
+      for (let i2 = 0; i2 < e2.getLength(); i2 += 1) {
+        num4[i2] ^= QRMath.gexp(QRMath.glog(e2.getAt(i2)) + ratio);
+      }
+      return qrPolynomial(num4, 0).mod(e2);
+    };
+    return _this;
+  };
+  var QRRSBlock = (function() {
+    const RS_BLOCK_TABLE = [
+      // L
+      // M
+      // Q
+      // H
+      // 1
+      [1, 26, 19],
+      [1, 26, 16],
+      [1, 26, 13],
+      [1, 26, 9],
+      // 2
+      [1, 44, 34],
+      [1, 44, 28],
+      [1, 44, 22],
+      [1, 44, 16],
+      // 3
+      [1, 70, 55],
+      [1, 70, 44],
+      [2, 35, 17],
+      [2, 35, 13],
+      // 4
+      [1, 100, 80],
+      [2, 50, 32],
+      [2, 50, 24],
+      [4, 25, 9],
+      // 5
+      [1, 134, 108],
+      [2, 67, 43],
+      [2, 33, 15, 2, 34, 16],
+      [2, 33, 11, 2, 34, 12],
+      // 6
+      [2, 86, 68],
+      [4, 43, 27],
+      [4, 43, 19],
+      [4, 43, 15],
+      // 7
+      [2, 98, 78],
+      [4, 49, 31],
+      [2, 32, 14, 4, 33, 15],
+      [4, 39, 13, 1, 40, 14],
+      // 8
+      [2, 121, 97],
+      [2, 60, 38, 2, 61, 39],
+      [4, 40, 18, 2, 41, 19],
+      [4, 40, 14, 2, 41, 15],
+      // 9
+      [2, 146, 116],
+      [3, 58, 36, 2, 59, 37],
+      [4, 36, 16, 4, 37, 17],
+      [4, 36, 12, 4, 37, 13],
+      // 10
+      [2, 86, 68, 2, 87, 69],
+      [4, 69, 43, 1, 70, 44],
+      [6, 43, 19, 2, 44, 20],
+      [6, 43, 15, 2, 44, 16],
+      // 11
+      [4, 101, 81],
+      [1, 80, 50, 4, 81, 51],
+      [4, 50, 22, 4, 51, 23],
+      [3, 36, 12, 8, 37, 13],
+      // 12
+      [2, 116, 92, 2, 117, 93],
+      [6, 58, 36, 2, 59, 37],
+      [4, 46, 20, 6, 47, 21],
+      [7, 42, 14, 4, 43, 15],
+      // 13
+      [4, 133, 107],
+      [8, 59, 37, 1, 60, 38],
+      [8, 44, 20, 4, 45, 21],
+      [12, 33, 11, 4, 34, 12],
+      // 14
+      [3, 145, 115, 1, 146, 116],
+      [4, 64, 40, 5, 65, 41],
+      [11, 36, 16, 5, 37, 17],
+      [11, 36, 12, 5, 37, 13],
+      // 15
+      [5, 109, 87, 1, 110, 88],
+      [5, 65, 41, 5, 66, 42],
+      [5, 54, 24, 7, 55, 25],
+      [11, 36, 12, 7, 37, 13],
+      // 16
+      [5, 122, 98, 1, 123, 99],
+      [7, 73, 45, 3, 74, 46],
+      [15, 43, 19, 2, 44, 20],
+      [3, 45, 15, 13, 46, 16],
+      // 17
+      [1, 135, 107, 5, 136, 108],
+      [10, 74, 46, 1, 75, 47],
+      [1, 50, 22, 15, 51, 23],
+      [2, 42, 14, 17, 43, 15],
+      // 18
+      [5, 150, 120, 1, 151, 121],
+      [9, 69, 43, 4, 70, 44],
+      [17, 50, 22, 1, 51, 23],
+      [2, 42, 14, 19, 43, 15],
+      // 19
+      [3, 141, 113, 4, 142, 114],
+      [3, 70, 44, 11, 71, 45],
+      [17, 47, 21, 4, 48, 22],
+      [9, 39, 13, 16, 40, 14],
+      // 20
+      [3, 135, 107, 5, 136, 108],
+      [3, 67, 41, 13, 68, 42],
+      [15, 54, 24, 5, 55, 25],
+      [15, 43, 15, 10, 44, 16],
+      // 21
+      [4, 144, 116, 4, 145, 117],
+      [17, 68, 42],
+      [17, 50, 22, 6, 51, 23],
+      [19, 46, 16, 6, 47, 17],
+      // 22
+      [2, 139, 111, 7, 140, 112],
+      [17, 74, 46],
+      [7, 54, 24, 16, 55, 25],
+      [34, 37, 13],
+      // 23
+      [4, 151, 121, 5, 152, 122],
+      [4, 75, 47, 14, 76, 48],
+      [11, 54, 24, 14, 55, 25],
+      [16, 45, 15, 14, 46, 16],
+      // 24
+      [6, 147, 117, 4, 148, 118],
+      [6, 73, 45, 14, 74, 46],
+      [11, 54, 24, 16, 55, 25],
+      [30, 46, 16, 2, 47, 17],
+      // 25
+      [8, 132, 106, 4, 133, 107],
+      [8, 75, 47, 13, 76, 48],
+      [7, 54, 24, 22, 55, 25],
+      [22, 45, 15, 13, 46, 16],
+      // 26
+      [10, 142, 114, 2, 143, 115],
+      [19, 74, 46, 4, 75, 47],
+      [28, 50, 22, 6, 51, 23],
+      [33, 46, 16, 4, 47, 17],
+      // 27
+      [8, 152, 122, 4, 153, 123],
+      [22, 73, 45, 3, 74, 46],
+      [8, 53, 23, 26, 54, 24],
+      [12, 45, 15, 28, 46, 16],
+      // 28
+      [3, 147, 117, 10, 148, 118],
+      [3, 73, 45, 23, 74, 46],
+      [4, 54, 24, 31, 55, 25],
+      [11, 45, 15, 31, 46, 16],
+      // 29
+      [7, 146, 116, 7, 147, 117],
+      [21, 73, 45, 7, 74, 46],
+      [1, 53, 23, 37, 54, 24],
+      [19, 45, 15, 26, 46, 16],
+      // 30
+      [5, 145, 115, 10, 146, 116],
+      [19, 75, 47, 10, 76, 48],
+      [15, 54, 24, 25, 55, 25],
+      [23, 45, 15, 25, 46, 16],
+      // 31
+      [13, 145, 115, 3, 146, 116],
+      [2, 74, 46, 29, 75, 47],
+      [42, 54, 24, 1, 55, 25],
+      [23, 45, 15, 28, 46, 16],
+      // 32
+      [17, 145, 115],
+      [10, 74, 46, 23, 75, 47],
+      [10, 54, 24, 35, 55, 25],
+      [19, 45, 15, 35, 46, 16],
+      // 33
+      [17, 145, 115, 1, 146, 116],
+      [14, 74, 46, 21, 75, 47],
+      [29, 54, 24, 19, 55, 25],
+      [11, 45, 15, 46, 46, 16],
+      // 34
+      [13, 145, 115, 6, 146, 116],
+      [14, 74, 46, 23, 75, 47],
+      [44, 54, 24, 7, 55, 25],
+      [59, 46, 16, 1, 47, 17],
+      // 35
+      [12, 151, 121, 7, 152, 122],
+      [12, 75, 47, 26, 76, 48],
+      [39, 54, 24, 14, 55, 25],
+      [22, 45, 15, 41, 46, 16],
+      // 36
+      [6, 151, 121, 14, 152, 122],
+      [6, 75, 47, 34, 76, 48],
+      [46, 54, 24, 10, 55, 25],
+      [2, 45, 15, 64, 46, 16],
+      // 37
+      [17, 152, 122, 4, 153, 123],
+      [29, 74, 46, 14, 75, 47],
+      [49, 54, 24, 10, 55, 25],
+      [24, 45, 15, 46, 46, 16],
+      // 38
+      [4, 152, 122, 18, 153, 123],
+      [13, 74, 46, 32, 75, 47],
+      [48, 54, 24, 14, 55, 25],
+      [42, 45, 15, 32, 46, 16],
+      // 39
+      [20, 147, 117, 4, 148, 118],
+      [40, 75, 47, 7, 76, 48],
+      [43, 54, 24, 22, 55, 25],
+      [10, 45, 15, 67, 46, 16],
+      // 40
+      [19, 148, 118, 6, 149, 119],
+      [18, 75, 47, 31, 76, 48],
+      [34, 54, 24, 34, 55, 25],
+      [20, 45, 15, 61, 46, 16]
+    ];
+    const qrRSBlock = function(totalCount, dataCount) {
+      const _this2 = {};
+      _this2.totalCount = totalCount;
+      _this2.dataCount = dataCount;
+      return _this2;
+    };
+    const _this = {};
+    const getRsBlockTable = function(typeNumber, errorCorrectionLevel) {
+      switch (errorCorrectionLevel) {
+        case QRErrorCorrectionLevel.L:
+          return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 0];
+        case QRErrorCorrectionLevel.M:
+          return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 1];
+        case QRErrorCorrectionLevel.Q:
+          return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 2];
+        case QRErrorCorrectionLevel.H:
+          return RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 3];
+        default:
+          return void 0;
+      }
+    };
+    _this.getRSBlocks = function(typeNumber, errorCorrectionLevel) {
+      const rsBlock = getRsBlockTable(typeNumber, errorCorrectionLevel);
+      if (typeof rsBlock == "undefined") {
+        throw "bad rs block @ typeNumber:" + typeNumber + "/errorCorrectionLevel:" + errorCorrectionLevel;
+      }
+      const length = rsBlock.length / 3;
+      const list4 = [];
+      for (let i2 = 0; i2 < length; i2 += 1) {
+        const count = rsBlock[i2 * 3 + 0];
+        const totalCount = rsBlock[i2 * 3 + 1];
+        const dataCount = rsBlock[i2 * 3 + 2];
+        for (let j2 = 0; j2 < count; j2 += 1) {
+          list4.push(qrRSBlock(totalCount, dataCount));
+        }
+      }
+      return list4;
+    };
+    return _this;
+  })();
+  var qrBitBuffer = function() {
+    const _buffer = [];
+    let _length = 0;
+    const _this = {};
+    _this.getBuffer = function() {
+      return _buffer;
+    };
+    _this.getAt = function(index) {
+      const bufIndex = Math.floor(index / 8);
+      return (_buffer[bufIndex] >>> 7 - index % 8 & 1) == 1;
+    };
+    _this.put = function(num3, length) {
+      for (let i2 = 0; i2 < length; i2 += 1) {
+        _this.putBit((num3 >>> length - i2 - 1 & 1) == 1);
+      }
+    };
+    _this.getLengthInBits = function() {
+      return _length;
+    };
+    _this.putBit = function(bit) {
+      const bufIndex = Math.floor(_length / 8);
+      if (_buffer.length <= bufIndex) {
+        _buffer.push(0);
+      }
+      if (bit) {
+        _buffer[bufIndex] |= 128 >>> _length % 8;
+      }
+      _length += 1;
+    };
+    return _this;
+  };
+  var qrNumber = function(data) {
+    const _mode = QRMode.MODE_NUMBER;
+    const _data = data;
+    const _this = {};
+    _this.getMode = function() {
+      return _mode;
+    };
+    _this.getLength = function(buffer) {
+      return _data.length;
+    };
+    _this.write = function(buffer) {
+      const data2 = _data;
+      let i2 = 0;
+      while (i2 + 2 < data2.length) {
+        buffer.put(strToNum(data2.substring(i2, i2 + 3)), 10);
+        i2 += 3;
+      }
+      if (i2 < data2.length) {
+        if (data2.length - i2 == 1) {
+          buffer.put(strToNum(data2.substring(i2, i2 + 1)), 4);
+        } else if (data2.length - i2 == 2) {
+          buffer.put(strToNum(data2.substring(i2, i2 + 2)), 7);
+        }
+      }
+    };
+    const strToNum = function(s2) {
+      let num3 = 0;
+      for (let i2 = 0; i2 < s2.length; i2 += 1) {
+        num3 = num3 * 10 + chatToNum(s2.charAt(i2));
+      }
+      return num3;
+    };
+    const chatToNum = function(c2) {
+      if ("0" <= c2 && c2 <= "9") {
+        return c2.charCodeAt(0) - "0".charCodeAt(0);
+      }
+      throw "illegal char :" + c2;
+    };
+    return _this;
+  };
+  var qrAlphaNum = function(data) {
+    const _mode = QRMode.MODE_ALPHA_NUM;
+    const _data = data;
+    const _this = {};
+    _this.getMode = function() {
+      return _mode;
+    };
+    _this.getLength = function(buffer) {
+      return _data.length;
+    };
+    _this.write = function(buffer) {
+      const s2 = _data;
+      let i2 = 0;
+      while (i2 + 1 < s2.length) {
+        buffer.put(
+          getCode(s2.charAt(i2)) * 45 + getCode(s2.charAt(i2 + 1)),
+          11
+        );
+        i2 += 2;
+      }
+      if (i2 < s2.length) {
+        buffer.put(getCode(s2.charAt(i2)), 6);
+      }
+    };
+    const getCode = function(c2) {
+      if ("0" <= c2 && c2 <= "9") {
+        return c2.charCodeAt(0) - "0".charCodeAt(0);
+      } else if ("A" <= c2 && c2 <= "Z") {
+        return c2.charCodeAt(0) - "A".charCodeAt(0) + 10;
+      } else {
+        switch (c2) {
+          case " ":
+            return 36;
+          case "$":
+            return 37;
+          case "%":
+            return 38;
+          case "*":
+            return 39;
+          case "+":
+            return 40;
+          case "-":
+            return 41;
+          case ".":
+            return 42;
+          case "/":
+            return 43;
+          case ":":
+            return 44;
+          default:
+            throw "illegal char :" + c2;
+        }
+      }
+    };
+    return _this;
+  };
+  var qr8BitByte = function(data) {
+    const _mode = QRMode.MODE_8BIT_BYTE;
+    const _data = data;
+    const _bytes = qrcode.stringToBytes(data);
+    const _this = {};
+    _this.getMode = function() {
+      return _mode;
+    };
+    _this.getLength = function(buffer) {
+      return _bytes.length;
+    };
+    _this.write = function(buffer) {
+      for (let i2 = 0; i2 < _bytes.length; i2 += 1) {
+        buffer.put(_bytes[i2], 8);
+      }
+    };
+    return _this;
+  };
+  var qrKanji = function(data) {
+    const _mode = QRMode.MODE_KANJI;
+    const _data = data;
+    const stringToBytes2 = qrcode.stringToBytes;
+    !(function(c2, code) {
+      const test = stringToBytes2(c2);
+      if (test.length != 2 || (test[0] << 8 | test[1]) != code) {
+        throw "sjis not supported.";
+      }
+    })("\u53CB", 38726);
+    const _bytes = stringToBytes2(data);
+    const _this = {};
+    _this.getMode = function() {
+      return _mode;
+    };
+    _this.getLength = function(buffer) {
+      return ~~(_bytes.length / 2);
+    };
+    _this.write = function(buffer) {
+      const data2 = _bytes;
+      let i2 = 0;
+      while (i2 + 1 < data2.length) {
+        let c2 = (255 & data2[i2]) << 8 | 255 & data2[i2 + 1];
+        if (33088 <= c2 && c2 <= 40956) {
+          c2 -= 33088;
+        } else if (57408 <= c2 && c2 <= 60351) {
+          c2 -= 49472;
+        } else {
+          throw "illegal char at " + (i2 + 1) + "/" + c2;
+        }
+        c2 = (c2 >>> 8 & 255) * 192 + (c2 & 255);
+        buffer.put(c2, 13);
+        i2 += 2;
+      }
+      if (i2 < data2.length) {
+        throw "illegal char at " + (i2 + 1);
+      }
+    };
+    return _this;
+  };
+  var byteArrayOutputStream = function() {
+    const _bytes = [];
+    const _this = {};
+    _this.writeByte = function(b2) {
+      _bytes.push(b2 & 255);
+    };
+    _this.writeShort = function(i2) {
+      _this.writeByte(i2);
+      _this.writeByte(i2 >>> 8);
+    };
+    _this.writeBytes = function(b2, off2, len) {
+      off2 = off2 || 0;
+      len = len || b2.length;
+      for (let i2 = 0; i2 < len; i2 += 1) {
+        _this.writeByte(b2[i2 + off2]);
+      }
+    };
+    _this.writeString = function(s2) {
+      for (let i2 = 0; i2 < s2.length; i2 += 1) {
+        _this.writeByte(s2.charCodeAt(i2));
+      }
+    };
+    _this.toByteArray = function() {
+      return _bytes;
+    };
+    _this.toString = function() {
+      let s2 = "";
+      s2 += "[";
+      for (let i2 = 0; i2 < _bytes.length; i2 += 1) {
+        if (i2 > 0) {
+          s2 += ",";
+        }
+        s2 += _bytes[i2];
+      }
+      s2 += "]";
+      return s2;
+    };
+    return _this;
+  };
+  var base64EncodeOutputStream = function() {
+    let _buffer = 0;
+    let _buflen = 0;
+    let _length = 0;
+    let _base64 = "";
+    const _this = {};
+    const writeEncoded = function(b2) {
+      _base64 += String.fromCharCode(encode(b2 & 63));
+    };
+    const encode = function(n3) {
+      if (n3 < 0) {
+        throw "n:" + n3;
+      } else if (n3 < 26) {
+        return 65 + n3;
+      } else if (n3 < 52) {
+        return 97 + (n3 - 26);
+      } else if (n3 < 62) {
+        return 48 + (n3 - 52);
+      } else if (n3 == 62) {
+        return 43;
+      } else if (n3 == 63) {
+        return 47;
+      } else {
+        throw "n:" + n3;
+      }
+    };
+    _this.writeByte = function(n3) {
+      _buffer = _buffer << 8 | n3 & 255;
+      _buflen += 8;
+      _length += 1;
+      while (_buflen >= 6) {
+        writeEncoded(_buffer >>> _buflen - 6);
+        _buflen -= 6;
+      }
+    };
+    _this.flush = function() {
+      if (_buflen > 0) {
+        writeEncoded(_buffer << 6 - _buflen);
+        _buffer = 0;
+        _buflen = 0;
+      }
+      if (_length % 3 != 0) {
+        const padlen = 3 - _length % 3;
+        for (let i2 = 0; i2 < padlen; i2 += 1) {
+          _base64 += "=";
+        }
+      }
+    };
+    _this.toString = function() {
+      return _base64;
+    };
+    return _this;
+  };
+  var base64DecodeInputStream = function(str) {
+    const _str = str;
+    let _pos = 0;
+    let _buffer = 0;
+    let _buflen = 0;
+    const _this = {};
+    _this.read = function() {
+      while (_buflen < 8) {
+        if (_pos >= _str.length) {
+          if (_buflen == 0) {
+            return -1;
+          }
+          throw "unexpected end of file./" + _buflen;
+        }
+        const c2 = _str.charAt(_pos);
+        _pos += 1;
+        if (c2 == "=") {
+          _buflen = 0;
+          return -1;
+        } else if (c2.match(/^\s$/)) {
+          continue;
+        }
+        _buffer = _buffer << 6 | decode(c2.charCodeAt(0));
+        _buflen += 6;
+      }
+      const n3 = _buffer >>> _buflen - 8 & 255;
+      _buflen -= 8;
+      return n3;
+    };
+    const decode = function(c2) {
+      if (65 <= c2 && c2 <= 90) {
+        return c2 - 65;
+      } else if (97 <= c2 && c2 <= 122) {
+        return c2 - 97 + 26;
+      } else if (48 <= c2 && c2 <= 57) {
+        return c2 - 48 + 52;
+      } else if (c2 == 43) {
+        return 62;
+      } else if (c2 == 47) {
+        return 63;
+      } else {
+        throw "c:" + c2;
+      }
+    };
+    return _this;
+  };
+  var gifImage = function(width, height) {
+    const _width = width;
+    const _height = height;
+    const _data = new Array(width * height);
+    const _this = {};
+    _this.setPixel = function(x2, y2, pixel) {
+      _data[y2 * _width + x2] = pixel;
+    };
+    _this.write = function(out) {
+      out.writeString("GIF87a");
+      out.writeShort(_width);
+      out.writeShort(_height);
+      out.writeByte(128);
+      out.writeByte(0);
+      out.writeByte(0);
+      out.writeByte(0);
+      out.writeByte(0);
+      out.writeByte(0);
+      out.writeByte(255);
+      out.writeByte(255);
+      out.writeByte(255);
+      out.writeString(",");
+      out.writeShort(0);
+      out.writeShort(0);
+      out.writeShort(_width);
+      out.writeShort(_height);
+      out.writeByte(0);
+      const lzwMinCodeSize = 2;
+      const raster = getLZWRaster(lzwMinCodeSize);
+      out.writeByte(lzwMinCodeSize);
+      let offset = 0;
+      while (raster.length - offset > 255) {
+        out.writeByte(255);
+        out.writeBytes(raster, offset, 255);
+        offset += 255;
+      }
+      out.writeByte(raster.length - offset);
+      out.writeBytes(raster, offset, raster.length - offset);
+      out.writeByte(0);
+      out.writeString(";");
+    };
+    const bitOutputStream = function(out) {
+      const _out = out;
+      let _bitLength = 0;
+      let _bitBuffer = 0;
+      const _this2 = {};
+      _this2.write = function(data, length) {
+        if (data >>> length != 0) {
+          throw "length over";
+        }
+        while (_bitLength + length >= 8) {
+          _out.writeByte(255 & (data << _bitLength | _bitBuffer));
+          length -= 8 - _bitLength;
+          data >>>= 8 - _bitLength;
+          _bitBuffer = 0;
+          _bitLength = 0;
+        }
+        _bitBuffer = data << _bitLength | _bitBuffer;
+        _bitLength = _bitLength + length;
+      };
+      _this2.flush = function() {
+        if (_bitLength > 0) {
+          _out.writeByte(_bitBuffer);
+        }
+      };
+      return _this2;
+    };
+    const getLZWRaster = function(lzwMinCodeSize) {
+      const clearCode = 1 << lzwMinCodeSize;
+      const endCode = (1 << lzwMinCodeSize) + 1;
+      let bitLength = lzwMinCodeSize + 1;
+      const table = lzwTable();
+      for (let i2 = 0; i2 < clearCode; i2 += 1) {
+        table.add(String.fromCharCode(i2));
+      }
+      table.add(String.fromCharCode(clearCode));
+      table.add(String.fromCharCode(endCode));
+      const byteOut = byteArrayOutputStream();
+      const bitOut = bitOutputStream(byteOut);
+      bitOut.write(clearCode, bitLength);
+      let dataIndex = 0;
+      let s2 = String.fromCharCode(_data[dataIndex]);
+      dataIndex += 1;
+      while (dataIndex < _data.length) {
+        const c2 = String.fromCharCode(_data[dataIndex]);
+        dataIndex += 1;
+        if (table.contains(s2 + c2)) {
+          s2 = s2 + c2;
+        } else {
+          bitOut.write(table.indexOf(s2), bitLength);
+          if (table.size() < 4095) {
+            if (table.size() == 1 << bitLength) {
+              bitLength += 1;
+            }
+            table.add(s2 + c2);
+          }
+          s2 = c2;
+        }
+      }
+      bitOut.write(table.indexOf(s2), bitLength);
+      bitOut.write(endCode, bitLength);
+      bitOut.flush();
+      return byteOut.toByteArray();
+    };
+    const lzwTable = function() {
+      const _map = {};
+      let _size = 0;
+      const _this2 = {};
+      _this2.add = function(key) {
+        if (_this2.contains(key)) {
+          throw "dup key:" + key;
+        }
+        _map[key] = _size;
+        _size += 1;
+      };
+      _this2.size = function() {
+        return _size;
+      };
+      _this2.indexOf = function(key) {
+        return _map[key];
+      };
+      _this2.contains = function(key) {
+        return typeof _map[key] != "undefined";
+      };
+      return _this2;
+    };
+    return _this;
+  };
+  var createDataURL = function(width, height, getPixel) {
+    const gif = gifImage(width, height);
+    for (let y2 = 0; y2 < height; y2 += 1) {
+      for (let x2 = 0; x2 < width; x2 += 1) {
+        gif.setPixel(x2, y2, getPixel(x2, y2));
+      }
+    }
+    const b2 = byteArrayOutputStream();
+    gif.write(b2);
+    const base64 = base64EncodeOutputStream();
+    const bytes = b2.toByteArray();
+    for (let i2 = 0; i2 < bytes.length; i2 += 1) {
+      base64.writeByte(bytes[i2]);
+    }
+    base64.flush();
+    return "data:image/gif;base64," + base64;
+  };
+  var qrcode_default = qrcode;
+  var stringToBytes = qrcode.stringToBytes;
+
+  // src/ts/editor/share.ts
+  var status2 = null;
+  var body2 = null;
+  var button5 = document.getElementById("btn-share");
+  function qrSvg(text) {
+    const qr = qrcode_default(0, "M");
+    qr.addData(text);
+    qr.make();
+    return qr.createSvgTag({ cellSize: 3, margin: 2, scalable: true });
+  }
+  function copy2(text, what) {
+    const done = () => toast(`${what} copied`, "ok");
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, () => fallback());
+    } else fallback();
+    function fallback() {
+      const area2 = h("textarea", {}, text);
+      document.body.append(area2);
+      area2.select();
+      try {
+        document.execCommand("copy");
+        done();
+      } catch {
+        toast("Select the link and copy it", "error");
+      }
+      area2.remove();
+    }
+  }
+  function linkRow(label4, url, hint) {
+    const qr = h("div", { class: "share-qr", title: `QR code: ${label4}` });
+    qr.innerHTML = qrSvg(url);
+    return h(
+      "div",
+      { class: "share-link" },
+      qr,
+      h(
+        "div",
+        { class: "share-link-text" },
+        h("strong", {}, label4),
+        h("span", { class: "hint" }, hint),
+        h("input", {
+          type: "text",
+          readonly: true,
+          value: url,
+          onfocus: (e2) => e2.target.select()
+        }),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            onclick: () => copy2(url, label4)
+          },
+          "Copy"
+        )
+      )
+    );
+  }
+  function render4() {
+    if (!body2 || !status2) return;
+    clear(body2);
+    const s2 = status2;
+    body2.append(
+      h(
+        "div",
+        { class: "share-state" },
+        h(
+          "p",
+          {},
+          s2.sharing ? "Shared on the network: people with a link below can join." : "Only this computer can open the deck. Share it to give people on the same network (or VPN) a link."
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            class: s2.sharing ? "pbtn" : "pbtn primary",
+            onclick: () => sendRaw({
+              type: "share",
+              op: s2.sharing ? "off" : "on"
+            })
+          },
+          s2.sharing ? "Stop sharing" : "Share on the network"
+        )
+      )
+    );
+    if (s2.error) body2.append(h("p", { class: "share-error" }, s2.error));
+    if (s2.sharing) {
+      if (!s2.links.length) {
+        body2.append(
+          h(
+            "p",
+            { class: "hint" },
+            "No network address found. Start inkflow with --host <address>."
+          )
+        );
+      }
+      for (const link of s2.links) {
+        body2.append(
+          h(
+            "section",
+            { class: "share-address" },
+            h("h3", {}, link.address),
+            linkRow(
+              "Editor link",
+              link.editor,
+              "Edits the deck with you (not your computer's files, git or programs)."
+            ),
+            linkRow(
+              "View link",
+              link.view,
+              "Watches the presentation and follows your slide."
+            )
+          )
+        );
+      }
+      if (s2.names.length) {
+        body2.append(
+          h(
+            "p",
+            { class: "hint" },
+            `The same links also work with ${s2.names.join(", ")} in place of the address, where the network supports it.`
+          )
+        );
+      }
+      body2.append(
+        h(
+          "div",
+          { class: "share-actions" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => {
+                if (confirm(
+                  "Make new links? Everyone who joined with the current ones is disconnected."
+                )) {
+                  sendRaw({ type: "share", op: "rotate" });
+                }
+              }
+            },
+            "New links"
+          )
+        ),
+        h(
+          "p",
+          { class: "hint" },
+          "The links travel unencrypted on the network: on a network you do not trust, share over SSH or a VPN instead."
+        )
+      );
+    }
+    body2.append(
+      h(
+        "p",
+        { class: "hint" },
+        "From another computer over SSH: ",
+        h(
+          "code",
+          {},
+          `ssh -L ${s2.port}:localhost:${s2.port} you@this-computer`
+        ),
+        `, then open http://localhost:${s2.port}/edit there (as you).`
+      )
+    );
+    const people = s2.people.filter((p2) => p2.id !== collab.me?.id);
+    body2.append(
+      h("h3", {}, people.length ? "Connected" : "No one else is connected")
+    );
+    const list4 = h("ul", { class: "share-people" });
+    for (const p2 of people) {
+      const where = p2.slide == null ? "" : p2.page === "presenter" ? `presenting slide ${p2.slide + 1}` : `on slide ${p2.slide + 1}`;
+      list4.append(
+        h(
+          "li",
+          {},
+          h("span", { class: "who" }, p2.name),
+          h(
+            "span",
+            { class: "hint" },
+            `${p2.role}${where ? ` \xB7 ${where}` : ""}`
+          ),
+          p2.role === "owner" ? null : h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => sendRaw({
+                type: "share",
+                op: "kick",
+                id: p2.id
+              })
+            },
+            "Disconnect"
+          )
+        )
+      );
+    }
+    body2.append(list4);
+  }
+  function setStatus(msg) {
+    status2 = msg;
+    if (button5) button5.classList.toggle("on", status2.sharing);
+    if (status2.error) toast(status2.error, "error");
+    if (body2 && dialogOpen()) render4();
+  }
+  function openShare() {
+    body2 = h("div", { class: "share-dialog" }, h("p", {}, "\u2026"));
+    openDialog("Share", body2, {
+      wide: true,
+      onClose: () => {
+        body2 = null;
+      }
+    });
+    sendRaw({ type: "share", op: "status" });
+    render4();
+  }
+  function initShare() {
+    onMessage("share-status", setStatus);
+    button5?.addEventListener("click", openShare);
   }
 
   // src/ts/editor/theme.ts
@@ -18305,8 +20620,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     probe.remove();
     return `#${rgb.slice(0, 3).map((n3) => Number(n3).toString(16).padStart(2, "0")).join("")}`;
   }
-  async function save3(body2, label4) {
-    await edit({ action: "theme-set", label: label4, ...body2 });
+  async function save3(body3, label4) {
+    await edit({ action: "theme-set", label: label4, ...body3 });
   }
   function setToken(group2, name2, value) {
     void save3({ changes: { [group2]: { [name2]: value } } }, "Theme");
@@ -18427,7 +20742,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       ) : null
     );
   }
-  function render4() {
+  function render5() {
     if (!content || !info3) return;
     const t2 = info3;
     clear(content);
@@ -18585,11 +20900,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const result = await request({ action: "theme-get" });
     if (!result.ok) return;
     info3 = result.theme;
-    render4();
+    render5();
     const fonts = await request({ action: "fonts" });
     if (fonts.ok) {
       report2 = fonts.fonts;
-      render4();
+      render5();
     }
   }
   async function openTheme() {
@@ -18673,8 +20988,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     panY = 0;
     wheelTimer = 0;
     safariScale = 1;
-    constructor(host4, tracker = new TouchTracker()) {
-      this.host = host4;
+    constructor(host5, tracker = new TouchTracker()) {
+      this.host = host5;
       this.touch = tracker;
       const opts2 = { capture: true };
       window.addEventListener("pointerdown", (e2) => this.down(e2), opts2);
@@ -18683,7 +20998,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       window.addEventListener("pointercancel", (e2) => this.up(e2, true), opts2);
       window.addEventListener("click", (e2) => this.claimClick(e2), opts2);
       window.addEventListener("dblclick", (e2) => this.claimClick(e2), opts2);
-      const s2 = host4.surface;
+      const s2 = host5.surface;
       s2.addEventListener("wheel", (e2) => this.wheel(e2), { passive: false });
       s2.addEventListener("gesturestart", (e2) => this.gesture(e2, "start"));
       s2.addEventListener("gesturechange", (e2) => this.gesture(e2, "change"));
@@ -19065,6 +21380,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       readHash();
       if (ed.current !== before) emit("slide");
     });
+    initCollab();
+    initShare();
+    on("stale", () => render());
     showError();
     renderSorter();
     render();

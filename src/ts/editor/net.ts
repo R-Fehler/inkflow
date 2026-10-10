@@ -5,8 +5,11 @@
 import { applyDeckStyles } from "../shared/deck-styles";
 import type { SlideData } from "../shared/types";
 import { setDeckCanvas } from "../shared/viewbox";
+import { SENT_AWAY, socketUrl } from "../shared/wsurl";
+import type { Person } from "./collab";
+import { presenceConnected, setPeople, welcome } from "./collab";
 import { toast } from "./dom";
-import { ed, emit } from "./state";
+import { ed, emit, off, on } from "./state";
 import type { EditorModel, EditRequest, EditResult } from "./types";
 
 let ws: WebSocket | null = null;
@@ -64,23 +67,32 @@ export function whenConnected(): Promise<void> {
     return new Promise((resolve) => waiting.push(resolve));
 }
 
+// `port` only says the page is served; the socket is on the page's own
+// address (a share link's, an SSH tunnel's), at /_inkflow/ws.
 export function connect(port: number): void {
-    const host = location.hostname || "localhost";
-    const sock = new WebSocket(`ws://${host}:${port}`);
+    const sock = new WebSocket(socketUrl(location));
     ws = sock;
     sock.onopen = () => {
+        presenceConnected();
         sock.send(JSON.stringify({ type: "hello", role: "editor" }));
         document.body.classList.remove("offline");
         for (const resolve of waiting) resolve();
         waiting = [];
         for (const fn of connectHooks) fn();
     };
-    sock.onclose = () => {
+    sock.onclose = (ev) => {
         document.body.classList.add("offline");
         for (const resolve of pending.values()) {
             resolve({ ok: false, error: "disconnected from the server" });
         }
         pending.clear();
+        if (ev.code === SENT_AWAY) {
+            // The owner stopped sharing, made new links or disconnected this
+            // page: the link no longer opens the deck.
+            stopped = true;
+            sentAway(ev.reason);
+            return;
+        }
         if (!stopped) window.setTimeout(() => connect(port), 1500);
     };
     sock.onmessage = (event) => {
@@ -139,6 +151,16 @@ export function connect(port: number): void {
             case "agent-edit":
                 agentEdit(msg);
                 break;
+            case "history":
+                // Someone's edit may block, or free, this person's Undo.
+                setHistory(msg as HistoryState);
+                break;
+            case "welcome":
+                welcome(msg);
+                break;
+            case "presence":
+                setPeople((msg.people as Person[]) ?? []);
+                break;
             case "notify":
                 toast(String(msg.message ?? ""));
                 break;
@@ -153,6 +175,7 @@ interface HistoryState {
     canRedo?: boolean;
     undoLabel?: string | null;
     redoLabel?: string | null;
+    undoBlockedBy?: string | null;
 }
 
 function setHistory(h: HistoryState): void {
@@ -160,7 +183,16 @@ function setHistory(h: HistoryState): void {
     ed.canRedo = h.canRedo ?? ed.canRedo;
     if ("undoLabel" in h) ed.undoLabel = h.undoLabel ?? null;
     if ("redoLabel" in h) ed.redoLabel = h.redoLabel ?? null;
+    if ("undoBlockedBy" in h) ed.undoBlockedBy = h.undoBlockedBy ?? null;
     emit("history");
+}
+
+function sentAway(reason: string): void {
+    const box = document.getElementById("build-error");
+    if (box) {
+        box.textContent = `Disconnected: ${reason || "this link no longer opens the deck"}. Ask the person sharing it for a new link.`;
+        box.classList.add("show");
+    }
 }
 
 // An agent changed the deck through the server (`inkflow slide …`): the step
@@ -170,6 +202,11 @@ function agentEdit(msg: Record<string, unknown>): void {
     setHistory(msg as HistoryState);
     const label = String(msg.label ?? "Agent: changed the deck");
     const step = msg.step;
+    // The agent works for the owner: only their pages can take it back.
+    if (!msg.mine) {
+        toast(label, "info");
+        return;
+    }
     toast(label, "info", {
         label: "Undo",
         run: () => {
@@ -189,23 +226,67 @@ export function request(req: EditRequest): Promise<EditResult> {
     }
     const id = nextId++;
     const sock = ws;
+    // The build this page shows: a write to a file someone changed since is
+    // refused rather than undoing their change.
+    const base =
+        req.action === "undo" || req.action === "redo"
+            ? {}
+            : ed.model?.build != null
+              ? { baseBuild: ed.model.build }
+              : {};
     return new Promise((resolve) => {
         pending.set(id, resolve);
-        sock.send(JSON.stringify({ type: "edit-op", id, ...req }));
+        sock.send(JSON.stringify({ type: "edit-op", id, ...base, ...req }));
     });
 }
 
 // A request whose failure is shown to the user; returns the result either way.
 let pendingTimer = 0;
 
+/** Resolves once a model newer than build `than` is here (true), or after
+ * `ms` without one (false). */
+export function newerBuild(
+    than: number | undefined,
+    ms = 4000,
+): Promise<boolean> {
+    return new Promise((resolve) => {
+        const now = () => ed.model?.build != null && ed.model.build !== than;
+        if (now()) {
+            resolve(true);
+            return;
+        }
+        const done = (ok: boolean) => {
+            window.clearTimeout(timer);
+            off("model", check);
+            resolve(ok);
+        };
+        const check = () => {
+            if (now()) done(true);
+        };
+        const timer = window.setTimeout(() => done(false), ms);
+        on("model", check);
+    });
+}
+
 // Refusals that only mean "the last edit has not rebuilt yet".
 const TRANSIENT = /since the last build|wait for the reload/;
 
 export async function edit(
     req: EditRequest,
-    opts: { retrying?: boolean } = {},
+    opts: { retrying?: boolean; quietStale?: boolean } = {},
 ): Promise<EditResult> {
     const result = await request(req);
+    if (!result.ok && result.stale && opts.quietStale) return result;
+    if (!result.ok && result.stale) {
+        // Someone else changed what this edit was aimed at: the newer
+        // build is on its way (or here); show it instead of the preview.
+        toast(
+            result.error ?? "Changed by someone else meanwhile — updated",
+            "error",
+        );
+        emit("stale");
+        return result;
+    }
     if (!result.ok && !(opts.retrying && TRANSIENT.test(result.error ?? ""))) {
         toast(result.error ?? "edit failed", "error");
     }

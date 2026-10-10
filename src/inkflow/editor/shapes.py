@@ -421,6 +421,7 @@ class Runner:
     _scene: Scene | None
     _scene_key: tuple[object, ...] | None
     _local: bool
+    _role: object
     _agent: object
 
     def __init__(
@@ -433,6 +434,7 @@ class Runner:
         self._scene = None
         self._scene_key = None
         self._local = msg.get("_local") is True
+        self._role = msg.get("_role")
         self._agent = msg.get("agent")
         self.reports = []
         self.created = []
@@ -531,6 +533,8 @@ class Runner:
             "coalesce": self.coalesce,
             "_local": self._local,
         }
+        if self._role is not None:
+            request["_role"] = self._role
         if self._agent is not None:
             request["agent"] = self._agent
         if action != "slide":

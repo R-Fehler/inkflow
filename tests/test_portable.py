@@ -22,11 +22,9 @@ from typing import cast
 
 import pytest
 from click.testing import CliRunner
-from websockets.asyncio.server import serve as ws_serve
 
 from inkflow import fontreport, instances, lfs, pack, pdf, server
 from inkflow.cli import main
-from inkflow.edit import NO_EDIT_COMMANDS
 from inkflow.editor.filerename import plan_copy_in
 from inkflow.editor.session import EditError, EditorSession
 from inkflow.fontreport import Face, Where, font_report, plan_bundle, token_value
@@ -739,11 +737,8 @@ def served(project: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[EditorSes
     async def run() -> None:
         server._editor["session"] = session  # pyright: ignore[reportPrivateUsage]
         await server.rebuild(deck_path, ui, levels)
-        handler = server.make_ws_handler(ui, NO_EDIT_COMMANDS, session)
-        async with ws_serve(handler, "127.0.0.1", 0) as ws:
-            port.append(
-                cast("tuple[str, int]", next(iter(ws.sockets)).getsockname())[1]
-            )
+        async with server.listening(ui, session) as bound:
+            port.append(bound)
             watch = asyncio.create_task(
                 server._watch(deck_path, ui, asyncio.Lock(), levels)  # pyright: ignore[reportPrivateUsage]
             )
@@ -755,7 +750,9 @@ def served(project: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[EditorSes
     thread = threading.Thread(target=lambda: loop.run_until_complete(run()))
     thread.start()
     assert started.wait(20)
-    record = instances.Instance(os.getpid(), "127.0.0.1", 0, port[0], str(deck_path))
+    record = instances.Instance(
+        os.getpid(), "127.0.0.1", port[0], port[0], str(deck_path)
+    )
 
     def serving(_deck: Path, _exclude_pid: int | None = None) -> instances.Instance:
         return record

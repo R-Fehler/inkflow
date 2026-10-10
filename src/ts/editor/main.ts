@@ -11,6 +11,7 @@ import {
 } from "./canvas";
 import { initCanvasMenu } from "./canvasmenu";
 import { editChart } from "./chart";
+import { initCollab } from "./collab";
 import { initCompare } from "./compare";
 import { initContext } from "./context";
 import { isCropped, setCropMode, startCrop } from "./crop";
@@ -29,6 +30,7 @@ import { connect } from "./net";
 import { initNotes } from "./notes";
 import { initObjects } from "./objects";
 import { focusCellLabel, initProps } from "./props";
+import { initShare } from "./share";
 import { initSorter, renderSorter } from "./sorter";
 import { currentSlide, ed, emit, on } from "./state";
 import { editingHost, editSvgText, editZone, finishTextEdit } from "./textedit";
@@ -180,6 +182,12 @@ function boot(): void {
         readHash();
         if (ed.current !== before) emit("slide");
     });
+
+    initCollab();
+    initShare();
+    // An edit refused because someone else changed its files: drop what the
+    // canvas previewed (the newer build follows).
+    on("stale", () => render());
 
     showError();
     renderSorter();

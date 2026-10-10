@@ -576,7 +576,9 @@ def test_through_the_server_it_is_one_agent_step(
 ) -> None:
     session, port = served
     original = {p: p.read_bytes() for p in project.rglob("*") if p.is_file()}
-    with connect(f"ws://127.0.0.1:{port}", proxy=None, max_size=None) as editor:
+    with connect(
+        f"ws://127.0.0.1:{port}/_inkflow/ws", proxy=None, max_size=None
+    ) as editor:
         editor.send(json.dumps({"type": "hello", "role": "editor"}))
         out = _ok(project, "batch", "-s", "1", input=json.dumps(BATCH))
         assert "Ctrl+Z in the editor" in out

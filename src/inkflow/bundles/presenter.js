@@ -3413,6 +3413,50 @@
       document.documentElement.dataset.theme = msg.mode;
   }
 
+  // src/ts/shared/identity.ts
+  var NAME_KEY = "inkflow-name";
+  var ID_KEY = "inkflow-key";
+  function read(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+  function write(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+    }
+  }
+  function storedName() {
+    const name = read(NAME_KEY)?.trim();
+    return name ? name.slice(0, 40) : null;
+  }
+  var sessionKey = null;
+  function clientKey() {
+    const stored = read(ID_KEY);
+    if (stored && /^[A-Za-z0-9_-]{16,64}$/.test(stored)) return stored;
+    if (!sessionKey) {
+      const bytes = new Uint8Array(18);
+      crypto.getRandomValues(bytes);
+      sessionKey = Array.from(
+        bytes,
+        (b2) => b2.toString(16).padStart(2, "0")
+      ).join("");
+      write(ID_KEY, sessionKey);
+    }
+    return sessionKey;
+  }
+
+  // src/ts/shared/wsurl.ts
+  var WS_PATH = "/_inkflow/ws";
+  function socketUrl(loc) {
+    const scheme = loc.protocol === "https:" ? "wss" : "ws";
+    return `${scheme}://${loc.host || "localhost"}${WS_PATH}`;
+  }
+  var SENT_AWAY = 4001;
+
   // src/ts/shared/morph-math.ts
   var INTERPOLATED_ATTRIBUTES = [
     "fill",
@@ -5011,6 +5055,43 @@
     }
     if (isSyncMode(stored)) state.syncMode = stored;
   }
+  function storedSyncMode() {
+    try {
+      return isSyncMode(sessionStorage.getItem(SYNC_MODE_KEY));
+    } catch (_2) {
+      return false;
+    }
+  }
+  var role = "owner";
+  function welcome(msg) {
+    role = String(msg.role ?? "owner");
+    if (role !== "viewer") return;
+    for (const id of ["btn-to-editor", "btn-edit"]) {
+      const el = document.getElementById(id);
+      if (el) el.style.display = "none";
+    }
+    if (!storedSyncMode() && state.syncMode !== "follow") {
+      state.syncMode = "follow";
+      requestSync();
+    }
+  }
+  var presenceSent = -1;
+  function sendPresence(force = false) {
+    const ws = state.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!force && presenceSent === state.slideIndex) return;
+    presenceSent = state.slideIndex;
+    ws.send(
+      JSON.stringify({
+        type: "presence",
+        page: "presenter",
+        key: clientKey(),
+        ...storedName() ? { name: storedName() } : {},
+        slide: state.slideIndex
+      })
+    );
+  }
+  window.setInterval(() => sendPresence(), 1e3);
   function applySyncMode(mode) {
     state.syncMode = mode;
     try {
@@ -5092,15 +5173,16 @@
   }
   function connectWS(wsPort, authoritative) {
     if (!wsPort) return;
-    state.ws = new WebSocket(`ws://localhost:${wsPort}`);
+    state.ws = new WebSocket(socketUrl(location));
     let firstPositionPending = false;
     state.ws.onopen = () => {
       wsDot.className = "connected";
       wsDot.dataset.tooltip = "Connected";
       const assert = authoritative && sends();
       firstPositionPending = assert;
-      if (assert) sendNav();
+      if (assert && role !== "viewer") sendNav();
       requestInk();
+      sendPresence(true);
     };
     state.ws.onmessage = (ev) => {
       let msg;
@@ -5134,6 +5216,8 @@
         inkSaveResult(msg);
       } else if (msg.type === "notify") {
         showNotify(msg.message, msg.style);
+      } else if (msg.type === "welcome") {
+        welcome(msg);
       } else if (msg.type === "position") {
         if (receives() && !msg.snap && firstPositionPending) {
           firstPositionPending = false;
@@ -5142,10 +5226,17 @@
         applyIncomingPosition(msg);
       }
     };
-    state.ws.onclose = () => {
+    state.ws.onclose = (ev) => {
       wsDot.className = "";
       wsDot.dataset.tooltip = "Disconnected";
       state.ws = null;
+      if (ev.code === SENT_AWAY) {
+        showNotify(
+          `Disconnected: ${ev.reason || "the link stopped working"}`,
+          "red"
+        );
+        return;
+      }
       setTimeout(() => connectWS(wsPort, true), 2e3);
     };
     state.ws.onerror = () => state.ws?.close();

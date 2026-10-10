@@ -287,7 +287,7 @@ def test_other_formats_come_in_for_converting(project: Path, mkv: Path) -> None:
     session = EditorSession(project / "deck.py")
     info = session.apply({"action": "media-info", "path": str(staged.path)}, None)
     assert info["remux"] == "mp4"
-    with pytest.raises(EditError, match="no video"):
+    with pytest.raises(EditError, match="outside the deck"):
         session.apply({"action": "media-info", "path": str(mkv)}, None)  # not local
     job = session.apply(
         {

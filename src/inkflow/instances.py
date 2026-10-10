@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import ssl
 import urllib.request
 from dataclasses import asdict, dataclass
 from http.client import HTTPResponse
@@ -25,6 +26,8 @@ from typing import cast
 import platformdirs
 
 PROBE_PATH = "/_inkflow/instance"
+WS_PATH = "/_inkflow/ws"
+"""The server's WebSocket, on its HTTP port."""
 
 
 @dataclass(frozen=True)
@@ -33,12 +36,35 @@ class Instance:
     host: str
     port: int
     ws_port: int
+    """The WebSocket's port: the HTTP port, unless an old separate one was
+    asked for (``--ws-port``)."""
     deck: str | None
     """The open deck.py (resolved), or None on the start page."""
+    tls: bool = False
+    """Served over HTTPS (``--tls``)."""
+
+    @property
+    def address(self) -> str:
+        """The host to reach it at from this machine."""
+        host = "localhost" if self.host in ("", "0.0.0.0", "::") else self.host
+        return f"[{host}]" if ":" in host else host
 
     def url(self, path: str = "/edit") -> str:
-        host = "localhost" if self.host in ("", "0.0.0.0", "::") else self.host
-        return f"http://{host}:{self.port}{path}"
+        return f"{'https' if self.tls else 'http'}://{self.address}:{self.port}{path}"
+
+    def ws_url(self) -> str:
+        """The server's WebSocket (on its HTTP port)."""
+        return f"{'wss' if self.tls else 'ws'}://{self.address}:{self.port}{WS_PATH}"
+
+
+def loopback_tls() -> ssl.SSLContext:
+    """TLS to this machine's own server, whose certificate (made for its
+    network name, or self-signed) need not name localhost: the connection
+    never leaves the machine, and who answers is checked by its pid."""
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
 
 
 def _dir() -> Path:
@@ -72,8 +98,9 @@ def _read(path: Path) -> Instance | None:
             pid=int(cast("int", data["pid"])),
             host=str(data["host"]),
             port=int(cast("int", data["port"])),
-            ws_port=int(cast("int", data["ws_port"])),
+            ws_port=int(cast("int", data.get("ws_port", data["port"]))),
             deck=str(deck) if isinstance(deck, str) else None,
+            tls=data.get("tls") is True,
         )
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -82,7 +109,10 @@ def _read(path: Path) -> Instance | None:
 def probe(instance: Instance, timeout: float = 1.0) -> dict[str, object] | None:
     """What the server at ``instance`` says about itself, if it is that server."""
     # Straight to the loopback address, never through a configured proxy.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    handlers: list[urllib.request.BaseHandler] = [urllib.request.ProxyHandler({})]
+    if instance.tls:
+        handlers.append(urllib.request.HTTPSHandler(context=loopback_tls()))
+    opener = urllib.request.build_opener(*handlers)
     try:
         response = cast(
             "HTTPResponse", opener.open(instance.url(PROBE_PATH), timeout=timeout)
@@ -120,6 +150,7 @@ def running(exclude_pid: int | None = None) -> list[Instance]:
                 port=instance.port,
                 ws_port=instance.ws_port,
                 deck=str(deck) if isinstance(deck, str) else None,
+                tls=instance.tls,
             )
         )
     return found

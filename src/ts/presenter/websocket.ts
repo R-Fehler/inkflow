@@ -1,4 +1,5 @@
 import { applyDeckStyles } from "../shared/deck-styles";
+import { clientKey, storedName } from "../shared/identity";
 import type {
     InkMessage,
     NavMessage,
@@ -7,6 +8,7 @@ import type {
     TransitionData,
     WsMessage,
 } from "../shared/types";
+import { SENT_AWAY, socketUrl } from "../shared/wsurl";
 import { applyIncomingInk, inkSaveResult, requestInk } from "./ink";
 import { renderPv, renderPvNext, updatePvInfo } from "./pv";
 import { state } from "./state";
@@ -52,6 +54,53 @@ export function loadSyncMode(): void {
     } catch (_) {}
     if (isSyncMode(stored)) state.syncMode = stored;
 }
+
+function storedSyncMode(): boolean {
+    try {
+        return isSyncMode(sessionStorage.getItem(SYNC_MODE_KEY));
+    } catch (_) {
+        return false;
+    }
+}
+
+// Who the server says this page is (its "welcome"): a view link follows the
+// presenter (it may still look around alone, in solo mode) and has no editor.
+let role = "owner";
+
+function welcome(msg: { role?: unknown }): void {
+    role = String(msg.role ?? "owner");
+    if (role !== "viewer") return;
+    for (const id of ["btn-to-editor", "btn-edit"]) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = "none";
+    }
+    if (!storedSyncMode() && state.syncMode !== "follow") {
+        state.syncMode = "follow";
+        requestSync();
+    }
+}
+
+// This page's slide, for the others' list of who is where (sent when it
+// changes; nothing about the page is stored).
+let presenceSent = -1;
+
+function sendPresence(force = false): void {
+    const ws = state.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!force && presenceSent === state.slideIndex) return;
+    presenceSent = state.slideIndex;
+    ws.send(
+        JSON.stringify({
+            type: "presence",
+            page: "presenter",
+            key: clientKey(),
+            ...(storedName() ? { name: storedName() } : {}),
+            slide: state.slideIndex,
+        }),
+    );
+}
+
+window.setInterval(() => sendPresence(), 1000);
 
 // Behavioural core of a mode change: update state, persist, and (when entering a
 // receiving mode) catch up to the presenter's current position immediately instead
@@ -190,7 +239,9 @@ export function applyIncomingPosition(msg: SyncPosition): void {
 // yanks the others.
 export function connectWS(wsPort: number | null, authoritative: boolean): void {
     if (!wsPort) return;
-    state.ws = new WebSocket(`ws://localhost:${wsPort}`);
+    // The page's own address: a LAN link or an SSH tunnel reaches the same
+    // server the page came from.
+    state.ws = new WebSocket(socketUrl(location));
 
     // Set in onopen (which fires before any message): true only while this
     // connection still owes the server's stale connect-time push a discard.
@@ -201,8 +252,9 @@ export function connectWS(wsPort: number | null, authoritative: boolean): void {
         wsDot.dataset.tooltip = "Connected";
         const assert = authoritative && sends();
         firstPositionPending = assert;
-        if (assert) sendNav();
+        if (assert && role !== "viewer") sendNav();
         requestInk();
+        sendPresence(true);
     };
 
     state.ws.onmessage = (ev) => {
@@ -237,6 +289,8 @@ export function connectWS(wsPort: number | null, authoritative: boolean): void {
             inkSaveResult(msg);
         } else if (msg.type === "notify") {
             showNotify(msg.message, msg.style);
+        } else if (msg.type === "welcome") {
+            welcome(msg);
         } else if (msg.type === "position") {
             // Discard exactly the stale connect-time push so an authoritative window
             // keeps its own position; later updates apply normally. Mirrors the
@@ -250,10 +304,19 @@ export function connectWS(wsPort: number | null, authoritative: boolean): void {
         }
     };
 
-    state.ws.onclose = () => {
+    state.ws.onclose = (ev) => {
         wsDot.className = "";
         wsDot.dataset.tooltip = "Disconnected";
         state.ws = null;
+        if (ev.code === SENT_AWAY) {
+            // The owner stopped sharing, made new links or disconnected
+            // this page: reconnecting would only be refused.
+            showNotify(
+                `Disconnected: ${ev.reason || "the link stopped working"}`,
+                "red",
+            );
+            return;
+        }
         // A reconnecting live window re-asserts its position rather than being
         // adopted by a possibly-stale server.
         setTimeout(() => connectWS(wsPort, true), 2000);

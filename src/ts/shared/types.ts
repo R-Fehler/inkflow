@@ -117,4 +117,6 @@ export type WsMessage =
       }
     | { type: "error"; message: string }
     | { type: "notify"; message: string; style: NotifyStyle }
+    | { type: "welcome"; id: string; role: string; color: string; name: string }
+    | { type: "presence"; people: unknown[] }
     | ({ type: "position" } & SyncPosition);

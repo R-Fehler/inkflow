@@ -32,8 +32,11 @@ class LiveUI:
         http_port: int,
         watch_path: Path,
         get_clients: Callable[[], int],
+        scheme: str = "http",
     ) -> None:
         self._live: Live = live
+        self._scheme: str = scheme
+        self._share: list[str] = []
         self._http_port: int = http_port
         self._host: str = host
         self._watch_path: Path = watch_path
@@ -56,7 +59,7 @@ class LiveUI:
 
         content = Group(
             Text.assemble(
-                (f"http://{self._host}:{self._http_port}", "bold"),
+                (f"{self._scheme}://{self._host}:{self._http_port}", "bold"),
                 ("  ·  ", "dim"),
                 (client_str, "dim"),
             ),
@@ -65,6 +68,7 @@ class LiveUI:
                 overflow="ellipsis",
                 no_wrap=True,
             ),
+            *(Text(line, style="dim", overflow="fold") for line in self._share),
             Text(""),
             Text.assemble(
                 ("o", "bold"),
@@ -124,6 +128,12 @@ class LiveUI:
     def refresh(self) -> None:
         self._live.update(self._renderable())
         self._live.refresh()
+
+    def set_share(self, lines: list[str]) -> None:
+        """The share links (and SSH recipe) under the address; none when the
+        server is not shared."""
+        self._share = lines
+        self.refresh()
 
     def set_building(self) -> None:
         self._phase = "building"

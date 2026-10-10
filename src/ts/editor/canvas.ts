@@ -104,6 +104,8 @@ export const hooks = {
     selectAfterRender: (_ids: string[]): void => {},
     toolDown: (_e: PointerEvent, _pt: { x: number; y: number }): boolean =>
         false,
+    // Draws the others' selections on this slide (collab.ts).
+    drawPeers: (_overlay: SVGSVGElement): void => {},
 };
 
 // ── Rendering ──
@@ -726,6 +728,13 @@ function poly(
     });
 }
 
+/** An element's outline on the overlay (its four transformed corners). */
+export function outlineOf(
+    el: SVGGraphicsElement,
+): { x: number; y: number }[] | null {
+    return elementCorners(el);
+}
+
 function elementCorners(
     el: SVGGraphicsElement,
 ): { x: number; y: number }[] | null {
@@ -799,6 +808,7 @@ export function drawOverlay(): void {
     const svg = slideRoot();
     if (!svg) return;
     drawPlaceholders();
+    hooks.drawPeers(overlay);
     if (ed.scope) {
         const c = elementCorners(ed.scope);
         if (c) overlay.append(poly(c, "scope-outline"));

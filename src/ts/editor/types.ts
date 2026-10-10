@@ -127,6 +127,8 @@ export interface SectionInfo {
 }
 
 export interface EditorModel {
+    // The build this model came from: requests name it (baseBuild).
+    build?: number;
     deckPath: string;
     projectDir: string;
     deckEditable: boolean;
@@ -167,6 +169,9 @@ export interface EditResult {
     canRedo?: boolean;
     undoLabel?: string | null;
     redoLabel?: string | null;
+    // A write refused because someone changed its files since this page's
+    // build (the page is about to get the newer one).
+    stale?: boolean;
     path?: string;
     rel?: string;
     theme?: unknown;
