@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from inkflow.animations import Animation, PlayVideo
 from inkflow.assets import AssetRoots, AssetSource
+from inkflow.charts import ResolvedChart, render
 from inkflow.clean import clean_inkscape_tree
 from inkflow.layout import (
     are_preview_layers_current,
@@ -13,7 +15,7 @@ from inkflow.layout import (
     resolve_default_zone,
 )
 from inkflow.loaders import load_md, resolve_content_src
-from inkflow.manifest import Inline, Media, Slide, Video
+from inkflow.manifest import Chart, Inline, Media, Slide, TextBox, Video
 from inkflow.pipeline import resolve_overlay_chains, resolve_slide_src
 from inkflow.svg import (
     compose_overlays,
@@ -129,6 +131,59 @@ def _check_animations(slide: Slide, all_ids: set[str]) -> list[Issue]:
                 ("error", f"animation element #{cue.element} not found in SVG")
             )
     return issues
+
+
+_ID_RE = re.compile(r'\bid="([^"]+)"')
+
+
+def _check_charts(
+    slide: Slide, project_dir: Path, zone_ids: set[str], default_zone: str
+) -> tuple[set[str], list[Issue]]:
+    """The ids a slide's charts draw (series an animation may target), and
+    their data problems.
+
+    A chart's elements exist only once it is drawn, so they are drawn here the
+    way the build draws them; the size does not change an id.
+    """
+    has_fence = False
+    md = None
+    if slide.md is not None:
+        try:
+            md = load_md(slide.md, project_dir)
+        except (FileNotFoundError, OSError):
+            md = None
+        has_fence = md is not None and "```chart" in md.text
+    if not has_fence and not any(isinstance(v, Chart) for v in slide.zones.values()):
+        return set(), []
+    roots = AssetRoots(project_dir)
+    deck_source = AssetSource.for_deck(roots)
+    md_source = (
+        AssetSource.for_file(roots, md.path)
+        if md is not None and md.path is not None
+        else deck_source
+    )
+    try:
+        content = build_slide_content(
+            parse_markdown_zones(md.text) if md is not None else None,
+            slide.zones,
+            md_source,
+            deck_source,
+            available_zones=zone_ids,
+            default_zone=default_zone,
+        ).content
+    except ValueError:
+        return set(), []  # reported by _check_default_zone
+    ids: set[str] = set()
+    issues: list[Issue] = []
+    for zone_id, item in content.items():
+        if isinstance(item, ResolvedChart):
+            if item.error:
+                issues.append(("error", item.error))
+            drawn = render(item, 960, 540, zone_id.removeprefix("zone-"))
+            ids |= {eid for el in drawn.iter() if (eid := el.get("id"))}
+        elif isinstance(item, TextBox) and item.text and "inkflow-chart" in item.text:
+            ids |= set(_ID_RE.findall(item.text))
+    return ids, issues
 
 
 def _check_default_zone(
@@ -269,9 +324,11 @@ def verify_slide(
     zone_ids = {eid for eid in all_ids if eid.startswith("zone-")}
     default_zone = resolve_default_zone(root, zone_ids)
 
+    chart_ids, chart_issues = _check_charts(slide, project_dir, zone_ids, default_zone)
     issues += _check_media(slide, project_dir)
     issues += _check_zones(slide, project_dir, zone_ids)
-    issues += _check_animations(slide, all_ids)
+    issues += chart_issues
+    issues += _check_animations(slide, all_ids | chart_ids)
     issues += _check_default_zone(slide, project_dir, zone_ids, default_zone)
     issues += _check_overlays(overlay_chains)
     issues += [

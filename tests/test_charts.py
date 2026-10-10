@@ -12,6 +12,7 @@ from typing import cast
 import pytest
 from lxml import etree
 
+from inkflow.animations import FadeIn
 from inkflow.assets import AssetRoots, AssetSource
 from inkflow.charts import (
     PALETTE,
@@ -43,6 +44,8 @@ from inkflow.markdown import html_fragment_to_xml, markdown_to_html
 from inkflow.pipeline import process_deck
 from inkflow.server import load_deck
 from inkflow.svgio import parse_svg
+from inkflow.sync import PreviewContext
+from inkflow.verify import verify_slide
 
 SVG_NS = "http://www.w3.org/2000/svg"
 SALES = "quarter,revenue,cost\nQ1,120,80\nQ2,150,95\nQ3,,110\nQ4,210,130\n"
@@ -472,3 +475,29 @@ class TestPipeline:
         )
         svg = process_deck(deck, tmp_path, tmp_path / "deck.py")[0]["svg"]
         assert 'id="sales-series-v"' in svg
+
+
+class TestVerify:
+    def _verify(self, project: Path, slide: Slide) -> list[tuple[str, str]]:
+        preview = PreviewContext(deck=Deck(slides=[]), project_dir=project, theme=None)
+        return verify_slide(slide, project, None, preview)
+
+    def test_series_are_animation_targets(self, tmp_path: Path) -> None:
+        (tmp_path / "slides").mkdir()
+        (tmp_path / "slides" / "s.svg").write_text(LAYOUT)
+        (tmp_path / "slides" / "a.md").write_text(FENCE)
+        slide = Slide(
+            "slides/s.svg",
+            md="slides/a.md",
+            zones={"sales": Chart(data={"q": ["a"], "revenue": [1]})},
+            animations=[FadeIn("sales-series-revenue"), FadeIn("share-slice-linux")],
+        )
+        assert self._verify(tmp_path, slide) == []
+        missing = Slide(
+            "slides/s.svg",
+            zones={"sales": Chart("data/none.csv")},
+            animations=[FadeIn("sales-series-nope")],
+        )
+        messages = [m for _, m in self._verify(tmp_path, missing)]
+        assert any("none.csv" in m for m in messages)
+        assert any("sales-series-nope" in m for m in messages)
