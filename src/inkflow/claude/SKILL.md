@@ -23,6 +23,12 @@ files, then each zone with where its text lives (`md` = the slide's `.md`,
 as deck.py writes it. Read it instead of opening every file; open only the
 files you change. `inkflow layouts` lists every layout with its zones.
 
+To place or size something against text, use the boxes the browser actually
+drew, not guesses: `inkflow render --boxes -s N` prints each element's box in
+slide units (`id  x,y wxh  kind  "text"`), each zone with its content's extent
+and free height, and each block of a zone's text (`zone-content/2  …  p`) with
+the extent of its text.
+
 ## Posters and page sizes
 
 A deck may be a poster or any other size: `Deck(size="a0")` (also `"a1"`,
@@ -54,6 +60,12 @@ Sections (`Section("Method", slides=[...])` entries in `slides=[...]`) group
 slides by name: `inkflow slide section add NAME --at N`, `section rename`,
 `section move`, `section remove`, and `inkflow slide move N --section NAME`.
 `inkflow outline` shows them as `## <section>` lines.
+
+To find or change wording across the deck, `inkflow find TEXT` lists every
+match (slide, file, `#id` or Markdown line and zone) in SVG text, Markdown,
+notes and deck.py's titles/zone text, and `inkflow replace TEXT NEW` changes
+them all as one undoable step (`--regex`, `--case`, `--word`, `-s SLIDE`,
+`--dry-run` first when unsure).
 
 ## Files
 
@@ -140,6 +152,14 @@ Slide(
 
 Steps are inferred from triggers; never number them by hand unless pinning
 with `Trigger.at(n)`. Morph pairs elements by `id` across consecutive slides.
+
+`inkflow anim list -s N` prints the slide's whole click timeline (Markdown
+reveals first, then `animations=[...]` with its `#` index). Prefer these to
+editing the list by hand; they check types and target ids and are undoable
+steps in the open editor: `inkflow anim add -s N FadeIn box-a --trigger with
+--duration 300` (`--direction`, `--delay`, `--easing`, `--set scale=0.6`,
+`--at INDEX`), `anim set -s N INDEX --trigger after`, `anim move -s N INDEX
+--to 1`, `anim remove -s N INDEX…`.
 
 ## Images and video (deck.py)
 
@@ -312,14 +332,18 @@ a branch", don't touch their deck:
 2. `inkflow render --check` measures every slide in a browser, without images,
    and prints one line per layout problem (`slide 3 (intro): #zone-content:
    text overflows its zone by 120px (bottom)`; also code blocks cut off,
-   objects outside the slide, text too small to read), exit 1 on a problem.
-   Fix what it reports: shorten text, enlarge the zone, or move the object.
+   objects outside the slide, text too small to read, and text whose
+   contrast with the pixels behind it is too low: `contrast 2.3:1 against
+   its background (needs 4.5:1): #9ca0b0 on #eff1f5`), exit 1 on a problem.
+   Fix what it reports: shorten text, enlarge the zone, move the object, or
+   use a theme colour that stands out from what is behind the text (check
+   both `mode`s if the deck may be shown in either).
 3. `inkflow render --sheet` writes one contact-sheet PNG of all slides
    (labelled with number and id) to `.inkflow/render/sheet.png`: read it to
    check flow and consistency. `inkflow render` writes one PNG per slide (the
    editor's current slide by default; `--slide N`, `--all`, `--step S`) and
-   prints the same findings. Overlapping objects and low contrast are only
-   visible in the images: look before you report back.
+   prints the same findings. Overlapping objects are only visible in the
+   images: look before you report back.
 4. On a branch or in a worktree, `inkflow compare main .` lists the slides
    your work changed compared with main (`~` changed, with the files; `+`
    added; `-` removed; `↕` moved); `--sheet` writes them side by side

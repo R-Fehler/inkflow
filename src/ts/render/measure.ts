@@ -211,10 +211,10 @@ export function snippet(text: string, max = 40): string {
 
 // ── DOM measurement ──────────────────────────────────────────────────────────
 
-const SVG_NS = "http://www.w3.org/2000/svg";
+export const SVG_NS = "http://www.w3.org/2000/svg";
 
 /** Containers whose children are never drawn where they stand. */
-const NOT_DRAWN = new Set([
+export const NOT_DRAWN = new Set([
     "defs",
     "clipPath",
     "mask",

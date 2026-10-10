@@ -129,16 +129,21 @@ class Page:
             },
         )
 
-    def screenshot(self, width: int, height: int) -> bytes:
-        """A PNG of the top-left ``width`` x ``height`` CSS px of the page."""
-        result = self.call(
-            "Page.captureScreenshot",
-            {
-                "format": "png",
-                "clip": {"x": 0, "y": 0, "width": width, "height": height, "scale": 1},
-            },
-        )
-        return base64.b64decode(cast(str, result["data"]))
+    def screenshot(self, width: int, height: int, *, fast: bool = False) -> bytes:
+        """A PNG of the top-left ``width`` x ``height`` CSS px of the page
+        (``fast``: compressed less, for images only measured, never kept)."""
+        return base64.b64decode(self.screenshot_base64(width, height, fast=fast))
+
+    def screenshot_base64(self, width: int, height: int, *, fast: bool = False) -> str:
+        """`screenshot`, as the base64 text Chromium sends."""
+        params: Json = {
+            "format": "png",
+            "clip": {"x": 0, "y": 0, "width": width, "height": height, "scale": 1},
+        }
+        if fast:
+            params["optimizeForSpeed"] = True
+        result = self.call("Page.captureScreenshot", params)
+        return cast(str, result["data"])
 
 
 class Browser:

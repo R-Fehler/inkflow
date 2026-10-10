@@ -15,6 +15,7 @@ from inkflow.cli._common import main
 # Import each submodule for its side effect: registering commands on ``main``.
 for _submodule in (
     "agent",
+    "anim",
     "authoring",
     "compare",
     "color",
@@ -22,6 +23,7 @@ for _submodule in (
     "project",
     "shapes",
     "slides",
+    "text",
     "verify",
     "worktree",
 ):

@@ -53,17 +53,81 @@ right away.
 |---|---|
 | `inkflow outline` | Prints what is on every slide in a few lines each: its files and layout chain, each zone with where its text is written and how it starts, the animations and clicks. `--slide N` shows one slide in full (zone texts and boxes, canvas size, element ids to animate, animations as `deck.py` writes them); `--json` for the whole structure. Claude starts here instead of reading every file. |
 | `inkflow context` | Prints what the editor has selected right now (`--json` for the raw data). |
-| `inkflow render` | Writes PNGs of slides at any build step to `.inkflow/render/`, the editor's current slide by default (`--slide N`, `--all`, `--step S`), and reports layout problems. Claude looks at them to check its own work. `--sheet` puts the slides on one contact sheet; `--check` only measures (see below). |
+| `inkflow render` | Writes PNGs of slides at any build step to `.inkflow/render/`, the editor's current slide by default (`--slide N`, `--all`, `--step S`), and reports layout problems. Claude looks at them to check its own work. `--sheet` puts the slides on one contact sheet; `--check` only measures (see below). `--boxes` prints where the browser drew every element instead ([below](#placing-against-real-text)). |
 | `inkflow verify` | Checks the deck for authoring mistakes. |
 | `inkflow goto N` | Shows slide `N` in the editor open on this deck. |
 | `inkflow select ID…` | Selects elements by id in the editor open on this deck, so Claude can point at what it means. |
 | `inkflow slide …` | Adds, deletes, duplicates, moves, hides, shows, renames or retitles slides, with their files (below). |
 | `inkflow shape …` | Draws on a slide as the editor does: shapes, text boxes, pictures, charts, and arrows attached to shapes, routed exactly where the editor routes them ([below](#shapes-and-arrows)). |
+| `inkflow anim …` | A slide's whole click timeline (Markdown reveals and `animations=[...]`, numbered as the build numbers them), and adding, changing, reordering or removing its animations as undoable steps ([below](#animations-from-the-command-line)). |
+| `inkflow find TEXT` / `inkflow replace TEXT NEW` | The editor's Find and Replace: every match on the slides with where it is, and a replace that is one undoable step ([below](#finding-and-replacing-text)). |
 | `inkflow worktree …` | A copy of the deck on a branch of its own for Claude to work in, merged when you like it ([below](#working-on-a-branch)). |
 | `inkflow compare [LEFT] RIGHT` | Which slides differ between two versions: the working copy, a revision (`main`, `HEAD~2`) or a deck folder. One line per slide that differs (`~ 3 features: slides/features.md, notes`, `+ 4 compare`, `- 7 morph`, `↕ 5 → 6 media`); `--json` adds the changed elements; `--sheet` writes side-by-side images of only those slides (see [Comparing two versions](compare.md)). |
 
 With several editors running, `goto` and `select` find the right one from the
 deck's `.inkflow/context.json`.
+
+## Finding and replacing text
+
+`inkflow find` and `inkflow replace` search exactly what the editor's Find
+dialog searches: the text in each slide's drawings (and in the project's
+layouts and overlays it is built on), its Markdown and speaker notes, and in
+`deck.py` only author text (titles, `zones={...}` text, `Inline(...)`), never
+code. Each match is one line: the slide it shows on, the file and where in it
+(an SVG text's `#id`, a Markdown line and its zone), and the match in brackets
+with some context:
+
+```text
+$ inkflow find widget
+slide 1 (drawn): slides/drawn.svg #label: "Blue [widget]s"
+slide 2 (intro): slides/intro.md:3 [content]: "All about [widget]s."
+slide 1 (drawn): deck.py: "[Widget]s"
+3 matches on 2 slides
+```
+
+| Option | |
+|---|---|
+| `--regex` / `--case` / `--word` | A regular expression (`NEW` may use `\1`, `\g<name>`), match case, whole words. |
+| `-s SLIDE` | Only that slide's files, and only its own text in `deck.py`. A layout's text changes on every slide built on it. |
+| `--dry-run` | (`replace`) Each match with what it would become; nothing is written. |
+| `--json` | (`find`) The matches as JSON. |
+
+`replace` replaces every match in one step: with the editor open, that step
+is *Agent: Replace "widget" with "gadget"* in its undo history, like the
+editor's own Replace All; otherwise the files are changed directly. It prints
+every file it wrote.
+
+## Animations from the command line
+
+A slide's clicks come from two places: reveals in its Markdown (`::step::`,
+`::steps::`, code highlight stages), which come first, and `animations=[...]`
+in `deck.py`, numbered on from them. `inkflow anim list -s N` prints them as
+one timeline, exactly as the build resolves the triggers:
+
+```text
+$ inkflow anim list -s 3
+slide 3 (drawn): 3 clicks
+  click    #  animation                target                       trigger timing
+      1    -  FadeIn                   zone-content "Second point"  click   0.4s
+      2    -  FadeIn                   zone-content "Third point"   click   0.4s
+      3    1  FadeIn                   #box                         click   0.4s
+      3    2  SlideIn direction=up     #label                       with    0.4s +0.2s
+  (- = a Markdown reveal: change it in the .md; # = an animations=[...] entry)
+```
+
+The `#` column numbers `animations=[...]`; the other commands take it:
+
+| Command | What it does |
+|---|---|
+| `inkflow anim add -s N TYPE TARGET [--trigger click\|with\|after\|at:N] [--duration MS] [--delay MS] [--easing E] [--direction D] [--set NAME=VALUE] [--at INDEX]` | Animates `TARGET` (an element id, a chart series `chart-series-sales`, a drawn-in diagram's cell; for `PlayVideo`, the video's zone). `TYPE` is an animation class (`FadeIn`, `SlideIn`, `ScaleOut`, `Highlight`, `PlayVideo`, or one the deck defines) or its kebab-case name (`fade-in`). Durations are milliseconds (`400`) or seconds (`0.4s`). |
+| `inkflow anim set -s N INDEX [--type T] [--target ID] [--trigger …] [--duration …] …` | Changes one animation; fields not given keep their values. |
+| `inkflow anim move -s N INDEX --to INDEX` | Moves it to another place in the list. |
+| `inkflow anim remove -s N INDEX…` | Removes animations, all in one step. |
+
+Types, fields and targets are checked against the deck itself: a misspelt type
+or id is refused with the nearest names. Each change is made through the same
+session action as the editor's Animation panel, so with the editor open it is
+one undoable *Agent: …* step there, and the new timeline is printed after it.
 
 ## Changing the slide list
 
@@ -208,6 +272,7 @@ slide 3 (interface): #zone-content: code block is cut off by 528px (right)
 slide 8 (morph): #logo: lies 40px outside the slide (right)
 slide 8 (morph): #lost: lies entirely outside the slide (right), so it is not shown
 slide 3 (interface): #zone-content: text 10px tall is likely too small to read (below 13.5px): "tiny footnote"
+slide 1 (title): #subtitle: contrast 2.4:1 against its background (needs 3:1): #8839ef on #203341 "Your editor, your style."
 ```
 
 Lengths are in slide units, the numbers in the SVG. A zone's text is compared
@@ -215,6 +280,18 @@ with the zone's box; a drawn object with the slide's edges, except a background
 or a band spanning the whole slide, and anything clipped on purpose (a crop, a
 media zone). Small text (below 1/80 of the slide's height) is a hint, the rest
 are problems.
+
+**Contrast** is measured against what is really behind each piece of text, in
+the rendered slide: the slide is shot once as shown and once with its text made
+transparent, and the background is read where the letters are. So text over a
+photo, a gradient or a coloured box is judged by the pixels behind it, in the
+deck's colour mode and with its theme's colours. The worst tenth of those pixels
+decides, so a light patch behind white letters is found but a few anti-aliased
+edges are not; a thick outline of another colour (a halo) is what the text is
+read against, and a text shadow counts where it helps. Below 3:1 is a problem
+for any text; between 3:1 and 4.5:1 is a hint for text smaller than 24px on a
+1080px-tall slide (18.66px bold), the WCAG size for large text. The check takes
+two more screenshots per slide (about 0.2 s); `--no-contrast` skips it.
 
 ```bash
 inkflow render --check            # every slide, no images; exit 1 on a problem
@@ -227,3 +304,31 @@ with problems. It is at most 1600 px wide, with up to 16 slides per image
 (`sheet-1.png`, `sheet-2.png`… for a longer deck), so one image shows the flow of
 the deck. Every render runs in a single browser, so `--all`, `--sheet` and
 `--check` take a few seconds for a whole deck.
+
+## Placing against real text
+
+The boxes in an SVG say where a zone *is*, not where its text ends. To size or
+line things up against what is really drawn, `inkflow render --boxes` prints
+every element's box as the browser renders it, in slide units after
+transforms, one line each (`--json` for everything):
+
+```text
+slide 2 (features): 1920x1080
+zone-title  80,60 1760x120  zone  "Features"  content 300.1x80, free 40
+  zone-title/1  80,63 300.1x80  h1  "Features"
+zone-content  80,220 1760x740  zone  "Draw in any SVG editor…"  content 1288.7x566.5, free 173.5
+  zone-content/1  80,224 1180x91.4  p  "Draw in any SVG editor…"
+  zone-content/2  80,342.8 1288.7x91.4  p  "Slides from Markdown…"
+box-svg  89,322.5 357.9x157.9  g
+  rect-svg  89,322.5 357.9x157.9  rect
+```
+
+Each element with an id is listed, nested under the listed element it is in. A
+zone shows the extent of its content and the height left free in it (negative
+when the text overflows); under it, each block of its text (paragraph, heading,
+list, code, table, picture) as `zone/N` with the extent of its *text*, not the
+full width its box takes. Only boxes are measured, no image is written unless
+`--output` is given, and it costs nothing noticeable on top of a render (about
+0.13 s per slide for the demo deck, browser start included). `inkflow outline
+--slide N --boxes` appends the same lines to a slide's outline.
+

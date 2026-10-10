@@ -13,6 +13,8 @@ label with its number and id, so the whole deck is one image to look at.
 
 from __future__ import annotations
 
+import base64
+import dataclasses
 import importlib.resources
 import json
 import math
@@ -21,6 +23,8 @@ from dataclasses import dataclass, field
 from html import escape as escape_html
 from pathlib import Path
 from typing import cast
+
+from typing_extensions import override
 
 from inkflow.cdp import Browser, Page
 from inkflow.editor.compare import (
@@ -63,7 +67,7 @@ class Finding:
 
     slide: int
     slide_id: str
-    kind: str  # overflow | clipped | outside | small-text | low-res
+    kind: str  # overflow | clipped | outside | small-text | low-res | contrast
     target: str
     top: int = 0
     right: int = 0
@@ -81,13 +85,22 @@ class Finding:
     """A picture's resolution at its printed size (``low-res``)."""
     problem: bool = False
     """A ``low-res`` picture below `PRINT_DPI_PROBLEM` (else a hint)."""
+    ratio: float = 0.0
+    """Contrast: the text's ratio against what is behind it, and the one it
+    needs (WCAG: 4.5:1, or 3:1 for large text)."""
+    needs: float = 0.0
+    color: str = ""
+    background: str = ""
 
     @property
     def is_problem(self) -> bool:
-        """Small text and a picture that is merely soft are hints; everything
-        else is something to fix."""
+        """Small text, a picture that is merely soft, and normal-size text
+        between 3:1 and 4.5:1 contrast are hints; everything else is something
+        to fix."""
         if self.kind == "low-res":
             return self.problem
+        if self.kind == "contrast":
+            return self.ratio < 3
         return self.kind != "small-text"
 
     def _sides(self) -> list[str]:
@@ -120,6 +133,13 @@ class Finding:
                 + f" (below {self.minimum:g} dpi at its printed size):"
                 + " use a larger image, or a vector one (SVG, PDF)"
             )
+        elif self.kind == "contrast":
+            said = (
+                f"contrast {self.ratio:g}:1 against its background"
+                + f" (needs {self.needs:g}:1): {self.color} on {self.background}"
+            )
+            if self.text:
+                said += f' "{self.text}"'
         elif self.unit == "pt":
             what = "body text" if self.body else "text"
             said = f"{what} {self.size:g} pt is likely too small to read on paper"
@@ -147,7 +167,14 @@ def parse_findings(slide: int, slide_id: str, raw: object) -> list[Finding]:
         data = cast("dict[str, object]", item)
         kind = data.get("kind")
         target = data.get("target")
-        if kind not in ("overflow", "clipped", "outside", "small-text", "low-res"):
+        if kind not in (
+            "overflow",
+            "clipped",
+            "outside",
+            "small-text",
+            "low-res",
+            "contrast",
+        ):
             continue
         if not isinstance(target, str):
             continue
@@ -175,9 +202,29 @@ def parse_findings(slide: int, slide_id: str, raw: object) -> list[Finding]:
                 body=data.get("body") is True,
                 dpi=number("dpi"),
                 problem=data.get("problem") is True,
+                ratio=number("ratio"),
+                needs=number("needs"),
+                color=str(data.get("color") or ""),
+                background=str(data.get("background") or ""),
             )
         )
     return found
+
+
+def render_json(result: RenderResult) -> dict[str, object]:
+    """`inkflow render --json`: images, findings (with their messages) and,
+    when measured, every slide's boxes."""
+    out: dict[str, object] = {
+        "slides": result.slides,
+        "images": [str(p) for p in result.images],
+        "findings": [
+            {**dataclasses.asdict(f), "problem": f.is_problem, "message": f.message()}
+            for f in result.findings
+        ],
+    }
+    if result.boxes:
+        out["boxes"] = [dataclasses.asdict(b) for b in result.boxes]
+    return out
 
 
 def summary(findings: list[Finding], slide_count: int) -> str:
@@ -193,6 +240,116 @@ def summary(findings: list[Finding], slide_count: int) -> str:
     if hints:
         parts.append(f"{hints} hint" + ("" if hints == 1 else "s"))
     return f"{' and '.join(parts)} in {slides}"
+
+
+# ── boxes ─────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Rect:
+    """A box in slide units: corner and size."""
+
+    x: float
+    y: float
+    w: float
+    h: float
+
+    @override
+    def __str__(self) -> str:
+        return f"{self.x:g},{self.y:g} {self.w:g}x{self.h:g}"
+
+
+@dataclass(frozen=True)
+class ElementBox:
+    """Where the browser drew one element of a slide (`src/ts/render/boxes.ts`):
+    an element with an id, a zone, or one block of a zone's text."""
+
+    id: str
+    kind: str
+    box: Rect
+    depth: int = 0
+    parent: str | None = None
+    text: str = ""
+    zone: str | None = None
+    block: Rect | None = None
+    """A text block's layout box (``box`` is the extent of its text)."""
+    content: Rect | None = None
+    """A text zone's content extent."""
+    free: float | None = None
+    """A text zone's height minus its content's (negative: it overflows)."""
+    hidden: bool = False
+
+    def line(self) -> str:
+        parts = [f"{'  ' * self.depth}{self.id}", str(self.box), self.kind]
+        if self.text:
+            parts.append(f'"{self.text}"')
+        if self.content is not None and self.free is not None:
+            parts.append(
+                f"content {self.content.w:g}x{self.content.h:g}, free {self.free:g}"
+            )
+        if self.hidden:
+            parts.append("(hidden)")
+        return "  ".join(parts)
+
+
+@dataclass(frozen=True)
+class SlideBoxes:
+    slide: int
+    slide_id: str
+    width: int
+    height: int
+    elements: list[ElementBox]
+
+    def text(self) -> str:
+        head = f"slide {self.slide}"
+        if self.slide_id:
+            head += f" ({self.slide_id})"
+        head += f": {self.width}x{self.height}"
+        return "\n".join([head, *(e.line() for e in self.elements)])
+
+
+def _rect(raw: object) -> Rect | None:
+    if not isinstance(raw, dict):
+        return None
+    data = cast("dict[str, object]", raw)
+    values = [data.get(k) for k in ("x", "y", "w", "h")]
+    if not all(isinstance(v, int | float) for v in values):
+        return None
+    x, y, w, h = cast("list[float]", values)
+    return Rect(x, y, w, h)
+
+
+def parse_boxes(raw: object) -> list[ElementBox]:
+    """The boxes the render page measured, as `ElementBox`es (malformed ones
+    dropped)."""
+    if not isinstance(raw, list):
+        return []
+    out: list[ElementBox] = []
+    for item in cast("list[object]", raw):
+        if not isinstance(item, dict):
+            continue
+        data = cast("dict[str, object]", item)
+        ident, kind, box = data.get("id"), data.get("kind"), _rect(data.get("box"))
+        if not isinstance(ident, str) or not isinstance(kind, str) or box is None:
+            continue
+        depth, parent = data.get("depth"), data.get("parent")
+        text, zone, free = data.get("text"), data.get("zone"), data.get("free")
+        out.append(
+            ElementBox(
+                id=ident,
+                kind=kind,
+                box=box,
+                depth=depth if isinstance(depth, int) else 0,
+                parent=parent if isinstance(parent, str) else None,
+                text=text if isinstance(text, str) else "",
+                zone=zone if isinstance(zone, str) else None,
+                block=_rect(data.get("block")),
+                content=_rect(data.get("content")),
+                free=float(free) if isinstance(free, int | float) else None,
+                hidden=data.get("hidden") is True,
+            )
+        )
+    return out
 
 
 # ── contact sheet ─────────────────────────────────────────────────────────────
@@ -377,6 +534,7 @@ class RenderResult:
     images: list[Path] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     slides: list[int] = field(default_factory=list)
+    boxes: list[SlideBoxes] = field(default_factory=list)
 
 
 def render_slides(
@@ -389,6 +547,8 @@ def render_slides(
     scale: float = 1.0,
     chromium: str | None = None,
     no_sandbox: bool = False,
+    boxes: bool = False,
+    contrast: bool = True,
 ) -> RenderResult:
     """Render slides (1-based, as the presenter numbers them; ``None`` = all).
 
@@ -396,7 +556,9 @@ def render_slides(
     page with nothing else on it and measured. With an ``output``, it is also
     written as a PNG: ``output`` is the file for a single slide or a directory
     for several (``slide-N.png``); with ``sheet``, the slides go onto contact
-    sheets instead (`sheet_paths`). Without one, nothing is written.
+    sheets instead (`sheet_paths`). Without one, nothing is written. With
+    ``boxes``, every element's rendered box is read back too (`boxes`).
+    With ``contrast``, text is checked against what is behind it (`_contrast`).
     """
     exe = chromium or find_chromium()
     if exe is None:
@@ -460,9 +622,14 @@ def render_slides(
             if raw is None:
                 logger.warning(f"slide {n}: the render page did not measure it")
             result.findings += parse_findings(n, slides[n - 1]["id"], raw)
-            if output is None:
+            if boxes:
+                measured = parse_boxes(page.evaluate("window.inkflowBoxes()"))
+                result.boxes.append(SlideBoxes(n, slides[n - 1]["id"], w, h, measured))
+            png = page.screenshot(w, h) if output is not None else None
+            if contrast:
+                result.findings += _contrast(page, n, slides[n - 1]["id"], w, h, png)
+            if png is None:
                 continue
-            png = page.screenshot(w, h)
             if sheet:
                 shots[n] = f"thumb-{n}.png"
                 (Path(tmp) / shots[n]).write_bytes(png)
@@ -484,6 +651,26 @@ def render_slides(
                 shots,
             )
     return result
+
+
+def _contrast(
+    page: Page, n: int, slide_id: str, w: int, h: int, shown: bytes | None
+) -> list[Finding]:
+    """Text whose contrast with what is behind it is too low
+    (src/ts/render/contrast.ts): the slide is shot as shown and with its
+    text's paint made transparent, and the page compares the two."""
+    shown_b64 = (
+        base64.b64encode(shown).decode("ascii")
+        if shown is not None
+        else page.screenshot_base64(w, h, fast=True)
+    )
+    if not page.evaluate("window.inkflowHideText()"):
+        return []  # no text
+    hidden_b64 = page.screenshot_base64(w, h, fast=True)
+    raw = page.evaluate(
+        f"window.inkflowContrast({json.dumps(shown_b64)}, {json.dumps(hidden_b64)})"
+    )
+    return parse_findings(n, slide_id, raw)
 
 
 def _write_sheets(

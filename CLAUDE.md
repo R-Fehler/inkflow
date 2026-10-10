@@ -164,6 +164,17 @@ src/
                                `render_comparison` (`inkflow compare --sheet`) shoots both
                                decks' differing slides in the same browser, each with its
                                own deck's page (`_page_template`), onto pair sheets
+                               `--boxes`: `window.inkflowBoxes()` (src/ts/render/boxes.ts)
+                               read back as `SlideBoxes` of `ElementBox` (every element
+                               with an id, zones with content extent + `free` height,
+                               `zone-x/N` text blocks with their text's extent), no PNG
+                               unless `-o`; `render_json` is `--json`
+                               contrast (default on, `--no-contrast`): `_contrast` shoots
+                               the slide as shown and after `window.inkflowHideText()`
+                               (fast PNGs, `Page.screenshot_base64`), and
+                               `window.inkflowContrast(shown, hidden)` returns `contrast`
+                               findings (`ratio`/`needs`/`color`/`background`; below 3:1
+                               a problem, 3–4.5:1 for small text a hint)
                                (`pair_sheet_layout`/`pair_sheet_html`, boxes outlined)
     cdp.py            minimal DevTools client over `websockets`: `Browser.launch`
                                (--remote-debugging-port=0, port read from the profile's
@@ -239,7 +250,8 @@ src/
                                outline.py (`inkflow outline`: `## <section>` lines, per-slide files, layout chain,
                                zones with their origin and text, animations and clicks, read
                                off `build_model` + the editor build; `--slide N` adds zone
-                               boxes, canvas size and the slide SVG's named ids),
+                               boxes, canvas size and the slide SVG's named ids; with
+                               `--boxes` also the rendered boxes of `render --boxes`),
                                transfer.py (clipboard bundles: copy slides/objects with their
                                files, paste into any project; pasted Slide(...) must pass the
                                `check_slide_code` allowlist, never arbitrary Python),
@@ -262,7 +274,8 @@ src/
                                dialog: token overrides as one marked block in the project's
                                styles.css, values validated, never raw CSS), findreplace.py
                                (find/replace over SVG text, Markdown and deck.py author-text
-                               literals only), gitops.py (the Git menu: status, commit,
+                               literals only; `deckSlide` keeps deck.py to one slide's
+                               text, the dialog's "This slide"), gitops.py (the Git menu: status, commit,
                                push/pull, discard, undo commit, branches, deck-scoped log,
                                view/revert/restore a commit, `lfs_status` = media
                                no LFS rule covers or committed as full copies, `lfs_track`
@@ -311,8 +324,20 @@ src/
                                style, text, delete, duplicate, group, ungroup, order,
                                rename, lock/unlock, hide/show, link, batch, list; `-s`
                                defaults to the editor's slide in a fresh context.json),
-                               _edits.py (`DeckSlides`, `apply_edit`: what slide and
-                               shape share),
+                               _edits.py (`DeckSlides`, `apply_edit`: what slide, shape,
+                               text and anim share),
+                               text.py (`find`/`replace`: the session's `find`
+                               and `replace` actions over the files `build_model` lists
+                               per slide, as the Find dialog sends them; `-s` sends
+                               `deckSlide`, deck.py text of that Slide(...) only),
+                               anim.py (the `anim` group: `list` = the slide built alone
+                               (hidden ones as if shown), Markdown reveals read off its
+                               `inkflow-step-*` data-cues and code highlight stages, then
+                               `resolve_steps(animations, reveal max)`; add/set/move/
+                               remove send the session's `anim` action (Animation panel
+                               ops; `remove` takes `indices` for several in one step),
+                               types from inkflow.animations + the deck module, targets
+                               from the built slide's ids, nearest names on a miss),
                                authoring.py
                                (clean, label2id, add, parent group, sync, layouts), color.py (colorize,
                                palette), verify.py, worktree.py (the `worktree` group: add,
@@ -543,7 +568,12 @@ src/
                       text vs its foreignObject box, code blocks cut off, drawn
                       objects vs the viewBox — skipping clipped/masked content,
                       unpainted shapes and anything spanning the slide — and text
-                      below 1/80 of the slide height; all in slide units)
+                      below 1/80 of the slide height; all in slide units),
+                      boxes.ts (`--boxes`: each id'd element's box after
+                      transforms, zone content extent/free space, text blocks)
+                      contrast.ts (each text run vs the hidden-text shot's pixels
+                      where its glyphs are, worst tenth decides; halo strokes,
+                      shadows that help, alpha blended; pure WCAG maths tested)
   css/                CSS source
     shared/           theme variables, animation keyframes, ink.css (the ink palette)
     presenter/        presenter partials including pv.css (sidebar panel)

@@ -1156,6 +1156,7 @@ class EditorSession:
                 segments, _ = self._segments(path, kind, path.read_bytes())
             except Exception:
                 continue  # an unparsable file has nothing to offer
+            segments = _on_deck_slide(segments, kind, msg)
             for hit in iter_hits(path, kind, segments, pat):
                 hits.append(hit.to_json())
                 if len(hits) >= MAX_HITS:
@@ -1181,6 +1182,7 @@ class EditorSession:
                 continue
             data = txn.read(path)
             segments, serialize = self._segments(path, kind, data)
+            segments = _on_deck_slide(segments, kind, msg)
             count = replace_in(
                 segments,
                 pat,
@@ -2804,8 +2806,21 @@ class EditorSession:
             source.edit_animations(index, replace=(position, code.call(obj)))
             label = "Edit animation"
         elif op == "remove":
-            source.edit_animations(index, remove=position)
-            label = "Remove animation"
+            # Several at once (``indices``, an agent's `inkflow anim remove`):
+            # from the last, so each index still names the same animation.
+            raw = msg.get("indices")
+            positions = (
+                sorted({int(cast("int", i)) for i in cast("list[object]", raw)})
+                if isinstance(raw, list) and raw
+                else [position]
+            )
+            for at in reversed(positions):
+                source.edit_animations(index, remove=at)
+            label = (
+                "Remove animation"
+                if len(positions) == 1
+                else f"Remove {len(positions)} animations"
+            )
         elif op == "move":
             to = int(cast("int", msg.get("to")))
             source.edit_animations(index, move=(position, to))
@@ -3024,3 +3039,14 @@ class EditorSession:
             raise EditError(str(exc)) from exc
         assert arrival is not None
         return self._placed(arrival)
+
+
+def _on_deck_slide(
+    segments: list[Segment], kind: str, msg: dict[str, object]
+) -> list[Segment]:
+    """deck.py's text limited to one ``Slide(...)`` (``deckSlide``: its deck
+    index), for a search of one slide; other files' segments as they are."""
+    only = msg.get("deckSlide")
+    if kind != "deck" or not isinstance(only, int) or isinstance(only, bool):
+        return segments
+    return [s for s in segments if s.slide == only]

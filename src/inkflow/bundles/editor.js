@@ -10455,7 +10455,8 @@
     return el(".find-input").value;
   }
   function base() {
-    return { query: query(), files: files(), ...opts };
+    const deckSlide = scope === "slide" ? currentSlide()?.deckIndex : void 0;
+    return { query: query(), files: files(), deckSlide, ...opts };
   }
   async function search() {
     const q = query();
@@ -10472,10 +10473,6 @@
       return;
     }
     hits = result.hits;
-    if (scope === "slide") {
-      const cur = currentSlide()?.deckIndex;
-      hits = hits.filter((h3) => h3.kind !== "deck" || h3.slide === cur);
-    }
     active = Math.min(active, hits.length - 1);
     renderResults();
   }

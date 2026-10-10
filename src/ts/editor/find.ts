@@ -69,7 +69,9 @@ function query(): string {
 }
 
 function base(): Record<string, unknown> {
-    return { query: query(), files: files(), ...opts };
+    // "This slide": deck.py's text of this slide only, in a search or a replace.
+    const deckSlide = scope === "slide" ? currentSlide()?.deckIndex : undefined;
+    return { query: query(), files: files(), deckSlide, ...opts };
 }
 
 async function search(): Promise<void> {
@@ -87,10 +89,6 @@ async function search(): Promise<void> {
         return;
     }
     hits = (result as unknown as { hits: Hit[] }).hits;
-    if (scope === "slide") {
-        const cur = currentSlide()?.deckIndex;
-        hits = hits.filter((h) => h.kind !== "deck" || h.slide === cur);
-    }
     active = Math.min(active, hits.length - 1);
     renderResults();
 }
