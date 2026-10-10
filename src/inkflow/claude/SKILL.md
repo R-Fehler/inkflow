@@ -299,6 +299,12 @@ editor; coordinates are slide units (`--at X,Y` is the top-left corner,
   `text ID "…"`, `rename ID NEW`, `delete ID…` (a zone's text goes too),
   `duplicate`, `group`/`ungroup`, `order ID front`, `lock`, `hide`/`show`,
   `link ID slide:<id>|URL`.
+- Text size: `style ID --font-scale 0.8` (or `80%`, `1` = its own) and
+  `--fit none|shrink`. Text zones shrink their text to fit by default (down
+  to a readable floor; `render --check` reports text that overflows even
+  there): rather than shortening text by hand to make it fit, check
+  `outline --slide N` (it shows each zone's `size`/`fit`) and `render`. A
+  layout's zone is set on that slide only (its marker's `size=80%`).
 - `batch` reads a JSON list of commands from stdin and applies them as ONE
   step (one undo, one rebuild); later commands see what earlier ones made.
   Each object's first key names the command, its other keys are the options:

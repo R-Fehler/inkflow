@@ -72,7 +72,16 @@ from inkflow.editor.scene import CONNECT, SITES, Op, Scene, own_file
 from inkflow.editor.svgops import file_hash
 from inkflow.layout import resolve_default_zone
 from inkflow.loaders import load_md
-from inkflow.manifest import Chart, Deck, Image, Inline, Slide, TextBox, Video
+from inkflow.manifest import (
+    Chart,
+    Deck,
+    Image,
+    Inline,
+    Slide,
+    TextBox,
+    Video,
+    parse_text_scale,
+)
 from inkflow.pipeline import slide_ids, zone_origin
 from inkflow.svgio import SvgElement
 from inkflow.zones import parse_markdown_zones, zone_spans
@@ -157,7 +166,11 @@ COMMANDS: dict[str, tuple[frozenset[str], int, int | None]] = {
     "resize": (frozenset({"size", "anchor"}), 1, 1),
     "align": (frozenset({"to"}), 2, None),
     "distribute": (frozenset(), 4, None),
-    "style": (frozenset({"fill", "stroke", "stroke-width", "opacity"}), 1, None),
+    "style": (
+        frozenset({"fill", "stroke", "stroke-width", "opacity", "font-scale", "fit"}),
+        1,
+        None,
+    ),
     "text": (frozenset(), 2, 2),
     "delete": (frozenset(), 1, None),
     "duplicate": (frozenset({"by"}), 1, 1),
@@ -1430,15 +1443,62 @@ class Runner:
     def cmd_style(self, args: list[str], opts: dict[str, object]) -> None:
         if not opts:
             raise ShapeError(
-                "style takes --fill, --stroke, --stroke-width or --opacity"
+                "style takes --fill, --stroke, --stroke-width, --opacity,"
+                + " --font-scale or --fit"
             )
-        els = [self.owned(i) for i in args]
-        self._style_ops(els, opts)
+        text = {k: opts.pop(k) for k in ("font-scale", "fit") if k in opts}
+        if text:
+            self._text_format(args, text)
+        if opts:
+            els = [self.owned(i) for i in args]
+            self._style_ops(els, opts)
         self.report(
             "style",
-            [e.get("id") or "" for e in els],
-            ", ".join(f"{k} {v}" for k, v in opts.items()),
+            [self.find(i).get("id") or "" for i in args],
+            ", ".join(f"{k} {v}" for k, v in {**opts, **text}.items()),
         )
+
+    def _text_format(self, args: list[str], opts: dict[str, object]) -> None:
+        """A text zone's size (``font-scale``, a factor or ``80%``; ``1`` or
+        ``none`` = its own) and shrink-to-fit (``shrink`` / ``none``): in the
+        zone shape's style when the shape is the slide's own, else (a layout's
+        zone) on the slide's text: its marker or its ``TextBox``."""
+        scale: float | None = None
+        if "font-scale" in opts:
+            raw = str(opts["font-scale"]).strip().lower()
+            if raw not in ("none", "auto", ""):
+                try:
+                    scale = parse_text_scale(raw)
+                except ValueError as exc:
+                    raise ShapeError(f"--font-scale: {exc}") from exc
+                scale = None if abs(scale - 1) < 1e-9 else scale
+        fit: str | None = None
+        if "fit" in opts:
+            fit = str(opts["fit"]).strip().lower()
+            if fit not in ("shrink", "none"):
+                raise ShapeError("--fit is shrink or none")
+        scene = self.scene()
+        ops: list[dict[str, object]] = []
+        for ident in args:
+            el = self.find(ident)
+            name = el.get("id") or ident
+            if not Scene.is_zone(el):
+                raise ShapeError(f"{name} is not a text box or zone")
+            if scene.is_own(el):
+                css: dict[str, object] = {}
+                if "font-scale" in opts:
+                    css["--inkflow-font-scale"] = None if scale is None else fmt(scale)
+                if "fit" in opts:
+                    css["--inkflow-fit"] = None if fit == "shrink" else fit
+                ops.append({"kind": "style", "loc": self.loc(el), "set": css})
+                continue
+            msg: dict[str, object] = {"zone": name.removeprefix("zone-")}
+            if "font-scale" in opts:
+                msg["size"] = scale
+            if "fit" in opts:
+                msg["fit"] = None if fit == "shrink" else fit
+            self.action("zone-format", msg)
+        self.svg(ops, "Text size")
 
     def zone_origin(self, name: str) -> str:
         slide = self.slide

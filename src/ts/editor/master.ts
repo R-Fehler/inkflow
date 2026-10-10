@@ -12,6 +12,7 @@
 // under the theme's other layouts (editor/master.py). Templates are slides
 // saved as layouts ("Save as layout…").
 
+import { scheduleFit } from "../shared/fit";
 import type { SlideData } from "../shared/types";
 import { clearSelection, enterGroup, keyOf, render, slideRoot } from "./canvas";
 import { closeDialog, openDialog } from "./dialog";
@@ -253,6 +254,7 @@ function thumb(name: string | null): HTMLElement {
         el?.querySelectorAll(".anim-pending").forEach((x) => {
             x.classList.remove("anim-pending");
         });
+        if (el) scheduleFit(el);
     }
     return box;
 }

@@ -4,6 +4,7 @@
 // loaded, `window.inkflowRendered` resolves to the layout findings (measure.ts)
 // that `inkflow render` reports, and the page is ready to be screenshot.
 
+import { fitSlide } from "../shared/fit";
 import { applyStepInstant, maxStep } from "../shared/step";
 import { type BoxEntry, measureBoxes } from "./boxes";
 import { type ContrastFinding, checkContrast, hideText } from "./contrast";
@@ -42,6 +43,8 @@ if (svg) {
     });
     const step = __RENDER_STEP__;
     applyStepInstant(svg, step == null ? maxStep(svg) : step);
+    // Text shrunk to fit its box, as every page showing the slide does.
+    fitSlide(svg);
 }
 document.body.dataset.ready = "1";
 
@@ -123,6 +126,8 @@ window.inkflowRendered = (async () => {
         Array.from(document.querySelectorAll("video"), firstFrame),
     );
     settleCss();
+    // Again in the slide's own fonts, now that they are in.
+    fitSlide(svg);
     await frame();
     await frame();
     if (!svg) return [];

@@ -124,6 +124,9 @@ class OpResult:
     renamed_prefixes: dict[str, str] = field(default_factory=dict)
     """Renamed draw.io pictures: the names of their shapes start with the
     picture's id (``<id>-<cell>``, see drawio_inline), so those follow."""
+    duplicates: dict[int, dict[str, str]] = field(default_factory=dict)
+    """Per ``duplicate`` op (its index in the batch): every id in the copied
+    element -> the id its copy got (a group's zones need their content)."""
 
 
 def _resolve(root: SvgElement, loc: object) -> SvgElement:
@@ -444,7 +447,7 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
             el.set("id", new_id)
             if old_id:
                 _rename_connections(root, old_id, new_id)
-                if _is_diagram_picture(el):
+                if is_diagram_picture(el):
                     _rename_connections(root, old_id, new_id, prefix=True)
                     result.renamed_prefixes[old_id] = new_id
         elif kind == "ensure-id":
@@ -458,7 +461,8 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
             result.structural = True
         elif kind == "duplicate":
             clone = copy.deepcopy(el)
-            copied.update(_renumber_ids(clone, root))
+            result.duplicates[n] = _renumber_ids(clone, root)
+            copied.update(result.duplicates[n])
             copies.append(clone)
             offset = cast("list[float]", op.get("offset") or [0, 0])
             _translate(clone, float(offset[0]), float(offset[1]))
@@ -649,7 +653,7 @@ def _rename_connections(
                 el.set(attr, f"{new}-{target.removeprefix(f'{old}-')}:{site}")
 
 
-def _is_diagram_picture(el: SvgElement) -> bool:
+def is_diagram_picture(el: SvgElement) -> bool:
     href = el.get("href") or el.get(f"{{{ns.XLINK}}}href") or ""
     return _local(el.tag) == "image" and href.split("?")[0].lower().endswith(
         ".drawio.svg"

@@ -660,6 +660,8 @@ def build_pdf(
             .replace("__DATA_THEME__", data_theme)
             .replace("__SLIDES__", slides_html)
             .replace("__TITLE__", escape_html(title))
+            # Text shrunk to fit its box, as every page showing a slide does.
+            .replace("/* __FIT_JS__ */", pkg.joinpath("bundles", "fit.js").read_text())
         )
         (Path(tmp) / "slides.html").write_text(html, encoding="utf-8")
         target = output.resolve()

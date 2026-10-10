@@ -3,6 +3,12 @@
 // selected, that object (position, colours, text, arrangement, animations);
 // with several, alignment and distribution.
 
+import {
+    formatTextSize,
+    neededBoxHeight,
+    nextTextSize,
+    parseTextSize,
+} from "../shared/fit";
 import { maxStep } from "../shared/step";
 import {
     cueSteps,
@@ -1543,14 +1549,21 @@ function renderObjectPanel(sel: Selected): void {
         panel.append(section("Video", previewButton(innerVideo, button)));
     }
 
-    if (movable) panel.append(geometrySection([sel]));
-
     // A text zone (a text box, text typed into a shape) is styled like a shape:
     // its source rect / ellipse draws the box behind the text.
     const textZone =
         zone &&
         el.localName === "foreignObject" &&
         !!el.querySelector(".inkflow-content");
+    if (textZone) {
+        const sizes = textSizeSection(
+            sel,
+            !!src?.writable && (movable || ed.layoutMode),
+        );
+        if (sizes) panel.append(sizes);
+    }
+
+    if (movable) panel.append(geometrySection([sel]));
     const shapeTag = textZone
         ? (el.getAttribute("data-ink-tag") ?? "rect")
         : el.localName;
@@ -1957,6 +1970,220 @@ function textBoxSection(sel: Selected): HTMLElement {
                 (v) => setVar("--inkflow-valign", v || null, "Vertical align"),
             ),
         ),
+    );
+}
+
+// ── Text size and shrink to fit (shared/fit.ts) ──
+
+// A text zone's size is a factor on its text (A− / A+ in fixed steps, or a
+// typed percentage) and its text shrinks to fit the box unless that is off.
+// Both are written where the box is: the zone shape's own style (a text box
+// of the slide, or any zone in Edit layout and the slide master), else this
+// slide's text (its Markdown marker's size=/fit=, a TextBox's fields: the
+// session's zone-format), which also wins when it already sets them.
+function textSizeSection(
+    sel: Selected,
+    shapeWritable: boolean,
+): HTMLElement | null {
+    const fo = sel.el;
+    const wrapper = fo.querySelector(
+        ":scope > .inkflow-wrapper",
+    ) as HTMLElement | null;
+    const slide = currentSlide();
+    const onSlide = !!slide && !ed.master && !ed.layoutMode;
+    if (!wrapper || (!shapeWritable && !onSlide)) return null;
+    const name = zoneName(fo);
+    const SCALE = "--inkflow-font-scale";
+    const FIT = "--inkflow-fit";
+    // What applies at a level once its own value is taken away.
+    const without = (holder: Element, prop: string): string => {
+        const style = (holder as HTMLElement).style;
+        const own = style.getPropertyValue(prop);
+        style.removeProperty(prop);
+        const v = getComputedStyle(holder).getPropertyValue(prop).trim();
+        if (own) style.setProperty(prop, own);
+        return v;
+    };
+    const onContent = (prop: string) =>
+        onSlide &&
+        (wrapper.style.getPropertyValue(prop).trim() !== "" || !shapeWritable);
+    const write = (prop: string, value: string | null, label: string) => {
+        if (onContent(prop)) {
+            const key = prop === SCALE ? "size" : "fit";
+            void edit({
+                action: "zone-format",
+                slide: slide!.deckIndex,
+                zone: name,
+                [key]:
+                    value == null
+                        ? null
+                        : key === "size"
+                          ? Number(value)
+                          : value,
+            });
+            return;
+        }
+        void sendSvgOps(
+            [
+                {
+                    sel,
+                    ops: [
+                        { kind: "style", loc: sel.loc, set: { [prop]: value } },
+                    ],
+                },
+            ],
+            label,
+        );
+    };
+    const holderOf = (prop: string) => (onContent(prop) ? wrapper : fo);
+    const computed = getComputedStyle(wrapper);
+    const current = Number.parseFloat(computed.getPropertyValue(SCALE)) || 1;
+    const fitting = computed.getPropertyValue(FIT).trim() !== "none";
+    const setSize = (v: number) => {
+        const base = Number.parseFloat(without(holderOf(SCALE), SCALE)) || 1;
+        write(SCALE, Math.abs(v - base) < 1e-6 ? null : String(v), "Text size");
+    };
+    const setFit = (on: boolean) => {
+        const base = without(holderOf(FIT), FIT) !== "none";
+        write(
+            FIT,
+            on === base ? null : on ? "shrink" : "none",
+            on ? "Shrink text to fit" : "Keep text size",
+        );
+    };
+
+    const value = button(
+        formatTextSize(current),
+        "Type a size (25–300 %)",
+        () => {
+            const input = h("input", {
+                type: "text",
+                class: "num text-size-input",
+                value: String(Math.round(current * 100)),
+            });
+            const commit = () => {
+                const v = parseTextSize(input.value);
+                if (v == null) {
+                    toast("A text size from 25 to 300 %", "error");
+                    input.replaceWith(value);
+                    return;
+                }
+                if (Math.abs(v - current) > 1e-6) setSize(v);
+                else input.replaceWith(value);
+            };
+            input.addEventListener("keydown", (e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") input.blur();
+                if (e.key === "Escape") {
+                    input.value = String(Math.round(current * 100));
+                    input.blur();
+                }
+            });
+            input.addEventListener("change", commit);
+            input.addEventListener("blur", () => {
+                if (input.isConnected) input.replaceWith(value);
+            });
+            value.replaceWith(input);
+            input.focus();
+            input.select();
+        },
+        "text-size-value",
+    );
+    const smaller = nextTextSize(current, -1);
+    const larger = nextTextSize(current, 1);
+    const down = button(
+        "A−",
+        "Smaller text",
+        () => setSize(smaller),
+        "text-size-step",
+    );
+    const up = button(
+        "A+",
+        "Larger text",
+        () => setSize(larger),
+        "text-size-step",
+    );
+    down.disabled = smaller === current;
+    up.disabled = larger === current;
+    const sizeRow = h(
+        "div",
+        { class: "prop-row" },
+        h("span", { class: "prop-label" }, "Text size"),
+        h("span", { class: "text-size" }, down, value, up),
+    );
+
+    const box = h("input", { type: "checkbox" });
+    box.checked = fitting;
+    box.addEventListener("change", () => setFit(box.checked));
+
+    const shrunk = Number.parseFloat(fo.getAttribute("data-inkflow-fit") ?? "");
+    const overflow = fo.hasAttribute("data-inkflow-overflow");
+    const status: Node[] = [];
+    if (overflow || shrunk > 0) {
+        status.push(
+            h(
+                "p",
+                {
+                    class: overflow
+                        ? "hint fit-status fit-warn"
+                        : "hint fit-status",
+                },
+                overflow
+                    ? shrunk > 0
+                        ? `Doesn't fit, even shrunk to ${formatTextSize(shrunk)}`
+                        : "Doesn't fit its box"
+                    : `Shrunk to ${formatTextSize(shrunk)} to fit`,
+            ),
+        );
+        const taller =
+            shapeWritable &&
+            (fo.getAttribute("data-ink-tag") ?? "rect") === "rect"
+                ? neededBoxHeight(fo)
+                : null;
+        const have = Number.parseFloat(fo.getAttribute("height") ?? "");
+        const actions = h("div", { class: "prop-buttons" });
+        if (taller != null && have > 0 && taller > have + 1) {
+            actions.append(
+                button(
+                    "Make box taller",
+                    "Grow the box so the text fits at its size",
+                    () =>
+                        void sendSvgOps(
+                            [
+                                {
+                                    sel,
+                                    ops: [
+                                        {
+                                            kind: "attrs",
+                                            loc: sel.loc,
+                                            set: {
+                                                height: String(
+                                                    Math.ceil(taller),
+                                                ),
+                                            },
+                                        },
+                                    ],
+                                },
+                            ],
+                            "Make box taller",
+                        ),
+                ),
+            );
+        }
+        if (smaller !== current) {
+            actions.append(
+                button("Smaller text", "One step smaller", () =>
+                    setSize(smaller),
+                ),
+            );
+        }
+        if (actions.childElementCount) status.push(actions);
+    }
+    return section(
+        "Text size",
+        sizeRow,
+        h("label", { class: "fit-check" }, box, "Shrink text to fit"),
+        ...status,
     );
 }
 

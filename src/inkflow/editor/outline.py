@@ -13,6 +13,7 @@ the ids in the slide's own SVG and each animation as deck.py writes it.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import re
@@ -20,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
+from inkflow import ns
 from inkflow.animations import Cue
 from inkflow.editor.codegen import Code
 from inkflow.editor.model import build_model
@@ -59,6 +61,14 @@ class ZoneOutline:
     box: list[float] | None = None
     """``[x, y, width, height]`` in slide units (before ``transform``)."""
     transform: str | None = None
+    scale: float | None = None
+    """The text's size as set on the zone (its marker's ``size=``, its
+    ``TextBox(size=)`` or its shape's ``--inkflow-font-scale``); ``None`` = its
+    own (a layout's CSS may still scale it)."""
+    fit: str | None = None
+    """``none`` when its text is never shrunk to fit, ``shrink`` when set to
+    shrink; ``None`` = the default (shrink, unless the layout or theme CSS
+    says ``--inkflow-fit: none``)."""
 
 
 @dataclass
@@ -291,6 +301,29 @@ def _layout_chain(
     return _rel(path, project_dir), names
 
 
+def _style_var(el: SvgElement | None, name: str) -> str | None:
+    for decl in ((el.get("style") or "") if el is not None else "").split(";"):
+        key, sep, value = decl.partition(":")
+        if sep and key.strip() == name:
+            return value.strip()
+    return None
+
+
+def _text_format(fo: SvgElement) -> tuple[float | None, str | None]:
+    """A built text zone's size and fit as set on it: on its wrapper (from its
+    marker or ``TextBox``), which wins, else on the zone itself (its shape)."""
+    wrapper = fo.find(f"{{{ns.XHTML}}}div")
+    scale: float | None = None
+    fit: str | None = None
+    for node in (wrapper, fo):
+        raw = _style_var(node, "--inkflow-font-scale")
+        if scale is None and raw is not None:
+            with contextlib.suppress(ValueError):
+                scale = float(raw)
+        fit = fit or _style_var(node, "--inkflow-fit")
+    return scale, fit
+
+
 def _hidden_zones(entry: dict[str, object]) -> list[ZoneOutline]:
     """A hidden slide is not built: its zones come from its sources alone."""
     zones: list[ZoneOutline] = []
@@ -322,6 +355,7 @@ def _built_zones(entry: dict[str, object], root: SvgElement) -> list[ZoneOutline
             zone.transform = el.get("transform")
             reveals = el.xpath(f'.//*[starts-with(@id, "{_STEP_ID}")]')
             zone.reveals = len(cast("list[object]", reveals))
+            zone.scale, zone.fit = _text_format(el)
         zones.append(zone)
     for empty in cast("list[dict[str, object]]", entry.get("emptyZones") or []):
         box = [
@@ -447,6 +481,10 @@ def _zone_line(zone: ZoneOutline, width: int, full: bool) -> list[str]:
         parts.append(_preview(zone.text))
     if zone.reveals:
         parts.append(f"({zone.reveals} reveal{'s' if zone.reveals > 1 else ''})")
+    if full and zone.scale is not None:
+        parts.append(f"size {zone.scale:.0%}")
+    if full and zone.fit is not None:
+        parts.append("fit off" if zone.fit == "none" else f"fit {zone.fit}")
     lines = [" ".join(p for p in parts if p).rstrip()]
     if full and zone.kind in ("md", "text", "textbox") and zone.text:
         lines.extend(f"      {line}" for line in zone.text.splitlines())
