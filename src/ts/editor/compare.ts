@@ -10,6 +10,7 @@
 // (`inkflow edit --compare`). Editing stays off while it is open, except
 // "Take this slide" (one undoable step) and undo/redo.
 
+import { scheduleFit } from "../shared/fit";
 import { parseViewBox } from "../shared/viewbox";
 import {
     type Box,
@@ -231,6 +232,7 @@ function slideView(
             v.removeAttribute("autoplay");
             v.removeAttribute("controls");
         });
+        scheduleFit(svg);
         host.svg = svg;
     }
     root.append(wrap);

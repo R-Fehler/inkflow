@@ -1123,6 +1123,141 @@ class TestSession:
         assert md.read_text() == "::text-2::\nHello **world**\n"
         assert 'id="zone-text"' not in drawing.read_text()
 
+    def _two_boxes(self, session: EditorSession, project: Path) -> Path:
+        drawing = project / "slides" / "drawing.svg"
+        for text, y in (("One", 600), ("Two", 800)):
+            session.apply(
+                {
+                    "action": "insert-textbox",
+                    "slide": 0,
+                    "file": str(drawing),
+                    "hash": _hash(drawing),
+                    "text": text,
+                    "x": 100,
+                    "y": y,
+                    "width": 800,
+                    "height": 120,
+                },
+                _deck(project),
+            )
+        svg = SvgFile.from_bytes(drawing, drawing.read_bytes())
+        session.apply(
+            {
+                "action": "svg",
+                "file": str(drawing),
+                "hash": _hash(drawing),
+                "ops": [
+                    {
+                        "kind": "group",
+                        "locs": [_loc(svg, "zone-text"), _loc(svg, "zone-text-2")],
+                    }
+                ],
+            },
+            _deck(project),
+        )
+        return drawing
+
+    def _group_loc(self, drawing: Path) -> str:
+        from inkflow.editor.provenance import child_path
+
+        svg = SvgFile.from_bytes(drawing, drawing.read_bytes())
+        box = svg.root.find(".//*[@id='zone-text']")
+        assert box is not None
+        grp = box.getparent()
+        assert grp is not None and grp.tag == f"{{{SVG_NS}}}g"
+        return f"0:{child_path(grp)}"
+
+    def test_deleting_a_group_takes_its_text_boxes_content(self, project: Path) -> None:
+        session = EditorSession(project / "deck.py")
+        drawing = self._two_boxes(session, project)
+        md = project / "slides" / "drawing.md"
+        assert md.read_text() == "::text::\nOne\n\n::text-2::\nTwo\n"
+        # An animation of one of the boxes goes with it.
+        session.apply(
+            {
+                "action": "anim",
+                "slide": 0,
+                "op": "insert",
+                "index": 1,
+                "spec": {"type": "FadeIn", "element": "zone-text-2"},
+            },
+            _deck(project),
+        )
+        assert [c.element for c in _deck(project).slides[0].animations] == [
+            "box",
+            "zone-text-2",
+        ]
+        before_svg, before_md = drawing.read_text(), md.read_text()
+        before_deck = (project / "deck.py").read_text()
+        session.apply(
+            {
+                "action": "svg",
+                "file": str(drawing),
+                "hash": _hash(drawing),
+                "zoneSlide": 0,
+                "ops": [{"kind": "delete", "loc": self._group_loc(drawing)}],
+            },
+            _deck(project),
+        )
+        assert "zone-text" not in drawing.read_text()
+        assert "::text" not in md.read_text()
+        assert [c.element for c in _deck(project).slides[0].animations] == ["box"]
+        # One undo brings back the shapes, the text and the animation.
+        session.apply({"action": "undo"}, _deck(project))
+        assert drawing.read_text() == before_svg
+        assert md.read_text() == before_md
+        assert (project / "deck.py").read_text() == before_deck
+
+    def test_deleting_an_animated_shape_removes_its_animation(
+        self, project: Path
+    ) -> None:
+        session = EditorSession(project / "deck.py")
+        drawing = project / "slides" / "drawing.svg"
+        svg = SvgFile.from_bytes(drawing, drawing.read_bytes())
+        session.apply(
+            {
+                "action": "svg",
+                "file": str(drawing),
+                "hash": _hash(drawing),
+                "zoneSlide": 0,
+                "ops": [{"kind": "delete", "loc": _loc(svg, "box")}],
+            },
+            _deck(project),
+        )
+        assert _deck(project).slides[0].animations == []
+        assert "animations=" not in (project / "deck.py").read_text()
+
+    def test_duplicating_a_group_copies_its_text_boxes_content(
+        self, project: Path
+    ) -> None:
+        session = EditorSession(project / "deck.py")
+        drawing = self._two_boxes(session, project)
+        md = project / "slides" / "drawing.md"
+        result = session.apply(
+            {
+                "action": "svg",
+                "file": str(drawing),
+                "hash": _hash(drawing),
+                "zoneSlide": 0,
+                "ops": [
+                    {
+                        "kind": "duplicate",
+                        "loc": self._group_loc(drawing),
+                        "key": "d",
+                    }
+                ],
+            },
+            _deck(project),
+        )
+        assert result["ok"]
+        spans = zone_spans(md.read_text())
+        # The copies get fresh ids (zone-text -> zone-text-3, ...).
+        assert set(spans) == {"text", "text-2", "text-3", "text-2-2"}
+        text = md.read_text()
+        assert text.count("One") == 2 and text.count("Two") == 2
+        html = process_deck(_deck(project), project, project / "deck.py")[0]["svg"]
+        assert html.count(">One<") == 2 and html.count(">Two<") == 2
+
     def test_text_box_on_a_markdown_slide_writes_the_md_file(
         self, project: Path
     ) -> None:

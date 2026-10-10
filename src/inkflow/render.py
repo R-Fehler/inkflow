@@ -53,7 +53,7 @@ from inkflow.logging import logger
 from inkflow.manifest import Deck
 from inkflow.pipeline import SlideData, process_deck
 from inkflow.server import load_deck
-from inkflow.sizes import print_body_pt
+from inkflow.sizes import PRINT_MIN_BODY, PRINT_MIN_TEXT, print_body_pt
 from inkflow.titles import resolve_deck_title
 
 # ── findings ──────────────────────────────────────────────────────────────────
@@ -115,6 +115,11 @@ class Finding:
             where += f" ({self.slide_id})"
         if self.kind == "overflow":
             said = f"text overflows its zone by {self._reach()}"
+            if self.size:
+                said += (
+                    f" even shrunk to {self.size:.0%} (as small as it goes):"
+                    + " shorten it, make the box larger, or split the slide"
+                )
         elif self.kind == "clipped":
             said = f"{self.text or 'a box'} is cut off by {self._reach()}"
         elif self.kind == "outside" and self.entirely:
@@ -195,7 +200,8 @@ def parse_findings(slide: int, slide_id: str, raw: object) -> list[Finding]:
                 bottom=round(number("bottom")),
                 left=round(number("left")),
                 entirely=data.get("entirely") is True,
-                size=number("size"),
+                # An overflow's: the factor its text was shrunk to.
+                size=number("scale" if kind == "overflow" else "size"),
                 minimum=number("min"),
                 text=text if isinstance(text, str) else "",
                 unit="pt" if data.get("unit") == "pt" else "px",
@@ -502,12 +508,6 @@ def print_check(page: PdfPage) -> dict[str, float]:
         "minPt": round(body * PRINT_MIN_TEXT, 1),
         "bodyPt": round(body * PRINT_MIN_BODY, 1),
     }
-
-
-PRINT_MIN_TEXT = 0.6
-"""Printed text below this fraction of the sheet's body size is a hint."""
-PRINT_MIN_BODY = 0.8
-"""Printed body text below this fraction of the sheet's body size is a hint."""
 
 
 def print_checks(deck: Deck, slides: list[SlideData]) -> list[dict[str, float] | None]:

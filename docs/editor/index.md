@@ -421,6 +421,35 @@ slide instead, where the slide re-renders as you type; the **M↓** button switc
 to that pane at any time. Nothing is ever dropped: the editor only edits in place
 when it can write back exactly what the zone holds.
 
+### Text size and shrinking to fit
+
+Select a text box or a zone with text, and the properties panel's **Text size**
+section sets how large its text is: **A−** and **A+** step through 50, 67, 80,
+90, 100, 115, 130, 150 and 200 %, and clicking the percentage lets you type any
+size from 25 to 300 %. Everything in the box scales together: headings, lists,
+code, tables and formulas.
+
+Text that does not fit its box is **shrunk to fit**, on every text zone unless you
+untick **Shrink text to fit**. The panel says how far a box was shrunk
+("Shrunk to 72% to fit"); the presenter, the static build, the PDF export and
+`inkflow render` show exactly the same size, since each fits the text in the
+browser by the same rule. Nothing fitted is written to your files: only the size
+and the tick are. Shrinking stops at a floor: a third of the box's own size, or
+the smallest size `inkflow render --check` calls readable (1/80 of the slide's
+height; on a printed deck 0.6 of the sheet's body text), whichever is larger. A
+box whose text still does not fit there (or with shrinking off) shows a red
+**Doesn't fit** badge on the canvas; its panel offers **Make box taller** (the
+box grows to fit the text at its size) and **Smaller text** (one step down).
+
+Where the two settings are written follows the box: a text box of the slide, or
+any zone while editing a layout or in the slide master, keeps them in its shape's
+style (`--inkflow-font-scale: 0.8; --inkflow-fit: none`), so a layout's setting
+applies to every slide on it; a layout's zone on one slide keeps them with the
+slide's text, as the Markdown marker's `size=80%` / `fit=none` or a `TextBox`'s
+`size=` / `fit=`. The slide's own setting wins over the shape's, which wins over
+the layout's CSS. To turn shrinking off for the whole deck, put
+`:root { --inkflow-fit: none; }` in `styles.css`.
+
 Empty zones show a small **+ zone** label; click it to start writing in place: the
 zone gets its name as text, selected, so typing replaces it. Leave it as it is, empty
 it or press <kbd>Escape</kbd> and the zone is empty again. For zones named like

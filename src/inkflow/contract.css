@@ -220,6 +220,12 @@ math {
 
 /* --inkflow-valign: start | center | end  (set on #zone-* in layout SVG CSS) */
 /* --inkflow-padding: any CSS length        (set on #zone-* in layout SVG CSS) */
+/* --inkflow-font-scale: a factor (0.8)     (the zone shape's style, layout CSS,
+ *                                           a marker's size=, TextBox(size=)) */
+/* --inkflow-fit: shrink | none             (shrink text that overflows: on
+ *                                           unless set to none; the browser's
+ *                                           shared/fit.ts sets the inline
+ *                                           --inkflow-fit-scale it found) */
 .inkflow-wrapper {
     display: flex;
     flex-direction: column;
@@ -228,6 +234,25 @@ math {
     box-sizing: border-box;
     justify-content: var(--inkflow-valign, start);
     padding: var(--inkflow-padding, 0);
+    /* Every size inside is in em, so headings, code, tables and formulas
+     * scale with the zone's text. */
+    font-size: calc(
+        1em *
+        var(--inkflow-font-scale, 1) *
+        var(--inkflow-fit-scale, 1)
+    );
+}
+
+/* A zone's HTML starts from no margins and padding, as the presenter's own
+ * reset gives it, in every page that shows a slide (the editor, the PDF
+ * export, the compare view), so text lays out (and fits) the same in each.
+ * :where() keeps it as weak as that reset: every rule below still wins. */
+:where(.inkflow-wrapper) *,
+:where(.inkflow-wrapper) *::before,
+:where(.inkflow-wrapper) *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
 }
 
 /* ── .inkflow-content typography ─────────────────────────────────────────── */

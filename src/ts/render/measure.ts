@@ -8,6 +8,10 @@
 // sizes in points against the sheet's type scale, and each raster picture's
 // resolution at its printed size.
 
+import { MIN_TEXT_FRACTION } from "../shared/fit";
+
+export { MIN_TEXT_FRACTION };
+
 export interface Box {
     left: number;
     top: number;
@@ -24,8 +28,9 @@ export interface Overhang {
 }
 
 export type Finding =
-    /** A zone's text (Markdown) reaches past the zone. */
-    | ({ kind: "overflow"; target: string } & Overhang)
+    /** A zone's text (Markdown) reaches past the zone; `scale`: shrunk to
+     * fit as far as it goes (shared/fit.ts), and still too much. */
+    | ({ kind: "overflow"; target: string; scale?: number } & Overhang)
     /** A code block (or other scrolling box) in a zone is cut off. */
     | ({ kind: "clipped"; target: string; what: string } & Overhang)
     /** A drawn object reaches past the slide's edges, or lies wholly outside. */
@@ -104,9 +109,6 @@ export function isVector(url: string): boolean {
 
 /** Overhangs smaller than this (slide units) are rounding, not layout. */
 export const TOLERANCE = 2;
-
-/** Text below this fraction of the slide's height is reported as too small. */
-export const MIN_TEXT_FRACTION = 1 / 80;
 
 export function union(a: Box | null, b: Box): Box {
     if (!a) return { ...b };
@@ -517,7 +519,16 @@ class Measurer {
         }
         if (!content) return;
         const over = significant(overhang(content, zoneBox));
-        if (over) this.findings.push({ kind: "overflow", target, ...over });
+        if (!over) return;
+        const scale = Number.parseFloat(
+            fo.getAttribute("data-inkflow-fit") ?? "",
+        );
+        this.findings.push({
+            kind: "overflow",
+            target,
+            ...over,
+            ...(scale > 0 ? { scale } : {}),
+        });
     }
 
     /** A box with scrollable overflow shows only part of its content. */

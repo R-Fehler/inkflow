@@ -7,6 +7,7 @@
 // attribute plan to the server, which writes it into that source file. The
 // rebuild that follows replaces the DOM with the authoritative render.
 
+import { fitSlide, onFontsLoaded } from "../shared/fit";
 import { scrollCorrection, ZoomAnchor } from "../shared/gestures";
 import { applyStepInstant } from "../shared/step";
 import { parseViewBox } from "../shared/viewbox";
@@ -206,6 +207,8 @@ export function render(): void {
         svg.removeAttribute("height");
         svg.style.display = "block";
         prepareForEditing(svg);
+        // Text shrunk to fit its box, as the presenter shows it.
+        fitSlide(svg);
     }
     ed.scope = scopeKey
         ? (host.querySelector(`[data-ink="${scopeKey}"]`) as SVGGElement | null)
@@ -811,6 +814,7 @@ export function drawOverlay(): void {
     const svg = slideRoot();
     if (!svg) return;
     drawPlaceholders();
+    drawOverflowBadges();
     hooks.drawPeers(overlay);
     if (ed.scope) {
         const c = elementCorners(ed.scope);
@@ -1000,6 +1004,55 @@ function drawCropGhost(): void {
 }
 
 const MEDIA_ZONES = /media|image|img|picture|photo|figure|video|logo/;
+
+// A text box whose text does not fit, even shrunk as far as it goes (or
+// with shrinking off): a small red badge on its corner (shared/fit.ts marks
+// it). Clicking it selects the box, whose panel offers the fixes.
+function drawOverflowBadges(): void {
+    const svg = slideRoot();
+    if (!svg || ed.step != null) return;
+    for (const fo of Array.from(
+        svg.querySelectorAll("foreignObject[data-inkflow-overflow]"),
+    )) {
+        const c = elementCorners(fo as SVGGraphicsElement);
+        if (!c) continue;
+        const xs = c.map((p) => p.x);
+        const ys = c.map((p) => p.y);
+        const right = Math.max(...xs);
+        const bottom = Math.max(...ys);
+        const text = "Doesn't fit";
+        const w = 14 + text.length * 6.6;
+        const g = svgEl("g", { class: "overflow-badge" });
+        g.append(
+            svgEl("rect", {
+                x: right - w - 4,
+                y: bottom - 26,
+                width: w,
+                height: 20,
+                rx: 10,
+            }),
+        );
+        const label = svgEl("text", {
+            x: right - 4 - w / 2,
+            y: bottom - 12,
+            "text-anchor": "middle",
+        });
+        label.textContent = text;
+        g.append(label);
+        const title = svgEl("title");
+        title.textContent = fo.hasAttribute("data-inkflow-fit")
+            ? "The text does not fit even shrunk as far as it goes: shorten it or make the box taller"
+            : "The text does not fit its box";
+        g.append(title);
+        g.addEventListener("pointerdown", (e) => {
+            if (!selectable(fo)) return;
+            e.stopPropagation();
+            e.preventDefault();
+            select([fo as SVGGraphicsElement]);
+        });
+        overlay.append(g);
+    }
+}
 
 function drawPlaceholders(): void {
     const slide = currentSlide();
@@ -2349,6 +2402,20 @@ function diagramPlans(plans: { sel: Selected; ops: SvgOp[] }[]): {
 }
 
 export function initCanvas(): void {
+    // Text measured again in its real fonts once they are in: the canvas
+    // (unless something is being dragged or typed) and every thumbnail.
+    onFontsLoaded(() => {
+        for (const svg of Array.from(
+            document.querySelectorAll(".thumb svg, .master-thumb svg"),
+        )) {
+            fitSlide(svg);
+        }
+        const svg = slideRoot();
+        if (!svg || ed.interacting || ed.richEditing) return;
+        fitSlide(svg);
+        drawOverlay();
+        emit("selection");
+    });
     paper.addEventListener("pointerdown", onPointerDown);
     // No autoscroll or "open link in new tab" on the middle button.
     for (const type of ["mousedown", "auxclick"]) {

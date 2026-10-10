@@ -392,6 +392,13 @@ def _replace_with_foreignobject(
         wrapper_style_parts.append(f"justify-content:{_VALIGN_CSS[item.valign]}")
     if item.padding is not None:
         wrapper_style_parts.append(f"padding:{item.padding:g}px")
+    # Text size and shrink-to-fit: custom properties contract.css and the
+    # browser's fitting (src/ts/shared/fit.ts) read, set here on the wrapper
+    # so they beat the zone shape's own (inherited from the foreignObject).
+    if item.size is not None:
+        wrapper_style_parts.append(f"--inkflow-font-scale:{item.size:g}")
+    if item.fit is not None:
+        wrapper_style_parts.append(f"--inkflow-fit:{'shrink' if item.fit else 'none'}")
 
     content_style_parts: list[str] = []
     if item.align is not None:

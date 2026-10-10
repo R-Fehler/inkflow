@@ -1,5 +1,204 @@
 "use strict";
 (() => {
+  // src/ts/shared/viewbox.ts
+  var deckCanvas = { w: 1920, h: 1080 };
+  function setDeckCanvas(w2, h3) {
+    if (w2 > 0 && h3 > 0) deckCanvas = { w: w2, h: h3 };
+  }
+  function parseViewBox(attr, fallback = `0 0 ${deckCanvas.w} ${deckCanvas.h}`) {
+    const parts = (attr ?? "").trim().split(/[\s,]+/).map(Number);
+    const valid = parts.length === 4 && parts.every((n3) => Number.isFinite(n3)) && parts[2] > 0 && parts[3] > 0;
+    const [x2, y2, w2, h3] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
+    return { x: x2, y: y2, w: w2, h: h3 };
+  }
+
+  // src/ts/shared/fit.ts
+  var MIN_TEXT_FRACTION = 1 / 80;
+  var FIT_FLOOR = 0.33;
+  var TEXT_SIZE_STEPS = [
+    0.5,
+    0.67,
+    0.8,
+    0.9,
+    1,
+    1.15,
+    1.3,
+    1.5,
+    2
+  ];
+  var TEXT_SCALE_MIN = 0.25;
+  var TEXT_SCALE_MAX = 3;
+  var FIT_TOLERANCE = 0.01;
+  var SLACK = 1;
+  function nextTextSize(current3, direction2) {
+    const eps = 1e-6;
+    if (direction2 > 0) {
+      return TEXT_SIZE_STEPS.find((s2) => s2 > current3 + eps) ?? current3;
+    }
+    return [...TEXT_SIZE_STEPS].reverse().find((s2) => s2 < current3 - eps) ?? current3;
+  }
+  function parseTextSize(text) {
+    const t2 = text.replace(/\s+/g, "").replace(/%$/, "");
+    if (!t2) return null;
+    const n3 = Number(t2);
+    if (!Number.isFinite(n3)) return null;
+    const scale2 = Math.round(n3 * 10) / 1e3;
+    return scale2 >= TEXT_SCALE_MIN && scale2 <= TEXT_SCALE_MAX ? scale2 : null;
+  }
+  function formatTextSize(scale2) {
+    return `${Math.round(scale2 * 100)}%`;
+  }
+  function floorScale(baseSize, minText) {
+    if (!(baseSize > 0)) return 1;
+    return Math.min(1, Math.max(FIT_FLOOR, minText / baseSize));
+  }
+  function searchScale(fits, floor, tolerance = FIT_TOLERANCE) {
+    if (fits(1)) return { scale: 1, overflow: false };
+    const lowest = Math.min(1, Math.max(0, floor));
+    if (lowest >= 1 || !fits(lowest)) return { scale: lowest, overflow: true };
+    let lo = lowest;
+    let hi = 1;
+    while (hi - lo > tolerance) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) lo = mid;
+      else hi = mid;
+    }
+    return {
+      scale: Math.max(lowest, Math.floor(lo * 1e3) / 1e3),
+      overflow: false
+    };
+  }
+  function neededHeight(children2) {
+    let total2 = 0;
+    for (const c2 of children2) {
+      if (c2.inFlow) total2 += c2.height + c2.marginTop + c2.marginBottom;
+    }
+    return total2;
+  }
+  var px = (v2) => Number.parseFloat(v2) || 0;
+  function slideSvg(el2) {
+    let svg = el2.ownerSVGElement ?? null;
+    while (svg?.ownerSVGElement) svg = svg.ownerSVGElement;
+    return svg ?? (el2 instanceof SVGSVGElement ? el2 : null);
+  }
+  function minTextSize(svg) {
+    const own = Number.parseFloat(
+      svg.getAttribute("data-inkflow-min-text") ?? ""
+    );
+    if (own > 0) return own;
+    return parseViewBox(svg.getAttribute("viewBox")).h * MIN_TEXT_FRACTION;
+  }
+  function unitScale(fo) {
+    const root2 = slideSvg(fo);
+    const a2 = fo.getScreenCTM?.();
+    const b2 = root2?.getScreenCTM();
+    if (!a2 || !b2) return 1;
+    const da = Math.sqrt(Math.abs(a2.a * a2.d - a2.b * a2.c));
+    const db = Math.sqrt(Math.abs(b2.a * b2.d - b2.b * b2.c));
+    return da > 0 && db > 0 ? da / db : 1;
+  }
+  function laidOut(wrapper) {
+    return Array.from(wrapper.children, (el2) => {
+      const s2 = getComputedStyle(el2);
+      return {
+        height: el2.offsetHeight ?? 0,
+        marginTop: px(s2.marginTop),
+        marginBottom: px(s2.marginBottom),
+        inFlow: s2.display !== "none" && s2.position !== "absolute" && s2.position !== "fixed"
+      };
+    });
+  }
+  function overflows(wrapper, content2) {
+    const ws2 = getComputedStyle(wrapper);
+    const avail = wrapper.clientHeight - px(ws2.paddingTop) - px(ws2.paddingBottom);
+    if (neededHeight(laidOut(wrapper)) > avail + SLACK) return true;
+    const width = content2.clientWidth;
+    for (const el2 of Array.from(content2.querySelectorAll("pre, table"))) {
+      const box = el2;
+      if (box.localName === "pre") {
+        if (box.scrollWidth > box.clientWidth + SLACK) return true;
+      } else if (box.offsetWidth > width + SLACK) {
+        return true;
+      }
+    }
+    return false;
+  }
+  function neededBoxHeight(fo) {
+    const wrapper = fo.querySelector(
+      ":scope > .inkflow-wrapper"
+    );
+    if (!wrapper) return null;
+    const saved = wrapper.style.getPropertyValue("--inkflow-fit-scale");
+    wrapper.style.removeProperty("--inkflow-fit-scale");
+    const ws2 = getComputedStyle(wrapper);
+    const need = px(ws2.paddingTop) + px(ws2.paddingBottom) + px(ws2.borderTopWidth) + px(ws2.borderBottomWidth) + neededHeight(laidOut(wrapper));
+    if (saved) wrapper.style.setProperty("--inkflow-fit-scale", saved);
+    return need;
+  }
+  function fitZone(fo, minText) {
+    const wrapper = fo.querySelector(
+      ":scope > .inkflow-wrapper"
+    );
+    const content2 = wrapper?.querySelector(
+      ":scope > .inkflow-content"
+    );
+    if (!wrapper || !content2) return null;
+    wrapper.style.removeProperty("--inkflow-fit-scale");
+    fo.removeAttribute("data-inkflow-fit");
+    fo.removeAttribute("data-inkflow-overflow");
+    const cs = getComputedStyle(wrapper);
+    if (cs.display === "none" || wrapper.clientHeight === 0) return null;
+    const apply2 = (scale2) => {
+      if (scale2 < 1)
+        wrapper.style.setProperty("--inkflow-fit-scale", String(scale2));
+      else wrapper.style.removeProperty("--inkflow-fit-scale");
+    };
+    const fits = (scale2) => {
+      apply2(scale2);
+      return !overflows(wrapper, content2);
+    };
+    const off2 = cs.getPropertyValue("--inkflow-fit").trim() === "none";
+    const result = off2 ? { scale: 1, overflow: !fits(1) } : searchScale(
+      fits,
+      floorScale(px(cs.fontSize) * unitScale(fo), minText)
+    );
+    apply2(result.scale);
+    if (result.scale < 1)
+      fo.setAttribute("data-inkflow-fit", result.scale.toFixed(3));
+    if (result.overflow) fo.setAttribute("data-inkflow-overflow", "");
+    return result;
+  }
+  function fitSlide(root2) {
+    if (!root2) return;
+    const svg = root2 instanceof SVGSVGElement ? root2 : root2.querySelector("svg");
+    if (!svg) return;
+    const min = minTextSize(slideSvg(svg) ?? svg);
+    for (const wrapper of Array.from(
+      svg.querySelectorAll("foreignObject > .inkflow-wrapper")
+    )) {
+      const fo = wrapper.parentElement;
+      if (fo) fitZone(fo, min);
+    }
+  }
+  var pending = /* @__PURE__ */ new Set();
+  var scheduled = false;
+  function scheduleFit(root2) {
+    pending.add(root2);
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      const roots = [...pending];
+      pending.clear();
+      for (const r2 of roots) if (r2.isConnected) fitSlide(r2);
+    });
+  }
+  function onFontsLoaded(fn) {
+    if (typeof document === "undefined" || !document.fonts) return;
+    document.fonts.addEventListener("loadingdone", () => fn());
+    void document.fonts.ready.then(() => fn());
+  }
+
   // src/ts/shared/gestures.ts
   var DELTA_LINE = 1;
   var DELTA_PAGE = 2;
@@ -437,18 +636,6 @@
     });
     applyCodeHighlights(root2, step2);
     rootStep.set(root2, step2);
-  }
-
-  // src/ts/shared/viewbox.ts
-  var deckCanvas = { w: 1920, h: 1080 };
-  function setDeckCanvas(w2, h3) {
-    if (w2 > 0 && h3 > 0) deckCanvas = { w: w2, h: h3 };
-  }
-  function parseViewBox(attr, fallback = `0 0 ${deckCanvas.w} ${deckCanvas.h}`) {
-    const parts = (attr ?? "").trim().split(/[\s,]+/).map(Number);
-    const valid = parts.length === 4 && parts.every((n3) => Number.isFinite(n3)) && parts[2] > 0 && parts[3] > 0;
-    const [x2, y2, w2, h3] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
-    return { x: x2, y: y2, w: w2, h: h3 };
   }
 
   // src/ts/editor/connectors.ts
@@ -4658,6 +4845,7 @@
       el2?.querySelectorAll(".anim-pending").forEach((x2) => {
         x2.classList.remove("anim-pending");
       });
+      if (el2) scheduleFit(el2);
     }
     return box;
   }
@@ -6194,6 +6382,7 @@
         svg.querySelectorAll("video").forEach((v2) => {
           v2.removeAttribute("autoplay");
         });
+        scheduleFit(svg);
       }
       return box;
     }
@@ -6760,7 +6949,7 @@
   // src/ts/editor/net.ts
   var ws = null;
   var nextId = 1;
-  var pending = /* @__PURE__ */ new Map();
+  var pending2 = /* @__PURE__ */ new Map();
   var commandHandler = () => {
   };
   var pendingSlides = null;
@@ -6807,10 +6996,10 @@
     };
     sock.onclose = (ev) => {
       document.body.classList.add("offline");
-      for (const resolve of pending.values()) {
+      for (const resolve of pending2.values()) {
         resolve({ ok: false, error: "disconnected from the server" });
       }
-      pending.clear();
+      pending2.clear();
       if (ev.code === SENT_AWAY) {
         stopped = true;
         sentAway(ev.reason);
@@ -6854,8 +7043,8 @@
           emit("error");
           break;
         case "edit-result": {
-          const resolve = pending.get(msg.id);
-          pending.delete(msg.id);
+          const resolve = pending2.get(msg.id);
+          pending2.delete(msg.id);
           resolve?.(msg);
           break;
         }
@@ -6927,7 +7116,7 @@
       (s2) => s2.path === req.file && s2.copyTo != null
     ) ? { copyLayout: true } : {};
     return new Promise((resolve) => {
-      pending.set(id, (result) => {
+      pending2.set(id, (result) => {
         if (result.ok && result.copied) copied(result);
         resolve(result);
       });
@@ -7205,6 +7394,7 @@
       svg.removeAttribute("height");
       svg.style.display = "block";
       prepareForEditing(svg);
+      fitSlide(svg);
     }
     ed.scope = scopeKey ? host3.querySelector(`[data-ink="${scopeKey}"]`) : null;
     ed.selection = [];
@@ -7652,6 +7842,7 @@
     const svg = slideRoot();
     if (!svg) return;
     drawPlaceholders();
+    drawOverflowBadges();
     hooks.drawPeers(overlay2);
     if (ed.scope) {
       const c2 = elementCorners(ed.scope);
@@ -7814,6 +8005,49 @@
     overlay2.append(ghost, poly(c2, "crop-extent"));
   }
   var MEDIA_ZONES = /media|image|img|picture|photo|figure|video|logo/;
+  function drawOverflowBadges() {
+    const svg = slideRoot();
+    if (!svg || ed.step != null) return;
+    for (const fo of Array.from(
+      svg.querySelectorAll("foreignObject[data-inkflow-overflow]")
+    )) {
+      const c2 = elementCorners(fo);
+      if (!c2) continue;
+      const xs = c2.map((p2) => p2.x);
+      const ys = c2.map((p2) => p2.y);
+      const right = Math.max(...xs);
+      const bottom = Math.max(...ys);
+      const text = "Doesn't fit";
+      const w2 = 14 + text.length * 6.6;
+      const g2 = svgEl("g", { class: "overflow-badge" });
+      g2.append(
+        svgEl("rect", {
+          x: right - w2 - 4,
+          y: bottom - 26,
+          width: w2,
+          height: 20,
+          rx: 10
+        })
+      );
+      const label4 = svgEl("text", {
+        x: right - 4 - w2 / 2,
+        y: bottom - 12,
+        "text-anchor": "middle"
+      });
+      label4.textContent = text;
+      g2.append(label4);
+      const title3 = svgEl("title");
+      title3.textContent = fo.hasAttribute("data-inkflow-fit") ? "The text does not fit even shrunk as far as it goes: shorten it or make the box taller" : "The text does not fit its box";
+      g2.append(title3);
+      g2.addEventListener("pointerdown", (e2) => {
+        if (!selectable(fo)) return;
+        e2.stopPropagation();
+        e2.preventDefault();
+        select([fo]);
+      });
+      overlay2.append(g2);
+    }
+  }
   function drawPlaceholders() {
     const slide = currentSlide();
     if (!slide?.emptyZones || ed.step != null || ed.master) return;
@@ -8837,6 +9071,18 @@
     return { plans: out, diagrams };
   }
   function initCanvas() {
+    onFontsLoaded(() => {
+      for (const svg2 of Array.from(
+        document.querySelectorAll(".thumb svg, .master-thumb svg")
+      )) {
+        fitSlide(svg2);
+      }
+      const svg = slideRoot();
+      if (!svg || ed.interacting || ed.richEditing) return;
+      fitSlide(svg);
+      drawOverlay();
+      emit("selection");
+    });
     paper.addEventListener("pointerdown", onPointerDown);
     for (const type of ["mousedown", "auxclick"]) {
       paper.addEventListener(type, (e2) => {
@@ -12081,8 +12327,15 @@
     if (innerVideo) {
       panel.append(section2("Video", previewButton(innerVideo, button3)));
     }
-    if (movable) panel.append(geometrySection([sel]));
     const textZone = zone && el2.localName === "foreignObject" && !!el2.querySelector(".inkflow-content");
+    if (textZone) {
+      const sizes = textSizeSection(
+        sel,
+        !!src?.writable && (movable || ed.layoutMode)
+      );
+      if (sizes) panel.append(sizes);
+    }
+    if (movable) panel.append(geometrySection([sel]));
     const shapeTag = textZone ? el2.getAttribute("data-ink-tag") ?? "rect" : el2.localName;
     if ((!zone || textZone) && src?.writable && (movable || ed.layoutMode)) {
       const picture = !!pictureOf(el2) || !!drawnDiagram(el2);
@@ -12433,6 +12686,188 @@
           (v2) => setVar("--inkflow-valign", v2 || null, "Vertical align")
         )
       )
+    );
+  }
+  function textSizeSection(sel, shapeWritable) {
+    const fo = sel.el;
+    const wrapper = fo.querySelector(
+      ":scope > .inkflow-wrapper"
+    );
+    const slide = currentSlide();
+    const onSlide2 = !!slide && !ed.master && !ed.layoutMode;
+    if (!wrapper || !shapeWritable && !onSlide2) return null;
+    const name2 = zoneName(fo);
+    const SCALE = "--inkflow-font-scale";
+    const FIT = "--inkflow-fit";
+    const without = (holder, prop) => {
+      const style = holder.style;
+      const own = style.getPropertyValue(prop);
+      style.removeProperty(prop);
+      const v2 = getComputedStyle(holder).getPropertyValue(prop).trim();
+      if (own) style.setProperty(prop, own);
+      return v2;
+    };
+    const onContent = (prop) => onSlide2 && (wrapper.style.getPropertyValue(prop).trim() !== "" || !shapeWritable);
+    const write2 = (prop, value2, label4) => {
+      if (onContent(prop)) {
+        const key = prop === SCALE ? "size" : "fit";
+        void edit({
+          action: "zone-format",
+          slide: slide.deckIndex,
+          zone: name2,
+          [key]: value2 == null ? null : key === "size" ? Number(value2) : value2
+        });
+        return;
+      }
+      void sendSvgOps(
+        [
+          {
+            sel,
+            ops: [
+              { kind: "style", loc: sel.loc, set: { [prop]: value2 } }
+            ]
+          }
+        ],
+        label4
+      );
+    };
+    const holderOf = (prop) => onContent(prop) ? wrapper : fo;
+    const computed = getComputedStyle(wrapper);
+    const current3 = Number.parseFloat(computed.getPropertyValue(SCALE)) || 1;
+    const fitting = computed.getPropertyValue(FIT).trim() !== "none";
+    const setSize2 = (v2) => {
+      const base2 = Number.parseFloat(without(holderOf(SCALE), SCALE)) || 1;
+      write2(SCALE, Math.abs(v2 - base2) < 1e-6 ? null : String(v2), "Text size");
+    };
+    const setFit = (on2) => {
+      const base2 = without(holderOf(FIT), FIT) !== "none";
+      write2(
+        FIT,
+        on2 === base2 ? null : on2 ? "shrink" : "none",
+        on2 ? "Shrink text to fit" : "Keep text size"
+      );
+    };
+    const value = button3(
+      formatTextSize(current3),
+      "Type a size (25\u2013300 %)",
+      () => {
+        const input = h("input", {
+          type: "text",
+          class: "num text-size-input",
+          value: String(Math.round(current3 * 100))
+        });
+        const commit = () => {
+          const v2 = parseTextSize(input.value);
+          if (v2 == null) {
+            toast("A text size from 25 to 300 %", "error");
+            input.replaceWith(value);
+            return;
+          }
+          if (Math.abs(v2 - current3) > 1e-6) setSize2(v2);
+          else input.replaceWith(value);
+        };
+        input.addEventListener("keydown", (e2) => {
+          e2.stopPropagation();
+          if (e2.key === "Enter") input.blur();
+          if (e2.key === "Escape") {
+            input.value = String(Math.round(current3 * 100));
+            input.blur();
+          }
+        });
+        input.addEventListener("change", commit);
+        input.addEventListener("blur", () => {
+          if (input.isConnected) input.replaceWith(value);
+        });
+        value.replaceWith(input);
+        input.focus();
+        input.select();
+      },
+      "text-size-value"
+    );
+    const smaller = nextTextSize(current3, -1);
+    const larger = nextTextSize(current3, 1);
+    const down = button3(
+      "A\u2212",
+      "Smaller text",
+      () => setSize2(smaller),
+      "text-size-step"
+    );
+    const up = button3(
+      "A+",
+      "Larger text",
+      () => setSize2(larger),
+      "text-size-step"
+    );
+    down.disabled = smaller === current3;
+    up.disabled = larger === current3;
+    const sizeRow = h(
+      "div",
+      { class: "prop-row" },
+      h("span", { class: "prop-label" }, "Text size"),
+      h("span", { class: "text-size" }, down, value, up)
+    );
+    const box = h("input", { type: "checkbox" });
+    box.checked = fitting;
+    box.addEventListener("change", () => setFit(box.checked));
+    const shrunk = Number.parseFloat(fo.getAttribute("data-inkflow-fit") ?? "");
+    const overflow = fo.hasAttribute("data-inkflow-overflow");
+    const status3 = [];
+    if (overflow || shrunk > 0) {
+      status3.push(
+        h(
+          "p",
+          {
+            class: overflow ? "hint fit-status fit-warn" : "hint fit-status"
+          },
+          overflow ? shrunk > 0 ? `Doesn't fit, even shrunk to ${formatTextSize(shrunk)}` : "Doesn't fit its box" : `Shrunk to ${formatTextSize(shrunk)} to fit`
+        )
+      );
+      const taller = shapeWritable && (fo.getAttribute("data-ink-tag") ?? "rect") === "rect" ? neededBoxHeight(fo) : null;
+      const have = Number.parseFloat(fo.getAttribute("height") ?? "");
+      const actions = h("div", { class: "prop-buttons" });
+      if (taller != null && have > 0 && taller > have + 1) {
+        actions.append(
+          button3(
+            "Make box taller",
+            "Grow the box so the text fits at its size",
+            () => void sendSvgOps(
+              [
+                {
+                  sel,
+                  ops: [
+                    {
+                      kind: "attrs",
+                      loc: sel.loc,
+                      set: {
+                        height: String(
+                          Math.ceil(taller)
+                        )
+                      }
+                    }
+                  ]
+                }
+              ],
+              "Make box taller"
+            )
+          )
+        );
+      }
+      if (smaller !== current3) {
+        actions.append(
+          button3(
+            "Smaller text",
+            "One step smaller",
+            () => setSize2(smaller)
+          )
+        );
+      }
+      if (actions.childElementCount) status3.push(actions);
+    }
+    return section2(
+      "Text size",
+      sizeRow,
+      h("label", { class: "fit-check" }, box, "Shrink text to fit"),
+      ...status3
     );
   }
   var FITS = [
@@ -13878,10 +14313,10 @@
         break;
     }
   }
-  function setSize(px) {
-    view.style.setProperty("--grid-w", `${px}px`);
+  function setSize(px2) {
+    view.style.setProperty("--grid-w", `${px2}px`);
     try {
-      localStorage.setItem("inkflow-editor-grid", String(px));
+      localStorage.setItem("inkflow-editor-grid", String(px2));
     } catch {
     }
   }
@@ -16325,6 +16760,7 @@ ${rules}`;
         v2.removeAttribute("autoplay");
         v2.removeAttribute("controls");
       });
+      scheduleFit(svg);
       host5.svg = svg;
     }
     root2.append(wrap2);
@@ -19726,15 +20162,15 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     }
     return winding !== 0;
   }
-  function pointSegment2(px, py, ax, ay, bx, by) {
+  function pointSegment2(px2, py, ax, ay, bx, by) {
     const dx = bx - ax;
     const dy = by - ay;
     const len2 = dx * dx + dy * dy;
     const t2 = len2 === 0 ? 0 : Math.max(
       0,
-      Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)
+      Math.min(1, ((px2 - ax) * dx + (py - ay) * dy) / len2)
     );
-    const ex = ax + t2 * dx - px;
+    const ex = ax + t2 * dx - px2;
     const ey = ay + t2 * dy - py;
     return ex * ex + ey * ey;
   }
@@ -20326,10 +20762,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       const largest = sizes[sizes.length - 1];
       this.sizes.replaceChildren(
         ...sizes.map((size4, i2) => {
-          const px = Math.max(3, Math.round(size4 / largest * 16));
+          const px2 = Math.max(3, Math.round(size4 / largest * 16));
           const b2 = button6(
             ["Thin", "Medium", "Thick"][i2] ?? `Size ${i2 + 1}`,
-            `<span class="ink-dot ${tool}" style="width:${px}px;height:${tool === "highlighter" ? Math.max(3, Math.round(px / 2.5)) : px}px"></span>`,
+            `<span class="ink-dot ${tool}" style="width:${px2}px;height:${tool === "highlighter" ? Math.max(3, Math.round(px2 / 2.5)) : px2}px"></span>`,
             { inkSize: String(i2) }
           );
           b2.setAttribute("aria-pressed", String(t2.size === i2));
@@ -20375,7 +20811,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   function penActive() {
     return ed.tool === "pen" && ed.step == null && !ed.richEditing && !ed.master;
   }
-  var pending2 = /* @__PURE__ */ new Map();
+  var pending3 = /* @__PURE__ */ new Map();
   function liveLayer(svg) {
     let layer2 = svg.querySelector(":scope > g.inkflow-live-ink");
     if (!layer2) {
@@ -20389,10 +20825,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const svg = slideRoot();
     const slide = currentSlide();
     if (!svg || !slide) return;
-    for (const [id, p2] of pending2) {
+    for (const [id, p2] of pending3) {
       if (p2.deckIndex !== slide.deckIndex) continue;
       if (svg.querySelector(`.inkflow-ink [id="${CSS.escape(id)}"]`)) {
-        pending2.delete(id);
+        pending3.delete(id);
       } else if (!svg.getElementById(id)) {
         liveLayer(svg).appendChild(strokeElement(p2.stroke));
       }
@@ -20401,7 +20837,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   async function save(stroke) {
     const slide = currentSlide();
     if (!slide) return;
-    pending2.set(stroke.id, { deckIndex: slide.deckIndex, stroke });
+    pending3.set(stroke.id, { deckIndex: slide.deckIndex, stroke });
     showPending();
     const result = await edit({
       action: "ink",
@@ -20410,14 +20846,14 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       strokes: [stroke]
     });
     if (!result.ok) {
-      pending2.delete(stroke.id);
+      pending3.delete(stroke.id);
       slideRoot()?.getElementById(stroke.id)?.remove();
     }
   }
   async function erase(ids, hidden) {
     const slide = currentSlide();
     if (!slide) return;
-    for (const id of ids) pending2.delete(id);
+    for (const id of ids) pending3.delete(id);
     const result = await edit({
       action: "ink",
       op: "erase",
@@ -20428,12 +20864,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   async function clear2() {
     const slide = currentSlide();
-    if (!slide?.ink?.exists && !pending2.size) {
+    if (!slide?.ink?.exists && !pending3.size) {
       toast("This slide has no ink");
       return;
     }
     if (!slide || !window.confirm("Remove all ink from this slide?")) return;
-    pending2.clear();
+    pending3.clear();
     await edit({ action: "ink", op: "clear", slide: slide.deckIndex });
   }
   function tokenColor(token) {

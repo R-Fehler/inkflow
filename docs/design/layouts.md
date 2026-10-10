@@ -366,12 +366,18 @@ Left column content here.
 Right column content here.
 ```
 
-Set per-layout defaults for alignment with CSS variables in the layout's own `<defs>`:
+Set per-layout defaults for alignment, text size and shrink-to-fit with CSS
+variables in the layout's own `<defs>`:
 
 ```css
 #zone-title   { --inkflow-valign: center; }
-#zone-content { --inkflow-padding: 40px; }
+#zone-content { --inkflow-padding: 40px; --inkflow-font-scale: 0.9; }
+#zone-footer  { --inkflow-fit: none; }
 ```
+
+Every text zone shrinks its text when it overflows (down to a readable floor)
+unless `--inkflow-fit: none`; a slide overrides any of these with its marker's
+`size=`/`fit=` (see [Markdown](../authoring/markdown.md#text-size-and-shrinking-to-fit)).
 
 ## Hiding an element on one slide
 

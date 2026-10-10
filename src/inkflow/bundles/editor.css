@@ -1868,6 +1868,17 @@ body.drag-copy #paper {
 .placeholder:hover text {
   fill: #fff;
 }
+#overlay .overflow-badge {
+  pointer-events: all;
+  cursor: pointer;
+}
+#overlay .overflow-badge rect {
+  fill: var(--red);
+}
+#overlay .overflow-badge text {
+  fill: #fff;
+  font: 600 11px var(--font-ui);
+}
 body.layout-mode #canvas {
   box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--yellow) 70%, transparent);
 }
@@ -2103,6 +2114,38 @@ body.previewing #canvas::after {
 }
 #props-body > .hint {
   padding: 0 14px;
+}
+.text-size {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+.text-size .text-size-value {
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+}
+.text-size input.text-size-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  background: var(--ui-bg);
+  border: 1px solid var(--sel);
+  border-radius: 5px;
+  padding: 0 7px;
+}
+.fit-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0 92px;
+}
+.hint.fit-status {
+  margin-left: 92px;
+}
+.hint.fit-warn {
+  color: var(--red);
+  font-weight: 600;
 }
 #objects > .hint {
   padding: 4px 14px 8px;

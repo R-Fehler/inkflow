@@ -376,1105 +376,149 @@
     renderEditButton();
   }
 
-  // node_modules/.pnpm/perfect-freehand@1.2.3/node_modules/perfect-freehand/dist/esm/index.mjs
-  var { PI: e } = Math;
-  var t = e + 1e-4;
-  var n = 0.5;
-  var r = [1, 1];
-  function i(e2, t2, n2, r2 = (e3) => e3) {
-    return e2 * r2(0.5 - t2 * (0.5 - n2));
+  // src/ts/shared/viewbox.ts
+  var deckCanvas = { w: 1920, h: 1080 };
+  function parseViewBox(attr, fallback = `0 0 ${deckCanvas.w} ${deckCanvas.h}`) {
+    const parts = (attr ?? "").trim().split(/[\s,]+/).map(Number);
+    const valid = parts.length === 4 && parts.every((n2) => Number.isFinite(n2)) && parts[2] > 0 && parts[3] > 0;
+    const [x2, y2, w2, h2] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
+    return { x: x2, y: y2, w: w2, h: h2 };
   }
-  var { min: a } = Math;
-  function o(e2, t2, n2) {
-    let r2 = a(1, t2 / n2);
-    return a(1, e2 + (a(1, 1 - r2) - e2) * (r2 * 0.275));
-  }
-  function s(e2) {
-    return [-e2[0], -e2[1]];
-  }
-  function c(e2, t2) {
-    return [e2[0] + t2[0], e2[1] + t2[1]];
-  }
-  function l(e2, t2, n2) {
-    return e2[0] = t2[0] + n2[0], e2[1] = t2[1] + n2[1], e2;
-  }
-  function u(e2, t2) {
-    return [e2[0] - t2[0], e2[1] - t2[1]];
-  }
-  function d(e2, t2, n2) {
-    return e2[0] = t2[0] - n2[0], e2[1] = t2[1] - n2[1], e2;
-  }
-  function f(e2, t2) {
-    return [e2[0] * t2, e2[1] * t2];
-  }
-  function p(e2, t2, n2) {
-    return e2[0] = t2[0] * n2, e2[1] = t2[1] * n2, e2;
-  }
-  function m(e2, t2) {
-    return [e2[0] / t2, e2[1] / t2];
-  }
-  function h(e2) {
-    return [e2[1], -e2[0]];
-  }
-  function g(e2, t2) {
-    let n2 = t2[0];
-    return e2[0] = t2[1], e2[1] = -n2, e2;
-  }
-  function ee(e2, t2) {
-    return e2[0] * t2[0] + e2[1] * t2[1];
-  }
-  function _(e2, t2) {
-    return e2[0] === t2[0] && e2[1] === t2[1];
-  }
-  function v(e2) {
-    return Math.hypot(e2[0], e2[1]);
-  }
-  function y(e2, t2) {
-    let n2 = e2[0] - t2[0], r2 = e2[1] - t2[1];
-    return n2 * n2 + r2 * r2;
-  }
-  function b(e2) {
-    return m(e2, v(e2));
-  }
-  function x(e2, t2) {
-    return Math.hypot(e2[1] - t2[1], e2[0] - t2[0]);
-  }
-  function S(e2, t2, n2) {
-    let r2 = Math.sin(n2), i2 = Math.cos(n2), a2 = e2[0] - t2[0], o2 = e2[1] - t2[1], s2 = a2 * i2 - o2 * r2, c2 = a2 * r2 + o2 * i2;
-    return [s2 + t2[0], c2 + t2[1]];
-  }
-  function C(e2, t2, n2, r2) {
-    let i2 = Math.sin(r2), a2 = Math.cos(r2), o2 = t2[0] - n2[0], s2 = t2[1] - n2[1], c2 = o2 * a2 - s2 * i2, l2 = o2 * i2 + s2 * a2;
-    return e2[0] = c2 + n2[0], e2[1] = l2 + n2[1], e2;
-  }
-  function w(e2, t2, n2) {
-    return c(e2, f(u(t2, e2), n2));
-  }
-  function te(e2, t2, n2, r2) {
-    let i2 = n2[0] - t2[0], a2 = n2[1] - t2[1];
-    return e2[0] = t2[0] + i2 * r2, e2[1] = t2[1] + a2 * r2, e2;
-  }
-  function T(e2, t2, n2) {
-    return c(e2, f(t2, n2));
-  }
-  var E = [0, 0];
-  var D = [0, 0];
-  var O = [0, 0];
-  function k(e2, n2) {
-    let r2 = T(e2, b(h(u(e2, c(e2, [1, 1])))), -n2), i2 = [], a2 = 1 / 13;
-    for (let n3 = a2; n3 <= 1; n3 += a2) i2.push(S(r2, e2, t * 2 * n3));
-    return i2;
-  }
-  function A(e2, n2, r2) {
-    let i2 = [], a2 = 1 / r2;
-    for (let r3 = a2; r3 <= 1; r3 += a2) i2.push(S(n2, e2, t * r3));
-    return i2;
-  }
-  function j(e2, t2, n2) {
-    let r2 = u(t2, n2), i2 = f(r2, 0.5), a2 = f(r2, 0.51);
-    return [u(e2, i2), u(e2, a2), c(e2, a2), c(e2, i2)];
-  }
-  function M(e2, n2, r2, i2) {
-    let a2 = [], o2 = T(e2, n2, r2), s2 = 1 / i2;
-    for (let n3 = s2; n3 < 1; n3 += s2) a2.push(S(o2, e2, t * 3 * n3));
-    return a2;
-  }
-  function ne(e2, t2, n2) {
-    return [c(e2, f(t2, n2)), c(e2, f(t2, n2 * 0.99)), u(e2, f(t2, n2 * 0.99)), u(e2, f(t2, n2))];
-  }
-  function N(e2, t2, n2) {
-    return e2 === false || e2 === void 0 ? 0 : e2 === true ? Math.max(t2, n2) : e2;
-  }
-  function re(e2, t2, n2) {
-    return e2.slice(0, 10).reduce((e3, r2) => {
-      let i2 = r2.pressure;
-      return t2 && (i2 = o(e3, r2.distance, n2)), (e3 + i2) / 2;
-    }, e2[0].pressure);
-  }
-  function P(e2, n2 = {}) {
-    let { size: r2 = 16, smoothing: a2 = 0.5, thinning: f2 = 0.5, simulatePressure: m2 = true, easing: _2 = (e3) => e3, start: v2 = {}, end: b2 = {}, last: x2 = false } = n2, { cap: S2 = true, easing: w2 = (e3) => e3 * (2 - e3) } = v2, { cap: T2 = true, easing: P2 = (e3) => --e3 * e3 * e3 + 1 } = b2;
-    if (e2.length === 0 || r2 <= 0) return [];
-    let F2 = e2[e2.length - 1].runningLength, I2 = N(v2.taper, r2, F2), L2 = N(b2.taper, r2, F2), R2 = (r2 * a2) ** 2, z = [], B = [], V = re(e2, m2, r2), H = i(r2, f2, e2[e2.length - 1].pressure, _2), U, W = e2[0].vector, G = e2[0].point, K = G, q = G, J = K, Y = false;
-    for (let n3 = 0; n3 < e2.length; n3++) {
-      let { pressure: a3 } = e2[n3], { point: s2, vector: h2, distance: v3, runningLength: b3 } = e2[n3], x3 = n3 === e2.length - 1;
-      if (!x3 && F2 - b3 < 3) continue;
-      f2 ? (m2 && (a3 = o(V, v3, r2)), H = i(r2, f2, a3, _2)) : H = r2 / 2, U === void 0 && (U = H);
-      let S3 = b3 < I2 ? w2(b3 / I2) : 1, T3 = F2 - b3 < L2 ? P2((F2 - b3) / L2) : 1;
-      H = Math.max(0.01, H * Math.min(S3, T3));
-      let k2 = (x3 ? e2[n3] : e2[n3 + 1]).vector, A2 = x3 ? 1 : ee(h2, k2), j2 = ee(h2, W) < 0 && !Y, M2 = A2 !== null && A2 < 0;
-      if (j2 || M2) {
-        g(E, W), p(E, E, H);
-        for (let e3 = 0; e3 <= 1; e3 += 0.07692307692307693) d(D, s2, E), C(D, D, s2, t * e3), q = [D[0], D[1]], z.push(q), l(O, s2, E), C(O, O, s2, t * -e3), J = [O[0], O[1]], B.push(J);
-        G = q, K = J, M2 && (Y = true);
-        continue;
-      }
-      if (Y = false, x3) {
-        g(E, h2), p(E, E, H), z.push(u(s2, E)), B.push(c(s2, E));
-        continue;
-      }
-      te(E, k2, h2, A2), g(E, E), p(E, E, H), d(D, s2, E), q = [D[0], D[1]], (n3 <= 1 || y(G, q) > R2) && (z.push(q), G = q), l(O, s2, E), J = [O[0], O[1]], (n3 <= 1 || y(K, J) > R2) && (B.push(J), K = J), V = a3, W = h2;
-    }
-    let X = [e2[0].point[0], e2[0].point[1]], Z = e2.length > 1 ? [e2[e2.length - 1].point[0], e2[e2.length - 1].point[1]] : c(e2[0].point, [1, 1]), Q = [], $ = [];
-    if (e2.length === 1) {
-      if (!(I2 || L2) || x2) return k(X, U || H);
-    } else {
-      I2 || L2 && e2.length === 1 || (S2 ? Q.push(...A(X, B[0], 13)) : Q.push(...j(X, z[0], B[0])));
-      let t2 = h(s(e2[e2.length - 1].vector));
-      L2 || I2 && e2.length === 1 ? $.push(Z) : T2 ? $.push(...M(Z, t2, H, 29)) : $.push(...ne(Z, t2, H));
-    }
-    return z.concat($, B.reverse(), Q);
-  }
-  var F = [0, 0];
-  function I(e2) {
-    return e2 != null && e2 >= 0;
-  }
-  function L(e2, t2 = {}) {
-    let { streamline: i2 = 0.5, size: a2 = 16, last: o2 = false } = t2;
-    if (e2.length === 0) return [];
-    let s2 = 0.15 + (1 - i2) * 0.85, l2 = Array.isArray(e2[0]) ? e2 : e2.map(({ x: e3, y: t3, pressure: r2 = n }) => [e3, t3, r2]);
-    if (l2.length === 2) {
-      let e3 = l2[1];
-      l2 = l2.slice(0, -1);
-      for (let t3 = 1; t3 < 5; t3++) l2.push(w(l2[0], e3, t3 / 4));
-    }
-    l2.length === 1 && (l2 = [...l2, [...c(l2[0], r), ...l2[0].slice(2)]]);
-    let u2 = [{ point: [l2[0][0], l2[0][1]], pressure: I(l2[0][2]) ? l2[0][2] : 0.25, vector: [...r], distance: 0, runningLength: 0 }], f2 = false, p2 = 0, m2 = u2[0], h2 = l2.length - 1;
-    for (let e3 = 1; e3 < l2.length; e3++) {
-      let t3 = o2 && e3 === h2 ? [l2[e3][0], l2[e3][1]] : w(m2.point, l2[e3], s2);
-      if (_(m2.point, t3)) continue;
-      let r2 = x(t3, m2.point);
-      if (p2 += r2, e3 < h2 && !f2) {
-        if (p2 < a2) continue;
-        f2 = true;
-      }
-      d(F, m2.point, t3), m2 = { point: t3, pressure: I(l2[e3][2]) ? l2[e3][2] : n, vector: b(F), distance: r2, runningLength: p2 }, u2.push(m2);
-    }
-    return u2[0].vector = u2[1]?.vector || [0, 0], u2;
-  }
-  function R(e2, t2 = {}) {
-    return P(L(e2, t2), t2);
+  function formatViewBox(vb) {
+    const round3 = (n2) => Math.round(n2 * 1e3) / 1e3;
+    return `${round3(vb.x)} ${round3(vb.y)} ${round3(vb.w)} ${round3(vb.h)}`;
   }
 
-  // src/ts/shared/ink.ts
-  var HIGHLIGHTER_OPACITY = 0.35;
-  var REFERENCE_WIDTH = 1920;
-  var REFERENCE_HEIGHT = 1080;
-  function inkScale(width, height = 0) {
-    const w2 = width > 0 ? width / REFERENCE_WIDTH : 0;
-    const h2 = height > 0 ? height / REFERENCE_HEIGHT : 0;
-    return Math.max(w2, h2) || 1;
+  // src/ts/shared/fit.ts
+  var MIN_TEXT_FRACTION = 1 / 80;
+  var FIT_FLOOR = 0.33;
+  var FIT_TOLERANCE = 0.01;
+  var SLACK = 1;
+  function floorScale(baseSize, minText) {
+    if (!(baseSize > 0)) return 1;
+    return Math.min(1, Math.max(FIT_FLOOR, minText / baseSize));
   }
-  var PEN_SIZES = [3, 6, 12];
-  var HIGHLIGHTER_SIZES = [20, 36, 60];
-  var SWATCHES = [
-    { label: "Black", token: null, hex: "#000000" },
-    { label: "White", token: null, hex: "#ffffff" },
-    { label: "Red", token: "red", hex: "#e64553" },
-    { label: "Orange", token: "orange", hex: "#fe640b" },
-    { label: "Yellow", token: "yellow", hex: "#df8e1d" },
-    { label: "Green", token: "green", hex: "#40a02b" },
-    { label: "Blue", token: "blue", hex: "#1e66f5" },
-    { label: "Purple", token: "purple", hex: "#8839ef" }
-  ];
-  var easeOutSine = (t2) => Math.sin(t2 * Math.PI / 2);
-  function strokeOptions(style, simulate, last) {
-    if (style.tool === "highlighter") {
-      return {
-        size: style.size,
-        thinning: 0,
-        smoothing: 0.5,
-        streamline: 0.4,
-        simulatePressure: false,
-        start: { cap: false },
-        end: { cap: false },
-        last
-      };
+  function searchScale(fits, floor, tolerance = FIT_TOLERANCE) {
+    if (fits(1)) return { scale: 1, overflow: false };
+    const lowest = Math.min(1, Math.max(0, floor));
+    if (lowest >= 1 || !fits(lowest)) return { scale: lowest, overflow: true };
+    let lo = lowest;
+    let hi = 1;
+    while (hi - lo > tolerance) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) lo = mid;
+      else hi = mid;
     }
     return {
-      size: style.size,
-      thinning: 0.6,
-      smoothing: 0.5,
-      streamline: simulate ? 0.5 : 0.35,
-      easing: easeOutSine,
-      simulatePressure: simulate,
-      last
+      scale: Math.max(lowest, Math.floor(lo * 1e3) / 1e3),
+      overflow: false
     };
   }
-  function outlineOf(points, style, simulate, last) {
-    return R(points, strokeOptions(style, simulate, last));
-  }
-  function round(v2, decimals) {
-    const f2 = 10 ** decimals;
-    const r2 = Math.round(v2 * f2) / f2;
-    return String(Object.is(r2, -0) ? 0 : r2);
-  }
-  function pathData(outline, decimals = 1) {
-    const n2 = outline.length;
-    if (n2 < 2) return "";
-    const mid = (a2, b2) => [
-      (a2[0] + b2[0]) / 2,
-      (a2[1] + b2[1]) / 2
-    ];
-    const pt = (p2) => `${round(p2[0], decimals)} ${round(p2[1], decimals)}`;
-    const parts = [`M${pt(mid(outline[n2 - 1], outline[0]))}Q`];
-    for (let i2 = 0; i2 < n2; i2++) {
-      const next = outline[(i2 + 1) % n2];
-      parts.push(`${pt(outline[i2])} ${pt(mid(outline[i2], next))}`);
+  function neededHeight(children) {
+    let total = 0;
+    for (const c2 of children) {
+      if (c2.inFlow) total += c2.height + c2.marginTop + c2.marginBottom;
     }
-    return `${parts[0]}${parts.slice(1).join(" ")}Z`;
+    return total;
   }
-  function simplify(outline, tolerance) {
-    if (outline.length < 4 || tolerance <= 0) return outline;
-    const keep = new Uint8Array(outline.length);
-    keep[0] = 1;
-    keep[outline.length - 1] = 1;
-    const t2 = tolerance * tolerance;
-    const stack = [[0, outline.length - 1]];
-    while (stack.length) {
-      const [first, last] = stack.pop();
-      const [ax, ay] = outline[first];
-      const [bx, by] = outline[last];
-      let worst = -1;
-      let index = -1;
-      for (let i2 = first + 1; i2 < last; i2++) {
-        const d2 = pointSegment2(
-          outline[i2][0],
-          outline[i2][1],
-          ax,
-          ay,
-          bx,
-          by
-        );
-        if (d2 > worst) {
-          worst = d2;
-          index = i2;
-        }
-      }
-      if (worst > t2) {
-        keep[index] = 1;
-        stack.push([first, index], [index, last]);
-      }
-    }
-    return outline.filter((_2, i2) => keep[i2]);
+  var px = (v2) => Number.parseFloat(v2) || 0;
+  function slideSvg(el) {
+    let svg = el.ownerSVGElement ?? null;
+    while (svg?.ownerSVGElement) svg = svg.ownerSVGElement;
+    return svg ?? (el instanceof SVGSVGElement ? el : null);
   }
-  function polygonOf(d2) {
-    const nums = d2.match(/-?(?:\d*\.\d+|\d+\.?)(?:[eE][+-]?\d+)?/g) ?? [];
-    const out = [];
-    for (let i2 = 0; i2 + 1 < nums.length; i2 += 2) {
-      out.push(Number(nums[i2]), Number(nums[i2 + 1]));
-    }
-    return out;
-  }
-  function bboxOf(poly) {
-    const box = {
-      minX: Infinity,
-      minY: Infinity,
-      maxX: -Infinity,
-      maxY: -Infinity
-    };
-    for (let i2 = 0; i2 + 1 < poly.length; i2 += 2) {
-      box.minX = Math.min(box.minX, poly[i2]);
-      box.maxX = Math.max(box.maxX, poly[i2]);
-      box.minY = Math.min(box.minY, poly[i2 + 1]);
-      box.maxY = Math.max(box.maxY, poly[i2 + 1]);
-    }
-    return box;
-  }
-  function insidePolygon(poly, x2, y2) {
-    let winding = 0;
-    const n2 = poly.length / 2;
-    for (let i2 = 0; i2 < n2; i2++) {
-      const x1 = poly[2 * i2];
-      const y1 = poly[2 * i2 + 1];
-      const x22 = poly[(2 * i2 + 2) % poly.length];
-      const y22 = poly[(2 * i2 + 3) % poly.length];
-      const cross = (x22 - x1) * (y2 - y1) - (x2 - x1) * (y22 - y1);
-      if (y1 <= y2) {
-        if (y22 > y2 && cross > 0) winding++;
-      } else if (y22 <= y2 && cross < 0) {
-        winding--;
-      }
-    }
-    return winding !== 0;
-  }
-  function pointSegment2(px, py, ax, ay, bx, by) {
-    const dx = bx - ax;
-    const dy = by - ay;
-    const len2 = dx * dx + dy * dy;
-    const t2 = len2 === 0 ? 0 : Math.max(
-      0,
-      Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)
+  function minTextSize(svg) {
+    const own = Number.parseFloat(
+      svg.getAttribute("data-inkflow-min-text") ?? ""
     );
-    const ex = ax + t2 * dx - px;
-    const ey = ay + t2 * dy - py;
-    return ex * ex + ey * ey;
+    if (own > 0) return own;
+    return parseViewBox(svg.getAttribute("viewBox")).h * MIN_TEXT_FRACTION;
   }
-  function segmentsCross(ax, ay, bx, by, cx, cy, dx, dy) {
-    const d1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-    const d2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
-    const d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
-    const d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
-    return d1 * d2 < 0 && d3 * d4 < 0;
+  function unitScale(fo) {
+    const root = slideSvg(fo);
+    const a2 = fo.getScreenCTM?.();
+    const b2 = root?.getScreenCTM();
+    if (!a2 || !b2) return 1;
+    const da = Math.sqrt(Math.abs(a2.a * a2.d - a2.b * a2.c));
+    const db = Math.sqrt(Math.abs(b2.a * b2.d - b2.b * b2.c));
+    return da > 0 && db > 0 ? da / db : 1;
   }
-  function eraserHits(poly, box, a2, b2, r2) {
-    if (Math.max(a2.x, b2.x) + r2 < box.minX || Math.min(a2.x, b2.x) - r2 > box.maxX || Math.max(a2.y, b2.y) + r2 < box.minY || Math.min(a2.y, b2.y) - r2 > box.maxY) {
-      return false;
-    }
-    if (insidePolygon(poly, a2.x, a2.y) || insidePolygon(poly, b2.x, b2.y)) {
-      return true;
-    }
-    const r22 = r2 * r2;
-    const n2 = poly.length / 2;
-    for (let i2 = 0; i2 < n2; i2++) {
-      const cx = poly[2 * i2];
-      const cy = poly[2 * i2 + 1];
-      const dx = poly[(2 * i2 + 2) % poly.length];
-      const dy = poly[(2 * i2 + 3) % poly.length];
-      if (segmentsCross(a2.x, a2.y, b2.x, b2.y, cx, cy, dx, dy) || pointSegment2(cx, cy, a2.x, a2.y, b2.x, b2.y) <= r22 || pointSegment2(a2.x, a2.y, cx, cy, dx, dy) <= r22 || pointSegment2(b2.x, b2.y, cx, cy, dx, dy) <= r22) {
+  function laidOut(wrapper) {
+    return Array.from(wrapper.children, (el) => {
+      const s2 = getComputedStyle(el);
+      return {
+        height: el.offsetHeight ?? 0,
+        marginTop: px(s2.marginTop),
+        marginBottom: px(s2.marginBottom),
+        inFlow: s2.display !== "none" && s2.position !== "absolute" && s2.position !== "fixed"
+      };
+    });
+  }
+  function overflows(wrapper, content) {
+    const ws = getComputedStyle(wrapper);
+    const avail = wrapper.clientHeight - px(ws.paddingTop) - px(ws.paddingBottom);
+    if (neededHeight(laidOut(wrapper)) > avail + SLACK) return true;
+    const width = content.clientWidth;
+    for (const el of Array.from(content.querySelectorAll("pre, table"))) {
+      const box = el;
+      if (box.localName === "pre") {
+        if (box.scrollWidth > box.clientWidth + SLACK) return true;
+      } else if (box.offsetWidth > width + SLACK) {
         return true;
       }
     }
     return false;
   }
-  function newInkId() {
-    const bytes = new Uint8Array(6);
-    crypto.getRandomValues(bytes);
-    return `ink-${Array.from(bytes, (b2) => b2.toString(36).padStart(2, "0")).join("")}`;
-  }
-  var ID_RE = /^ink-[A-Za-z0-9_-]{1,64}$/;
-  var HEX_RE = /^#(?:[0-9a-fA-F]{3}){1,2}$/;
-  var TOKEN_RE = /^[a-z][a-z-]{0,31}$/;
-  var PATH_RE = /^M[MQLZ0-9eE.,\s+-]*$/;
-  function finite(v2, low, high) {
-    return typeof v2 === "number" && Number.isFinite(v2) && v2 > low && v2 <= high;
-  }
-  function styleFrom(raw) {
-    if (typeof raw !== "object" || raw === null) return null;
-    const s2 = raw;
-    if (typeof s2.id !== "string" || !ID_RE.test(s2.id)) return null;
-    if (s2.tool !== "pen" && s2.tool !== "highlighter") return null;
-    if (typeof s2.fill !== "string" || !HEX_RE.test(s2.fill)) return null;
-    if (s2.token != null && (typeof s2.token !== "string" || !TOKEN_RE.test(s2.token)))
-      return null;
-    if (!finite(s2.size, 0, 2e3)) return null;
-    return {
-      id: s2.id,
-      tool: s2.tool,
-      fill: s2.fill,
-      token: s2.token ?? null,
-      size: s2.size
-    };
-  }
-  function strokeFrom(raw) {
-    const style = styleFrom(raw);
-    if (!style) return null;
-    const s2 = raw;
-    if (typeof s2.d !== "string" || s2.d.length > 2e6 || !PATH_RE.test(s2.d))
-      return null;
-    const stroke = { ...style, d: s2.d };
-    if (s2.opacity !== void 0) {
-      if (!finite(s2.opacity, 0, 1)) return null;
-      stroke.opacity = s2.opacity;
-    }
-    return stroke;
-  }
-  function flatten(points) {
-    const out = [];
-    for (const [x2, y2, p2] of points) {
-      out.push(
-        Math.round(x2 * 100) / 100,
-        Math.round(y2 * 100) / 100,
-        Math.round(p2 * 1e3) / 1e3
-      );
-    }
-    return out;
-  }
-  function unflatten(flat) {
-    if (!Array.isArray(flat) || flat.length % 3 !== 0) return null;
-    const out = [];
-    for (let i2 = 0; i2 < flat.length; i2 += 3) {
-      const [x2, y2, p2] = [flat[i2], flat[i2 + 1], flat[i2 + 2]];
-      if (![x2, y2, p2].every((v2) => typeof v2 === "number" && Number.isFinite(v2)))
-        return null;
-      out.push([x2, y2, Math.max(0, Math.min(1, p2))]);
-    }
-    return out;
-  }
-  function finish(live, points, tolerance = 0.1) {
-    const outline = outlineOf(points, live, live.simulate, true);
-    const stroke = {
-      id: live.id,
-      tool: live.tool,
-      fill: live.fill,
-      token: live.token,
-      size: live.size,
-      d: pathData(simplify(outline, tolerance), 1)
-    };
-    if (live.tool === "highlighter") stroke.opacity = HIGHLIGHTER_OPACITY;
-    return stroke;
-  }
-
-  // src/ts/shared/inkpad.ts
-  var SVG_NS = "http://www.w3.org/2000/svg";
-  var ERASER_RADIUS_PX = 10;
-  var PALM_MS = 1500;
-  var SWALLOW_MS = 400;
-  function paintStroke(el, s2) {
-    if (s2.id) el.id = s2.id;
-    if (s2.d !== void 0) el.setAttribute("d", s2.d);
-    el.setAttribute("fill", s2.fill);
-    const classes = [
-      ...s2.token ? [`inkflow-fill-${s2.token}`] : [],
-      ...s2.tool === "highlighter" ? ["inkflow-highlighter"] : []
-    ];
-    el.setAttribute("class", classes.join(" "));
-    const opacity = s2.opacity ?? (s2.tool === "highlighter" ? HIGHLIGHTER_OPACITY : void 0);
-    if (opacity !== void 0 && opacity < 1)
-      el.setAttribute("fill-opacity", String(opacity));
-    else el.removeAttribute("fill-opacity");
-    el.setAttribute("inkflow:tool", s2.tool);
-    el.setAttribute("inkflow:size", String(Math.round(s2.size * 100) / 100));
-    return el;
-  }
-  function strokeElement(stroke) {
-    return paintStroke(
-      document.createElementNS(SVG_NS, "path"),
-      stroke
+  function fitZone(fo, minText) {
+    const wrapper = fo.querySelector(
+      ":scope > .inkflow-wrapper"
     );
-  }
-  function strokeOf(el) {
-    const d2 = el.getAttribute("d");
-    const fill = el.getAttribute("fill");
-    if (!el.id || !d2 || !fill) return null;
-    const token = (el.getAttribute("class") ?? "").split(/\s+/).find((c2) => c2.startsWith("inkflow-fill-"))?.slice("inkflow-fill-".length) ?? null;
-    const tool = el.getAttribute("inkflow:tool") === "highlighter" ? "highlighter" : "pen";
-    const stroke = {
-      id: el.id,
-      tool,
-      fill,
-      token,
-      size: Number(el.getAttribute("inkflow:size")) || 1,
-      d: d2
+    const content = wrapper?.querySelector(
+      ":scope > .inkflow-content"
+    );
+    if (!wrapper || !content) return null;
+    wrapper.style.removeProperty("--inkflow-fit-scale");
+    fo.removeAttribute("data-inkflow-fit");
+    fo.removeAttribute("data-inkflow-overflow");
+    const cs = getComputedStyle(wrapper);
+    if (cs.display === "none" || wrapper.clientHeight === 0) return null;
+    const apply = (scale) => {
+      if (scale < 1)
+        wrapper.style.setProperty("--inkflow-fit-scale", String(scale));
+      else wrapper.style.removeProperty("--inkflow-fit-scale");
     };
-    const opacity = Number(el.getAttribute("fill-opacity"));
-    if (opacity > 0 && opacity < 1) stroke.opacity = opacity;
-    return stroke;
-  }
-  var shapes = /* @__PURE__ */ new WeakMap();
-  function shapeOf(el) {
-    const d2 = el.getAttribute("d") ?? "";
-    let shape = shapes.get(el);
-    if (!shape || shape.d !== d2) {
-      const poly = polygonOf(d2);
-      shape = { d: d2, poly, box: bboxOf(poly) };
-      shapes.set(el, shape);
-    }
-    return shape;
-  }
-  var InkPad = class {
-    host;
-    gesture = null;
-    frame = 0;
-    lastPenAt = -Infinity;
-    swallowUntil = -Infinity;
-    swallowAt = { x: Number.NaN, y: Number.NaN };
-    constructor(host) {
-      this.host = host;
-      const s2 = host.surface;
-      s2.addEventListener("pointerdown", (e2) => this.down(e2), {
-        capture: true
-      });
-      s2.addEventListener("pointermove", (e2) => this.move(e2), {
-        capture: true
-      });
-      s2.addEventListener("pointerup", (e2) => this.up(e2, false), {
-        capture: true
-      });
-      s2.addEventListener("pointercancel", (e2) => this.up(e2, true), {
-        capture: true
-      });
-      for (const type of ["touchstart", "touchmove", "touchend"]) {
-        s2.addEventListener(type, (e2) => this.claimTouch(e2), {
-          capture: true,
-          passive: false
-        });
-      }
-      window.addEventListener("click", (e2) => this.claimClick(e2), true);
-      s2.addEventListener("contextmenu", (e2) => this.claimClick(e2), true);
-    }
-    // A stroke or an erase is in progress.
-    get busy() {
-      return this.gesture !== null;
-    }
-    // Drop the gesture in progress (the slide is going away).
-    cancel() {
-      const g2 = this.gesture;
-      if (!g2) return;
-      this.gesture = null;
-      cancelAnimationFrame(this.frame);
-      if (g2.kind === "draw") {
-        g2.path.remove();
-        this.host.onAbandon?.(g2.live);
-      } else {
-        for (const el of g2.hits.values())
-          el.style.removeProperty("display");
-        g2.cursor.remove();
-      }
-    }
-    claimTouch(e2) {
-      if (this.gesture || performance.now() < this.swallowUntil) {
-        e2.stopPropagation();
-        if (e2.cancelable && e2.type !== "touchstart") e2.preventDefault();
-      }
-    }
-    // Only the click the browser makes of a gesture's own press and release
-    // (where the pointer let go, just after): a click elsewhere, such as on
-    // the palette right after a stroke, is the user's.
-    claimClick(e2) {
-      const near = Math.hypot(
-        e2.clientX - this.swallowAt.x,
-        e2.clientY - this.swallowAt.y
-      ) < 16;
-      if (this.gesture || performance.now() < this.swallowUntil && near) {
-        e2.stopPropagation();
-        e2.preventDefault();
-      }
-    }
-    swallow(e2) {
-      e2.preventDefault();
-      e2.stopPropagation();
-      this.swallowUntil = performance.now() + SWALLOW_MS;
-      this.swallowAt = { x: e2.clientX, y: e2.clientY };
-    }
-    down(e2) {
-      if (e2.pointerType === "pen") this.lastPenAt = performance.now();
-      if (this.gesture) {
-        if (e2.pointerId !== this.gesture.pointerId) this.swallow(e2);
-        return;
-      }
-      if (!this.host.active() || this.host.allows?.(e2) === false) return;
-      if (e2.pointerType !== "pen" && !this.host.fingers()) {
-        if (e2.pointerType === "touch" && performance.now() - this.lastPenAt < PALM_MS) {
-          this.swallow(e2);
-        }
-        return;
-      }
-      if (e2.button !== 0 && e2.button !== 5) return;
-      const tool = e2.button === 5 ? "eraser" : this.host.tool();
-      const svg = this.host.svg();
-      const ctm = svg?.getScreenCTM();
-      if (!svg || !ctm) return;
-      this.swallow(e2);
-      try {
-        this.host.surface.setPointerCapture(e2.pointerId);
-      } catch {
-      }
-      const inv = ctm.inverse();
-      const unitsPerPx = Math.hypot(inv.a, inv.b);
-      const at2 = new DOMPoint(e2.clientX, e2.clientY).matrixTransform(inv);
-      if (tool === "eraser") {
-        const cursor = document.createElementNS(
-          SVG_NS,
-          "circle"
-        );
-        cursor.setAttribute("class", "inkflow-eraser-cursor");
-        cursor.setAttribute("r", String(ERASER_RADIUS_PX * unitsPerPx));
-        cursor.setAttribute("cx", String(at2.x));
-        cursor.setAttribute("cy", String(at2.y));
-        cursor.setAttribute("stroke-width", String(1.5 * unitsPerPx));
-        svg.appendChild(cursor);
-        this.gesture = {
-          kind: "erase",
-          pointerId: e2.pointerId,
-          svg,
-          inv,
-          last: { x: e2.clientX, y: e2.clientY },
-          hits: /* @__PURE__ */ new Map(),
-          local: /* @__PURE__ */ new Map(),
-          cursor
-        };
-        this.erase(e2.clientX, e2.clientY);
-        return;
-      }
-      const pen = e2.pointerType === "pen";
-      const style = this.host.style(tool, svg);
-      const simulate = tool === "pen" && (!pen || e2.pressure === 0 || e2.pressure === 0.5);
-      const live = { ...style, id: newInkId(), simulate };
-      const path = paintStroke(
-        document.createElementNS(SVG_NS, "path"),
-        live
-      );
-      path.classList.add("inkflow-live-stroke");
-      svg.appendChild(path);
-      this.gesture = {
-        kind: "draw",
-        pointerId: e2.pointerId,
-        inv,
-        minDist: 0.4 * unitsPerPx,
-        live,
-        points: [[at2.x, at2.y, simulate ? 0.5 : e2.pressure]],
-        predicted: [],
-        sent: 0,
-        path
-      };
-      this.schedule();
-    }
-    move(e2) {
-      if (e2.pointerType === "pen") this.lastPenAt = performance.now();
-      const g2 = this.gesture;
-      if (!g2 || e2.pointerId !== g2.pointerId) return;
-      e2.preventDefault();
-      e2.stopPropagation();
-      const samples = e2.getCoalescedEvents?.() ?? [];
-      const events = samples.length ? samples : [e2];
-      if (g2.kind === "erase") {
-        for (const s2 of events) this.erase(s2.clientX, s2.clientY);
-        return;
-      }
-      for (const s2 of events) this.sample(g2, s2, g2.points);
-      g2.predicted = [];
-      for (const p2 of e2.getPredictedEvents?.() ?? []) {
-        this.sample(g2, p2, g2.predicted);
-      }
-      this.schedule();
-    }
-    sample(g2, e2, into) {
-      const p2 = new DOMPoint(e2.clientX, e2.clientY).matrixTransform(g2.inv);
-      const prev = into[into.length - 1] ?? g2.points[g2.points.length - 1];
-      if (prev && Math.hypot(p2.x - prev[0], p2.y - prev[1]) < g2.minDist)
-        return;
-      into.push([p2.x, p2.y, g2.live.simulate ? 0.5 : e2.pressure]);
-    }
-    schedule() {
-      if (this.frame) return;
-      this.frame = requestAnimationFrame(() => {
-        this.frame = 0;
-        const g2 = this.gesture;
-        if (g2?.kind !== "draw") return;
-        const pts = g2.predicted.length ? g2.points.concat(g2.predicted) : g2.points;
-        g2.path.setAttribute(
-          "d",
-          pathData(outlineOf(pts, g2.live, g2.live.simulate, false), 2)
-        );
-        if (g2.points.length > g2.sent) {
-          this.host.onDraw?.(g2.live, g2.sent, g2.points.slice(g2.sent));
-          g2.sent = g2.points.length;
-        }
-      });
-    }
-    erase(clientX, clientY) {
-      const g2 = this.gesture;
-      if (g2?.kind !== "erase") return;
-      const at2 = new DOMPoint(clientX, clientY).matrixTransform(g2.inv);
-      g2.cursor.setAttribute("cx", String(at2.x));
-      g2.cursor.setAttribute("cy", String(at2.y));
-      const a2 = new DOMPoint(g2.last.x, g2.last.y);
-      const b2 = new DOMPoint(clientX, clientY);
-      g2.last = { x: clientX, y: clientY };
-      for (const el of this.host.erasables(g2.svg)) {
-        if (g2.hits.has(el.id) || el.style.display === "none") continue;
-        let local = g2.local.get(el);
-        if (!local) {
-          const m2 = el.getScreenCTM();
-          if (!m2) continue;
-          local = m2.inverse();
-          g2.local.set(el, local);
-        }
-        const shape = shapeOf(el);
-        const r2 = ERASER_RADIUS_PX * Math.hypot(local.a, local.b);
-        if (eraserHits(
-          shape.poly,
-          shape.box,
-          a2.matrixTransform(local),
-          b2.matrixTransform(local),
-          r2
-        )) {
-          el.style.display = "none";
-          g2.hits.set(el.id, el);
-        }
-      }
-    }
-    up(e2, cancelled) {
-      const g2 = this.gesture;
-      if (!g2 || e2.pointerId !== g2.pointerId) return;
-      this.swallow(e2);
-      if (cancelled) {
-        this.cancel();
-        return;
-      }
-      this.gesture = null;
-      cancelAnimationFrame(this.frame);
-      this.frame = 0;
-      if (g2.kind === "erase") {
-        g2.cursor.remove();
-        if (g2.hits.size)
-          this.host.onErase([...g2.hits.keys()], [...g2.hits.values()]);
-        return;
-      }
-      const stroke = finish(g2.live, g2.points);
-      g2.path.remove();
-      if (stroke.d) this.host.onStroke(stroke, g2.live);
-      else this.host.onAbandon?.(g2.live);
-    }
-  };
-
-  // src/ts/shared/inksettings.ts
-  function defaultSettings(fingers) {
-    return {
-      tool: "pen",
-      pen: { swatch: 2, custom: "#e64553", size: 1 },
-      highlighter: { swatch: 4, custom: "#df8e1d", size: 1 },
-      fingers,
-      keep: false
+    const fits = (scale) => {
+      apply(scale);
+      return !overflows(wrapper, content);
     };
+    const off = cs.getPropertyValue("--inkflow-fit").trim() === "none";
+    const result = off ? { scale: 1, overflow: !fits(1) } : searchScale(
+      fits,
+      floorScale(px(cs.fontSize) * unitScale(fo), minText)
+    );
+    apply(result.scale);
+    if (result.scale < 1)
+      fo.setAttribute("data-inkflow-fit", result.scale.toFixed(3));
+    if (result.overflow) fo.setAttribute("data-inkflow-overflow", "");
+    return result;
   }
-  var HEX_RE2 = /^#[0-9a-fA-F]{6}$/;
-  function toolFrom(raw, fallback, sizes) {
-    if (typeof raw !== "object" || raw === null) return { ...fallback };
-    const r2 = raw;
-    const swatch = r2.swatch === null ? null : Number.isInteger(r2.swatch) && r2.swatch >= 0 && r2.swatch < SWATCHES.length ? r2.swatch : fallback.swatch;
-    return {
-      swatch,
-      custom: typeof r2.custom === "string" && HEX_RE2.test(r2.custom) ? r2.custom : fallback.custom,
-      size: Number.isInteger(r2.size) && r2.size >= 0 && r2.size < sizes ? r2.size : fallback.size
-    };
-  }
-  function settingsFrom(raw, fallback) {
-    if (typeof raw !== "object" || raw === null)
-      return structuredClone(fallback);
-    const r2 = raw;
-    return {
-      tool: r2.tool === "pen" || r2.tool === "highlighter" || r2.tool === "eraser" ? r2.tool : fallback.tool,
-      pen: toolFrom(r2.pen, fallback.pen, PEN_SIZES.length),
-      highlighter: toolFrom(
-        r2.highlighter,
-        fallback.highlighter,
-        HIGHLIGHTER_SIZES.length
-      ),
-      fingers: typeof r2.fingers === "boolean" ? r2.fingers : fallback.fingers,
-      keep: typeof r2.keep === "boolean" ? r2.keep : fallback.keep
-    };
-  }
-  function sizesOf(tool) {
-    return tool === "highlighter" ? HIGHLIGHTER_SIZES : PEN_SIZES;
-  }
-  function styleFor(s2, tool, width, tokenColor2, height = 0) {
-    const t2 = s2[tool];
-    const swatch = t2.swatch === null ? null : SWATCHES[t2.swatch];
-    const fill = swatch ? swatch.token && tokenColor2(swatch.token) || swatch.hex : t2.custom;
-    return {
-      tool,
-      fill: normalizeHex(fill) ?? "#000000",
-      token: swatch?.token ?? null,
-      size: sizesOf(tool)[t2.size] * inkScale(width, height)
-    };
-  }
-  function normalizeHex(color) {
-    const c2 = color.trim().toLowerCase();
-    if (/^#[0-9a-f]{6}$/.test(c2)) return c2;
-    if (/^#[0-9a-f]{3}$/.test(c2))
-      return `#${[...c2.slice(1)].map((x2) => x2 + x2).join("")}`;
-    const m2 = c2.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/);
-    if (m2) {
-      return `#${m2.slice(1, 4).map((v2) => Math.min(255, Number(v2)).toString(16).padStart(2, "0")).join("")}`;
-    }
-    return null;
-  }
-
-  // src/ts/shared/inkpalette.ts
-  var ICONS = {
-    pen: '<path d="M3 13.5 4 10l7-7 2.5 2.5-7 7Z"/><path d="m9.5 4.5 2 2"/>',
-    highlighter: '<path d="M5 11 3.5 14h4l.8-1.8"/><path d="m5 11 6.5-8.5 3 2.4L8.3 12.2Z"/>',
-    eraser: '<path d="M6.5 14H14"/><path d="M2.8 10.2 9 4l4 4-6 6H5.6Z"/><path d="m6 7 4 4"/>',
-    undo: '<path d="M4 7h7a3.5 3.5 0 0 1 0 7H8"/><path d="M6.5 4.5 4 7l2.5 2.5"/>',
-    clear: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9"/>',
-    fingers: '<path d="M6 8.5V3.2a1.1 1.1 0 0 1 2.2 0V7.5"/><path d="M8.2 7V6a1.1 1.1 0 0 1 2.2 0v1.5"/><path d="M10.4 7.2a1.1 1.1 0 0 1 2.1.3V10c0 2.5-1.6 4-4 4H8c-1.7 0-2.6-.8-3.6-2.3L3.2 9.8a1 1 0 0 1 1.6-1.2L6 9.8"/>',
-    keep: '<path d="M4 2.5h6.5L13 5v8.5H4Z"/><path d="M6 2.5v3.5h4V2.5M6 13.5V9.5h5v4"/>',
-    close: '<path d="m4 4 8 8M12 4l-8 8"/>'
-  };
-  function icon(name) {
-    return `<svg aria-hidden="true" viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
-  }
-  function button(title, content, data) {
-    const b2 = document.createElement("button");
-    b2.type = "button";
-    b2.className = "ink-btn";
-    b2.title = title;
-    b2.setAttribute("aria-label", title);
-    b2.innerHTML = content;
-    for (const [k2, v2] of Object.entries(data)) b2.dataset[k2] = v2;
-    return b2;
-  }
-  function group(...children) {
-    const g2 = document.createElement("div");
-    g2.className = "ink-group";
-    g2.append(...children);
-    return g2;
-  }
-  var TOOL_TITLES = {
-    pen: "Pen",
-    highlighter: "Highlighter",
-    eraser: "Eraser (also a pen's eraser end): wipe over strokes to remove them"
-  };
-  var InkPalette = class {
-    el;
-    opts;
-    custom;
-    sizes;
-    constructor(opts) {
-      this.opts = opts;
-      const el = document.createElement("div");
-      el.className = "ink-palette";
-      el.setAttribute("role", "toolbar");
-      el.setAttribute("aria-label", "Ink");
-      this.el = el;
-      const tools = group(
-        ...["pen", "highlighter", "eraser"].map(
-          (t2) => button(TOOL_TITLES[t2], icon(t2), { inkTool: t2 })
-        )
-      );
-      const swatches = group(
-        ...SWATCHES.map((s2, i2) => {
-          const b2 = button(
-            s2.label,
-            `<span class="ink-swatch" style="background:${s2.token ? `var(--inkflow-${s2.token}, ${s2.hex})` : s2.hex}"></span>`,
-            { inkSwatch: String(i2) }
-          );
-          return b2;
-        })
-      );
-      swatches.classList.add("ink-colours");
-      const customLabel = document.createElement("label");
-      customLabel.className = "ink-btn ink-custom";
-      customLabel.title = "Another colour";
-      customLabel.dataset.inkCustom = "";
-      this.custom = document.createElement("input");
-      this.custom.type = "color";
-      this.custom.setAttribute("aria-label", "Another colour");
-      customLabel.append(this.custom);
-      swatches.append(customLabel);
-      this.sizes = group();
-      this.sizes.classList.add("ink-sizes");
-      const actions = group(
-        button(opts.undoTitle, icon("undo"), { inkAction: "undo" }),
-        button(opts.clearTitle, icon("clear"), { inkAction: "clear" })
-      );
-      const toggles = group(
-        button(
-          "Draw with a mouse or a finger too (off: only a pen draws, so clicks and swipes still navigate)",
-          icon("fingers"),
-          { inkToggle: "fingers" }
-        )
-      );
-      if (opts.keep) {
-        toggles.append(
-          button(
-            "Keep: save new strokes with the slide (off: they last for this talk only)",
-            icon("keep"),
-            { inkToggle: "keep" }
-          )
-        );
-      }
-      if (opts.close) {
-        toggles.append(
-          button("Leave ink mode (i)", icon("close"), {
-            inkAction: "close"
-          })
-        );
-      }
-      el.append(tools, swatches, this.sizes, actions, toggles);
-      el.addEventListener("pointerdown", (e2) => e2.stopPropagation());
-      el.addEventListener("click", (e2) => {
-        e2.stopPropagation();
-        const b2 = e2.target.closest(".ink-btn");
-        if (!b2) return;
-        this.press(b2.dataset);
-      });
-      this.custom.addEventListener("input", () => {
-        const s2 = this.settings;
-        const tool = this.penTool();
-        s2[tool] = { ...s2[tool], swatch: null, custom: this.custom.value };
-        if (s2.tool === "eraser") s2.tool = tool;
-        this.commit(s2);
-      });
-      this.render();
-    }
-    get settings() {
-      return structuredClone(this.opts.settings);
-    }
-    set(settings2) {
-      this.opts.settings = settings2;
-      this.render();
-    }
-    // The pen tool colour and width apply to: the current one, or the pen
-    // while the eraser is picked.
-    penTool() {
-      return this.opts.settings.tool === "highlighter" ? "highlighter" : "pen";
-    }
-    press(data) {
-      const s2 = this.settings;
-      if (data.inkTool) {
-        s2.tool = data.inkTool;
-      } else if (data.inkSwatch !== void 0) {
-        const tool = this.penTool();
-        s2[tool] = { ...s2[tool], swatch: Number(data.inkSwatch) };
-        if (s2.tool === "eraser") s2.tool = tool;
-      } else if (data.inkSize !== void 0) {
-        const tool = this.penTool();
-        s2[tool] = { ...s2[tool], size: Number(data.inkSize) };
-        if (s2.tool === "eraser") s2.tool = tool;
-      } else if (data.inkCustom !== void 0) {
-        const tool = this.penTool();
-        s2[tool] = { ...s2[tool], swatch: null };
-        if (s2.tool === "eraser") s2.tool = tool;
-      } else if (data.inkToggle === "fingers") {
-        s2.fingers = !s2.fingers;
-      } else if (data.inkToggle === "keep") {
-        s2.keep = !s2.keep;
-      } else if (data.inkAction === "undo") {
-        this.opts.undo();
-        return;
-      } else if (data.inkAction === "clear") {
-        this.opts.clear();
-        return;
-      } else if (data.inkAction === "close") {
-        this.opts.close?.();
-        return;
-      }
-      this.commit(s2);
-    }
-    commit(s2) {
-      this.opts.settings = s2;
-      this.render();
-      this.opts.onChange(structuredClone(s2));
-    }
-    render() {
-      const s2 = this.opts.settings;
-      const tool = this.penTool();
-      const t2 = s2[tool];
-      for (const b2 of this.el.querySelectorAll(
-        "[data-ink-tool]"
-      )) {
-        b2.setAttribute(
-          "aria-pressed",
-          String(b2.dataset.inkTool === s2.tool)
-        );
-      }
-      for (const b2 of this.el.querySelectorAll(
-        "[data-ink-swatch]"
-      )) {
-        b2.setAttribute(
-          "aria-pressed",
-          String(t2.swatch === Number(b2.dataset.inkSwatch))
-        );
-      }
-      this.custom.parentElement.classList.toggle("on", t2.swatch === null);
-      this.custom.value = t2.custom;
-      const sizes = sizesOf(tool);
-      const largest = sizes[sizes.length - 1];
-      this.sizes.replaceChildren(
-        ...sizes.map((size, i2) => {
-          const px = Math.max(3, Math.round(size / largest * 16));
-          const b2 = button(
-            ["Thin", "Medium", "Thick"][i2] ?? `Size ${i2 + 1}`,
-            `<span class="ink-dot ${tool}" style="width:${px}px;height:${tool === "highlighter" ? Math.max(3, Math.round(px / 2.5)) : px}px"></span>`,
-            { inkSize: String(i2) }
-          );
-          b2.setAttribute("aria-pressed", String(t2.size === i2));
-          return b2;
-        })
-      );
-      this.el.classList.toggle("erasing", s2.tool === "eraser");
-      for (const b2 of this.el.querySelectorAll(
-        "[data-ink-toggle]"
-      )) {
-        const key = b2.dataset.inkToggle;
-        b2.setAttribute("aria-pressed", String(s2[key]));
-      }
-    }
-  };
-  function loadSettings(key, fingers) {
-    const fallback = defaultSettings(fingers);
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? settingsFrom(JSON.parse(raw), fallback) : fallback;
-    } catch {
-      return fallback;
+  function fitSlide(root) {
+    if (!root) return;
+    const svg = root instanceof SVGSVGElement ? root : root.querySelector("svg");
+    if (!svg) return;
+    const min = minTextSize(slideSvg(svg) ?? svg);
+    for (const wrapper of Array.from(
+      svg.querySelectorAll("foreignObject > .inkflow-wrapper")
+    )) {
+      const fo = wrapper.parentElement;
+      if (fo) fitZone(fo, min);
     }
   }
-  function saveSettings(key, settings2) {
-    try {
-      localStorage.setItem(key, JSON.stringify(settings2));
-    } catch {
-    }
+  function onFontsLoaded(fn) {
+    if (typeof document === "undefined" || !document.fonts) return;
+    document.fonts.addEventListener("loadingdone", () => fn());
+    void document.fonts.ready.then(() => fn());
   }
-
-  // src/ts/presenter/inkstore.ts
-  var UNDO_LIMIT = 200;
-  var SlideInk = class {
-    strokes = [];
-    // Bumped on every change, so a render can tell it is up to date.
-    rev = 0;
-    history = [];
-    // Show these strokes; one with the id of a stroke already here replaces it
-    // in place (a relayed stroke finishing, a save coming back).
-    add(strokes) {
-      for (const s2 of strokes) {
-        const i2 = this.strokes.findIndex((x2) => x2.id === s2.id);
-        if (i2 >= 0) this.strokes[i2] = s2;
-        else this.strokes.push(s2);
-      }
-      if (strokes.length) this.rev++;
-    }
-    // Stop showing these; returns the ones that were here.
-    remove(ids) {
-      const gone = new Set(ids);
-      const removed = this.strokes.filter((s2) => gone.has(s2.id));
-      if (removed.length) {
-        this.strokes = this.strokes.filter((s2) => !gone.has(s2.id));
-        this.rev++;
-      }
-      return removed;
-    }
-    record(action) {
-      if (!action.strokes.length) return;
-      this.history.push(action);
-      this.history.splice(0, this.history.length - UNDO_LIMIT);
-    }
-    // The last action, taken off the history: the caller undoes it.
-    popUndo() {
-      return this.history.pop() ?? null;
-    }
-    get canUndo() {
-      return this.history.length > 0;
-    }
-    // Saved strokes the slide's ink file now shows: no longer held here.
-    settle(inFile) {
-      const before = this.strokes.length;
-      this.strokes = this.strokes.filter((s2) => !inFile.has(s2.id));
-      if (this.strokes.length !== before) this.rev++;
-    }
-  };
-  var InkStore = class {
-    slides = /* @__PURE__ */ new Map();
-    get(slideId2) {
-      let ink = this.slides.get(slideId2);
-      if (!ink) {
-        ink = new SlideInk();
-        this.slides.set(slideId2, ink);
-      }
-      return ink;
-    }
-    // Every slide's strokes, for a window that just connected.
-    snapshot() {
-      const out = {};
-      for (const [id, ink] of this.slides) {
-        const shown = ink.strokes.map(({ saved: _2, ...s2 }) => s2);
-        if (shown.length) out[id] = shown;
-      }
-      return out;
-    }
-  };
 
   // src/ts/presenter/slidehooks.ts
   var mounted = [];
@@ -1555,1253 +599,6 @@
     const [x1, y1, x2, y2] = points;
     if (x1 === 0 && y1 === 0 && x2 === 1 && y2 === 1) return identity;
     return makeCubicBezier(points);
-  }
-
-  // src/ts/shared/gestures.ts
-  var DELTA_LINE = 1;
-  var DELTA_PAGE = 2;
-  var LINE_PX = 40;
-  var PAGE_PX = 800;
-  function wheelPixels(delta, mode, pagePx = PAGE_PX) {
-    if (mode === DELTA_LINE) return delta * LINE_PX;
-    if (mode === DELTA_PAGE) return delta * pagePx;
-    return delta;
-  }
-  var PINCH_PER_PX = 0.01;
-  var MAX_WHEEL_STEP = Math.log(1.2);
-  function wheelZoomLog(deltaY, deltaMode) {
-    const z = -wheelPixels(deltaY, deltaMode) * PINCH_PER_PX;
-    return Math.min(Math.max(z, -MAX_WHEEL_STEP), MAX_WHEEL_STEP);
-  }
-  function midpoint(a2, b2) {
-    return { x: (a2.x + b2.x) / 2, y: (a2.y + b2.y) / 2 };
-  }
-  function distance(a2, b2) {
-    return Math.hypot(a2.x - b2.x, a2.y - b2.y);
-  }
-  var TOUCH_DEFAULTS = {
-    windowMs: 200,
-    slopPx: 10,
-    tapMs: 300,
-    doubleTapMs: 350,
-    doubleTapPx: 30
-  };
-  var TouchTracker = class {
-    opts;
-    phase = "idle";
-    fingers = /* @__PURE__ */ new Map();
-    first = null;
-    moved = false;
-    committed = false;
-    pair = null;
-    last = null;
-    lastTap = null;
-    // This sequence had a second finger: nothing it does is a swipe or tap.
-    multi = false;
-    constructor(opts = {}) {
-      this.opts = { ...TOUCH_DEFAULTS, ...opts };
-    }
-    // Fingers are down and at least one of them is the gesture's (a pinch,
-    // or one left over from it): clicks and swipes are not the page's.
-    get claimed() {
-      return this.phase === "pinch" || this.phase === "spent";
-    }
-    get pinching() {
-      return this.phase === "pinch";
-    }
-    // The sequence in progress has had more than one finger.
-    get multiTouch() {
-      return this.multi;
-    }
-    get active() {
-      return this.phase !== "idle";
-    }
-    // The single finger's id while one finger acts alone.
-    get single() {
-      return this.phase === "single" ? this.first?.id ?? null : null;
-    }
-    get isCommitted() {
-      return this.committed;
-    }
-    has(id) {
-      return this.fingers.has(id);
-    }
-    down(id, at2, t2) {
-      const finger = { id, start: at2, at: at2, t0: t2 };
-      if (this.phase === "idle") {
-        this.fingers.clear();
-        this.fingers.set(id, finger);
-        this.first = finger;
-        this.moved = false;
-        this.committed = false;
-        this.multi = false;
-        this.phase = "single";
-        return { pass: true };
-      }
-      this.fingers.set(id, finger);
-      this.multi = true;
-      if (this.phase === "single" && this.first) {
-        if (this.committed) return { pass: false };
-        this.lastTap = null;
-        this.startPinch(this.first.id, id);
-        return { pass: false, cancelSingle: true, pinchStart: true };
-      }
-      if (this.phase === "spent" && this.fingers.size === 2) {
-        const other = [...this.fingers.keys()].find((k2) => k2 !== id);
-        if (other !== void 0) {
-          this.startPinch(other, id);
-          return { pass: false, pinchStart: true };
-        }
-      }
-      return { pass: false };
-    }
-    startPinch(a2, b2) {
-      this.phase = "pinch";
-      this.pair = [a2, b2];
-      this.last = this.measure();
-    }
-    measure() {
-      if (!this.pair) return null;
-      const a2 = this.fingers.get(this.pair[0]);
-      const b2 = this.fingers.get(this.pair[1]);
-      if (!a2 || !b2) return null;
-      return { mid: midpoint(a2.at, b2.at), dist: distance(a2.at, b2.at) };
-    }
-    move(id, at2, t2) {
-      const f2 = this.fingers.get(id);
-      if (!f2) return { pass: true };
-      f2.at = at2;
-      if (this.phase === "single" && f2 === this.first) {
-        if (!this.moved && distance(at2, f2.start) > this.opts.slopPx)
-          this.moved = true;
-        return { pass: true, commit: this.tryCommit(t2) };
-      }
-      if (this.phase === "pinch" && this.pair?.includes(id)) {
-        const now = this.measure();
-        const before = this.last;
-        if (!now || !before) return { pass: false };
-        this.last = now;
-        const scale = before.dist > 0 && now.dist > 0 ? now.dist / before.dist : 1;
-        return {
-          pass: false,
-          pinch: { scale, from: before.mid, to: now.mid }
-        };
-      }
-      return { pass: false };
-    }
-    // Time passing with no event: a finger that moved past the slop early
-    // commits once the window is over, even if it then holds still.
-    tick(t2) {
-      return { pass: true, commit: this.tryCommit(t2) };
-    }
-    tryCommit(t2) {
-      if (this.phase !== "single" || this.committed || !this.first)
-        return false;
-      if (!this.moved || t2 - this.first.t0 < this.opts.windowMs) return false;
-      this.committed = true;
-      return true;
-    }
-    // `cancelled`: the browser took the pointer back (pointercancel).
-    up(id, at2, t2, cancelled = false) {
-      const f2 = this.fingers.get(id);
-      if (!f2) return { pass: true };
-      f2.at = at2;
-      this.fingers.delete(id);
-      if (this.phase === "single" && f2 === this.first) {
-        const release = !this.committed;
-        if (this.fingers.size) {
-          this.phase = "spent";
-          this.first = null;
-        } else this.reset();
-        const verdict = {
-          pass: true,
-          release,
-          moved: this.moved
-        };
-        if (!cancelled && !this.moved && distance(at2, f2.start) <= this.opts.slopPx && t2 - f2.t0 <= this.opts.tapMs) {
-          verdict.tap = f2.start;
-          const prev = this.lastTap;
-          if (prev && t2 - prev.t <= this.opts.doubleTapMs && distance(prev.at, f2.start) <= this.opts.doubleTapPx) {
-            verdict.doubleTap = f2.start;
-            this.lastTap = null;
-          } else {
-            this.lastTap = { at: f2.start, t: t2 };
-          }
-        } else {
-          this.lastTap = null;
-        }
-        return verdict;
-      }
-      const ended = this.phase === "pinch" && !!this.pair?.includes(id);
-      if (ended) {
-        this.phase = "spent";
-        this.pair = null;
-        this.last = null;
-      }
-      if (this.fingers.size === 0) this.reset();
-      return ended ? { pass: false, pinchEnd: true } : { pass: false };
-    }
-    reset() {
-      this.phase = "idle";
-      this.fingers.clear();
-      this.first = null;
-      this.pair = null;
-      this.last = null;
-      this.committed = false;
-    }
-  };
-
-  // src/ts/shared/gesturepad.ts
-  var CLICK_AFTER_MS = 400;
-  var PALM_MS2 = 1500;
-  var WHEEL_END_MS = 160;
-  function at(e2) {
-    return { x: e2.clientX, y: e2.clientY };
-  }
-  function replica(type, src, pos = src) {
-    return new PointerEvent(type, {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      pointerId: src.pointerId,
-      pointerType: src.pointerType,
-      isPrimary: src.isPrimary,
-      clientX: pos.clientX,
-      clientY: pos.clientY,
-      screenX: pos.screenX,
-      screenY: pos.screenY,
-      width: pos.width,
-      height: pos.height,
-      pressure: type === "pointerup" ? 0 : pos.pressure || 0.5,
-      button: type === "pointermove" ? -1 : 0,
-      buttons: type === "pointerup" ? 0 : 1,
-      ctrlKey: pos.ctrlKey,
-      shiftKey: pos.shiftKey,
-      altKey: pos.altKey,
-      metaKey: pos.metaKey
-    });
-  }
-  function stop(e2) {
-    e2.stopImmediatePropagation();
-    if (e2.cancelable) e2.preventDefault();
-  }
-  var GesturePad = class {
-    touch;
-    host;
-    // Touch pointers in the current sequence.
-    ours = /* @__PURE__ */ new Set();
-    deferred = null;
-    replaying = false;
-    timer = 0;
-    clicksAfter = -Infinity;
-    penNear = -Infinity;
-    pensDown = /* @__PURE__ */ new Set();
-    // This frame's batch.
-    frame = 0;
-    zoomLog = 0;
-    from = null;
-    to = null;
-    source = "wheel";
-    panX = 0;
-    panY = 0;
-    wheelTimer = 0;
-    safariScale = 1;
-    constructor(host, tracker = new TouchTracker()) {
-      this.host = host;
-      this.touch = tracker;
-      const opts = { capture: true };
-      window.addEventListener("pointerdown", (e2) => this.down(e2), opts);
-      window.addEventListener("pointermove", (e2) => this.move(e2), opts);
-      window.addEventListener("pointerup", (e2) => this.up(e2, false), opts);
-      window.addEventListener("pointercancel", (e2) => this.up(e2, true), opts);
-      window.addEventListener("click", (e2) => this.claimClick(e2), opts);
-      window.addEventListener("dblclick", (e2) => this.claimClick(e2), opts);
-      const s2 = host.surface;
-      s2.addEventListener("wheel", (e2) => this.wheel(e2), { passive: false });
-      s2.addEventListener("gesturestart", (e2) => this.gesture(e2, "start"));
-      s2.addEventListener("gesturechange", (e2) => this.gesture(e2, "change"));
-      s2.addEventListener("gestureend", (e2) => this.gesture(e2, "end"));
-    }
-    // The touch sequence in progress (or the one that just ended) had a
-    // second finger: it is no swipe and no tap.
-    get multiTouch() {
-      return this.touch.multiTouch;
-    }
-    // Two fingers are zooming, or one is left over from them.
-    get claimed() {
-      return this.touch.claimed;
-    }
-    // ── Touch ──
-    palm() {
-      return this.pensDown.size > 0 || performance.now() - this.penNear < PALM_MS2;
-    }
-    down(e2) {
-      if (e2.pointerType === "pen") {
-        this.penNear = performance.now();
-        this.pensDown.add(e2.pointerId);
-        return;
-      }
-      if (e2.pointerType !== "touch" || this.replaying) return;
-      const target = e2.target;
-      if (!target || !this.host.surface.contains(target)) return;
-      if (!this.touch.active) {
-        if (this.palm() || this.host.accepts?.(e2) === false) return;
-      }
-      const v2 = this.touch.down(e2.pointerId, at(e2), performance.now());
-      this.ours.add(e2.pointerId);
-      if (v2.cancelSingle) this.rollback();
-      if (v2.pinchStart) {
-        this.source = "pinch";
-        this.clicksAfter = Infinity;
-      }
-      if (!v2.pass) {
-        stop(e2);
-        return;
-      }
-      if (this.host.defer?.(e2)) {
-        this.deferred = { target, down: e2, last: e2 };
-        stop(e2);
-        clearTimeout(this.timer);
-        this.timer = window.setTimeout(
-          () => this.tick(),
-          this.touch.opts.windowMs + 10
-        );
-      }
-    }
-    rollback() {
-      if (this.deferred) {
-        this.deferred = null;
-        clearTimeout(this.timer);
-      } else {
-        this.host.cancelSingle?.();
-      }
-    }
-    move(e2) {
-      if (e2.pointerType === "pen") {
-        this.penNear = performance.now();
-        return;
-      }
-      if (this.replaying || !this.ours.has(e2.pointerId)) return;
-      const v2 = this.touch.move(e2.pointerId, at(e2), performance.now());
-      this.queuePinch(v2);
-      if (!v2.pass) {
-        stop(e2);
-        return;
-      }
-      const d2 = this.deferred;
-      if (d2 && d2.down.pointerId === e2.pointerId) {
-        if (v2.commit) {
-          this.replayDown();
-        } else {
-          d2.last = e2;
-          stop(e2);
-        }
-      }
-    }
-    tick() {
-      const d2 = this.deferred;
-      if (!d2) return;
-      const v2 = this.touch.tick(performance.now());
-      if (!v2.commit) {
-        return;
-      }
-      this.replayDown();
-      this.replay(replica("pointermove", d2.down, d2.last), d2.target);
-    }
-    replayDown() {
-      const d2 = this.deferred;
-      if (!d2) return;
-      this.deferred = null;
-      clearTimeout(this.timer);
-      this.replay(replica("pointerdown", d2.down), d2.target);
-    }
-    replay(e2, target) {
-      const aim = target.isConnected ? target : document.elementFromPoint(e2.clientX, e2.clientY);
-      if (!aim) return;
-      this.replaying = true;
-      try {
-        aim.dispatchEvent(e2);
-      } finally {
-        this.replaying = false;
-      }
-    }
-    up(e2, cancelled) {
-      if (e2.pointerType === "pen") {
-        this.penNear = performance.now();
-        this.pensDown.delete(e2.pointerId);
-        return;
-      }
-      if (this.replaying || !this.ours.has(e2.pointerId)) return;
-      const v2 = this.touch.up(
-        e2.pointerId,
-        at(e2),
-        performance.now(),
-        cancelled
-      );
-      this.ours.delete(e2.pointerId);
-      if (!this.touch.active) this.ours.clear();
-      if (v2.pinchEnd) {
-        this.flush();
-        this.host.zoomEnd?.("pinch");
-      }
-      if (this.touch.multiTouch) {
-        this.clicksAfter = this.touch.active ? Infinity : performance.now() + CLICK_AFTER_MS;
-      }
-      if (!v2.pass) {
-        stop(e2);
-        return;
-      }
-      const d2 = this.deferred;
-      if (d2 && d2.down.pointerId === e2.pointerId) {
-        if (cancelled) {
-          this.deferred = null;
-          clearTimeout(this.timer);
-          stop(e2);
-          return;
-        }
-        this.replayDown();
-        if (v2.moved)
-          this.replay(replica("pointermove", d2.down, e2), d2.target);
-      }
-      if (v2.doubleTap) {
-        this.host.doubleTap?.(v2.doubleTap, e2.target);
-      }
-    }
-    claimClick(e2) {
-      if (this.touch.claimed || performance.now() < this.clicksAfter) {
-        e2.stopImmediatePropagation();
-        e2.preventDefault();
-      }
-    }
-    // ── Wheel and Safari gestures ──
-    wheel(e2) {
-      if (this.host.acceptsWheel?.(e2) === false) return;
-      if (e2.ctrlKey || e2.metaKey) {
-        e2.preventDefault();
-        this.zoomLog += wheelZoomLog(e2.deltaY, e2.deltaMode);
-        this.source = "wheel";
-        this.from = at(e2);
-        this.to = at(e2);
-        clearTimeout(this.wheelTimer);
-        this.wheelTimer = window.setTimeout(() => {
-          this.flush();
-          this.host.zoomEnd?.("wheel");
-        }, WHEEL_END_MS);
-        this.schedule();
-        return;
-      }
-      if (!this.host.pan || !this.host.canPan?.(e2)) return;
-      e2.preventDefault();
-      const page = this.host.surface.clientHeight || void 0;
-      this.panX += wheelPixels(e2.deltaX, e2.deltaMode, page);
-      this.panY += wheelPixels(e2.deltaY, e2.deltaMode, page);
-      this.schedule();
-    }
-    gesture(raw, phase) {
-      const e2 = raw;
-      e2.preventDefault();
-      if (this.touch.active) return;
-      if (phase === "start") {
-        this.safariScale = 1;
-        return;
-      }
-      if (phase === "end") {
-        this.flush();
-        this.host.zoomEnd?.("gesture");
-        return;
-      }
-      if (!(e2.scale > 0)) return;
-      this.zoomLog += Math.log(e2.scale / this.safariScale);
-      this.safariScale = e2.scale;
-      this.source = "gesture";
-      this.from = at(e2);
-      this.to = at(e2);
-      this.schedule();
-    }
-    // ── Frames ──
-    queuePinch(v2) {
-      if (!v2.pinch) return;
-      this.zoomLog += Math.log(v2.pinch.scale);
-      this.from ??= v2.pinch.from;
-      this.to = v2.pinch.to;
-      this.source = "pinch";
-      this.schedule();
-    }
-    schedule() {
-      if (this.frame) return;
-      this.frame = requestAnimationFrame(() => this.flush());
-    }
-    // Apply this frame's batch now.
-    flush() {
-      if (this.frame) cancelAnimationFrame(this.frame);
-      this.frame = 0;
-      const log = this.zoomLog;
-      const from = this.from;
-      const to = this.to;
-      const dx = this.panX;
-      const dy = this.panY;
-      this.zoomLog = 0;
-      this.from = null;
-      this.to = null;
-      this.panX = 0;
-      this.panY = 0;
-      if (from && to && (log !== 0 || from.x !== to.x || from.y !== to.y)) {
-        this.host.zoom(Math.exp(log), from, to, this.source);
-      }
-      if (dx || dy) this.host.pan?.(dx, dy);
-    }
-  };
-
-  // src/ts/shared/viewbox.ts
-  var deckCanvas = { w: 1920, h: 1080 };
-  function parseViewBox(attr, fallback = `0 0 ${deckCanvas.w} ${deckCanvas.h}`) {
-    const parts = (attr ?? "").trim().split(/[\s,]+/).map(Number);
-    const valid = parts.length === 4 && parts.every((n2) => Number.isFinite(n2)) && parts[2] > 0 && parts[3] > 0;
-    const [x2, y2, w2, h2] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
-    return { x: x2, y: y2, w: w2, h: h2 };
-  }
-  function formatViewBox(vb) {
-    const round3 = (n2) => Math.round(n2 * 1e3) / 1e3;
-    return `${round3(vb.x)} ${round3(vb.y)} ${round3(vb.w)} ${round3(vb.h)}`;
-  }
-
-  // src/ts/shared/zoom-camera.ts
-  function clamp(n2, lo, hi) {
-    return Math.min(Math.max(n2, lo), hi);
-  }
-  function scaleOf(vb, base) {
-    return base.w / vb.w;
-  }
-  function isZoomedIn(vb, base, epsilon = 1e-3) {
-    return scaleOf(vb, base) > 1 + epsilon;
-  }
-  function clampToBounds(vb, base) {
-    const w2 = Math.min(vb.w, base.w);
-    const h2 = Math.min(vb.h, base.h);
-    const x2 = w2 >= base.w ? base.x + (base.w - w2) / 2 : clamp(vb.x, base.x, base.x + base.w - w2);
-    const y2 = h2 >= base.h ? base.y + (base.h - h2) / 2 : clamp(vb.y, base.y, base.y + base.h - h2);
-    return { x: x2, y: y2, w: w2, h: h2 };
-  }
-  function zoomAt(current2, base, factor, focus, limits) {
-    const targetScale = clamp(
-      scaleOf(current2, base) * factor,
-      limits.minScale,
-      limits.maxScale
-    );
-    const w2 = base.w / targetScale;
-    const h2 = base.h / targetScale;
-    const fx = (focus.ux - current2.x) / current2.w;
-    const fy = (focus.uy - current2.y) / current2.h;
-    return clampToBounds(
-      { x: focus.ux - fx * w2, y: focus.uy - fy * h2, w: w2, h: h2 },
-      base
-    );
-  }
-  function panBy(current2, base, dxUser, dyUser) {
-    return clampToBounds(
-      { ...current2, x: current2.x + dxUser, y: current2.y + dyUser },
-      base
-    );
-  }
-  function lerpViewBox(a2, b2, t2) {
-    return {
-      x: a2.x + (b2.x - a2.x) * t2,
-      y: a2.y + (b2.y - a2.y) * t2,
-      w: a2.w + (b2.w - a2.w) * t2,
-      h: a2.h + (b2.h - a2.h) * t2
-    };
-  }
-
-  // src/ts/presenter/progress-driver.ts
-  var ProgressDriver = class {
-    value = 0;
-    // The end the most recent animateTo is travelling toward. Callers read this to
-    // decide which way a reversal should go.
-    heading = 1;
-    animateTo(target, durationSeconds, signal, onFrame) {
-      this.heading = target;
-      const ratePerMillisecond = 1 / (durationSeconds * 1e3);
-      return new Promise((resolve) => {
-        let lastTimestamp = null;
-        const step = (timestamp) => {
-          if (signal.aborted) {
-            resolve();
-            return;
-          }
-          if (lastTimestamp === null) lastTimestamp = timestamp;
-          const direction = target >= this.value ? 1 : -1;
-          this.value += direction * ratePerMillisecond * (timestamp - lastTimestamp);
-          lastTimestamp = timestamp;
-          const reachedTarget = direction === 1 && this.value >= target || direction === -1 && this.value <= target;
-          if (reachedTarget) {
-            this.value = target;
-            onFrame(this.value);
-            resolve();
-            return;
-          }
-          onFrame(this.value);
-          requestAnimationFrame(step);
-        };
-        requestAnimationFrame(step);
-      });
-    }
-  };
-
-  // src/ts/presenter/zoom.ts
-  var stage = document.getElementById("stage");
-  var stageWrap = document.getElementById("stage-wrap");
-  var indicator = document.getElementById("zoom-indicator");
-  var LIMITS = { minScale: 1, maxScale: 8 };
-  var KEY_ZOOM_STEP = 1.4;
-  var KEY_ANIM_MS = 140;
-  var RESET_ANIM_MS = 240;
-  var NAV_RESET_MS = 150;
-  var EASE = cubicBezierEasing("cubic-bezier(0.22, 1, 0.36, 1)");
-  var baseViewBox = null;
-  var camera = null;
-  var navReset = null;
-  var dragStartCamera = null;
-  var dragStartInverse = null;
-  var dragStartClientX = 0;
-  var dragStartClientY = 0;
-  function currentSvg() {
-    return stage?.querySelector("svg") ?? null;
-  }
-  function clientToUser(clientX, clientY, inverse) {
-    const inv = inverse ?? currentSvg()?.getScreenCTM()?.inverse();
-    if (!inv) return null;
-    const p2 = new DOMPoint(clientX, clientY).matrixTransform(inv);
-    return { ux: p2.x, uy: p2.y };
-  }
-  function ensureBase() {
-    if (camera && baseViewBox) return true;
-    const svg = currentSvg();
-    if (!svg) return false;
-    baseViewBox = parseViewBox(svg.getAttribute("viewBox"));
-    camera = { ...baseViewBox };
-    return true;
-  }
-  function renderIndicator() {
-    if (!indicator) return;
-    const factor = camera && baseViewBox ? scaleOf(camera, baseViewBox) : 1;
-    indicator.textContent = `${factor.toFixed(1)}\xD7`;
-    indicator.toggleAttribute("data-active", factor > 1.01);
-  }
-  function applyCamera() {
-    const svg = currentSvg();
-    if (!svg || !camera) return;
-    svg.setAttribute("viewBox", formatViewBox(camera));
-    renderIndicator();
-  }
-  var driver = new ProgressDriver();
-  var animController = null;
-  function cancelAnim() {
-    animController?.abort();
-    animController = null;
-  }
-  function animateCameraTo(target, ms, onDone) {
-    cancelAnim();
-    if (!camera) {
-      camera = { ...target };
-      applyCamera();
-      onDone?.();
-      return;
-    }
-    const start = { ...camera };
-    const controller2 = new AbortController();
-    animController = controller2;
-    driver.value = 0;
-    driver.animateTo(1, ms / 1e3, controller2.signal, (p2) => {
-      camera = p2 >= 1 ? { ...target } : lerpViewBox(start, target, EASE(p2));
-      applyCamera();
-    }).then(() => {
-      if (animController === controller2) animController = null;
-      if (!controller2.signal.aborted) onDone?.();
-    });
-  }
-  function endDrag() {
-    dragStartCamera = null;
-    dragStartInverse = null;
-    document.body.classList.remove("zoom-grabbing");
-  }
-  function resetCamera() {
-    cancelAnim();
-    const svg = currentSvg();
-    if (svg && baseViewBox) {
-      svg.setAttribute("viewBox", formatViewBox(baseViewBox));
-    }
-    baseViewBox = null;
-    camera = null;
-    endDrag();
-    renderIndicator();
-  }
-  function cameraIsZoomed() {
-    return !!camera && !!baseViewBox && isZoomedIn(camera, baseViewBox);
-  }
-  function runNavReset() {
-    const fn = navReset;
-    navReset = null;
-    fn?.();
-  }
-  function resetCameraThen(after) {
-    if (!cameraIsZoomed() || !baseViewBox) {
-      navReset = null;
-      after();
-      return;
-    }
-    navReset = after;
-    animateCameraTo({ ...baseViewBox }, NAV_RESET_MS, runNavReset);
-  }
-  function cancelPendingNav() {
-    navReset = null;
-  }
-  function flushPendingNav() {
-    if (navReset) runNavReset();
-  }
-  function smoothResetCamera() {
-    flushPendingNav();
-    if (!ensureBase() || !camera || !baseViewBox) return;
-    if (!isZoomedIn(camera, baseViewBox)) return;
-    animateCameraTo({ ...baseViewBox }, RESET_ANIM_MS);
-  }
-  function keyZoom(direction) {
-    flushPendingNav();
-    if (!ensureBase() || !camera || !baseViewBox) return;
-    const factor = direction === "in" ? KEY_ZOOM_STEP : 1 / KEY_ZOOM_STEP;
-    const target = zoomAt(
-      camera,
-      baseViewBox,
-      factor,
-      { ux: camera.x + camera.w / 2, uy: camera.y + camera.h / 2 },
-      LIMITS
-    );
-    animateCameraTo(target, KEY_ANIM_MS);
-  }
-  function zoomAbout(factor, from, to) {
-    flushPendingNav();
-    cancelAnim();
-    if (!ensureBase() || !camera || !baseViewBox) return;
-    const focus = clientToUser(from.x, from.y);
-    if (!focus) return;
-    camera = zoomAt(camera, baseViewBox, factor, focus, LIMITS);
-    applyCamera();
-    if (from.x === to.x && from.y === to.y) return;
-    const a2 = clientToUser(from.x, from.y);
-    const b2 = clientToUser(to.x, to.y);
-    if (!a2 || !b2) return;
-    camera = panBy(camera, baseViewBox, a2.ux - b2.ux, a2.uy - b2.uy);
-    applyCamera();
-  }
-  function panPixels(dx, dy) {
-    if (!camera || !baseViewBox) return;
-    const inv = currentSvg()?.getScreenCTM()?.inverse();
-    if (!inv) return;
-    const units = Math.hypot(inv.a, inv.b);
-    camera = panBy(camera, baseViewBox, dx * units, dy * units);
-    applyCamera();
-  }
-  var touchCancels = [];
-  function onTouchCancel(fn) {
-    touchCancels.push(fn);
-  }
-  var gestures = null;
-  function multiTouch() {
-    return gestures?.multiTouch ?? false;
-  }
-  function overGrid(target) {
-    return Boolean(target?.closest?.("#overview"));
-  }
-  function isCameraGesture(e2) {
-    return e2.ctrlKey;
-  }
-  function setArmed(on) {
-    document.body.classList.toggle("camera-armed", on);
-  }
-  document.addEventListener("keydown", (e2) => {
-    if (e2.key === "Control") setArmed(true);
-  });
-  document.addEventListener("keyup", (e2) => {
-    if (e2.key === "Control") setArmed(false);
-  });
-  window.addEventListener("blur", () => setArmed(false));
-  if (stageWrap) {
-    const wrap = stageWrap;
-    gestures = new GesturePad({
-      surface: wrap,
-      accepts: (e2) => !overGrid(e2.target) && !e2.target.closest?.(".ink-palette"),
-      acceptsWheel: (e2) => !overGrid(e2.target),
-      cancelSingle: () => {
-        for (const fn of touchCancels) fn();
-      },
-      zoom: zoomAbout,
-      canPan: () => cameraIsZoomed(),
-      pan: panPixels,
-      doubleTap: smoothResetCamera
-    });
-    wrap.addEventListener("pointerdown", (e2) => {
-      if (!isCameraGesture(e2) || overGrid(e2.target)) return;
-      flushPendingNav();
-      cancelAnim();
-      if (!ensureBase() || !camera) return;
-      const inverse = currentSvg()?.getScreenCTM()?.inverse();
-      if (!inverse) return;
-      wrap.setPointerCapture(e2.pointerId);
-      dragStartCamera = { ...camera };
-      dragStartInverse = inverse;
-      dragStartClientX = e2.clientX;
-      dragStartClientY = e2.clientY;
-      document.body.classList.add("zoom-grabbing");
-    });
-    wrap.addEventListener("pointermove", (e2) => {
-      if (!dragStartCamera || !dragStartInverse || !baseViewBox) return;
-      const from = clientToUser(
-        dragStartClientX,
-        dragStartClientY,
-        dragStartInverse
-      );
-      const to = clientToUser(e2.clientX, e2.clientY, dragStartInverse);
-      if (!from || !to) return;
-      camera = panBy(
-        dragStartCamera,
-        baseViewBox,
-        from.ux - to.ux,
-        from.uy - to.uy
-      );
-      applyCamera();
-    });
-    wrap.addEventListener("pointerup", endDrag);
-    wrap.addEventListener("pointercancel", endDrag);
-    wrap.addEventListener("dblclick", smoothResetCamera);
-  }
-
-  // src/ts/presenter/ink.ts
-  var SETTINGS_KEY = "inkflow-ink-presenter";
-  var SVG_NS2 = "http://www.w3.org/2000/svg";
-  var stage2 = document.getElementById("stage");
-  var stageWrap2 = document.getElementById("stage-wrap");
-  var overviewEl = document.getElementById("overview");
-  var button2 = document.getElementById("btn-ink");
-  var store = new InkStore();
-  var settings = loadSettings(SETTINGS_KEY, false);
-  var active = false;
-  var palette = null;
-  var pad = null;
-  onTouchCancel(() => pad?.cancel());
-  var send = () => {
-  };
-  var saving = false;
-  var drawing = /* @__PURE__ */ new Map();
-  var hiddenSaved = /* @__PURE__ */ new Set();
-  var pendingSaves = /* @__PURE__ */ new Map();
-  var saveCount = 0;
-  function slideId() {
-    return state.slides[state.slideIndex]?.id ?? null;
-  }
-  function slideSvg() {
-    return stage2?.querySelector(":scope > svg") ?? null;
-  }
-  function current() {
-    const id = slideId();
-    return id === null ? null : store.get(id);
-  }
-  function group2(parent, name) {
-    let g2 = parent.querySelector(`:scope > g[data-${name}]`);
-    if (!g2) {
-      g2 = document.createElementNS(SVG_NS2, "g");
-      g2.setAttribute(`data-${name}`, "");
-      parent.appendChild(g2);
-    }
-    return g2;
-  }
-  function mountInk() {
-    const svg = slideSvg();
-    const id = slideId();
-    if (!svg || id === null) return;
-    const ink = store.get(id);
-    const inFile = new Set(
-      [...svg.querySelectorAll(".inkflow-ink [id]")].map((el) => el.id)
-    );
-    ink.settle(inFile);
-    for (const hidden of [...hiddenSaved]) {
-      const el = inFile.has(hidden) ? svg.getElementById(hidden) : null;
-      if (el instanceof SVGElement) el.style.display = "none";
-      else hiddenSaved.delete(hidden);
-    }
-    let layer = svg.querySelector(":scope > g.inkflow-live-ink");
-    if (!layer) {
-      layer = document.createElementNS(SVG_NS2, "g");
-      layer.setAttribute("class", "inkflow-live-ink");
-      svg.appendChild(layer);
-    }
-    const held = group2(layer, "held");
-    const rev = `${id}:${ink.rev}`;
-    if (held.dataset.rev !== rev) {
-      held.replaceChildren(...ink.strokes.map(strokeElement));
-      held.dataset.rev = rev;
-    }
-    const relayed = group2(layer, "relayed");
-    const shown = new Map(
-      [...relayed.children].map((el) => [el.getAttribute("data-stroke"), el])
-    );
-    for (const [strokeId, d2] of drawing) {
-      if (d2.slide !== id) continue;
-      let path = shown.get(strokeId);
-      if (!path) {
-        path = paintStroke(
-          document.createElementNS(SVG_NS2, "path"),
-          d2.live
-        );
-        path.setAttribute("data-stroke", strokeId);
-        relayed.appendChild(path);
-      }
-      shown.delete(strokeId);
-      path.setAttribute(
-        "d",
-        pathData(outlineOf(d2.points, d2.live, d2.live.simulate, false), 2)
-      );
-    }
-    for (const stale of shown.values()) stale?.remove();
-  }
-  var mountFrame = 0;
-  function remount() {
-    if (mountFrame) return;
-    mountFrame = requestAnimationFrame(() => {
-      mountFrame = 0;
-      mountInk();
-    });
-  }
-  function save(slide, op, payload, ids) {
-    const ws = state.ws;
-    if (!saving || !ws || ws.readyState !== WebSocket.OPEN) {
-      showNotify("Ink not saved: no connection to the inkflow server", "red");
-      return false;
-    }
-    const id = `ink-${++saveCount}`;
-    pendingSaves.set(id, { slide, op, ids });
-    ws.send(
-      JSON.stringify({
-        type: "edit-op",
-        id,
-        action: "ink",
-        op,
-        slideId: slide,
-        ...payload
-      })
-    );
-    return true;
-  }
-  function inkSaveResult(msg) {
-    const pending = typeof msg.id === "string" ? pendingSaves.get(msg.id) : void 0;
-    if (!pending) return false;
-    pendingSaves.delete(msg.id);
-    if (msg.ok) return true;
-    showNotify(`Ink not saved: ${String(msg.error ?? "refused")}`, "red");
-    const ids = new Set(pending.ids);
-    if (pending.op === "add") {
-      for (const s2 of store.get(pending.slide).strokes) {
-        if (ids.has(s2.id)) s2.saved = false;
-      }
-    } else {
-      for (const id of ids) hiddenSaved.delete(id);
-      for (const id of ids) {
-        const el = slideSvg()?.getElementById(id);
-        if (el instanceof SVGElement) el.style.removeProperty("display");
-      }
-    }
-    return true;
-  }
-  function plain(s2) {
-    const { saved: _2, ...stroke } = s2;
-    return stroke;
-  }
-  function addStrokes(ink, strokes, slide) {
-    ink.add(strokes);
-    const keep = strokes.filter((s2) => s2.saved);
-    if (keep.length && !save(
-      slide,
-      "add",
-      { strokes: keep.map(plain) },
-      keep.map((s2) => s2.id)
-    )) {
-      for (const s2 of keep) s2.saved = false;
-    }
-    send({ type: "ink", op: "add", slide, strokes: strokes.map(plain) });
-  }
-  function eraseStrokes(ink, strokes, slide) {
-    const ids = strokes.map((s2) => s2.id);
-    ink.remove(ids);
-    const saved = strokes.filter((s2) => s2.saved).map((s2) => s2.id);
-    if (saved.length && save(slide, "erase", { ids: saved }, saved)) {
-      for (const id of saved) hiddenSaved.add(id);
-    }
-    send({ type: "ink", op: "erase", slide, ids });
-  }
-  function undoInk() {
-    const ink = current();
-    const slide = slideId();
-    const action = ink?.popUndo();
-    if (!ink || !action || slide === null) return;
-    if (action.kind === "add") eraseStrokes(ink, action.strokes, slide);
-    else addStrokes(ink, action.strokes, slide);
-    mountInk();
-  }
-  function savedStrokes(els) {
-    return [...els].filter((el) => !hiddenSaved.has(el.id)).map(strokeOf).filter((s2) => s2 !== null).map((s2) => ({ ...s2, saved: true }));
-  }
-  function clearInk() {
-    const ink = current();
-    const svg = slideSvg();
-    const slide = slideId();
-    if (!ink || !svg || slide === null) return;
-    const saved = settings.keep && saving ? savedStrokes(svg.querySelectorAll(".inkflow-ink path[id]")) : [];
-    const all = [...ink.strokes, ...saved];
-    if (!all.length) return;
-    if (saved.length && !window.confirm(
-      "Clear this slide's ink, including the strokes saved with the deck?"
-    ))
-      return;
-    eraseStrokes(ink, all, slide);
-    ink.record({ kind: "erase", strokes: all });
-    mountInk();
-  }
-  function applyIncomingInk(msg) {
-    if (msg.op === "request") {
-      const slides = store.snapshot();
-      if (Object.keys(slides).length)
-        send({ type: "ink", op: "state", slides });
-      return;
-    }
-    if (msg.op === "state") {
-      if (typeof msg.slides !== "object" || msg.slides === null) return;
-      for (const [slide, raw] of Object.entries(msg.slides)) {
-        if (!Array.isArray(raw)) continue;
-        store.get(slide).add(raw.map(strokeFrom).filter((s2) => s2 !== null));
-      }
-      remount();
-      return;
-    }
-    if (typeof msg.slide !== "string") return;
-    const ink = store.get(msg.slide);
-    if (msg.op === "draw") {
-      const style = styleFrom(msg.stroke);
-      const points = unflatten(msg.points);
-      if (!style || !points || typeof msg.from !== "number") return;
-      const simulate = msg.stroke.simulate;
-      const live = { ...style, simulate: simulate === true };
-      const d2 = drawing.get(live.id) ?? {
-        slide: msg.slide,
-        live,
-        points: []
-      };
-      d2.points = d2.points.slice(0, Math.max(0, msg.from)).concat(points);
-      drawing.set(live.id, d2);
-    } else if (msg.op === "abandon") {
-      drawing.delete(String(msg.id));
-    } else if (msg.op === "add") {
-      if (!Array.isArray(msg.strokes)) return;
-      const strokes = msg.strokes.map(strokeFrom).filter((s2) => s2 !== null);
-      for (const s2 of strokes) drawing.delete(s2.id);
-      ink.add(strokes);
-    } else if (msg.op === "erase") {
-      if (!Array.isArray(msg.ids)) return;
-      ink.remove(msg.ids.filter((i2) => typeof i2 === "string"));
-    }
-    if (msg.slide === slideId()) remount();
-  }
-  function inkActive() {
-    return active;
-  }
-  function toggleInk() {
-    active = !active;
-    if (!active) pad?.cancel();
-    document.body.classList.toggle("ink-mode", active);
-    button2?.classList.toggle("active", active);
-    button2?.setAttribute("aria-pressed", String(active));
-    if (palette) palette.el.hidden = !active;
-  }
-  function inkKey(e2) {
-    if (!active) return false;
-    if ((e2.ctrlKey || e2.metaKey) && e2.key.toLowerCase() === "z") {
-      e2.preventDefault();
-      undoInk();
-      return true;
-    }
-    if (e2.key === "Escape") {
-      toggleInk();
-      return true;
-    }
-    return false;
-  }
-  function tokenColor(token) {
-    const value = getComputedStyle(slideSvg() ?? document.documentElement).getPropertyValue(`--inkflow-${token}`).trim();
-    return value ? normalizeHex(value) : null;
-  }
-  function initInk(wsPort, sender) {
-    send = sender;
-    if (!stage2 || !stageWrap2) return;
-    onSlideMounted(mountInk);
-    onSlideLeaving(() => pad?.cancel());
-    const local = ["localhost", "127.0.0.1", "[::1]"].includes(
-      location.hostname
-    );
-    saving = wsPort !== null && local;
-    if (!saving) settings.keep = false;
-    palette = new InkPalette({
-      settings,
-      keep: saving,
-      undoTitle: "Undo the last stroke (Ctrl+Z)",
-      clearTitle: "Clear this slide's ink",
-      onChange(next) {
-        settings = next;
-        saveSettings(SETTINGS_KEY, settings);
-      },
-      undo: undoInk,
-      clear: clearInk,
-      close: toggleInk
-    });
-    palette.el.hidden = true;
-    stageWrap2.appendChild(palette.el);
-    pad = new InkPad({
-      surface: stageWrap2,
-      active: () => active,
-      fingers: () => settings.fingers,
-      tool: () => settings.tool,
-      allows: (e2) => !isCameraGesture(e2) && !overviewEl?.classList.contains("visible") && !e2.target.closest(".ink-palette"),
-      svg: slideSvg,
-      style: (tool, svg) => styleFor(
-        settings,
-        tool,
-        svg.viewBox.baseVal.width,
-        tokenColor,
-        svg.viewBox.baseVal.height
-      ),
-      *erasables(svg) {
-        yield* svg.querySelectorAll(
-          ".inkflow-live-ink [data-held] path[id]"
-        );
-        if (settings.keep && saving) {
-          yield* svg.querySelectorAll(
-            ".inkflow-ink path[id]"
-          );
-        }
-      },
-      onDraw(live, from, points) {
-        const slide = slideId();
-        if (slide === null) return;
-        send({
-          type: "ink",
-          op: "draw",
-          slide,
-          stroke: live,
-          from,
-          points: flatten(points)
-        });
-      },
-      onAbandon(live) {
-        const slide = slideId();
-        if (slide !== null)
-          send({ type: "ink", op: "abandon", slide, id: live.id });
-      },
-      onStroke(stroke) {
-        const ink = current();
-        const slide = slideId();
-        if (!ink || slide === null) return;
-        const held = {
-          ...stroke,
-          saved: settings.keep && saving
-        };
-        addStrokes(ink, [held], slide);
-        ink.record({ kind: "add", strokes: [held] });
-        mountInk();
-      },
-      onErase(ids, hidden) {
-        const ink = current();
-        const slide = slideId();
-        if (!ink || slide === null) return;
-        const taken = new Set(ids);
-        const held = ink.strokes.filter((s2) => taken.has(s2.id));
-        const heldIds = new Set(held.map((s2) => s2.id));
-        const saved = savedStrokes(
-          hidden.filter((el) => !heldIds.has(el.id))
-        );
-        eraseStrokes(ink, [...held, ...saved], slide);
-        ink.record({ kind: "erase", strokes: [...held, ...saved] });
-        mountInk();
-      }
-    });
-  }
-  function requestInk() {
-    send({ type: "ink", op: "request" });
-  }
-
-  // src/ts/shared/ring.ts
-  function buildStepRing(current2, total) {
-    const size = 20, cx = 10, cy = 10, ro = 9, ri = 5;
-    if (total === 0) {
-      return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:middle"><circle cx="${cx}" cy="${cy}" r="${(ro + ri) / 2}" fill="none" stroke="var(--overlay)" stroke-width="${ro - ri}" opacity="0.2"/></svg>`;
-    }
-    const gap = total > 1 ? 0.15 : 0;
-    const sweep = 2 * Math.PI / total;
-    let paths = "";
-    for (let i2 = 0; i2 < total; i2++) {
-      const a1 = -Math.PI / 2 + i2 * sweep + gap / 2;
-      const a2 = -Math.PI / 2 + (i2 + 1) * sweep - gap / 2;
-      const ox1 = (cx + ro * Math.cos(a1)).toFixed(2), oy1 = (cy + ro * Math.sin(a1)).toFixed(2);
-      const ox2 = (cx + ro * Math.cos(a2)).toFixed(2), oy2 = (cy + ro * Math.sin(a2)).toFixed(2);
-      const ix1 = (cx + ri * Math.cos(a1)).toFixed(2), iy1 = (cy + ri * Math.sin(a1)).toFixed(2);
-      const ix2 = (cx + ri * Math.cos(a2)).toFixed(2), iy2 = (cy + ri * Math.sin(a2)).toFixed(2);
-      const large = a2 - a1 > Math.PI ? 1 : 0;
-      const active2 = i2 < current2;
-      const d2 = `M${ox1},${oy1}A${ro},${ro},0,${large},1,${ox2},${oy2}L${ix2},${iy2}A${ri},${ri},0,${large},0,${ix1},${iy1}Z`;
-      paths += `<path d="${d2}" fill="${active2 ? "var(--text)" : "var(--overlay)"}" opacity="${active2 ? 1 : 0.3}"/>`;
-    }
-    return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:middle" aria-label="Step ${current2} of ${total}">${paths}</svg>`;
-  }
-
-  // src/ts/shared/sections.ts
-  function sectionRuns(slides) {
-    const runs = [];
-    slides.forEach((s2, i2) => {
-      const section = s2.section ?? null;
-      const last = runs[runs.length - 1];
-      if (last && (last.section?.index ?? -1) === (section?.index ?? -1)) {
-        last.end = i2 + 1;
-      } else {
-        runs.push({ section, start: i2, end: i2 + 1 });
-      }
-    });
-    return runs;
-  }
-  function sectionPosition(slides, i2) {
-    const run = sectionRuns(slides).find((r2) => i2 >= r2.start && i2 < r2.end);
-    if (!run?.section) return null;
-    return {
-      name: run.section.name,
-      at: i2 - run.start + 1,
-      of: run.end - run.start
-    };
-  }
-  function gridRows(runs, cols) {
-    return runs.reduce((n2, r2) => n2 + Math.ceil((r2.end - r2.start) / cols), 0);
-  }
-  function verticalNeighbor(boxes, i2, dir) {
-    const me = boxes[i2];
-    if (!me) return i2;
-    const tops = [...new Set(boxes.map((b2) => b2.top))].sort((a2, b2) => a2 - b2);
-    const row = tops.indexOf(me.top) + dir;
-    if (row < 0 || row >= tops.length) return i2;
-    const center = me.left + me.width / 2;
-    let best = i2;
-    let bestD = Number.POSITIVE_INFINITY;
-    boxes.forEach((b2, j2) => {
-      if (b2.top !== tops[row]) return;
-      const d2 = Math.abs(b2.left + b2.width / 2 - center);
-      if (d2 < bestD) {
-        best = j2;
-        bestD = d2;
-      }
-    });
-    return best;
   }
 
   // src/ts/shared/keyframes.ts
@@ -3035,442 +832,6 @@
     });
     applyCodeHighlights(root, step);
     rootStep.set(root, step);
-  }
-
-  // src/ts/presenter/deck-url.ts
-  var SLIDE = "slide";
-  var STEPS = "steps";
-  function hashParams(url) {
-    return new URLSearchParams(url.hash.slice(1));
-  }
-  function positionHref(url, slideIndex, step) {
-    const next = new URL(url.href);
-    const params = hashParams(next);
-    params.set(SLIDE, String(slideIndex + 1));
-    if (step > 0) params.set(STEPS, String(step));
-    else params.delete(STEPS);
-    next.hash = params.toString();
-    return next.href;
-  }
-  function readPosition(url, slideCount) {
-    const params = hashParams(url);
-    const slide = parseInt(params.get(SLIDE) ?? "", 10);
-    const inDeck = !Number.isNaN(slide) && slide >= 1 && slide <= slideCount;
-    const step = parseInt(params.get(STEPS) ?? "0", 10);
-    return {
-      slideIndex: inDeck ? slide - 1 : null,
-      step: !Number.isNaN(step) && step >= 0 ? step : 0
-    };
-  }
-
-  // src/ts/presenter/video.ts
-  var armed = /* @__PURE__ */ new WeakSet();
-  var activeState = /* @__PURE__ */ new WeakMap();
-  function readSpec(v2) {
-    const step = v2.getAttribute("data-play-on-step");
-    const start = v2.getAttribute("data-start");
-    const end = v2.getAttribute("data-end");
-    return {
-      autoplay: v2.hasAttribute("data-autoplay"),
-      loop: v2.hasAttribute("data-loop"),
-      playOnStep: step === null ? null : Number(step),
-      start: start === null ? 0 : Number(start),
-      end: end === null ? null : Number(end)
-    };
-  }
-  function arm(v2, spec) {
-    if (armed.has(v2)) return;
-    armed.add(v2);
-    if (spec.start > 0) {
-      const seek = () => {
-        if (v2.currentTime < spec.start) v2.currentTime = spec.start;
-      };
-      if (v2.readyState >= 1) seek();
-      else v2.addEventListener("loadedmetadata", seek, { once: true });
-    }
-    if (spec.end !== null || spec.loop) {
-      v2.addEventListener("timeupdate", () => {
-        if (spec.end !== null && v2.currentTime >= spec.end) {
-          if (spec.loop) v2.currentTime = spec.start;
-          else v2.pause();
-        }
-      });
-    }
-    if (spec.loop) {
-      v2.addEventListener("ended", () => playFrom(v2, spec.start));
-    }
-  }
-  function playFrom(v2, start) {
-    const go = () => {
-      v2.currentTime = start;
-      void v2.play().catch(() => {
-      });
-    };
-    if (start > 0 && v2.readyState < 1) {
-      v2.addEventListener("loadedmetadata", go, { once: true });
-    } else {
-      go();
-    }
-  }
-  function syncVideos(root, step) {
-    root.querySelectorAll("video").forEach((v2) => {
-      const spec = readSpec(v2);
-      arm(v2, spec);
-      const shouldPlay = spec.autoplay || spec.playOnStep !== null && step >= spec.playOnStep;
-      const wasActive = activeState.get(v2) ?? false;
-      if (shouldPlay && !wasActive) {
-        playFrom(v2, spec.start);
-      } else if (!shouldPlay && wasActive) {
-        v2.pause();
-        v2.currentTime = spec.start;
-      }
-      activeState.set(v2, shouldPlay);
-    });
-  }
-
-  // src/ts/presenter/status.ts
-  var stage3 = document.getElementById("stage");
-  var slideInfo = document.getElementById("slide-info");
-  var stepInfo = document.getElementById("step-info");
-  var mhudSlideInfo = document.getElementById("mhud-slide-info");
-  var mhudStepRing = document.getElementById("mhud-step-ring");
-  var maxStepSlides = null;
-  var maxStepIndex = -1;
-  var maxStepValue = 0;
-  function maxStep2() {
-    if (maxStepSlides === state.slides && maxStepIndex === state.slideIndex)
-      return maxStepValue;
-    const scratch = document.createElement("div");
-    scratch.innerHTML = state.slides[state.slideIndex]?.svg ?? "";
-    maxStepValue = maxStep(scratch);
-    maxStepSlides = state.slides;
-    maxStepIndex = state.slideIndex;
-    return maxStepValue;
-  }
-  var runController = null;
-  var runDriver = null;
-  var runRun = null;
-  var runTo = 0;
-  var runForward = true;
-  function inflightStepDirection() {
-    if (!runController) return null;
-    return runForward ? "forward" : "backward";
-  }
-  function driveRun() {
-    const ctrl = new AbortController();
-    runController = ctrl;
-    const driver2 = runDriver;
-    const run = runRun;
-    const to = runTo;
-    void driver2.animateTo(
-      runForward ? 1 : 0,
-      run.totalMs / 1e3,
-      ctrl.signal,
-      (v2) => seekStepRun(run, v2)
-    ).then(() => {
-      if (ctrl.signal.aborted) return;
-      if (runController === ctrl) {
-        runController = null;
-        runDriver = null;
-        runRun = null;
-      }
-      applyStepInstant(stage3, to);
-      updateStatus();
-    });
-  }
-  function landRun() {
-    if (!runController) return;
-    runController.abort();
-    runController = null;
-    runDriver = null;
-    runRun = null;
-    applyStepInstant(stage3, runTo);
-    syncVideos(stage3, runTo);
-  }
-  function snapStepRun() {
-    if (!runController) return;
-    landRun();
-    updateStatus();
-  }
-  function reverseStepRun() {
-    if (!runController || !runDriver || !runRun) return false;
-    const nextTo = runForward ? runTo - 1 : runTo + 1;
-    if (nextTo < 0) return false;
-    runController.abort();
-    runForward = !runForward;
-    runTo = nextTo;
-    state.step = runTo;
-    applyCodeHighlights(stage3, runTo);
-    syncVideos(stage3, runTo);
-    updateStatus();
-    driveRun();
-    return true;
-  }
-  function settleStepRun() {
-    landRun();
-  }
-  function applyCurrentStep() {
-    landRun();
-    const from = appliedStep(stage3);
-    const to = state.step;
-    applyCodeHighlights(stage3, to);
-    syncVideos(stage3, to);
-    const run = buildStepRun(stage3, from, to);
-    if (run.totalMs <= 0 || from === to) {
-      applyStepInstant(stage3, to);
-      updateStatus();
-      return;
-    }
-    runRun = run;
-    runDriver = new ProgressDriver();
-    runDriver.value = run.forward ? 0 : 1;
-    runTo = to;
-    runForward = run.forward;
-    updateStatus();
-    driveRun();
-  }
-  function applyCurrentStepInstant() {
-    landRun();
-    applyStepInstant(stage3, state.step);
-    syncVideos(stage3, state.step);
-    updateStatus();
-  }
-  function syncURL() {
-    const href = positionHref(
-      new URL(window.location.href),
-      state.slideIndex,
-      state.step
-    );
-    try {
-      history.replaceState(null, "", href);
-    } catch (_2) {
-    }
-  }
-  function readURL() {
-    const { slideIndex, step } = readPosition(
-      new URL(window.location.href),
-      state.slides.length
-    );
-    if (slideIndex !== null) state.slideIndex = slideIndex;
-    state.step = step;
-    return slideIndex !== null;
-  }
-  function updateStatus() {
-    const infoHtml = `<span class="slide-current">${state.slideIndex + 1}</span> / ${state.slides.length}`;
-    const at2 = sectionPosition(state.slides, state.slideIndex);
-    slideInfo.title = at2 ? `${at2.name}: ${at2.at} of ${at2.of}` : "";
-    const ringHtml = buildStepRing(state.step, maxStep2());
-    slideInfo.innerHTML = infoHtml;
-    stepInfo.innerHTML = ringHtml;
-    mhudSlideInfo.innerHTML = infoHtml;
-    mhudStepRing.innerHTML = ringHtml;
-    syncURL();
-  }
-
-  // src/ts/presenter/pv.ts
-  var pvPanel = document.getElementById("pv");
-  var pvResizeHandle = document.getElementById("pv-resize-handle");
-  var pvStrip = document.getElementById("pv-strip");
-  var pvClock = document.getElementById("pv-clock");
-  var pvElapsed = document.getElementById("pv-elapsed");
-  var pvTimerToggle = document.getElementById("pv-timer-toggle");
-  var pvTimerReset = document.getElementById("pv-timer-reset");
-  var pvSlideInfo = document.getElementById("pv-slide-info");
-  var pvSection = document.getElementById("pv-section");
-  var pvStepRing = document.getElementById("pv-step-ring");
-  var pvNextInner = document.getElementById("pv-next-inner");
-  var pvNotes = document.getElementById("pv-notes");
-  var _elapsedAccumMs = 0;
-  var _runningSince = Date.now();
-  function _elapsedMs() {
-    const running = _runningSince === null ? 0 : Date.now() - _runningSince;
-    return _elapsedAccumMs + running;
-  }
-  function _setTimerPaused(paused) {
-    if (paused === (_runningSince === null)) return;
-    if (paused) {
-      _elapsedAccumMs = _elapsedMs();
-      _runningSince = null;
-    } else {
-      _runningSince = Date.now();
-    }
-    pvStrip.classList.toggle("timer-paused", paused);
-    const label = paused ? "Resume timer" : "Pause timer";
-    pvTimerToggle.title = label;
-    pvTimerToggle.setAttribute("aria-label", label);
-    updatePvClock();
-  }
-  function _resetTimer() {
-    _elapsedAccumMs = 0;
-    if (_runningSince !== null) _runningSince = Date.now();
-    updatePvClock();
-  }
-  pvTimerToggle.addEventListener("click", () => {
-    _setTimerPaused(_runningSince !== null);
-  });
-  pvTimerReset.addEventListener("click", _resetTimer);
-  function _pad2(n2) {
-    return String(n2).padStart(2, "0");
-  }
-  function updatePvClock() {
-    const now = /* @__PURE__ */ new Date();
-    pvClock.textContent = `${_pad2(now.getHours())}:${_pad2(now.getMinutes())}:${_pad2(now.getSeconds())}`;
-    const secs = Math.floor(_elapsedMs() / 1e3);
-    const h2 = Math.floor(secs / 3600);
-    const m2 = Math.floor(secs % 3600 / 60);
-    const s2 = secs % 60;
-    pvElapsed.textContent = h2 > 0 ? `${_pad2(h2)}:${_pad2(m2)}:${_pad2(s2)}` : `${_pad2(m2)}:${_pad2(s2)}`;
-  }
-  function updatePvInfo() {
-    const total = state.slides.length;
-    pvSlideInfo.innerHTML = `<span class="slide-current">${total ? state.slideIndex + 1 : "\u2013"}</span> / ${total || "\u2013"}`;
-    pvStepRing.innerHTML = buildStepRing(state.step, maxStep2());
-    if (pvSection) {
-      const at2 = sectionPosition(state.slides, state.slideIndex);
-      pvSection.hidden = !at2;
-      pvSection.textContent = at2 ? `\xA7 ${at2.name} \xB7 ${at2.at}/${at2.of}` : "";
-      pvSection.title = at2 ? `Section \u201C${at2.name}\u201D: slide ${at2.at} of ${at2.of}` : "";
-    }
-  }
-  function _scalePvNext() {
-    const svg = pvNextInner.querySelector("svg");
-    if (!svg) return;
-    const vb = parseViewBox(svg.getAttribute("viewBox"));
-    svg.setAttribute("width", String(vb.w));
-    svg.setAttribute("height", String(vb.h));
-    svg.style.width = `${vb.w}px`;
-    svg.style.height = `${vb.h}px`;
-    const scale = Math.min(
-      pvNextInner.clientWidth / vb.w,
-      pvNextInner.clientHeight / vb.h
-    );
-    const tx = (pvNextInner.clientWidth - vb.w * scale) / 2;
-    const ty = (pvNextInner.clientHeight - vb.h * scale) / 2;
-    svg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
-  }
-  function renderPvNext() {
-    const curMax = maxStep2();
-    let previewSvg = null;
-    let revealStep = 0;
-    if (state.step < curMax) {
-      previewSvg = state.slides[state.slideIndex]?.svg ?? null;
-      revealStep = state.step + 1;
-    } else if (state.slideIndex + 1 < state.slides.length) {
-      previewSvg = state.slides[state.slideIndex + 1].svg;
-    }
-    if (previewSvg === null) {
-      pvNextInner.innerHTML = '<div id="pv-next-empty">END</div>';
-      return;
-    }
-    pvNextInner.innerHTML = previewSvg;
-    const svg = pvNextInner.querySelector("svg");
-    if (svg) applyStepInstant(svg, revealStep);
-    requestAnimationFrame(_scalePvNext);
-  }
-  function renderPvNotes() {
-    pvNotes.innerHTML = state.slides[state.slideIndex]?.notes ?? "";
-    pvNotes.scrollTop = 0;
-  }
-  function renderPv() {
-    updatePvInfo();
-    renderPvNext();
-    renderPvNotes();
-    renderEditButton();
-  }
-  function togglePv() {
-    document.body.classList.toggle("pv-open");
-    pvPanel.addEventListener("transitionend", _scalePvNext, { once: true });
-  }
-  window.addEventListener("resize", _scalePvNext);
-  function _onPvResizeMove(e2) {
-    pvPanel.style.setProperty(
-      "--pv-width",
-      `${window.innerWidth - e2.clientX}px`
-    );
-    _scalePvNext();
-  }
-  function _onPvResizeUp(e2) {
-    pvResizeHandle.releasePointerCapture(e2.pointerId);
-    pvResizeHandle.removeEventListener("pointermove", _onPvResizeMove);
-    pvResizeHandle.removeEventListener("pointerup", _onPvResizeUp);
-    pvPanel.style.transition = "";
-  }
-  pvResizeHandle.addEventListener("pointerdown", (e2) => {
-    e2.preventDefault();
-    pvPanel.style.transition = "none";
-    pvResizeHandle.setPointerCapture(e2.pointerId);
-    pvResizeHandle.addEventListener("pointermove", _onPvResizeMove);
-    pvResizeHandle.addEventListener("pointerup", _onPvResizeUp);
-  });
-
-  // src/ts/shared/deck-styles.ts
-  function applyDeckStyles(msg) {
-    if (msg.styles !== void 0) {
-      const el = document.getElementById("deck-styles");
-      if (el) el.textContent = msg.styles;
-    }
-    if (msg.mode !== void 0)
-      document.documentElement.dataset.theme = msg.mode;
-  }
-
-  // src/ts/shared/identity.ts
-  var NAME_KEY = "inkflow-name";
-  var ID_KEY = "inkflow-key";
-  function read(key) {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  }
-  function write(key, value) {
-    try {
-      localStorage.setItem(key, value);
-    } catch {
-    }
-  }
-  function storedName() {
-    const name = read(NAME_KEY)?.trim();
-    return name ? name.slice(0, 40) : null;
-  }
-  var sessionKey = null;
-  function clientKey() {
-    const stored = read(ID_KEY);
-    if (stored && /^[A-Za-z0-9_-]{16,64}$/.test(stored)) return stored;
-    if (!sessionKey) {
-      const bytes = new Uint8Array(18);
-      crypto.getRandomValues(bytes);
-      sessionKey = Array.from(
-        bytes,
-        (b2) => b2.toString(16).padStart(2, "0")
-      ).join("");
-      write(ID_KEY, sessionKey);
-    }
-    return sessionKey;
-  }
-
-  // src/ts/shared/wsurl.ts
-  var WS_PATH = "/_inkflow/ws";
-  function socketUrl(loc) {
-    const scheme = loc.protocol === "https:" ? "wss" : "ws";
-    return `${scheme}://${loc.host || "localhost"}${WS_PATH}`;
-  }
-  var SENT_AWAY = 4001;
-  function relay() {
-    try {
-      if (window.parent !== window) {
-        return window.parent.__inkflowRelay;
-      }
-    } catch {
-    }
-    return void 0;
-  }
-  function openSocket() {
-    const online = relay();
-    if (!online) return new WebSocket(socketUrl(location));
-    const sock = online.openSocket();
-    window.addEventListener("pagehide", () => sock.close(1001, "page left"));
-    return sock;
   }
 
   // src/ts/shared/morph-math.ts
@@ -3788,12 +1149,12 @@
       })
     }));
   }
-  function round2(value) {
+  function round(value) {
     return Math.round(value * 1e3) / 1e3;
   }
   function serializePathData(segments) {
     return segments.map(
-      (segment) => segment.type === "Z" ? "Z" : `${segment.type} ${segment.points.map((point) => `${round2(point.x)} ${round2(point.y)}`).join(" ")}`
+      (segment) => segment.type === "Z" ? "Z" : `${segment.type} ${segment.points.map((point) => `${round(point.x)} ${round(point.y)}`).join(" ")}`
     ).join(" ");
   }
 
@@ -3965,6 +1326,41 @@
     }));
   }
 
+  // src/ts/presenter/progress-driver.ts
+  var ProgressDriver = class {
+    value = 0;
+    // The end the most recent animateTo is travelling toward. Callers read this to
+    // decide which way a reversal should go.
+    heading = 1;
+    animateTo(target, durationSeconds, signal, onFrame) {
+      this.heading = target;
+      const ratePerMillisecond = 1 / (durationSeconds * 1e3);
+      return new Promise((resolve) => {
+        let lastTimestamp = null;
+        const step = (timestamp) => {
+          if (signal.aborted) {
+            resolve();
+            return;
+          }
+          if (lastTimestamp === null) lastTimestamp = timestamp;
+          const direction = target >= this.value ? 1 : -1;
+          this.value += direction * ratePerMillisecond * (timestamp - lastTimestamp);
+          lastTimestamp = timestamp;
+          const reachedTarget = direction === 1 && this.value >= target || direction === -1 && this.value <= target;
+          if (reachedTarget) {
+            this.value = target;
+            onFrame(this.value);
+            resolve();
+            return;
+          }
+          onFrame(this.value);
+          requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      });
+    }
+  };
+
   // src/ts/presenter/morph.ts
   var LEAF_SELECTOR = "rect, circle, ellipse, line, polyline, polygon, path, text, image, foreignObject";
   var DEFINITION_SUBTREE_SELECTOR = "defs, marker, symbol, clipPath, mask, pattern";
@@ -4045,8 +1441,8 @@
     );
   }
   function readFontSize(node) {
-    const px = parseFloat(getComputedStyle(node).fontSize);
-    return Number.isFinite(px) ? px : 0;
+    const px2 = parseFloat(getComputedStyle(node).fontSize);
+    return Number.isFinite(px2) ? px2 : 0;
   }
   function textAnchorLocal(node) {
     return {
@@ -4685,8 +2081,1077 @@
     }
   };
 
+  // src/ts/shared/ring.ts
+  function buildStepRing(current2, total) {
+    const size = 20, cx = 10, cy = 10, ro = 9, ri = 5;
+    if (total === 0) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:middle"><circle cx="${cx}" cy="${cy}" r="${(ro + ri) / 2}" fill="none" stroke="var(--overlay)" stroke-width="${ro - ri}" opacity="0.2"/></svg>`;
+    }
+    const gap = total > 1 ? 0.15 : 0;
+    const sweep = 2 * Math.PI / total;
+    let paths = "";
+    for (let i2 = 0; i2 < total; i2++) {
+      const a1 = -Math.PI / 2 + i2 * sweep + gap / 2;
+      const a2 = -Math.PI / 2 + (i2 + 1) * sweep - gap / 2;
+      const ox1 = (cx + ro * Math.cos(a1)).toFixed(2), oy1 = (cy + ro * Math.sin(a1)).toFixed(2);
+      const ox2 = (cx + ro * Math.cos(a2)).toFixed(2), oy2 = (cy + ro * Math.sin(a2)).toFixed(2);
+      const ix1 = (cx + ri * Math.cos(a1)).toFixed(2), iy1 = (cy + ri * Math.sin(a1)).toFixed(2);
+      const ix2 = (cx + ri * Math.cos(a2)).toFixed(2), iy2 = (cy + ri * Math.sin(a2)).toFixed(2);
+      const large = a2 - a1 > Math.PI ? 1 : 0;
+      const active2 = i2 < current2;
+      const d2 = `M${ox1},${oy1}A${ro},${ro},0,${large},1,${ox2},${oy2}L${ix2},${iy2}A${ri},${ri},0,${large},0,${ix1},${iy1}Z`;
+      paths += `<path d="${d2}" fill="${active2 ? "var(--text)" : "var(--overlay)"}" opacity="${active2 ? 1 : 0.3}"/>`;
+    }
+    return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:middle" aria-label="Step ${current2} of ${total}">${paths}</svg>`;
+  }
+
+  // src/ts/shared/sections.ts
+  function sectionRuns(slides) {
+    const runs = [];
+    slides.forEach((s2, i2) => {
+      const section = s2.section ?? null;
+      const last = runs[runs.length - 1];
+      if (last && (last.section?.index ?? -1) === (section?.index ?? -1)) {
+        last.end = i2 + 1;
+      } else {
+        runs.push({ section, start: i2, end: i2 + 1 });
+      }
+    });
+    return runs;
+  }
+  function sectionPosition(slides, i2) {
+    const run = sectionRuns(slides).find((r2) => i2 >= r2.start && i2 < r2.end);
+    if (!run?.section) return null;
+    return {
+      name: run.section.name,
+      at: i2 - run.start + 1,
+      of: run.end - run.start
+    };
+  }
+  function gridRows(runs, cols) {
+    return runs.reduce((n2, r2) => n2 + Math.ceil((r2.end - r2.start) / cols), 0);
+  }
+  function verticalNeighbor(boxes, i2, dir) {
+    const me = boxes[i2];
+    if (!me) return i2;
+    const tops = [...new Set(boxes.map((b2) => b2.top))].sort((a2, b2) => a2 - b2);
+    const row = tops.indexOf(me.top) + dir;
+    if (row < 0 || row >= tops.length) return i2;
+    const center = me.left + me.width / 2;
+    let best = i2;
+    let bestD = Number.POSITIVE_INFINITY;
+    boxes.forEach((b2, j2) => {
+      if (b2.top !== tops[row]) return;
+      const d2 = Math.abs(b2.left + b2.width / 2 - center);
+      if (d2 < bestD) {
+        best = j2;
+        bestD = d2;
+      }
+    });
+    return best;
+  }
+
+  // src/ts/presenter/deck-url.ts
+  var SLIDE = "slide";
+  var STEPS = "steps";
+  function hashParams(url) {
+    return new URLSearchParams(url.hash.slice(1));
+  }
+  function positionHref(url, slideIndex, step) {
+    const next = new URL(url.href);
+    const params = hashParams(next);
+    params.set(SLIDE, String(slideIndex + 1));
+    if (step > 0) params.set(STEPS, String(step));
+    else params.delete(STEPS);
+    next.hash = params.toString();
+    return next.href;
+  }
+  function readPosition(url, slideCount) {
+    const params = hashParams(url);
+    const slide = parseInt(params.get(SLIDE) ?? "", 10);
+    const inDeck = !Number.isNaN(slide) && slide >= 1 && slide <= slideCount;
+    const step = parseInt(params.get(STEPS) ?? "0", 10);
+    return {
+      slideIndex: inDeck ? slide - 1 : null,
+      step: !Number.isNaN(step) && step >= 0 ? step : 0
+    };
+  }
+
+  // src/ts/presenter/video.ts
+  var armed = /* @__PURE__ */ new WeakSet();
+  var activeState = /* @__PURE__ */ new WeakMap();
+  function readSpec(v2) {
+    const step = v2.getAttribute("data-play-on-step");
+    const start = v2.getAttribute("data-start");
+    const end = v2.getAttribute("data-end");
+    return {
+      autoplay: v2.hasAttribute("data-autoplay"),
+      loop: v2.hasAttribute("data-loop"),
+      playOnStep: step === null ? null : Number(step),
+      start: start === null ? 0 : Number(start),
+      end: end === null ? null : Number(end)
+    };
+  }
+  function arm(v2, spec) {
+    if (armed.has(v2)) return;
+    armed.add(v2);
+    if (spec.start > 0) {
+      const seek = () => {
+        if (v2.currentTime < spec.start) v2.currentTime = spec.start;
+      };
+      if (v2.readyState >= 1) seek();
+      else v2.addEventListener("loadedmetadata", seek, { once: true });
+    }
+    if (spec.end !== null || spec.loop) {
+      v2.addEventListener("timeupdate", () => {
+        if (spec.end !== null && v2.currentTime >= spec.end) {
+          if (spec.loop) v2.currentTime = spec.start;
+          else v2.pause();
+        }
+      });
+    }
+    if (spec.loop) {
+      v2.addEventListener("ended", () => playFrom(v2, spec.start));
+    }
+  }
+  function playFrom(v2, start) {
+    const go = () => {
+      v2.currentTime = start;
+      void v2.play().catch(() => {
+      });
+    };
+    if (start > 0 && v2.readyState < 1) {
+      v2.addEventListener("loadedmetadata", go, { once: true });
+    } else {
+      go();
+    }
+  }
+  function syncVideos(root, step) {
+    root.querySelectorAll("video").forEach((v2) => {
+      const spec = readSpec(v2);
+      arm(v2, spec);
+      const shouldPlay = spec.autoplay || spec.playOnStep !== null && step >= spec.playOnStep;
+      const wasActive = activeState.get(v2) ?? false;
+      if (shouldPlay && !wasActive) {
+        playFrom(v2, spec.start);
+      } else if (!shouldPlay && wasActive) {
+        v2.pause();
+        v2.currentTime = spec.start;
+      }
+      activeState.set(v2, shouldPlay);
+    });
+  }
+
+  // src/ts/presenter/status.ts
+  var stage = document.getElementById("stage");
+  var slideInfo = document.getElementById("slide-info");
+  var stepInfo = document.getElementById("step-info");
+  var mhudSlideInfo = document.getElementById("mhud-slide-info");
+  var mhudStepRing = document.getElementById("mhud-step-ring");
+  var maxStepSlides = null;
+  var maxStepIndex = -1;
+  var maxStepValue = 0;
+  function maxStep2() {
+    if (maxStepSlides === state.slides && maxStepIndex === state.slideIndex)
+      return maxStepValue;
+    const scratch = document.createElement("div");
+    scratch.innerHTML = state.slides[state.slideIndex]?.svg ?? "";
+    maxStepValue = maxStep(scratch);
+    maxStepSlides = state.slides;
+    maxStepIndex = state.slideIndex;
+    return maxStepValue;
+  }
+  var runController = null;
+  var runDriver = null;
+  var runRun = null;
+  var runTo = 0;
+  var runForward = true;
+  function inflightStepDirection() {
+    if (!runController) return null;
+    return runForward ? "forward" : "backward";
+  }
+  function driveRun() {
+    const ctrl = new AbortController();
+    runController = ctrl;
+    const driver2 = runDriver;
+    const run = runRun;
+    const to = runTo;
+    void driver2.animateTo(
+      runForward ? 1 : 0,
+      run.totalMs / 1e3,
+      ctrl.signal,
+      (v2) => seekStepRun(run, v2)
+    ).then(() => {
+      if (ctrl.signal.aborted) return;
+      if (runController === ctrl) {
+        runController = null;
+        runDriver = null;
+        runRun = null;
+      }
+      applyStepInstant(stage, to);
+      updateStatus();
+    });
+  }
+  function landRun() {
+    if (!runController) return;
+    runController.abort();
+    runController = null;
+    runDriver = null;
+    runRun = null;
+    applyStepInstant(stage, runTo);
+    syncVideos(stage, runTo);
+  }
+  function snapStepRun() {
+    if (!runController) return;
+    landRun();
+    updateStatus();
+  }
+  function reverseStepRun() {
+    if (!runController || !runDriver || !runRun) return false;
+    const nextTo = runForward ? runTo - 1 : runTo + 1;
+    if (nextTo < 0) return false;
+    runController.abort();
+    runForward = !runForward;
+    runTo = nextTo;
+    state.step = runTo;
+    applyCodeHighlights(stage, runTo);
+    syncVideos(stage, runTo);
+    updateStatus();
+    driveRun();
+    return true;
+  }
+  function settleStepRun() {
+    landRun();
+  }
+  function applyCurrentStep() {
+    landRun();
+    const from = appliedStep(stage);
+    const to = state.step;
+    applyCodeHighlights(stage, to);
+    syncVideos(stage, to);
+    const run = buildStepRun(stage, from, to);
+    if (run.totalMs <= 0 || from === to) {
+      applyStepInstant(stage, to);
+      updateStatus();
+      return;
+    }
+    runRun = run;
+    runDriver = new ProgressDriver();
+    runDriver.value = run.forward ? 0 : 1;
+    runTo = to;
+    runForward = run.forward;
+    updateStatus();
+    driveRun();
+  }
+  function applyCurrentStepInstant() {
+    landRun();
+    applyStepInstant(stage, state.step);
+    syncVideos(stage, state.step);
+    updateStatus();
+  }
+  function syncURL() {
+    const href = positionHref(
+      new URL(window.location.href),
+      state.slideIndex,
+      state.step
+    );
+    try {
+      history.replaceState(null, "", href);
+    } catch (_2) {
+    }
+  }
+  function readURL() {
+    const { slideIndex, step } = readPosition(
+      new URL(window.location.href),
+      state.slides.length
+    );
+    if (slideIndex !== null) state.slideIndex = slideIndex;
+    state.step = step;
+    return slideIndex !== null;
+  }
+  function updateStatus() {
+    const infoHtml = `<span class="slide-current">${state.slideIndex + 1}</span> / ${state.slides.length}`;
+    const at2 = sectionPosition(state.slides, state.slideIndex);
+    slideInfo.title = at2 ? `${at2.name}: ${at2.at} of ${at2.of}` : "";
+    const ringHtml = buildStepRing(state.step, maxStep2());
+    slideInfo.innerHTML = infoHtml;
+    stepInfo.innerHTML = ringHtml;
+    mhudSlideInfo.innerHTML = infoHtml;
+    mhudStepRing.innerHTML = ringHtml;
+    syncURL();
+  }
+
+  // src/ts/shared/gestures.ts
+  var DELTA_LINE = 1;
+  var DELTA_PAGE = 2;
+  var LINE_PX = 40;
+  var PAGE_PX = 800;
+  function wheelPixels(delta, mode, pagePx = PAGE_PX) {
+    if (mode === DELTA_LINE) return delta * LINE_PX;
+    if (mode === DELTA_PAGE) return delta * pagePx;
+    return delta;
+  }
+  var PINCH_PER_PX = 0.01;
+  var MAX_WHEEL_STEP = Math.log(1.2);
+  function wheelZoomLog(deltaY, deltaMode) {
+    const z = -wheelPixels(deltaY, deltaMode) * PINCH_PER_PX;
+    return Math.min(Math.max(z, -MAX_WHEEL_STEP), MAX_WHEEL_STEP);
+  }
+  function midpoint(a2, b2) {
+    return { x: (a2.x + b2.x) / 2, y: (a2.y + b2.y) / 2 };
+  }
+  function distance(a2, b2) {
+    return Math.hypot(a2.x - b2.x, a2.y - b2.y);
+  }
+  var TOUCH_DEFAULTS = {
+    windowMs: 200,
+    slopPx: 10,
+    tapMs: 300,
+    doubleTapMs: 350,
+    doubleTapPx: 30
+  };
+  var TouchTracker = class {
+    opts;
+    phase = "idle";
+    fingers = /* @__PURE__ */ new Map();
+    first = null;
+    moved = false;
+    committed = false;
+    pair = null;
+    last = null;
+    lastTap = null;
+    // This sequence had a second finger: nothing it does is a swipe or tap.
+    multi = false;
+    constructor(opts = {}) {
+      this.opts = { ...TOUCH_DEFAULTS, ...opts };
+    }
+    // Fingers are down and at least one of them is the gesture's (a pinch,
+    // or one left over from it): clicks and swipes are not the page's.
+    get claimed() {
+      return this.phase === "pinch" || this.phase === "spent";
+    }
+    get pinching() {
+      return this.phase === "pinch";
+    }
+    // The sequence in progress has had more than one finger.
+    get multiTouch() {
+      return this.multi;
+    }
+    get active() {
+      return this.phase !== "idle";
+    }
+    // The single finger's id while one finger acts alone.
+    get single() {
+      return this.phase === "single" ? this.first?.id ?? null : null;
+    }
+    get isCommitted() {
+      return this.committed;
+    }
+    has(id) {
+      return this.fingers.has(id);
+    }
+    down(id, at2, t2) {
+      const finger = { id, start: at2, at: at2, t0: t2 };
+      if (this.phase === "idle") {
+        this.fingers.clear();
+        this.fingers.set(id, finger);
+        this.first = finger;
+        this.moved = false;
+        this.committed = false;
+        this.multi = false;
+        this.phase = "single";
+        return { pass: true };
+      }
+      this.fingers.set(id, finger);
+      this.multi = true;
+      if (this.phase === "single" && this.first) {
+        if (this.committed) return { pass: false };
+        this.lastTap = null;
+        this.startPinch(this.first.id, id);
+        return { pass: false, cancelSingle: true, pinchStart: true };
+      }
+      if (this.phase === "spent" && this.fingers.size === 2) {
+        const other = [...this.fingers.keys()].find((k2) => k2 !== id);
+        if (other !== void 0) {
+          this.startPinch(other, id);
+          return { pass: false, pinchStart: true };
+        }
+      }
+      return { pass: false };
+    }
+    startPinch(a2, b2) {
+      this.phase = "pinch";
+      this.pair = [a2, b2];
+      this.last = this.measure();
+    }
+    measure() {
+      if (!this.pair) return null;
+      const a2 = this.fingers.get(this.pair[0]);
+      const b2 = this.fingers.get(this.pair[1]);
+      if (!a2 || !b2) return null;
+      return { mid: midpoint(a2.at, b2.at), dist: distance(a2.at, b2.at) };
+    }
+    move(id, at2, t2) {
+      const f2 = this.fingers.get(id);
+      if (!f2) return { pass: true };
+      f2.at = at2;
+      if (this.phase === "single" && f2 === this.first) {
+        if (!this.moved && distance(at2, f2.start) > this.opts.slopPx)
+          this.moved = true;
+        return { pass: true, commit: this.tryCommit(t2) };
+      }
+      if (this.phase === "pinch" && this.pair?.includes(id)) {
+        const now = this.measure();
+        const before = this.last;
+        if (!now || !before) return { pass: false };
+        this.last = now;
+        const scale = before.dist > 0 && now.dist > 0 ? now.dist / before.dist : 1;
+        return {
+          pass: false,
+          pinch: { scale, from: before.mid, to: now.mid }
+        };
+      }
+      return { pass: false };
+    }
+    // Time passing with no event: a finger that moved past the slop early
+    // commits once the window is over, even if it then holds still.
+    tick(t2) {
+      return { pass: true, commit: this.tryCommit(t2) };
+    }
+    tryCommit(t2) {
+      if (this.phase !== "single" || this.committed || !this.first)
+        return false;
+      if (!this.moved || t2 - this.first.t0 < this.opts.windowMs) return false;
+      this.committed = true;
+      return true;
+    }
+    // `cancelled`: the browser took the pointer back (pointercancel).
+    up(id, at2, t2, cancelled = false) {
+      const f2 = this.fingers.get(id);
+      if (!f2) return { pass: true };
+      f2.at = at2;
+      this.fingers.delete(id);
+      if (this.phase === "single" && f2 === this.first) {
+        const release = !this.committed;
+        if (this.fingers.size) {
+          this.phase = "spent";
+          this.first = null;
+        } else this.reset();
+        const verdict = {
+          pass: true,
+          release,
+          moved: this.moved
+        };
+        if (!cancelled && !this.moved && distance(at2, f2.start) <= this.opts.slopPx && t2 - f2.t0 <= this.opts.tapMs) {
+          verdict.tap = f2.start;
+          const prev = this.lastTap;
+          if (prev && t2 - prev.t <= this.opts.doubleTapMs && distance(prev.at, f2.start) <= this.opts.doubleTapPx) {
+            verdict.doubleTap = f2.start;
+            this.lastTap = null;
+          } else {
+            this.lastTap = { at: f2.start, t: t2 };
+          }
+        } else {
+          this.lastTap = null;
+        }
+        return verdict;
+      }
+      const ended = this.phase === "pinch" && !!this.pair?.includes(id);
+      if (ended) {
+        this.phase = "spent";
+        this.pair = null;
+        this.last = null;
+      }
+      if (this.fingers.size === 0) this.reset();
+      return ended ? { pass: false, pinchEnd: true } : { pass: false };
+    }
+    reset() {
+      this.phase = "idle";
+      this.fingers.clear();
+      this.first = null;
+      this.pair = null;
+      this.last = null;
+      this.committed = false;
+    }
+  };
+
+  // src/ts/shared/gesturepad.ts
+  var CLICK_AFTER_MS = 400;
+  var PALM_MS = 1500;
+  var WHEEL_END_MS = 160;
+  function at(e2) {
+    return { x: e2.clientX, y: e2.clientY };
+  }
+  function replica(type, src, pos = src) {
+    return new PointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      pointerId: src.pointerId,
+      pointerType: src.pointerType,
+      isPrimary: src.isPrimary,
+      clientX: pos.clientX,
+      clientY: pos.clientY,
+      screenX: pos.screenX,
+      screenY: pos.screenY,
+      width: pos.width,
+      height: pos.height,
+      pressure: type === "pointerup" ? 0 : pos.pressure || 0.5,
+      button: type === "pointermove" ? -1 : 0,
+      buttons: type === "pointerup" ? 0 : 1,
+      ctrlKey: pos.ctrlKey,
+      shiftKey: pos.shiftKey,
+      altKey: pos.altKey,
+      metaKey: pos.metaKey
+    });
+  }
+  function stop(e2) {
+    e2.stopImmediatePropagation();
+    if (e2.cancelable) e2.preventDefault();
+  }
+  var GesturePad = class {
+    touch;
+    host;
+    // Touch pointers in the current sequence.
+    ours = /* @__PURE__ */ new Set();
+    deferred = null;
+    replaying = false;
+    timer = 0;
+    clicksAfter = -Infinity;
+    penNear = -Infinity;
+    pensDown = /* @__PURE__ */ new Set();
+    // This frame's batch.
+    frame = 0;
+    zoomLog = 0;
+    from = null;
+    to = null;
+    source = "wheel";
+    panX = 0;
+    panY = 0;
+    wheelTimer = 0;
+    safariScale = 1;
+    constructor(host, tracker = new TouchTracker()) {
+      this.host = host;
+      this.touch = tracker;
+      const opts = { capture: true };
+      window.addEventListener("pointerdown", (e2) => this.down(e2), opts);
+      window.addEventListener("pointermove", (e2) => this.move(e2), opts);
+      window.addEventListener("pointerup", (e2) => this.up(e2, false), opts);
+      window.addEventListener("pointercancel", (e2) => this.up(e2, true), opts);
+      window.addEventListener("click", (e2) => this.claimClick(e2), opts);
+      window.addEventListener("dblclick", (e2) => this.claimClick(e2), opts);
+      const s2 = host.surface;
+      s2.addEventListener("wheel", (e2) => this.wheel(e2), { passive: false });
+      s2.addEventListener("gesturestart", (e2) => this.gesture(e2, "start"));
+      s2.addEventListener("gesturechange", (e2) => this.gesture(e2, "change"));
+      s2.addEventListener("gestureend", (e2) => this.gesture(e2, "end"));
+    }
+    // The touch sequence in progress (or the one that just ended) had a
+    // second finger: it is no swipe and no tap.
+    get multiTouch() {
+      return this.touch.multiTouch;
+    }
+    // Two fingers are zooming, or one is left over from them.
+    get claimed() {
+      return this.touch.claimed;
+    }
+    // ── Touch ──
+    palm() {
+      return this.pensDown.size > 0 || performance.now() - this.penNear < PALM_MS;
+    }
+    down(e2) {
+      if (e2.pointerType === "pen") {
+        this.penNear = performance.now();
+        this.pensDown.add(e2.pointerId);
+        return;
+      }
+      if (e2.pointerType !== "touch" || this.replaying) return;
+      const target = e2.target;
+      if (!target || !this.host.surface.contains(target)) return;
+      if (!this.touch.active) {
+        if (this.palm() || this.host.accepts?.(e2) === false) return;
+      }
+      const v2 = this.touch.down(e2.pointerId, at(e2), performance.now());
+      this.ours.add(e2.pointerId);
+      if (v2.cancelSingle) this.rollback();
+      if (v2.pinchStart) {
+        this.source = "pinch";
+        this.clicksAfter = Infinity;
+      }
+      if (!v2.pass) {
+        stop(e2);
+        return;
+      }
+      if (this.host.defer?.(e2)) {
+        this.deferred = { target, down: e2, last: e2 };
+        stop(e2);
+        clearTimeout(this.timer);
+        this.timer = window.setTimeout(
+          () => this.tick(),
+          this.touch.opts.windowMs + 10
+        );
+      }
+    }
+    rollback() {
+      if (this.deferred) {
+        this.deferred = null;
+        clearTimeout(this.timer);
+      } else {
+        this.host.cancelSingle?.();
+      }
+    }
+    move(e2) {
+      if (e2.pointerType === "pen") {
+        this.penNear = performance.now();
+        return;
+      }
+      if (this.replaying || !this.ours.has(e2.pointerId)) return;
+      const v2 = this.touch.move(e2.pointerId, at(e2), performance.now());
+      this.queuePinch(v2);
+      if (!v2.pass) {
+        stop(e2);
+        return;
+      }
+      const d2 = this.deferred;
+      if (d2 && d2.down.pointerId === e2.pointerId) {
+        if (v2.commit) {
+          this.replayDown();
+        } else {
+          d2.last = e2;
+          stop(e2);
+        }
+      }
+    }
+    tick() {
+      const d2 = this.deferred;
+      if (!d2) return;
+      const v2 = this.touch.tick(performance.now());
+      if (!v2.commit) {
+        return;
+      }
+      this.replayDown();
+      this.replay(replica("pointermove", d2.down, d2.last), d2.target);
+    }
+    replayDown() {
+      const d2 = this.deferred;
+      if (!d2) return;
+      this.deferred = null;
+      clearTimeout(this.timer);
+      this.replay(replica("pointerdown", d2.down), d2.target);
+    }
+    replay(e2, target) {
+      const aim = target.isConnected ? target : document.elementFromPoint(e2.clientX, e2.clientY);
+      if (!aim) return;
+      this.replaying = true;
+      try {
+        aim.dispatchEvent(e2);
+      } finally {
+        this.replaying = false;
+      }
+    }
+    up(e2, cancelled) {
+      if (e2.pointerType === "pen") {
+        this.penNear = performance.now();
+        this.pensDown.delete(e2.pointerId);
+        return;
+      }
+      if (this.replaying || !this.ours.has(e2.pointerId)) return;
+      const v2 = this.touch.up(
+        e2.pointerId,
+        at(e2),
+        performance.now(),
+        cancelled
+      );
+      this.ours.delete(e2.pointerId);
+      if (!this.touch.active) this.ours.clear();
+      if (v2.pinchEnd) {
+        this.flush();
+        this.host.zoomEnd?.("pinch");
+      }
+      if (this.touch.multiTouch) {
+        this.clicksAfter = this.touch.active ? Infinity : performance.now() + CLICK_AFTER_MS;
+      }
+      if (!v2.pass) {
+        stop(e2);
+        return;
+      }
+      const d2 = this.deferred;
+      if (d2 && d2.down.pointerId === e2.pointerId) {
+        if (cancelled) {
+          this.deferred = null;
+          clearTimeout(this.timer);
+          stop(e2);
+          return;
+        }
+        this.replayDown();
+        if (v2.moved)
+          this.replay(replica("pointermove", d2.down, e2), d2.target);
+      }
+      if (v2.doubleTap) {
+        this.host.doubleTap?.(v2.doubleTap, e2.target);
+      }
+    }
+    claimClick(e2) {
+      if (this.touch.claimed || performance.now() < this.clicksAfter) {
+        e2.stopImmediatePropagation();
+        e2.preventDefault();
+      }
+    }
+    // ── Wheel and Safari gestures ──
+    wheel(e2) {
+      if (this.host.acceptsWheel?.(e2) === false) return;
+      if (e2.ctrlKey || e2.metaKey) {
+        e2.preventDefault();
+        this.zoomLog += wheelZoomLog(e2.deltaY, e2.deltaMode);
+        this.source = "wheel";
+        this.from = at(e2);
+        this.to = at(e2);
+        clearTimeout(this.wheelTimer);
+        this.wheelTimer = window.setTimeout(() => {
+          this.flush();
+          this.host.zoomEnd?.("wheel");
+        }, WHEEL_END_MS);
+        this.schedule();
+        return;
+      }
+      if (!this.host.pan || !this.host.canPan?.(e2)) return;
+      e2.preventDefault();
+      const page = this.host.surface.clientHeight || void 0;
+      this.panX += wheelPixels(e2.deltaX, e2.deltaMode, page);
+      this.panY += wheelPixels(e2.deltaY, e2.deltaMode, page);
+      this.schedule();
+    }
+    gesture(raw, phase) {
+      const e2 = raw;
+      e2.preventDefault();
+      if (this.touch.active) return;
+      if (phase === "start") {
+        this.safariScale = 1;
+        return;
+      }
+      if (phase === "end") {
+        this.flush();
+        this.host.zoomEnd?.("gesture");
+        return;
+      }
+      if (!(e2.scale > 0)) return;
+      this.zoomLog += Math.log(e2.scale / this.safariScale);
+      this.safariScale = e2.scale;
+      this.source = "gesture";
+      this.from = at(e2);
+      this.to = at(e2);
+      this.schedule();
+    }
+    // ── Frames ──
+    queuePinch(v2) {
+      if (!v2.pinch) return;
+      this.zoomLog += Math.log(v2.pinch.scale);
+      this.from ??= v2.pinch.from;
+      this.to = v2.pinch.to;
+      this.source = "pinch";
+      this.schedule();
+    }
+    schedule() {
+      if (this.frame) return;
+      this.frame = requestAnimationFrame(() => this.flush());
+    }
+    // Apply this frame's batch now.
+    flush() {
+      if (this.frame) cancelAnimationFrame(this.frame);
+      this.frame = 0;
+      const log = this.zoomLog;
+      const from = this.from;
+      const to = this.to;
+      const dx = this.panX;
+      const dy = this.panY;
+      this.zoomLog = 0;
+      this.from = null;
+      this.to = null;
+      this.panX = 0;
+      this.panY = 0;
+      if (from && to && (log !== 0 || from.x !== to.x || from.y !== to.y)) {
+        this.host.zoom(Math.exp(log), from, to, this.source);
+      }
+      if (dx || dy) this.host.pan?.(dx, dy);
+    }
+  };
+
+  // src/ts/shared/zoom-camera.ts
+  function clamp(n2, lo, hi) {
+    return Math.min(Math.max(n2, lo), hi);
+  }
+  function scaleOf(vb, base) {
+    return base.w / vb.w;
+  }
+  function isZoomedIn(vb, base, epsilon = 1e-3) {
+    return scaleOf(vb, base) > 1 + epsilon;
+  }
+  function clampToBounds(vb, base) {
+    const w2 = Math.min(vb.w, base.w);
+    const h2 = Math.min(vb.h, base.h);
+    const x2 = w2 >= base.w ? base.x + (base.w - w2) / 2 : clamp(vb.x, base.x, base.x + base.w - w2);
+    const y2 = h2 >= base.h ? base.y + (base.h - h2) / 2 : clamp(vb.y, base.y, base.y + base.h - h2);
+    return { x: x2, y: y2, w: w2, h: h2 };
+  }
+  function zoomAt(current2, base, factor, focus, limits) {
+    const targetScale = clamp(
+      scaleOf(current2, base) * factor,
+      limits.minScale,
+      limits.maxScale
+    );
+    const w2 = base.w / targetScale;
+    const h2 = base.h / targetScale;
+    const fx = (focus.ux - current2.x) / current2.w;
+    const fy = (focus.uy - current2.y) / current2.h;
+    return clampToBounds(
+      { x: focus.ux - fx * w2, y: focus.uy - fy * h2, w: w2, h: h2 },
+      base
+    );
+  }
+  function panBy(current2, base, dxUser, dyUser) {
+    return clampToBounds(
+      { ...current2, x: current2.x + dxUser, y: current2.y + dyUser },
+      base
+    );
+  }
+  function lerpViewBox(a2, b2, t2) {
+    return {
+      x: a2.x + (b2.x - a2.x) * t2,
+      y: a2.y + (b2.y - a2.y) * t2,
+      w: a2.w + (b2.w - a2.w) * t2,
+      h: a2.h + (b2.h - a2.h) * t2
+    };
+  }
+
+  // src/ts/presenter/zoom.ts
+  var stage2 = document.getElementById("stage");
+  var stageWrap = document.getElementById("stage-wrap");
+  var indicator = document.getElementById("zoom-indicator");
+  var LIMITS = { minScale: 1, maxScale: 8 };
+  var KEY_ZOOM_STEP = 1.4;
+  var KEY_ANIM_MS = 140;
+  var RESET_ANIM_MS = 240;
+  var NAV_RESET_MS = 150;
+  var EASE = cubicBezierEasing("cubic-bezier(0.22, 1, 0.36, 1)");
+  var baseViewBox = null;
+  var camera = null;
+  var navReset = null;
+  var dragStartCamera = null;
+  var dragStartInverse = null;
+  var dragStartClientX = 0;
+  var dragStartClientY = 0;
+  function currentSvg() {
+    return stage2?.querySelector("svg") ?? null;
+  }
+  function clientToUser(clientX, clientY, inverse) {
+    const inv = inverse ?? currentSvg()?.getScreenCTM()?.inverse();
+    if (!inv) return null;
+    const p2 = new DOMPoint(clientX, clientY).matrixTransform(inv);
+    return { ux: p2.x, uy: p2.y };
+  }
+  function ensureBase() {
+    if (camera && baseViewBox) return true;
+    const svg = currentSvg();
+    if (!svg) return false;
+    baseViewBox = parseViewBox(svg.getAttribute("viewBox"));
+    camera = { ...baseViewBox };
+    return true;
+  }
+  function renderIndicator() {
+    if (!indicator) return;
+    const factor = camera && baseViewBox ? scaleOf(camera, baseViewBox) : 1;
+    indicator.textContent = `${factor.toFixed(1)}\xD7`;
+    indicator.toggleAttribute("data-active", factor > 1.01);
+  }
+  function applyCamera() {
+    const svg = currentSvg();
+    if (!svg || !camera) return;
+    svg.setAttribute("viewBox", formatViewBox(camera));
+    renderIndicator();
+  }
+  var driver = new ProgressDriver();
+  var animController = null;
+  function cancelAnim() {
+    animController?.abort();
+    animController = null;
+  }
+  function animateCameraTo(target, ms, onDone) {
+    cancelAnim();
+    if (!camera) {
+      camera = { ...target };
+      applyCamera();
+      onDone?.();
+      return;
+    }
+    const start = { ...camera };
+    const controller2 = new AbortController();
+    animController = controller2;
+    driver.value = 0;
+    driver.animateTo(1, ms / 1e3, controller2.signal, (p2) => {
+      camera = p2 >= 1 ? { ...target } : lerpViewBox(start, target, EASE(p2));
+      applyCamera();
+    }).then(() => {
+      if (animController === controller2) animController = null;
+      if (!controller2.signal.aborted) onDone?.();
+    });
+  }
+  function endDrag() {
+    dragStartCamera = null;
+    dragStartInverse = null;
+    document.body.classList.remove("zoom-grabbing");
+  }
+  function resetCamera() {
+    cancelAnim();
+    const svg = currentSvg();
+    if (svg && baseViewBox) {
+      svg.setAttribute("viewBox", formatViewBox(baseViewBox));
+    }
+    baseViewBox = null;
+    camera = null;
+    endDrag();
+    renderIndicator();
+  }
+  function cameraIsZoomed() {
+    return !!camera && !!baseViewBox && isZoomedIn(camera, baseViewBox);
+  }
+  function runNavReset() {
+    const fn = navReset;
+    navReset = null;
+    fn?.();
+  }
+  function resetCameraThen(after) {
+    if (!cameraIsZoomed() || !baseViewBox) {
+      navReset = null;
+      after();
+      return;
+    }
+    navReset = after;
+    animateCameraTo({ ...baseViewBox }, NAV_RESET_MS, runNavReset);
+  }
+  function cancelPendingNav() {
+    navReset = null;
+  }
+  function flushPendingNav() {
+    if (navReset) runNavReset();
+  }
+  function smoothResetCamera() {
+    flushPendingNav();
+    if (!ensureBase() || !camera || !baseViewBox) return;
+    if (!isZoomedIn(camera, baseViewBox)) return;
+    animateCameraTo({ ...baseViewBox }, RESET_ANIM_MS);
+  }
+  function keyZoom(direction) {
+    flushPendingNav();
+    if (!ensureBase() || !camera || !baseViewBox) return;
+    const factor = direction === "in" ? KEY_ZOOM_STEP : 1 / KEY_ZOOM_STEP;
+    const target = zoomAt(
+      camera,
+      baseViewBox,
+      factor,
+      { ux: camera.x + camera.w / 2, uy: camera.y + camera.h / 2 },
+      LIMITS
+    );
+    animateCameraTo(target, KEY_ANIM_MS);
+  }
+  function zoomAbout(factor, from, to) {
+    flushPendingNav();
+    cancelAnim();
+    if (!ensureBase() || !camera || !baseViewBox) return;
+    const focus = clientToUser(from.x, from.y);
+    if (!focus) return;
+    camera = zoomAt(camera, baseViewBox, factor, focus, LIMITS);
+    applyCamera();
+    if (from.x === to.x && from.y === to.y) return;
+    const a2 = clientToUser(from.x, from.y);
+    const b2 = clientToUser(to.x, to.y);
+    if (!a2 || !b2) return;
+    camera = panBy(camera, baseViewBox, a2.ux - b2.ux, a2.uy - b2.uy);
+    applyCamera();
+  }
+  function panPixels(dx, dy) {
+    if (!camera || !baseViewBox) return;
+    const inv = currentSvg()?.getScreenCTM()?.inverse();
+    if (!inv) return;
+    const units = Math.hypot(inv.a, inv.b);
+    camera = panBy(camera, baseViewBox, dx * units, dy * units);
+    applyCamera();
+  }
+  var touchCancels = [];
+  function onTouchCancel(fn) {
+    touchCancels.push(fn);
+  }
+  var gestures = null;
+  function multiTouch() {
+    return gestures?.multiTouch ?? false;
+  }
+  function overGrid(target) {
+    return Boolean(target?.closest?.("#overview"));
+  }
+  function isCameraGesture(e2) {
+    return e2.ctrlKey;
+  }
+  function setArmed(on) {
+    document.body.classList.toggle("camera-armed", on);
+  }
+  document.addEventListener("keydown", (e2) => {
+    if (e2.key === "Control") setArmed(true);
+  });
+  document.addEventListener("keyup", (e2) => {
+    if (e2.key === "Control") setArmed(false);
+  });
+  window.addEventListener("blur", () => setArmed(false));
+  if (stageWrap) {
+    const wrap = stageWrap;
+    gestures = new GesturePad({
+      surface: wrap,
+      accepts: (e2) => !overGrid(e2.target) && !e2.target.closest?.(".ink-palette"),
+      acceptsWheel: (e2) => !overGrid(e2.target),
+      cancelSingle: () => {
+        for (const fn of touchCancels) fn();
+      },
+      zoom: zoomAbout,
+      canPan: () => cameraIsZoomed(),
+      pan: panPixels,
+      doubleTap: smoothResetCamera
+    });
+    wrap.addEventListener("pointerdown", (e2) => {
+      if (!isCameraGesture(e2) || overGrid(e2.target)) return;
+      flushPendingNav();
+      cancelAnim();
+      if (!ensureBase() || !camera) return;
+      const inverse = currentSvg()?.getScreenCTM()?.inverse();
+      if (!inverse) return;
+      wrap.setPointerCapture(e2.pointerId);
+      dragStartCamera = { ...camera };
+      dragStartInverse = inverse;
+      dragStartClientX = e2.clientX;
+      dragStartClientY = e2.clientY;
+      document.body.classList.add("zoom-grabbing");
+    });
+    wrap.addEventListener("pointermove", (e2) => {
+      if (!dragStartCamera || !dragStartInverse || !baseViewBox) return;
+      const from = clientToUser(
+        dragStartClientX,
+        dragStartClientY,
+        dragStartInverse
+      );
+      const to = clientToUser(e2.clientX, e2.clientY, dragStartInverse);
+      if (!from || !to) return;
+      camera = panBy(
+        dragStartCamera,
+        baseViewBox,
+        from.ux - to.ux,
+        from.uy - to.uy
+      );
+      applyCamera();
+    });
+    wrap.addEventListener("pointerup", endDrag);
+    wrap.addEventListener("pointercancel", endDrag);
+    wrap.addEventListener("dblclick", smoothResetCamera);
+  }
+
   // src/ts/presenter/transitions.ts
-  var stage4 = document.getElementById("stage");
+  var stage3 = document.getElementById("stage");
   var CUT = { type: "cut", duration: 0 };
   var registry = /* @__PURE__ */ new Map();
   function registerTransition(name, factory) {
@@ -4710,7 +3175,7 @@
     liveParams = null;
     liveSettle = null;
     ctrl.abort();
-    inst?.cancel?.({ stage: stage4, params });
+    inst?.cancel?.({ stage: stage3, params });
     settle(callThen);
   }
   function inflightDirection() {
@@ -4719,8 +3184,8 @@
   }
   function snapInflight() {
     cancelInflight(true);
-    stage4.innerHTML = state.slides.length ? state.slides[state.slideIndex].svg : '<p style="color:var(--accent);padding:2rem">No slides.</p>';
-    fitSlideToStage(stage4.firstElementChild);
+    stage3.innerHTML = state.slides.length ? state.slides[state.slideIndex].svg : '<p style="color:var(--accent);padding:2rem">No slides.</p>';
+    fitSlideToStage(stage3.firstElementChild);
     slideMounted();
     applyCurrentStepInstant();
     updateStatus();
@@ -4750,11 +3215,11 @@
       if (el.isConnected) refit(el);
       else fittedSlides.delete(el);
     }
-  }).observe(stage4);
+  }).observe(stage3);
   function makeLayer() {
     const layer = document.createElement("div");
     layer.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none";
-    layer.style.padding = getComputedStyle(stage4).padding;
+    layer.style.padding = getComputedStyle(stage3).padding;
     return layer;
   }
   function dirAxis(dir) {
@@ -4784,8 +3249,8 @@
     // ignored for painting.
     startParams;
     prepare() {
-      this.outgoingHtml = stage4.innerHTML;
-      this.stageStyleText = stage4.style.cssText;
+      this.outgoingHtml = stage3.innerHTML;
+      this.stageStyleText = stage3.style.cssText;
     }
     async start({
       params,
@@ -4821,7 +3286,7 @@
     }
     paint(value) {
       this.render(
-        { stage: stage4, oldLayer: this.oldLayer, newLayer: this.newLayer },
+        { stage: stage3, oldLayer: this.oldLayer, newLayer: this.newLayer },
         this.ease(value),
         this.startParams
       );
@@ -4829,14 +3294,14 @@
     buildLayers() {
       this.settled = false;
       const newLayer = makeLayer();
-      while (stage4.firstChild) newLayer.appendChild(stage4.firstChild);
+      while (stage3.firstChild) newLayer.appendChild(stage3.firstChild);
       fitSlideToStage(newLayer.firstElementChild);
-      stage4.appendChild(newLayer);
+      stage3.appendChild(newLayer);
       this.newLayer = newLayer;
       const oldLayer = makeLayer();
       oldLayer.innerHTML = this.outgoingHtml;
       fitSlideToStage(oldLayer.firstElementChild);
-      stage4.appendChild(oldLayer);
+      stage3.appendChild(oldLayer);
       this.oldLayer = oldLayer;
     }
     settle() {
@@ -4849,8 +3314,8 @@
     teardown(shownLayer) {
       if (this.settled) return;
       this.settled = true;
-      if (shownLayer) stage4.replaceChildren(...shownLayer.children);
-      stage4.style.cssText = this.stageStyleText;
+      if (shownLayer) stage3.replaceChildren(...shownLayer.children);
+      stage3.style.cssText = this.stageStyleText;
     }
   };
   function registerProgressTransition(name, render) {
@@ -4891,18 +3356,18 @@
       newLayer.style.transform = `scale(${1 - amount + amount * progress})`;
     }
   };
-  var SVG_NS3 = "http://www.w3.org/2000/svg";
-  function makeFadeBackdrop(slideSvg2, color) {
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  function makeFadeBackdrop(slideSvg3, color) {
     const layer = makeLayer();
     layer.dataset.fadeBackdrop = "1";
-    const vb = parseViewBox(slideSvg2?.getAttribute("viewBox") ?? null);
-    const svg = document.createElementNS(SVG_NS3, "svg");
+    const vb = parseViewBox(slideSvg3?.getAttribute("viewBox") ?? null);
+    const svg = document.createElementNS(SVG_NS, "svg");
     svg.setAttribute("viewBox", formatViewBox(vb));
     svg.setAttribute(
       "preserveAspectRatio",
-      slideSvg2?.getAttribute("preserveAspectRatio") ?? "xMidYMid meet"
+      slideSvg3?.getAttribute("preserveAspectRatio") ?? "xMidYMid meet"
     );
-    const rect = document.createElementNS(SVG_NS3, "rect");
+    const rect = document.createElementNS(SVG_NS, "rect");
     rect.setAttribute("width", String(vb.w));
     rect.setAttribute("height", String(vb.h));
     rect.setAttribute("fill", color);
@@ -4962,12 +3427,12 @@
       updateStatus();
     };
     const initialLand = entering ? () => {
-      applyStepInstant(stage4, state.step - 1);
+      applyStepInstant(stage3, state.step - 1);
       updateStatus();
     } : settleContent;
     const swap = () => {
-      stage4.innerHTML = state.slides.length ? state.slides[state.slideIndex].svg : '<p style="color:var(--accent);padding:2rem">No slides.</p>';
-      fitSlideToStage(stage4.firstElementChild);
+      stage3.innerHTML = state.slides.length ? state.slides[state.slideIndex].svg : '<p style="color:var(--accent);padding:2rem">No slides.</p>';
+      fitSlideToStage(stage3.firstElementChild);
       slideMounted();
       initialLand();
     };
@@ -4999,7 +3464,7 @@
       liveInstance = inst2;
       liveParams = params;
       liveSettle = settle2;
-      inst2.reverse({ stage: stage4, params, signal: newCtrl.signal }).then(() => {
+      inst2.reverse({ stage: stage3, params, signal: newCtrl.signal }).then(() => {
         if (!newCtrl.signal.aborted) {
           slideMounted();
           settleContent();
@@ -5020,8 +3485,8 @@
       return;
     }
     const inst = makeTransition();
-    commitStepStyles(stage4);
-    inst.prepare?.({ stage: stage4, params });
+    commitStepStyles(stage3);
+    inst.prepare?.({ stage: stage3, params });
     const ctrl = new AbortController();
     let done = false;
     const settle = (callThen) => {
@@ -5040,13 +3505,1692 @@
     liveParams = params;
     liveSettle = settle;
     swap();
-    inst.start({ stage: stage4, params, signal: ctrl.signal }).then(() => {
+    inst.start({ stage: stage3, params, signal: ctrl.signal }).then(() => {
       if (entering && !ctrl.signal.aborted) applyCurrentStep();
       settle(true);
     }).catch((error) => {
       reportTransitionFailure(error);
       settle(false);
     });
+  }
+
+  // src/ts/presenter/fit.ts
+  function initFit() {
+    const stage6 = document.getElementById("stage");
+    if (!stage6) return;
+    onSlideMounted(() => fitSlide(stage6.firstElementChild));
+    onFontsLoaded(() => {
+      if (!inflightDirection()) fitSlide(stage6.firstElementChild);
+    });
+  }
+
+  // node_modules/.pnpm/perfect-freehand@1.2.3/node_modules/perfect-freehand/dist/esm/index.mjs
+  var { PI: e } = Math;
+  var t = e + 1e-4;
+  var n = 0.5;
+  var r = [1, 1];
+  function i(e2, t2, n2, r2 = (e3) => e3) {
+    return e2 * r2(0.5 - t2 * (0.5 - n2));
+  }
+  var { min: a } = Math;
+  function o(e2, t2, n2) {
+    let r2 = a(1, t2 / n2);
+    return a(1, e2 + (a(1, 1 - r2) - e2) * (r2 * 0.275));
+  }
+  function s(e2) {
+    return [-e2[0], -e2[1]];
+  }
+  function c(e2, t2) {
+    return [e2[0] + t2[0], e2[1] + t2[1]];
+  }
+  function l(e2, t2, n2) {
+    return e2[0] = t2[0] + n2[0], e2[1] = t2[1] + n2[1], e2;
+  }
+  function u(e2, t2) {
+    return [e2[0] - t2[0], e2[1] - t2[1]];
+  }
+  function d(e2, t2, n2) {
+    return e2[0] = t2[0] - n2[0], e2[1] = t2[1] - n2[1], e2;
+  }
+  function f(e2, t2) {
+    return [e2[0] * t2, e2[1] * t2];
+  }
+  function p(e2, t2, n2) {
+    return e2[0] = t2[0] * n2, e2[1] = t2[1] * n2, e2;
+  }
+  function m(e2, t2) {
+    return [e2[0] / t2, e2[1] / t2];
+  }
+  function h(e2) {
+    return [e2[1], -e2[0]];
+  }
+  function g(e2, t2) {
+    let n2 = t2[0];
+    return e2[0] = t2[1], e2[1] = -n2, e2;
+  }
+  function ee(e2, t2) {
+    return e2[0] * t2[0] + e2[1] * t2[1];
+  }
+  function _(e2, t2) {
+    return e2[0] === t2[0] && e2[1] === t2[1];
+  }
+  function v(e2) {
+    return Math.hypot(e2[0], e2[1]);
+  }
+  function y(e2, t2) {
+    let n2 = e2[0] - t2[0], r2 = e2[1] - t2[1];
+    return n2 * n2 + r2 * r2;
+  }
+  function b(e2) {
+    return m(e2, v(e2));
+  }
+  function x(e2, t2) {
+    return Math.hypot(e2[1] - t2[1], e2[0] - t2[0]);
+  }
+  function S(e2, t2, n2) {
+    let r2 = Math.sin(n2), i2 = Math.cos(n2), a2 = e2[0] - t2[0], o2 = e2[1] - t2[1], s2 = a2 * i2 - o2 * r2, c2 = a2 * r2 + o2 * i2;
+    return [s2 + t2[0], c2 + t2[1]];
+  }
+  function C(e2, t2, n2, r2) {
+    let i2 = Math.sin(r2), a2 = Math.cos(r2), o2 = t2[0] - n2[0], s2 = t2[1] - n2[1], c2 = o2 * a2 - s2 * i2, l2 = o2 * i2 + s2 * a2;
+    return e2[0] = c2 + n2[0], e2[1] = l2 + n2[1], e2;
+  }
+  function w(e2, t2, n2) {
+    return c(e2, f(u(t2, e2), n2));
+  }
+  function te(e2, t2, n2, r2) {
+    let i2 = n2[0] - t2[0], a2 = n2[1] - t2[1];
+    return e2[0] = t2[0] + i2 * r2, e2[1] = t2[1] + a2 * r2, e2;
+  }
+  function T(e2, t2, n2) {
+    return c(e2, f(t2, n2));
+  }
+  var E = [0, 0];
+  var D = [0, 0];
+  var O = [0, 0];
+  function k(e2, n2) {
+    let r2 = T(e2, b(h(u(e2, c(e2, [1, 1])))), -n2), i2 = [], a2 = 1 / 13;
+    for (let n3 = a2; n3 <= 1; n3 += a2) i2.push(S(r2, e2, t * 2 * n3));
+    return i2;
+  }
+  function A(e2, n2, r2) {
+    let i2 = [], a2 = 1 / r2;
+    for (let r3 = a2; r3 <= 1; r3 += a2) i2.push(S(n2, e2, t * r3));
+    return i2;
+  }
+  function j(e2, t2, n2) {
+    let r2 = u(t2, n2), i2 = f(r2, 0.5), a2 = f(r2, 0.51);
+    return [u(e2, i2), u(e2, a2), c(e2, a2), c(e2, i2)];
+  }
+  function M(e2, n2, r2, i2) {
+    let a2 = [], o2 = T(e2, n2, r2), s2 = 1 / i2;
+    for (let n3 = s2; n3 < 1; n3 += s2) a2.push(S(o2, e2, t * 3 * n3));
+    return a2;
+  }
+  function ne(e2, t2, n2) {
+    return [c(e2, f(t2, n2)), c(e2, f(t2, n2 * 0.99)), u(e2, f(t2, n2 * 0.99)), u(e2, f(t2, n2))];
+  }
+  function N(e2, t2, n2) {
+    return e2 === false || e2 === void 0 ? 0 : e2 === true ? Math.max(t2, n2) : e2;
+  }
+  function re(e2, t2, n2) {
+    return e2.slice(0, 10).reduce((e3, r2) => {
+      let i2 = r2.pressure;
+      return t2 && (i2 = o(e3, r2.distance, n2)), (e3 + i2) / 2;
+    }, e2[0].pressure);
+  }
+  function P(e2, n2 = {}) {
+    let { size: r2 = 16, smoothing: a2 = 0.5, thinning: f2 = 0.5, simulatePressure: m2 = true, easing: _2 = (e3) => e3, start: v2 = {}, end: b2 = {}, last: x2 = false } = n2, { cap: S2 = true, easing: w2 = (e3) => e3 * (2 - e3) } = v2, { cap: T2 = true, easing: P2 = (e3) => --e3 * e3 * e3 + 1 } = b2;
+    if (e2.length === 0 || r2 <= 0) return [];
+    let F2 = e2[e2.length - 1].runningLength, I2 = N(v2.taper, r2, F2), L2 = N(b2.taper, r2, F2), R2 = (r2 * a2) ** 2, z = [], B = [], V = re(e2, m2, r2), H = i(r2, f2, e2[e2.length - 1].pressure, _2), U, W = e2[0].vector, G = e2[0].point, K = G, q = G, J = K, Y = false;
+    for (let n3 = 0; n3 < e2.length; n3++) {
+      let { pressure: a3 } = e2[n3], { point: s2, vector: h2, distance: v3, runningLength: b3 } = e2[n3], x3 = n3 === e2.length - 1;
+      if (!x3 && F2 - b3 < 3) continue;
+      f2 ? (m2 && (a3 = o(V, v3, r2)), H = i(r2, f2, a3, _2)) : H = r2 / 2, U === void 0 && (U = H);
+      let S3 = b3 < I2 ? w2(b3 / I2) : 1, T3 = F2 - b3 < L2 ? P2((F2 - b3) / L2) : 1;
+      H = Math.max(0.01, H * Math.min(S3, T3));
+      let k2 = (x3 ? e2[n3] : e2[n3 + 1]).vector, A2 = x3 ? 1 : ee(h2, k2), j2 = ee(h2, W) < 0 && !Y, M2 = A2 !== null && A2 < 0;
+      if (j2 || M2) {
+        g(E, W), p(E, E, H);
+        for (let e3 = 0; e3 <= 1; e3 += 0.07692307692307693) d(D, s2, E), C(D, D, s2, t * e3), q = [D[0], D[1]], z.push(q), l(O, s2, E), C(O, O, s2, t * -e3), J = [O[0], O[1]], B.push(J);
+        G = q, K = J, M2 && (Y = true);
+        continue;
+      }
+      if (Y = false, x3) {
+        g(E, h2), p(E, E, H), z.push(u(s2, E)), B.push(c(s2, E));
+        continue;
+      }
+      te(E, k2, h2, A2), g(E, E), p(E, E, H), d(D, s2, E), q = [D[0], D[1]], (n3 <= 1 || y(G, q) > R2) && (z.push(q), G = q), l(O, s2, E), J = [O[0], O[1]], (n3 <= 1 || y(K, J) > R2) && (B.push(J), K = J), V = a3, W = h2;
+    }
+    let X = [e2[0].point[0], e2[0].point[1]], Z = e2.length > 1 ? [e2[e2.length - 1].point[0], e2[e2.length - 1].point[1]] : c(e2[0].point, [1, 1]), Q = [], $ = [];
+    if (e2.length === 1) {
+      if (!(I2 || L2) || x2) return k(X, U || H);
+    } else {
+      I2 || L2 && e2.length === 1 || (S2 ? Q.push(...A(X, B[0], 13)) : Q.push(...j(X, z[0], B[0])));
+      let t2 = h(s(e2[e2.length - 1].vector));
+      L2 || I2 && e2.length === 1 ? $.push(Z) : T2 ? $.push(...M(Z, t2, H, 29)) : $.push(...ne(Z, t2, H));
+    }
+    return z.concat($, B.reverse(), Q);
+  }
+  var F = [0, 0];
+  function I(e2) {
+    return e2 != null && e2 >= 0;
+  }
+  function L(e2, t2 = {}) {
+    let { streamline: i2 = 0.5, size: a2 = 16, last: o2 = false } = t2;
+    if (e2.length === 0) return [];
+    let s2 = 0.15 + (1 - i2) * 0.85, l2 = Array.isArray(e2[0]) ? e2 : e2.map(({ x: e3, y: t3, pressure: r2 = n }) => [e3, t3, r2]);
+    if (l2.length === 2) {
+      let e3 = l2[1];
+      l2 = l2.slice(0, -1);
+      for (let t3 = 1; t3 < 5; t3++) l2.push(w(l2[0], e3, t3 / 4));
+    }
+    l2.length === 1 && (l2 = [...l2, [...c(l2[0], r), ...l2[0].slice(2)]]);
+    let u2 = [{ point: [l2[0][0], l2[0][1]], pressure: I(l2[0][2]) ? l2[0][2] : 0.25, vector: [...r], distance: 0, runningLength: 0 }], f2 = false, p2 = 0, m2 = u2[0], h2 = l2.length - 1;
+    for (let e3 = 1; e3 < l2.length; e3++) {
+      let t3 = o2 && e3 === h2 ? [l2[e3][0], l2[e3][1]] : w(m2.point, l2[e3], s2);
+      if (_(m2.point, t3)) continue;
+      let r2 = x(t3, m2.point);
+      if (p2 += r2, e3 < h2 && !f2) {
+        if (p2 < a2) continue;
+        f2 = true;
+      }
+      d(F, m2.point, t3), m2 = { point: t3, pressure: I(l2[e3][2]) ? l2[e3][2] : n, vector: b(F), distance: r2, runningLength: p2 }, u2.push(m2);
+    }
+    return u2[0].vector = u2[1]?.vector || [0, 0], u2;
+  }
+  function R(e2, t2 = {}) {
+    return P(L(e2, t2), t2);
+  }
+
+  // src/ts/shared/ink.ts
+  var HIGHLIGHTER_OPACITY = 0.35;
+  var REFERENCE_WIDTH = 1920;
+  var REFERENCE_HEIGHT = 1080;
+  function inkScale(width, height = 0) {
+    const w2 = width > 0 ? width / REFERENCE_WIDTH : 0;
+    const h2 = height > 0 ? height / REFERENCE_HEIGHT : 0;
+    return Math.max(w2, h2) || 1;
+  }
+  var PEN_SIZES = [3, 6, 12];
+  var HIGHLIGHTER_SIZES = [20, 36, 60];
+  var SWATCHES = [
+    { label: "Black", token: null, hex: "#000000" },
+    { label: "White", token: null, hex: "#ffffff" },
+    { label: "Red", token: "red", hex: "#e64553" },
+    { label: "Orange", token: "orange", hex: "#fe640b" },
+    { label: "Yellow", token: "yellow", hex: "#df8e1d" },
+    { label: "Green", token: "green", hex: "#40a02b" },
+    { label: "Blue", token: "blue", hex: "#1e66f5" },
+    { label: "Purple", token: "purple", hex: "#8839ef" }
+  ];
+  var easeOutSine = (t2) => Math.sin(t2 * Math.PI / 2);
+  function strokeOptions(style, simulate, last) {
+    if (style.tool === "highlighter") {
+      return {
+        size: style.size,
+        thinning: 0,
+        smoothing: 0.5,
+        streamline: 0.4,
+        simulatePressure: false,
+        start: { cap: false },
+        end: { cap: false },
+        last
+      };
+    }
+    return {
+      size: style.size,
+      thinning: 0.6,
+      smoothing: 0.5,
+      streamline: simulate ? 0.5 : 0.35,
+      easing: easeOutSine,
+      simulatePressure: simulate,
+      last
+    };
+  }
+  function outlineOf(points, style, simulate, last) {
+    return R(points, strokeOptions(style, simulate, last));
+  }
+  function round2(v2, decimals) {
+    const f2 = 10 ** decimals;
+    const r2 = Math.round(v2 * f2) / f2;
+    return String(Object.is(r2, -0) ? 0 : r2);
+  }
+  function pathData(outline, decimals = 1) {
+    const n2 = outline.length;
+    if (n2 < 2) return "";
+    const mid = (a2, b2) => [
+      (a2[0] + b2[0]) / 2,
+      (a2[1] + b2[1]) / 2
+    ];
+    const pt = (p2) => `${round2(p2[0], decimals)} ${round2(p2[1], decimals)}`;
+    const parts = [`M${pt(mid(outline[n2 - 1], outline[0]))}Q`];
+    for (let i2 = 0; i2 < n2; i2++) {
+      const next = outline[(i2 + 1) % n2];
+      parts.push(`${pt(outline[i2])} ${pt(mid(outline[i2], next))}`);
+    }
+    return `${parts[0]}${parts.slice(1).join(" ")}Z`;
+  }
+  function simplify(outline, tolerance) {
+    if (outline.length < 4 || tolerance <= 0) return outline;
+    const keep = new Uint8Array(outline.length);
+    keep[0] = 1;
+    keep[outline.length - 1] = 1;
+    const t2 = tolerance * tolerance;
+    const stack = [[0, outline.length - 1]];
+    while (stack.length) {
+      const [first, last] = stack.pop();
+      const [ax, ay] = outline[first];
+      const [bx, by] = outline[last];
+      let worst = -1;
+      let index = -1;
+      for (let i2 = first + 1; i2 < last; i2++) {
+        const d2 = pointSegment2(
+          outline[i2][0],
+          outline[i2][1],
+          ax,
+          ay,
+          bx,
+          by
+        );
+        if (d2 > worst) {
+          worst = d2;
+          index = i2;
+        }
+      }
+      if (worst > t2) {
+        keep[index] = 1;
+        stack.push([first, index], [index, last]);
+      }
+    }
+    return outline.filter((_2, i2) => keep[i2]);
+  }
+  function polygonOf(d2) {
+    const nums = d2.match(/-?(?:\d*\.\d+|\d+\.?)(?:[eE][+-]?\d+)?/g) ?? [];
+    const out = [];
+    for (let i2 = 0; i2 + 1 < nums.length; i2 += 2) {
+      out.push(Number(nums[i2]), Number(nums[i2 + 1]));
+    }
+    return out;
+  }
+  function bboxOf(poly) {
+    const box = {
+      minX: Infinity,
+      minY: Infinity,
+      maxX: -Infinity,
+      maxY: -Infinity
+    };
+    for (let i2 = 0; i2 + 1 < poly.length; i2 += 2) {
+      box.minX = Math.min(box.minX, poly[i2]);
+      box.maxX = Math.max(box.maxX, poly[i2]);
+      box.minY = Math.min(box.minY, poly[i2 + 1]);
+      box.maxY = Math.max(box.maxY, poly[i2 + 1]);
+    }
+    return box;
+  }
+  function insidePolygon(poly, x2, y2) {
+    let winding = 0;
+    const n2 = poly.length / 2;
+    for (let i2 = 0; i2 < n2; i2++) {
+      const x1 = poly[2 * i2];
+      const y1 = poly[2 * i2 + 1];
+      const x22 = poly[(2 * i2 + 2) % poly.length];
+      const y22 = poly[(2 * i2 + 3) % poly.length];
+      const cross = (x22 - x1) * (y2 - y1) - (x2 - x1) * (y22 - y1);
+      if (y1 <= y2) {
+        if (y22 > y2 && cross > 0) winding++;
+      } else if (y22 <= y2 && cross < 0) {
+        winding--;
+      }
+    }
+    return winding !== 0;
+  }
+  function pointSegment2(px2, py, ax, ay, bx, by) {
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    const t2 = len2 === 0 ? 0 : Math.max(
+      0,
+      Math.min(1, ((px2 - ax) * dx + (py - ay) * dy) / len2)
+    );
+    const ex = ax + t2 * dx - px2;
+    const ey = ay + t2 * dy - py;
+    return ex * ex + ey * ey;
+  }
+  function segmentsCross(ax, ay, bx, by, cx, cy, dx, dy) {
+    const d1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    const d2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
+    const d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
+    const d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+    return d1 * d2 < 0 && d3 * d4 < 0;
+  }
+  function eraserHits(poly, box, a2, b2, r2) {
+    if (Math.max(a2.x, b2.x) + r2 < box.minX || Math.min(a2.x, b2.x) - r2 > box.maxX || Math.max(a2.y, b2.y) + r2 < box.minY || Math.min(a2.y, b2.y) - r2 > box.maxY) {
+      return false;
+    }
+    if (insidePolygon(poly, a2.x, a2.y) || insidePolygon(poly, b2.x, b2.y)) {
+      return true;
+    }
+    const r22 = r2 * r2;
+    const n2 = poly.length / 2;
+    for (let i2 = 0; i2 < n2; i2++) {
+      const cx = poly[2 * i2];
+      const cy = poly[2 * i2 + 1];
+      const dx = poly[(2 * i2 + 2) % poly.length];
+      const dy = poly[(2 * i2 + 3) % poly.length];
+      if (segmentsCross(a2.x, a2.y, b2.x, b2.y, cx, cy, dx, dy) || pointSegment2(cx, cy, a2.x, a2.y, b2.x, b2.y) <= r22 || pointSegment2(a2.x, a2.y, cx, cy, dx, dy) <= r22 || pointSegment2(b2.x, b2.y, cx, cy, dx, dy) <= r22) {
+        return true;
+      }
+    }
+    return false;
+  }
+  function newInkId() {
+    const bytes = new Uint8Array(6);
+    crypto.getRandomValues(bytes);
+    return `ink-${Array.from(bytes, (b2) => b2.toString(36).padStart(2, "0")).join("")}`;
+  }
+  var ID_RE = /^ink-[A-Za-z0-9_-]{1,64}$/;
+  var HEX_RE = /^#(?:[0-9a-fA-F]{3}){1,2}$/;
+  var TOKEN_RE = /^[a-z][a-z-]{0,31}$/;
+  var PATH_RE = /^M[MQLZ0-9eE.,\s+-]*$/;
+  function finite(v2, low, high) {
+    return typeof v2 === "number" && Number.isFinite(v2) && v2 > low && v2 <= high;
+  }
+  function styleFrom(raw) {
+    if (typeof raw !== "object" || raw === null) return null;
+    const s2 = raw;
+    if (typeof s2.id !== "string" || !ID_RE.test(s2.id)) return null;
+    if (s2.tool !== "pen" && s2.tool !== "highlighter") return null;
+    if (typeof s2.fill !== "string" || !HEX_RE.test(s2.fill)) return null;
+    if (s2.token != null && (typeof s2.token !== "string" || !TOKEN_RE.test(s2.token)))
+      return null;
+    if (!finite(s2.size, 0, 2e3)) return null;
+    return {
+      id: s2.id,
+      tool: s2.tool,
+      fill: s2.fill,
+      token: s2.token ?? null,
+      size: s2.size
+    };
+  }
+  function strokeFrom(raw) {
+    const style = styleFrom(raw);
+    if (!style) return null;
+    const s2 = raw;
+    if (typeof s2.d !== "string" || s2.d.length > 2e6 || !PATH_RE.test(s2.d))
+      return null;
+    const stroke = { ...style, d: s2.d };
+    if (s2.opacity !== void 0) {
+      if (!finite(s2.opacity, 0, 1)) return null;
+      stroke.opacity = s2.opacity;
+    }
+    return stroke;
+  }
+  function flatten(points) {
+    const out = [];
+    for (const [x2, y2, p2] of points) {
+      out.push(
+        Math.round(x2 * 100) / 100,
+        Math.round(y2 * 100) / 100,
+        Math.round(p2 * 1e3) / 1e3
+      );
+    }
+    return out;
+  }
+  function unflatten(flat) {
+    if (!Array.isArray(flat) || flat.length % 3 !== 0) return null;
+    const out = [];
+    for (let i2 = 0; i2 < flat.length; i2 += 3) {
+      const [x2, y2, p2] = [flat[i2], flat[i2 + 1], flat[i2 + 2]];
+      if (![x2, y2, p2].every((v2) => typeof v2 === "number" && Number.isFinite(v2)))
+        return null;
+      out.push([x2, y2, Math.max(0, Math.min(1, p2))]);
+    }
+    return out;
+  }
+  function finish(live, points, tolerance = 0.1) {
+    const outline = outlineOf(points, live, live.simulate, true);
+    const stroke = {
+      id: live.id,
+      tool: live.tool,
+      fill: live.fill,
+      token: live.token,
+      size: live.size,
+      d: pathData(simplify(outline, tolerance), 1)
+    };
+    if (live.tool === "highlighter") stroke.opacity = HIGHLIGHTER_OPACITY;
+    return stroke;
+  }
+
+  // src/ts/shared/inkpad.ts
+  var SVG_NS2 = "http://www.w3.org/2000/svg";
+  var ERASER_RADIUS_PX = 10;
+  var PALM_MS2 = 1500;
+  var SWALLOW_MS = 400;
+  function paintStroke(el, s2) {
+    if (s2.id) el.id = s2.id;
+    if (s2.d !== void 0) el.setAttribute("d", s2.d);
+    el.setAttribute("fill", s2.fill);
+    const classes = [
+      ...s2.token ? [`inkflow-fill-${s2.token}`] : [],
+      ...s2.tool === "highlighter" ? ["inkflow-highlighter"] : []
+    ];
+    el.setAttribute("class", classes.join(" "));
+    const opacity = s2.opacity ?? (s2.tool === "highlighter" ? HIGHLIGHTER_OPACITY : void 0);
+    if (opacity !== void 0 && opacity < 1)
+      el.setAttribute("fill-opacity", String(opacity));
+    else el.removeAttribute("fill-opacity");
+    el.setAttribute("inkflow:tool", s2.tool);
+    el.setAttribute("inkflow:size", String(Math.round(s2.size * 100) / 100));
+    return el;
+  }
+  function strokeElement(stroke) {
+    return paintStroke(
+      document.createElementNS(SVG_NS2, "path"),
+      stroke
+    );
+  }
+  function strokeOf(el) {
+    const d2 = el.getAttribute("d");
+    const fill = el.getAttribute("fill");
+    if (!el.id || !d2 || !fill) return null;
+    const token = (el.getAttribute("class") ?? "").split(/\s+/).find((c2) => c2.startsWith("inkflow-fill-"))?.slice("inkflow-fill-".length) ?? null;
+    const tool = el.getAttribute("inkflow:tool") === "highlighter" ? "highlighter" : "pen";
+    const stroke = {
+      id: el.id,
+      tool,
+      fill,
+      token,
+      size: Number(el.getAttribute("inkflow:size")) || 1,
+      d: d2
+    };
+    const opacity = Number(el.getAttribute("fill-opacity"));
+    if (opacity > 0 && opacity < 1) stroke.opacity = opacity;
+    return stroke;
+  }
+  var shapes = /* @__PURE__ */ new WeakMap();
+  function shapeOf(el) {
+    const d2 = el.getAttribute("d") ?? "";
+    let shape = shapes.get(el);
+    if (!shape || shape.d !== d2) {
+      const poly = polygonOf(d2);
+      shape = { d: d2, poly, box: bboxOf(poly) };
+      shapes.set(el, shape);
+    }
+    return shape;
+  }
+  var InkPad = class {
+    host;
+    gesture = null;
+    frame = 0;
+    lastPenAt = -Infinity;
+    swallowUntil = -Infinity;
+    swallowAt = { x: Number.NaN, y: Number.NaN };
+    constructor(host) {
+      this.host = host;
+      const s2 = host.surface;
+      s2.addEventListener("pointerdown", (e2) => this.down(e2), {
+        capture: true
+      });
+      s2.addEventListener("pointermove", (e2) => this.move(e2), {
+        capture: true
+      });
+      s2.addEventListener("pointerup", (e2) => this.up(e2, false), {
+        capture: true
+      });
+      s2.addEventListener("pointercancel", (e2) => this.up(e2, true), {
+        capture: true
+      });
+      for (const type of ["touchstart", "touchmove", "touchend"]) {
+        s2.addEventListener(type, (e2) => this.claimTouch(e2), {
+          capture: true,
+          passive: false
+        });
+      }
+      window.addEventListener("click", (e2) => this.claimClick(e2), true);
+      s2.addEventListener("contextmenu", (e2) => this.claimClick(e2), true);
+    }
+    // A stroke or an erase is in progress.
+    get busy() {
+      return this.gesture !== null;
+    }
+    // Drop the gesture in progress (the slide is going away).
+    cancel() {
+      const g2 = this.gesture;
+      if (!g2) return;
+      this.gesture = null;
+      cancelAnimationFrame(this.frame);
+      if (g2.kind === "draw") {
+        g2.path.remove();
+        this.host.onAbandon?.(g2.live);
+      } else {
+        for (const el of g2.hits.values())
+          el.style.removeProperty("display");
+        g2.cursor.remove();
+      }
+    }
+    claimTouch(e2) {
+      if (this.gesture || performance.now() < this.swallowUntil) {
+        e2.stopPropagation();
+        if (e2.cancelable && e2.type !== "touchstart") e2.preventDefault();
+      }
+    }
+    // Only the click the browser makes of a gesture's own press and release
+    // (where the pointer let go, just after): a click elsewhere, such as on
+    // the palette right after a stroke, is the user's.
+    claimClick(e2) {
+      const near = Math.hypot(
+        e2.clientX - this.swallowAt.x,
+        e2.clientY - this.swallowAt.y
+      ) < 16;
+      if (this.gesture || performance.now() < this.swallowUntil && near) {
+        e2.stopPropagation();
+        e2.preventDefault();
+      }
+    }
+    swallow(e2) {
+      e2.preventDefault();
+      e2.stopPropagation();
+      this.swallowUntil = performance.now() + SWALLOW_MS;
+      this.swallowAt = { x: e2.clientX, y: e2.clientY };
+    }
+    down(e2) {
+      if (e2.pointerType === "pen") this.lastPenAt = performance.now();
+      if (this.gesture) {
+        if (e2.pointerId !== this.gesture.pointerId) this.swallow(e2);
+        return;
+      }
+      if (!this.host.active() || this.host.allows?.(e2) === false) return;
+      if (e2.pointerType !== "pen" && !this.host.fingers()) {
+        if (e2.pointerType === "touch" && performance.now() - this.lastPenAt < PALM_MS2) {
+          this.swallow(e2);
+        }
+        return;
+      }
+      if (e2.button !== 0 && e2.button !== 5) return;
+      const tool = e2.button === 5 ? "eraser" : this.host.tool();
+      const svg = this.host.svg();
+      const ctm = svg?.getScreenCTM();
+      if (!svg || !ctm) return;
+      this.swallow(e2);
+      try {
+        this.host.surface.setPointerCapture(e2.pointerId);
+      } catch {
+      }
+      const inv = ctm.inverse();
+      const unitsPerPx = Math.hypot(inv.a, inv.b);
+      const at2 = new DOMPoint(e2.clientX, e2.clientY).matrixTransform(inv);
+      if (tool === "eraser") {
+        const cursor = document.createElementNS(
+          SVG_NS2,
+          "circle"
+        );
+        cursor.setAttribute("class", "inkflow-eraser-cursor");
+        cursor.setAttribute("r", String(ERASER_RADIUS_PX * unitsPerPx));
+        cursor.setAttribute("cx", String(at2.x));
+        cursor.setAttribute("cy", String(at2.y));
+        cursor.setAttribute("stroke-width", String(1.5 * unitsPerPx));
+        svg.appendChild(cursor);
+        this.gesture = {
+          kind: "erase",
+          pointerId: e2.pointerId,
+          svg,
+          inv,
+          last: { x: e2.clientX, y: e2.clientY },
+          hits: /* @__PURE__ */ new Map(),
+          local: /* @__PURE__ */ new Map(),
+          cursor
+        };
+        this.erase(e2.clientX, e2.clientY);
+        return;
+      }
+      const pen = e2.pointerType === "pen";
+      const style = this.host.style(tool, svg);
+      const simulate = tool === "pen" && (!pen || e2.pressure === 0 || e2.pressure === 0.5);
+      const live = { ...style, id: newInkId(), simulate };
+      const path = paintStroke(
+        document.createElementNS(SVG_NS2, "path"),
+        live
+      );
+      path.classList.add("inkflow-live-stroke");
+      svg.appendChild(path);
+      this.gesture = {
+        kind: "draw",
+        pointerId: e2.pointerId,
+        inv,
+        minDist: 0.4 * unitsPerPx,
+        live,
+        points: [[at2.x, at2.y, simulate ? 0.5 : e2.pressure]],
+        predicted: [],
+        sent: 0,
+        path
+      };
+      this.schedule();
+    }
+    move(e2) {
+      if (e2.pointerType === "pen") this.lastPenAt = performance.now();
+      const g2 = this.gesture;
+      if (!g2 || e2.pointerId !== g2.pointerId) return;
+      e2.preventDefault();
+      e2.stopPropagation();
+      const samples = e2.getCoalescedEvents?.() ?? [];
+      const events = samples.length ? samples : [e2];
+      if (g2.kind === "erase") {
+        for (const s2 of events) this.erase(s2.clientX, s2.clientY);
+        return;
+      }
+      for (const s2 of events) this.sample(g2, s2, g2.points);
+      g2.predicted = [];
+      for (const p2 of e2.getPredictedEvents?.() ?? []) {
+        this.sample(g2, p2, g2.predicted);
+      }
+      this.schedule();
+    }
+    sample(g2, e2, into) {
+      const p2 = new DOMPoint(e2.clientX, e2.clientY).matrixTransform(g2.inv);
+      const prev = into[into.length - 1] ?? g2.points[g2.points.length - 1];
+      if (prev && Math.hypot(p2.x - prev[0], p2.y - prev[1]) < g2.minDist)
+        return;
+      into.push([p2.x, p2.y, g2.live.simulate ? 0.5 : e2.pressure]);
+    }
+    schedule() {
+      if (this.frame) return;
+      this.frame = requestAnimationFrame(() => {
+        this.frame = 0;
+        const g2 = this.gesture;
+        if (g2?.kind !== "draw") return;
+        const pts = g2.predicted.length ? g2.points.concat(g2.predicted) : g2.points;
+        g2.path.setAttribute(
+          "d",
+          pathData(outlineOf(pts, g2.live, g2.live.simulate, false), 2)
+        );
+        if (g2.points.length > g2.sent) {
+          this.host.onDraw?.(g2.live, g2.sent, g2.points.slice(g2.sent));
+          g2.sent = g2.points.length;
+        }
+      });
+    }
+    erase(clientX, clientY) {
+      const g2 = this.gesture;
+      if (g2?.kind !== "erase") return;
+      const at2 = new DOMPoint(clientX, clientY).matrixTransform(g2.inv);
+      g2.cursor.setAttribute("cx", String(at2.x));
+      g2.cursor.setAttribute("cy", String(at2.y));
+      const a2 = new DOMPoint(g2.last.x, g2.last.y);
+      const b2 = new DOMPoint(clientX, clientY);
+      g2.last = { x: clientX, y: clientY };
+      for (const el of this.host.erasables(g2.svg)) {
+        if (g2.hits.has(el.id) || el.style.display === "none") continue;
+        let local = g2.local.get(el);
+        if (!local) {
+          const m2 = el.getScreenCTM();
+          if (!m2) continue;
+          local = m2.inverse();
+          g2.local.set(el, local);
+        }
+        const shape = shapeOf(el);
+        const r2 = ERASER_RADIUS_PX * Math.hypot(local.a, local.b);
+        if (eraserHits(
+          shape.poly,
+          shape.box,
+          a2.matrixTransform(local),
+          b2.matrixTransform(local),
+          r2
+        )) {
+          el.style.display = "none";
+          g2.hits.set(el.id, el);
+        }
+      }
+    }
+    up(e2, cancelled) {
+      const g2 = this.gesture;
+      if (!g2 || e2.pointerId !== g2.pointerId) return;
+      this.swallow(e2);
+      if (cancelled) {
+        this.cancel();
+        return;
+      }
+      this.gesture = null;
+      cancelAnimationFrame(this.frame);
+      this.frame = 0;
+      if (g2.kind === "erase") {
+        g2.cursor.remove();
+        if (g2.hits.size)
+          this.host.onErase([...g2.hits.keys()], [...g2.hits.values()]);
+        return;
+      }
+      const stroke = finish(g2.live, g2.points);
+      g2.path.remove();
+      if (stroke.d) this.host.onStroke(stroke, g2.live);
+      else this.host.onAbandon?.(g2.live);
+    }
+  };
+
+  // src/ts/shared/inksettings.ts
+  function defaultSettings(fingers) {
+    return {
+      tool: "pen",
+      pen: { swatch: 2, custom: "#e64553", size: 1 },
+      highlighter: { swatch: 4, custom: "#df8e1d", size: 1 },
+      fingers,
+      keep: false
+    };
+  }
+  var HEX_RE2 = /^#[0-9a-fA-F]{6}$/;
+  function toolFrom(raw, fallback, sizes) {
+    if (typeof raw !== "object" || raw === null) return { ...fallback };
+    const r2 = raw;
+    const swatch = r2.swatch === null ? null : Number.isInteger(r2.swatch) && r2.swatch >= 0 && r2.swatch < SWATCHES.length ? r2.swatch : fallback.swatch;
+    return {
+      swatch,
+      custom: typeof r2.custom === "string" && HEX_RE2.test(r2.custom) ? r2.custom : fallback.custom,
+      size: Number.isInteger(r2.size) && r2.size >= 0 && r2.size < sizes ? r2.size : fallback.size
+    };
+  }
+  function settingsFrom(raw, fallback) {
+    if (typeof raw !== "object" || raw === null)
+      return structuredClone(fallback);
+    const r2 = raw;
+    return {
+      tool: r2.tool === "pen" || r2.tool === "highlighter" || r2.tool === "eraser" ? r2.tool : fallback.tool,
+      pen: toolFrom(r2.pen, fallback.pen, PEN_SIZES.length),
+      highlighter: toolFrom(
+        r2.highlighter,
+        fallback.highlighter,
+        HIGHLIGHTER_SIZES.length
+      ),
+      fingers: typeof r2.fingers === "boolean" ? r2.fingers : fallback.fingers,
+      keep: typeof r2.keep === "boolean" ? r2.keep : fallback.keep
+    };
+  }
+  function sizesOf(tool) {
+    return tool === "highlighter" ? HIGHLIGHTER_SIZES : PEN_SIZES;
+  }
+  function styleFor(s2, tool, width, tokenColor2, height = 0) {
+    const t2 = s2[tool];
+    const swatch = t2.swatch === null ? null : SWATCHES[t2.swatch];
+    const fill = swatch ? swatch.token && tokenColor2(swatch.token) || swatch.hex : t2.custom;
+    return {
+      tool,
+      fill: normalizeHex(fill) ?? "#000000",
+      token: swatch?.token ?? null,
+      size: sizesOf(tool)[t2.size] * inkScale(width, height)
+    };
+  }
+  function normalizeHex(color) {
+    const c2 = color.trim().toLowerCase();
+    if (/^#[0-9a-f]{6}$/.test(c2)) return c2;
+    if (/^#[0-9a-f]{3}$/.test(c2))
+      return `#${[...c2.slice(1)].map((x2) => x2 + x2).join("")}`;
+    const m2 = c2.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/);
+    if (m2) {
+      return `#${m2.slice(1, 4).map((v2) => Math.min(255, Number(v2)).toString(16).padStart(2, "0")).join("")}`;
+    }
+    return null;
+  }
+
+  // src/ts/shared/inkpalette.ts
+  var ICONS = {
+    pen: '<path d="M3 13.5 4 10l7-7 2.5 2.5-7 7Z"/><path d="m9.5 4.5 2 2"/>',
+    highlighter: '<path d="M5 11 3.5 14h4l.8-1.8"/><path d="m5 11 6.5-8.5 3 2.4L8.3 12.2Z"/>',
+    eraser: '<path d="M6.5 14H14"/><path d="M2.8 10.2 9 4l4 4-6 6H5.6Z"/><path d="m6 7 4 4"/>',
+    undo: '<path d="M4 7h7a3.5 3.5 0 0 1 0 7H8"/><path d="M6.5 4.5 4 7l2.5 2.5"/>',
+    clear: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9"/>',
+    fingers: '<path d="M6 8.5V3.2a1.1 1.1 0 0 1 2.2 0V7.5"/><path d="M8.2 7V6a1.1 1.1 0 0 1 2.2 0v1.5"/><path d="M10.4 7.2a1.1 1.1 0 0 1 2.1.3V10c0 2.5-1.6 4-4 4H8c-1.7 0-2.6-.8-3.6-2.3L3.2 9.8a1 1 0 0 1 1.6-1.2L6 9.8"/>',
+    keep: '<path d="M4 2.5h6.5L13 5v8.5H4Z"/><path d="M6 2.5v3.5h4V2.5M6 13.5V9.5h5v4"/>',
+    close: '<path d="m4 4 8 8M12 4l-8 8"/>'
+  };
+  function icon(name) {
+    return `<svg aria-hidden="true" viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]}</svg>`;
+  }
+  function button(title, content, data) {
+    const b2 = document.createElement("button");
+    b2.type = "button";
+    b2.className = "ink-btn";
+    b2.title = title;
+    b2.setAttribute("aria-label", title);
+    b2.innerHTML = content;
+    for (const [k2, v2] of Object.entries(data)) b2.dataset[k2] = v2;
+    return b2;
+  }
+  function group(...children) {
+    const g2 = document.createElement("div");
+    g2.className = "ink-group";
+    g2.append(...children);
+    return g2;
+  }
+  var TOOL_TITLES = {
+    pen: "Pen",
+    highlighter: "Highlighter",
+    eraser: "Eraser (also a pen's eraser end): wipe over strokes to remove them"
+  };
+  var InkPalette = class {
+    el;
+    opts;
+    custom;
+    sizes;
+    constructor(opts) {
+      this.opts = opts;
+      const el = document.createElement("div");
+      el.className = "ink-palette";
+      el.setAttribute("role", "toolbar");
+      el.setAttribute("aria-label", "Ink");
+      this.el = el;
+      const tools = group(
+        ...["pen", "highlighter", "eraser"].map(
+          (t2) => button(TOOL_TITLES[t2], icon(t2), { inkTool: t2 })
+        )
+      );
+      const swatches = group(
+        ...SWATCHES.map((s2, i2) => {
+          const b2 = button(
+            s2.label,
+            `<span class="ink-swatch" style="background:${s2.token ? `var(--inkflow-${s2.token}, ${s2.hex})` : s2.hex}"></span>`,
+            { inkSwatch: String(i2) }
+          );
+          return b2;
+        })
+      );
+      swatches.classList.add("ink-colours");
+      const customLabel = document.createElement("label");
+      customLabel.className = "ink-btn ink-custom";
+      customLabel.title = "Another colour";
+      customLabel.dataset.inkCustom = "";
+      this.custom = document.createElement("input");
+      this.custom.type = "color";
+      this.custom.setAttribute("aria-label", "Another colour");
+      customLabel.append(this.custom);
+      swatches.append(customLabel);
+      this.sizes = group();
+      this.sizes.classList.add("ink-sizes");
+      const actions = group(
+        button(opts.undoTitle, icon("undo"), { inkAction: "undo" }),
+        button(opts.clearTitle, icon("clear"), { inkAction: "clear" })
+      );
+      const toggles = group(
+        button(
+          "Draw with a mouse or a finger too (off: only a pen draws, so clicks and swipes still navigate)",
+          icon("fingers"),
+          { inkToggle: "fingers" }
+        )
+      );
+      if (opts.keep) {
+        toggles.append(
+          button(
+            "Keep: save new strokes with the slide (off: they last for this talk only)",
+            icon("keep"),
+            { inkToggle: "keep" }
+          )
+        );
+      }
+      if (opts.close) {
+        toggles.append(
+          button("Leave ink mode (i)", icon("close"), {
+            inkAction: "close"
+          })
+        );
+      }
+      el.append(tools, swatches, this.sizes, actions, toggles);
+      el.addEventListener("pointerdown", (e2) => e2.stopPropagation());
+      el.addEventListener("click", (e2) => {
+        e2.stopPropagation();
+        const b2 = e2.target.closest(".ink-btn");
+        if (!b2) return;
+        this.press(b2.dataset);
+      });
+      this.custom.addEventListener("input", () => {
+        const s2 = this.settings;
+        const tool = this.penTool();
+        s2[tool] = { ...s2[tool], swatch: null, custom: this.custom.value };
+        if (s2.tool === "eraser") s2.tool = tool;
+        this.commit(s2);
+      });
+      this.render();
+    }
+    get settings() {
+      return structuredClone(this.opts.settings);
+    }
+    set(settings2) {
+      this.opts.settings = settings2;
+      this.render();
+    }
+    // The pen tool colour and width apply to: the current one, or the pen
+    // while the eraser is picked.
+    penTool() {
+      return this.opts.settings.tool === "highlighter" ? "highlighter" : "pen";
+    }
+    press(data) {
+      const s2 = this.settings;
+      if (data.inkTool) {
+        s2.tool = data.inkTool;
+      } else if (data.inkSwatch !== void 0) {
+        const tool = this.penTool();
+        s2[tool] = { ...s2[tool], swatch: Number(data.inkSwatch) };
+        if (s2.tool === "eraser") s2.tool = tool;
+      } else if (data.inkSize !== void 0) {
+        const tool = this.penTool();
+        s2[tool] = { ...s2[tool], size: Number(data.inkSize) };
+        if (s2.tool === "eraser") s2.tool = tool;
+      } else if (data.inkCustom !== void 0) {
+        const tool = this.penTool();
+        s2[tool] = { ...s2[tool], swatch: null };
+        if (s2.tool === "eraser") s2.tool = tool;
+      } else if (data.inkToggle === "fingers") {
+        s2.fingers = !s2.fingers;
+      } else if (data.inkToggle === "keep") {
+        s2.keep = !s2.keep;
+      } else if (data.inkAction === "undo") {
+        this.opts.undo();
+        return;
+      } else if (data.inkAction === "clear") {
+        this.opts.clear();
+        return;
+      } else if (data.inkAction === "close") {
+        this.opts.close?.();
+        return;
+      }
+      this.commit(s2);
+    }
+    commit(s2) {
+      this.opts.settings = s2;
+      this.render();
+      this.opts.onChange(structuredClone(s2));
+    }
+    render() {
+      const s2 = this.opts.settings;
+      const tool = this.penTool();
+      const t2 = s2[tool];
+      for (const b2 of this.el.querySelectorAll(
+        "[data-ink-tool]"
+      )) {
+        b2.setAttribute(
+          "aria-pressed",
+          String(b2.dataset.inkTool === s2.tool)
+        );
+      }
+      for (const b2 of this.el.querySelectorAll(
+        "[data-ink-swatch]"
+      )) {
+        b2.setAttribute(
+          "aria-pressed",
+          String(t2.swatch === Number(b2.dataset.inkSwatch))
+        );
+      }
+      this.custom.parentElement.classList.toggle("on", t2.swatch === null);
+      this.custom.value = t2.custom;
+      const sizes = sizesOf(tool);
+      const largest = sizes[sizes.length - 1];
+      this.sizes.replaceChildren(
+        ...sizes.map((size, i2) => {
+          const px2 = Math.max(3, Math.round(size / largest * 16));
+          const b2 = button(
+            ["Thin", "Medium", "Thick"][i2] ?? `Size ${i2 + 1}`,
+            `<span class="ink-dot ${tool}" style="width:${px2}px;height:${tool === "highlighter" ? Math.max(3, Math.round(px2 / 2.5)) : px2}px"></span>`,
+            { inkSize: String(i2) }
+          );
+          b2.setAttribute("aria-pressed", String(t2.size === i2));
+          return b2;
+        })
+      );
+      this.el.classList.toggle("erasing", s2.tool === "eraser");
+      for (const b2 of this.el.querySelectorAll(
+        "[data-ink-toggle]"
+      )) {
+        const key = b2.dataset.inkToggle;
+        b2.setAttribute("aria-pressed", String(s2[key]));
+      }
+    }
+  };
+  function loadSettings(key, fingers) {
+    const fallback = defaultSettings(fingers);
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? settingsFrom(JSON.parse(raw), fallback) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  function saveSettings(key, settings2) {
+    try {
+      localStorage.setItem(key, JSON.stringify(settings2));
+    } catch {
+    }
+  }
+
+  // src/ts/presenter/inkstore.ts
+  var UNDO_LIMIT = 200;
+  var SlideInk = class {
+    strokes = [];
+    // Bumped on every change, so a render can tell it is up to date.
+    rev = 0;
+    history = [];
+    // Show these strokes; one with the id of a stroke already here replaces it
+    // in place (a relayed stroke finishing, a save coming back).
+    add(strokes) {
+      for (const s2 of strokes) {
+        const i2 = this.strokes.findIndex((x2) => x2.id === s2.id);
+        if (i2 >= 0) this.strokes[i2] = s2;
+        else this.strokes.push(s2);
+      }
+      if (strokes.length) this.rev++;
+    }
+    // Stop showing these; returns the ones that were here.
+    remove(ids) {
+      const gone = new Set(ids);
+      const removed = this.strokes.filter((s2) => gone.has(s2.id));
+      if (removed.length) {
+        this.strokes = this.strokes.filter((s2) => !gone.has(s2.id));
+        this.rev++;
+      }
+      return removed;
+    }
+    record(action) {
+      if (!action.strokes.length) return;
+      this.history.push(action);
+      this.history.splice(0, this.history.length - UNDO_LIMIT);
+    }
+    // The last action, taken off the history: the caller undoes it.
+    popUndo() {
+      return this.history.pop() ?? null;
+    }
+    get canUndo() {
+      return this.history.length > 0;
+    }
+    // Saved strokes the slide's ink file now shows: no longer held here.
+    settle(inFile) {
+      const before = this.strokes.length;
+      this.strokes = this.strokes.filter((s2) => !inFile.has(s2.id));
+      if (this.strokes.length !== before) this.rev++;
+    }
+  };
+  var InkStore = class {
+    slides = /* @__PURE__ */ new Map();
+    get(slideId2) {
+      let ink = this.slides.get(slideId2);
+      if (!ink) {
+        ink = new SlideInk();
+        this.slides.set(slideId2, ink);
+      }
+      return ink;
+    }
+    // Every slide's strokes, for a window that just connected.
+    snapshot() {
+      const out = {};
+      for (const [id, ink] of this.slides) {
+        const shown = ink.strokes.map(({ saved: _2, ...s2 }) => s2);
+        if (shown.length) out[id] = shown;
+      }
+      return out;
+    }
+  };
+
+  // src/ts/presenter/ink.ts
+  var SETTINGS_KEY = "inkflow-ink-presenter";
+  var SVG_NS3 = "http://www.w3.org/2000/svg";
+  var stage4 = document.getElementById("stage");
+  var stageWrap2 = document.getElementById("stage-wrap");
+  var overviewEl = document.getElementById("overview");
+  var button2 = document.getElementById("btn-ink");
+  var store = new InkStore();
+  var settings = loadSettings(SETTINGS_KEY, false);
+  var active = false;
+  var palette = null;
+  var pad = null;
+  onTouchCancel(() => pad?.cancel());
+  var send = () => {
+  };
+  var saving = false;
+  var drawing = /* @__PURE__ */ new Map();
+  var hiddenSaved = /* @__PURE__ */ new Set();
+  var pendingSaves = /* @__PURE__ */ new Map();
+  var saveCount = 0;
+  function slideId() {
+    return state.slides[state.slideIndex]?.id ?? null;
+  }
+  function slideSvg2() {
+    return stage4?.querySelector(":scope > svg") ?? null;
+  }
+  function current() {
+    const id = slideId();
+    return id === null ? null : store.get(id);
+  }
+  function group2(parent, name) {
+    let g2 = parent.querySelector(`:scope > g[data-${name}]`);
+    if (!g2) {
+      g2 = document.createElementNS(SVG_NS3, "g");
+      g2.setAttribute(`data-${name}`, "");
+      parent.appendChild(g2);
+    }
+    return g2;
+  }
+  function mountInk() {
+    const svg = slideSvg2();
+    const id = slideId();
+    if (!svg || id === null) return;
+    const ink = store.get(id);
+    const inFile = new Set(
+      [...svg.querySelectorAll(".inkflow-ink [id]")].map((el) => el.id)
+    );
+    ink.settle(inFile);
+    for (const hidden of [...hiddenSaved]) {
+      const el = inFile.has(hidden) ? svg.getElementById(hidden) : null;
+      if (el instanceof SVGElement) el.style.display = "none";
+      else hiddenSaved.delete(hidden);
+    }
+    let layer = svg.querySelector(":scope > g.inkflow-live-ink");
+    if (!layer) {
+      layer = document.createElementNS(SVG_NS3, "g");
+      layer.setAttribute("class", "inkflow-live-ink");
+      svg.appendChild(layer);
+    }
+    const held = group2(layer, "held");
+    const rev = `${id}:${ink.rev}`;
+    if (held.dataset.rev !== rev) {
+      held.replaceChildren(...ink.strokes.map(strokeElement));
+      held.dataset.rev = rev;
+    }
+    const relayed = group2(layer, "relayed");
+    const shown = new Map(
+      [...relayed.children].map((el) => [el.getAttribute("data-stroke"), el])
+    );
+    for (const [strokeId, d2] of drawing) {
+      if (d2.slide !== id) continue;
+      let path = shown.get(strokeId);
+      if (!path) {
+        path = paintStroke(
+          document.createElementNS(SVG_NS3, "path"),
+          d2.live
+        );
+        path.setAttribute("data-stroke", strokeId);
+        relayed.appendChild(path);
+      }
+      shown.delete(strokeId);
+      path.setAttribute(
+        "d",
+        pathData(outlineOf(d2.points, d2.live, d2.live.simulate, false), 2)
+      );
+    }
+    for (const stale of shown.values()) stale?.remove();
+  }
+  var mountFrame = 0;
+  function remount() {
+    if (mountFrame) return;
+    mountFrame = requestAnimationFrame(() => {
+      mountFrame = 0;
+      mountInk();
+    });
+  }
+  function save(slide, op, payload, ids) {
+    const ws = state.ws;
+    if (!saving || !ws || ws.readyState !== WebSocket.OPEN) {
+      showNotify("Ink not saved: no connection to the inkflow server", "red");
+      return false;
+    }
+    const id = `ink-${++saveCount}`;
+    pendingSaves.set(id, { slide, op, ids });
+    ws.send(
+      JSON.stringify({
+        type: "edit-op",
+        id,
+        action: "ink",
+        op,
+        slideId: slide,
+        ...payload
+      })
+    );
+    return true;
+  }
+  function inkSaveResult(msg) {
+    const pending = typeof msg.id === "string" ? pendingSaves.get(msg.id) : void 0;
+    if (!pending) return false;
+    pendingSaves.delete(msg.id);
+    if (msg.ok) return true;
+    showNotify(`Ink not saved: ${String(msg.error ?? "refused")}`, "red");
+    const ids = new Set(pending.ids);
+    if (pending.op === "add") {
+      for (const s2 of store.get(pending.slide).strokes) {
+        if (ids.has(s2.id)) s2.saved = false;
+      }
+    } else {
+      for (const id of ids) hiddenSaved.delete(id);
+      for (const id of ids) {
+        const el = slideSvg2()?.getElementById(id);
+        if (el instanceof SVGElement) el.style.removeProperty("display");
+      }
+    }
+    return true;
+  }
+  function plain(s2) {
+    const { saved: _2, ...stroke } = s2;
+    return stroke;
+  }
+  function addStrokes(ink, strokes, slide) {
+    ink.add(strokes);
+    const keep = strokes.filter((s2) => s2.saved);
+    if (keep.length && !save(
+      slide,
+      "add",
+      { strokes: keep.map(plain) },
+      keep.map((s2) => s2.id)
+    )) {
+      for (const s2 of keep) s2.saved = false;
+    }
+    send({ type: "ink", op: "add", slide, strokes: strokes.map(plain) });
+  }
+  function eraseStrokes(ink, strokes, slide) {
+    const ids = strokes.map((s2) => s2.id);
+    ink.remove(ids);
+    const saved = strokes.filter((s2) => s2.saved).map((s2) => s2.id);
+    if (saved.length && save(slide, "erase", { ids: saved }, saved)) {
+      for (const id of saved) hiddenSaved.add(id);
+    }
+    send({ type: "ink", op: "erase", slide, ids });
+  }
+  function undoInk() {
+    const ink = current();
+    const slide = slideId();
+    const action = ink?.popUndo();
+    if (!ink || !action || slide === null) return;
+    if (action.kind === "add") eraseStrokes(ink, action.strokes, slide);
+    else addStrokes(ink, action.strokes, slide);
+    mountInk();
+  }
+  function savedStrokes(els) {
+    return [...els].filter((el) => !hiddenSaved.has(el.id)).map(strokeOf).filter((s2) => s2 !== null).map((s2) => ({ ...s2, saved: true }));
+  }
+  function clearInk() {
+    const ink = current();
+    const svg = slideSvg2();
+    const slide = slideId();
+    if (!ink || !svg || slide === null) return;
+    const saved = settings.keep && saving ? savedStrokes(svg.querySelectorAll(".inkflow-ink path[id]")) : [];
+    const all = [...ink.strokes, ...saved];
+    if (!all.length) return;
+    if (saved.length && !window.confirm(
+      "Clear this slide's ink, including the strokes saved with the deck?"
+    ))
+      return;
+    eraseStrokes(ink, all, slide);
+    ink.record({ kind: "erase", strokes: all });
+    mountInk();
+  }
+  function applyIncomingInk(msg) {
+    if (msg.op === "request") {
+      const slides = store.snapshot();
+      if (Object.keys(slides).length)
+        send({ type: "ink", op: "state", slides });
+      return;
+    }
+    if (msg.op === "state") {
+      if (typeof msg.slides !== "object" || msg.slides === null) return;
+      for (const [slide, raw] of Object.entries(msg.slides)) {
+        if (!Array.isArray(raw)) continue;
+        store.get(slide).add(raw.map(strokeFrom).filter((s2) => s2 !== null));
+      }
+      remount();
+      return;
+    }
+    if (typeof msg.slide !== "string") return;
+    const ink = store.get(msg.slide);
+    if (msg.op === "draw") {
+      const style = styleFrom(msg.stroke);
+      const points = unflatten(msg.points);
+      if (!style || !points || typeof msg.from !== "number") return;
+      const simulate = msg.stroke.simulate;
+      const live = { ...style, simulate: simulate === true };
+      const d2 = drawing.get(live.id) ?? {
+        slide: msg.slide,
+        live,
+        points: []
+      };
+      d2.points = d2.points.slice(0, Math.max(0, msg.from)).concat(points);
+      drawing.set(live.id, d2);
+    } else if (msg.op === "abandon") {
+      drawing.delete(String(msg.id));
+    } else if (msg.op === "add") {
+      if (!Array.isArray(msg.strokes)) return;
+      const strokes = msg.strokes.map(strokeFrom).filter((s2) => s2 !== null);
+      for (const s2 of strokes) drawing.delete(s2.id);
+      ink.add(strokes);
+    } else if (msg.op === "erase") {
+      if (!Array.isArray(msg.ids)) return;
+      ink.remove(msg.ids.filter((i2) => typeof i2 === "string"));
+    }
+    if (msg.slide === slideId()) remount();
+  }
+  function inkActive() {
+    return active;
+  }
+  function toggleInk() {
+    active = !active;
+    if (!active) pad?.cancel();
+    document.body.classList.toggle("ink-mode", active);
+    button2?.classList.toggle("active", active);
+    button2?.setAttribute("aria-pressed", String(active));
+    if (palette) palette.el.hidden = !active;
+  }
+  function inkKey(e2) {
+    if (!active) return false;
+    if ((e2.ctrlKey || e2.metaKey) && e2.key.toLowerCase() === "z") {
+      e2.preventDefault();
+      undoInk();
+      return true;
+    }
+    if (e2.key === "Escape") {
+      toggleInk();
+      return true;
+    }
+    return false;
+  }
+  function tokenColor(token) {
+    const value = getComputedStyle(slideSvg2() ?? document.documentElement).getPropertyValue(`--inkflow-${token}`).trim();
+    return value ? normalizeHex(value) : null;
+  }
+  function initInk(wsPort, sender) {
+    send = sender;
+    if (!stage4 || !stageWrap2) return;
+    onSlideMounted(mountInk);
+    onSlideLeaving(() => pad?.cancel());
+    const local = ["localhost", "127.0.0.1", "[::1]"].includes(
+      location.hostname
+    );
+    saving = wsPort !== null && local;
+    if (!saving) settings.keep = false;
+    palette = new InkPalette({
+      settings,
+      keep: saving,
+      undoTitle: "Undo the last stroke (Ctrl+Z)",
+      clearTitle: "Clear this slide's ink",
+      onChange(next) {
+        settings = next;
+        saveSettings(SETTINGS_KEY, settings);
+      },
+      undo: undoInk,
+      clear: clearInk,
+      close: toggleInk
+    });
+    palette.el.hidden = true;
+    stageWrap2.appendChild(palette.el);
+    pad = new InkPad({
+      surface: stageWrap2,
+      active: () => active,
+      fingers: () => settings.fingers,
+      tool: () => settings.tool,
+      allows: (e2) => !isCameraGesture(e2) && !overviewEl?.classList.contains("visible") && !e2.target.closest(".ink-palette"),
+      svg: slideSvg2,
+      style: (tool, svg) => styleFor(
+        settings,
+        tool,
+        svg.viewBox.baseVal.width,
+        tokenColor,
+        svg.viewBox.baseVal.height
+      ),
+      *erasables(svg) {
+        yield* svg.querySelectorAll(
+          ".inkflow-live-ink [data-held] path[id]"
+        );
+        if (settings.keep && saving) {
+          yield* svg.querySelectorAll(
+            ".inkflow-ink path[id]"
+          );
+        }
+      },
+      onDraw(live, from, points) {
+        const slide = slideId();
+        if (slide === null) return;
+        send({
+          type: "ink",
+          op: "draw",
+          slide,
+          stroke: live,
+          from,
+          points: flatten(points)
+        });
+      },
+      onAbandon(live) {
+        const slide = slideId();
+        if (slide !== null)
+          send({ type: "ink", op: "abandon", slide, id: live.id });
+      },
+      onStroke(stroke) {
+        const ink = current();
+        const slide = slideId();
+        if (!ink || slide === null) return;
+        const held = {
+          ...stroke,
+          saved: settings.keep && saving
+        };
+        addStrokes(ink, [held], slide);
+        ink.record({ kind: "add", strokes: [held] });
+        mountInk();
+      },
+      onErase(ids, hidden) {
+        const ink = current();
+        const slide = slideId();
+        if (!ink || slide === null) return;
+        const taken = new Set(ids);
+        const held = ink.strokes.filter((s2) => taken.has(s2.id));
+        const heldIds = new Set(held.map((s2) => s2.id));
+        const saved = savedStrokes(
+          hidden.filter((el) => !heldIds.has(el.id))
+        );
+        eraseStrokes(ink, [...held, ...saved], slide);
+        ink.record({ kind: "erase", strokes: [...held, ...saved] });
+        mountInk();
+      }
+    });
+  }
+  function requestInk() {
+    send({ type: "ink", op: "request" });
+  }
+
+  // src/ts/presenter/pv.ts
+  var pvPanel = document.getElementById("pv");
+  var pvResizeHandle = document.getElementById("pv-resize-handle");
+  var pvStrip = document.getElementById("pv-strip");
+  var pvClock = document.getElementById("pv-clock");
+  var pvElapsed = document.getElementById("pv-elapsed");
+  var pvTimerToggle = document.getElementById("pv-timer-toggle");
+  var pvTimerReset = document.getElementById("pv-timer-reset");
+  var pvSlideInfo = document.getElementById("pv-slide-info");
+  var pvSection = document.getElementById("pv-section");
+  var pvStepRing = document.getElementById("pv-step-ring");
+  var pvNextInner = document.getElementById("pv-next-inner");
+  var pvNotes = document.getElementById("pv-notes");
+  var _elapsedAccumMs = 0;
+  var _runningSince = Date.now();
+  function _elapsedMs() {
+    const running = _runningSince === null ? 0 : Date.now() - _runningSince;
+    return _elapsedAccumMs + running;
+  }
+  function _setTimerPaused(paused) {
+    if (paused === (_runningSince === null)) return;
+    if (paused) {
+      _elapsedAccumMs = _elapsedMs();
+      _runningSince = null;
+    } else {
+      _runningSince = Date.now();
+    }
+    pvStrip.classList.toggle("timer-paused", paused);
+    const label = paused ? "Resume timer" : "Pause timer";
+    pvTimerToggle.title = label;
+    pvTimerToggle.setAttribute("aria-label", label);
+    updatePvClock();
+  }
+  function _resetTimer() {
+    _elapsedAccumMs = 0;
+    if (_runningSince !== null) _runningSince = Date.now();
+    updatePvClock();
+  }
+  pvTimerToggle.addEventListener("click", () => {
+    _setTimerPaused(_runningSince !== null);
+  });
+  pvTimerReset.addEventListener("click", _resetTimer);
+  function _pad2(n2) {
+    return String(n2).padStart(2, "0");
+  }
+  function updatePvClock() {
+    const now = /* @__PURE__ */ new Date();
+    pvClock.textContent = `${_pad2(now.getHours())}:${_pad2(now.getMinutes())}:${_pad2(now.getSeconds())}`;
+    const secs = Math.floor(_elapsedMs() / 1e3);
+    const h2 = Math.floor(secs / 3600);
+    const m2 = Math.floor(secs % 3600 / 60);
+    const s2 = secs % 60;
+    pvElapsed.textContent = h2 > 0 ? `${_pad2(h2)}:${_pad2(m2)}:${_pad2(s2)}` : `${_pad2(m2)}:${_pad2(s2)}`;
+  }
+  function updatePvInfo() {
+    const total = state.slides.length;
+    pvSlideInfo.innerHTML = `<span class="slide-current">${total ? state.slideIndex + 1 : "\u2013"}</span> / ${total || "\u2013"}`;
+    pvStepRing.innerHTML = buildStepRing(state.step, maxStep2());
+    if (pvSection) {
+      const at2 = sectionPosition(state.slides, state.slideIndex);
+      pvSection.hidden = !at2;
+      pvSection.textContent = at2 ? `\xA7 ${at2.name} \xB7 ${at2.at}/${at2.of}` : "";
+      pvSection.title = at2 ? `Section \u201C${at2.name}\u201D: slide ${at2.at} of ${at2.of}` : "";
+    }
+  }
+  function _scalePvNext() {
+    const svg = pvNextInner.querySelector("svg");
+    if (!svg) return;
+    const vb = parseViewBox(svg.getAttribute("viewBox"));
+    svg.setAttribute("width", String(vb.w));
+    svg.setAttribute("height", String(vb.h));
+    svg.style.width = `${vb.w}px`;
+    svg.style.height = `${vb.h}px`;
+    const scale = Math.min(
+      pvNextInner.clientWidth / vb.w,
+      pvNextInner.clientHeight / vb.h
+    );
+    const tx = (pvNextInner.clientWidth - vb.w * scale) / 2;
+    const ty = (pvNextInner.clientHeight - vb.h * scale) / 2;
+    svg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  }
+  function renderPvNext() {
+    const curMax = maxStep2();
+    let previewSvg = null;
+    let revealStep = 0;
+    if (state.step < curMax) {
+      previewSvg = state.slides[state.slideIndex]?.svg ?? null;
+      revealStep = state.step + 1;
+    } else if (state.slideIndex + 1 < state.slides.length) {
+      previewSvg = state.slides[state.slideIndex + 1].svg;
+    }
+    if (previewSvg === null) {
+      pvNextInner.innerHTML = '<div id="pv-next-empty">END</div>';
+      return;
+    }
+    pvNextInner.innerHTML = previewSvg;
+    const svg = pvNextInner.querySelector("svg");
+    if (svg) {
+      fitSlide(svg);
+      applyStepInstant(svg, revealStep);
+    }
+    requestAnimationFrame(_scalePvNext);
+  }
+  function renderPvNotes() {
+    pvNotes.innerHTML = state.slides[state.slideIndex]?.notes ?? "";
+    pvNotes.scrollTop = 0;
+  }
+  function renderPv() {
+    updatePvInfo();
+    renderPvNext();
+    renderPvNotes();
+    renderEditButton();
+  }
+  function togglePv() {
+    document.body.classList.toggle("pv-open");
+    pvPanel.addEventListener("transitionend", _scalePvNext, { once: true });
+  }
+  window.addEventListener("resize", _scalePvNext);
+  function _onPvResizeMove(e2) {
+    pvPanel.style.setProperty(
+      "--pv-width",
+      `${window.innerWidth - e2.clientX}px`
+    );
+    _scalePvNext();
+  }
+  function _onPvResizeUp(e2) {
+    pvResizeHandle.releasePointerCapture(e2.pointerId);
+    pvResizeHandle.removeEventListener("pointermove", _onPvResizeMove);
+    pvResizeHandle.removeEventListener("pointerup", _onPvResizeUp);
+    pvPanel.style.transition = "";
+  }
+  pvResizeHandle.addEventListener("pointerdown", (e2) => {
+    e2.preventDefault();
+    pvPanel.style.transition = "none";
+    pvResizeHandle.setPointerCapture(e2.pointerId);
+    pvResizeHandle.addEventListener("pointermove", _onPvResizeMove);
+    pvResizeHandle.addEventListener("pointerup", _onPvResizeUp);
+  });
+
+  // src/ts/shared/deck-styles.ts
+  function applyDeckStyles(msg) {
+    if (msg.styles !== void 0) {
+      const el = document.getElementById("deck-styles");
+      if (el) el.textContent = msg.styles;
+    }
+    if (msg.mode !== void 0)
+      document.documentElement.dataset.theme = msg.mode;
+  }
+
+  // src/ts/shared/identity.ts
+  var NAME_KEY = "inkflow-name";
+  var ID_KEY = "inkflow-key";
+  function read(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+  function write(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+    }
+  }
+  function storedName() {
+    const name = read(NAME_KEY)?.trim();
+    return name ? name.slice(0, 40) : null;
+  }
+  var sessionKey = null;
+  function clientKey() {
+    const stored = read(ID_KEY);
+    if (stored && /^[A-Za-z0-9_-]{16,64}$/.test(stored)) return stored;
+    if (!sessionKey) {
+      const bytes = new Uint8Array(18);
+      crypto.getRandomValues(bytes);
+      sessionKey = Array.from(
+        bytes,
+        (b2) => b2.toString(16).padStart(2, "0")
+      ).join("");
+      write(ID_KEY, sessionKey);
+    }
+    return sessionKey;
+  }
+
+  // src/ts/shared/wsurl.ts
+  var WS_PATH = "/_inkflow/ws";
+  function socketUrl(loc) {
+    const scheme = loc.protocol === "https:" ? "wss" : "ws";
+    return `${scheme}://${loc.host || "localhost"}${WS_PATH}`;
+  }
+  var SENT_AWAY = 4001;
+  function relay() {
+    try {
+      if (window.parent !== window) {
+        return window.parent.__inkflowRelay;
+      }
+    } catch {
+    }
+    return void 0;
+  }
+  function openSocket() {
+    const online = relay();
+    if (!online) return new WebSocket(socketUrl(location));
+    const sock = online.openSocket();
+    window.addEventListener("pagehide", () => sock.close(1001, "page left"));
+    return sock;
   }
 
   // src/ts/presenter/websocket.ts
@@ -5802,6 +5946,7 @@
     }
     state._overviewActive = state.slideIndex;
     overviewGrid.querySelectorAll(".overview-thumb").forEach((thumb) => {
+      fitSlide(thumb);
       applyStepInstant(thumb, maxStep(thumb));
     });
     await nextFrame();
@@ -6221,6 +6366,7 @@
   initEditMenu(EDIT_COMMANDS, WS_PORT);
   initToEditor(WS_PORT);
   initInk(WS_PORT, sendInk);
+  initFit();
   var deepLinked = readURL();
   loadSlide();
   renderPv();

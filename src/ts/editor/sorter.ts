@@ -5,6 +5,7 @@
 // delete slides. Every change is a structured edit of the Deck(slides=[...])
 // list in deck.py.
 
+import { scheduleFit } from "../shared/fit";
 import { parseViewBox } from "../shared/viewbox";
 import {
     copySlides,
@@ -145,6 +146,8 @@ export class Thumbs {
             svg.querySelectorAll("video").forEach((v) => {
                 v.removeAttribute("autoplay");
             });
+            // Its text fitted once it is in the page.
+            scheduleFit(svg);
             // Ids inside thumbnails would shadow the canvas's own for url(#…)
             // lookups only if they came first in the document; the canvas does
             // (see editor.html).

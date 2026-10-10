@@ -675,6 +675,18 @@ def distribute(
 )
 @click.option("--stroke-width", default=None, type=float, help="Outline width.")
 @click.option("--opacity", default=None, type=click.FloatRange(0, 1), help="0 to 1.")
+@click.option(
+    "--font-scale",
+    default=None,
+    metavar="SCALE",
+    help="A text box's text size: a factor (0.8) or 80%; 1 = its own.",
+)
+@click.option(
+    "--fit",
+    default=None,
+    type=click.Choice(["shrink", "none"]),
+    help="Shrink a text box's text when it overflows (the default), or never.",
+)
 def style(
     ids: tuple[str, ...],
     deck_path: Path,
@@ -684,9 +696,12 @@ def style(
     stroke: str | None,
     stroke_width: float | None,
     opacity: float | None,
+    font_scale: str | None,
+    fit: str | None,
 ) -> None:
     """Colour objects: a theme colour follows the deck's theme and mode; a
-    text box shows its frame once styled."""
+    text box shows its frame once styled. --font-scale and --fit set a text
+    box's text size and shrink-to-fit (a layout's zone: on this slide only)."""
     command = _command(
         "style",
         list(ids),
@@ -694,6 +709,8 @@ def style(
         stroke=stroke,
         stroke_width=stroke_width,
         opacity=opacity,
+        font_scale=font_scale,
+        fit=fit,
     )
     _send(deck_path, slide_ref, [command], f"Style {', '.join(ids)}", as_json)
 

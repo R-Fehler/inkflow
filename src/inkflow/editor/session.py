@@ -105,6 +105,7 @@ from inkflow.editor.master import (
 )
 from inkflow.editor.model import MEDIA_HIDDEN_FIELDS, source_infos
 from inkflow.editor.previews import layout_previews
+from inkflow.editor.provenance import is_element
 from inkflow.editor.svgops import (
     SvgFile,
     SvgOpError,
@@ -113,6 +114,7 @@ from inkflow.editor.svgops import (
     element_at,
     file_hash,
     group,
+    is_diagram_picture,
     set_style,
     ungroup,
     unique_id,
@@ -169,7 +171,19 @@ from inkflow.layout import (
     theme_ref,
 )
 from inkflow.logging import collect_logs, logger
-from inkflow.manifest import Chart, Deck, Image, Inline, Slide, TextBox, Video
+from inkflow.manifest import (
+    TEXT_SCALE_MAX,
+    TEXT_SCALE_MIN,
+    Chart,
+    Deck,
+    Image,
+    Inline,
+    Slide,
+    TextBox,
+    Video,
+    format_text_scale,
+    parse_text_scale,
+)
 from inkflow.ns import INKFLOW_COPY_OF, INKFLOW_LABEL, INKFLOW_SHOW_SHAPE
 from inkflow.overlay import Overlay
 from inkflow.pipeline import (
@@ -180,7 +194,7 @@ from inkflow.pipeline import (
 )
 from inkflow.sizes import PageSize
 from inkflow.svg import canvas_size
-from inkflow.svgio import parse_svg_file
+from inkflow.svgio import SvgElement, parse_svg_file
 from inkflow.sync import build_context, deck_files, plan_preview
 from inkflow.titles import resolve_deck_title
 from inkflow.transitions import Transition
@@ -188,6 +202,7 @@ from inkflow.zones import (
     parse_markdown_zones,
     remove_zone_section,
     replace_zone_text,
+    set_zone_params,
     zone_spans,
 )
 
@@ -655,6 +670,15 @@ def as_strings(value: list[object]) -> list[str]:
     return [str(v) for v in value]
 
 
+def _ids_inside(el: SvgElement) -> list[tuple[str, SvgElement]]:
+    """Every id in ``el`` (itself included), in document order."""
+    return [
+        (node.get("id", ""), node)
+        for node in el.iter()
+        if is_element(node) and node.get("id")
+    ]
+
+
 def _py(value: object) -> str:
     return Code().literal(value)
 
@@ -892,6 +916,7 @@ class EditorSession:
         handler = {
             "svg": self._svg,
             "zone-text": self._zone_text,
+            "zone-format": self._zone_format,
             "zone-media": self._zone_media,
             "media-props": self._media_props,
             "insert-video": self._insert_video,
@@ -1277,14 +1302,40 @@ class EditorSession:
         untouched = svg.to_bytes()
         ops = cast("list[dict[str, object]]", msg.get("ops") or [])
         # A zone's content lives outside the SVG (deck.py, Markdown): deleting
-        # or duplicating the zone's shape takes its content along.
-        zone_ops: list[tuple[str, str, object]] = []
-        if isinstance(msg.get("zoneSlide"), int):
+        # or duplicating the zone's shape, or a group holding zones, takes
+        # their content along; deleting anything drops the slide's
+        # animations of it and of everything inside it.
+        zone_slide = msg.get("zoneSlide")
+        dropped_zones: list[str] = []
+        deleted_ids: set[str] = set()
+        deleted_prefixes: set[str] = set()
+        # Duplicates by their index among the ops apply_ops runs.
+        dup_zones: dict[int, list[str]] = {}
+        if isinstance(zone_slide, int):
+            plain_n = 0
             for op in ops:
-                if op.get("kind") in ("delete", "duplicate"):
-                    el_id = element_at(svg.root, op.get("loc")).get("id") or ""
-                    if el_id.startswith("zone-"):
-                        zone_ops.append((str(op["kind"]), el_id, op.get("key")))
+                kind = op.get("kind")
+                if kind in ("group", "ungroup"):
+                    continue
+                if kind in ("delete", "duplicate"):
+                    inside = _ids_inside(element_at(svg.root, op.get("loc")))
+                    zones = [i for i, _ in inside if i.startswith("zone-")]
+                    if kind == "delete":
+                        dropped_zones += [z for z in zones if z not in dropped_zones]
+                        for el_id, el in inside:
+                            deleted_ids.add(el_id)
+                            # A chart's series and a drawn-in diagram's shapes
+                            # are named after the element they are drawn in.
+                            if el_id.startswith("zone-"):
+                                deleted_prefixes |= {
+                                    f"{el_id}-series-",
+                                    f"{el_id}-slice-",
+                                }
+                            if is_diagram_picture(el):
+                                deleted_prefixes.add(f"{el_id}-")
+                    else:
+                        dup_zones[plain_n] = zones
+                plain_n += 1
         result_ids: dict[str, str] = {}
         structural = False
         for op in ops:
@@ -1296,11 +1347,13 @@ class EditorSession:
                 structural = True
         plain = [op for op in ops if op.get("kind") not in ("group", "ungroup")]
         prefixes: dict[str, str] = {}
+        duplicates: dict[int, dict[str, str]] = {}
         if plain:
             result = apply_ops(svg, plain)
             result_ids.update(result.ids)
             structural = structural or result.structural
             prefixes = result.renamed_prefixes
+            duplicates = result.duplicates
         out = svg.to_bytes()
         if out != untouched:
             # A batch that changes nothing leaves the file's own formatting alone.
@@ -1314,28 +1367,53 @@ class EditorSession:
         }
         if renames:
             self._rename_cues(deck, path, renames, txn, prefixes)
-        if zone_ops:
-            index, slide = self._deck_slide(deck, {"slide": msg["zoneSlide"]})
-            for kind, el_id, key in zone_ops:
-                zone = el_id.removeprefix("zone-")
-                if kind == "delete":
-                    self._drop_zone_content(index, slide, zone, txn)
-                else:
-                    new_id = result_ids.get(
-                        str(key if key is not None else "duplicate")
-                    )
-                    if new_id and new_id.startswith("zone-"):
+        if isinstance(zone_slide, int) and (dropped_zones or dup_zones):
+            index, slide = self._deck_slide(deck, {"slide": zone_slide})
+            for el_id in dropped_zones:
+                self._drop_zone_content(index, slide, el_id.removeprefix("zone-"), txn)
+            for n, zones in dup_zones.items():
+                renamed = duplicates.get(n, {})
+                for el_id in zones:
+                    new_id = renamed.get(el_id, "")
+                    if new_id.startswith("zone-"):
                         self._copy_zone_content(
                             index,
                             slide,
                             deck,
-                            zone,
+                            el_id.removeprefix("zone-"),
                             new_id.removeprefix("zone-"),
                             txn,
                         )
+        if isinstance(zone_slide, int) and deleted_ids:
+            self._drop_cues(deck, zone_slide, deleted_ids, deleted_prefixes, txn)
         extra["ids"] = result_ids
         extra["structural"] = structural
         return str(msg.get("label") or "Edit shape")
+
+    def _drop_cues(
+        self,
+        deck: Deck,
+        slide_number: int,
+        ids: set[str],
+        prefixes: set[str],
+        txn: _Txn,
+    ) -> None:
+        """Remove the slide's ``animations=[...]`` entries of deleted elements
+        (so the build does not warn about cues whose element is gone)."""
+        index, slide = self._deck_slide(deck, {"slide": slide_number})
+        gone = [
+            i
+            for i, cue in enumerate(slide.animations)
+            if cue.element in ids or cue.element.startswith(tuple(prefixes))
+        ]
+        if not gone:
+            return
+        source = self._deck_source(txn)
+        if source.animation_count(index) != len(slide.animations):
+            return  # built in code: left as written
+        for at in reversed(gone):
+            source.edit_animations(index, remove=at)
+        self._save_deck(txn, source, set())
 
     def _rename_cues(
         self,
@@ -1422,6 +1500,79 @@ class EditorSession:
         source.set_slide_arg(index, "md", f"Inline({_py(new)})")
         self._save_deck(txn, source, {"Inline"})
         return f"Edit {zone}"
+
+    def _zone_format(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, _extra: dict[str, object]
+    ) -> str:
+        """A zone's text size and shrink-to-fit on one slide, where its text
+        is written: ``size=`` / ``fit=`` on its Markdown marker, or
+        ``TextBox(size=, fit=)`` in deck.py. ``size`` (a factor, or ``None``
+        to drop it) and ``fit`` (``"shrink"``, ``"none"`` or ``None``) are
+        changed only when the request names them. (A zone shape of the
+        slide's own, or of a layout in the slide master, keeps them in its
+        style instead: the ``svg`` action's ``style`` op.)"""
+        index, slide = self._deck_slide(deck, msg)
+        zone = str(msg.get("zone") or "")
+        if not zone:
+            raise EditError("which zone?")
+        size: float | None = None
+        if "size" in msg and msg["size"] is not None:
+            raw = msg["size"]
+            try:
+                size = (
+                    parse_text_scale(raw)
+                    if isinstance(raw, str)
+                    else float(cast("float", raw))
+                )
+            except (TypeError, ValueError) as exc:
+                raise EditError(f"text size: {exc}") from exc
+            if not TEXT_SCALE_MIN <= size <= TEXT_SCALE_MAX:
+                raise EditError(
+                    f"the text size must be between {TEXT_SCALE_MIN:.0%}"
+                    + f" and {TEXT_SCALE_MAX:.0%}"
+                )
+        fit = msg.get("fit")
+        if fit not in (None, "shrink", "none"):
+            raise EditError("fit is shrink or none")
+        label = "Text size" if "size" in msg else "Shrink text to fit"
+        current = slide.zones.get(zone)
+        if isinstance(current, TextBox):
+            changes: dict[str, object] = {}
+            if "size" in msg:
+                changes["size"] = size
+            if "fit" in msg:
+                changes["fit"] = None if fit is None else fit == "shrink"
+            source = self._deck_source(txn)
+            code = Code()
+            source.set_zone(
+                index, zone, code.call(dataclasses.replace(current, **changes))
+            )
+            self._save_deck(txn, source, code.imports)
+            return label
+        if current is not None and not isinstance(current, str):
+            raise EditError(f"{zone} holds no text")
+        updates: dict[str, str | None] = {}
+        if "size" in msg:
+            updates["size"] = None if size is None else format_text_scale(size)
+        if "fit" in msg:
+            updates["fit"] = cast("str | None", fit)
+        if isinstance(slide.md, Inline):
+            text = str(slide.md)
+            source = self._deck_source(txn)
+            if isinstance(current, str):
+                # Its text joins the Inline Markdown, under the marker.
+                text = replace_zone_text(text, zone, current)
+                source.set_zone(index, zone, None)
+            new = set_zone_params(text, zone, updates)
+            source.set_slide_arg(index, "md", f"Inline({_py(new)})")
+            self._save_deck(txn, source, {"Inline"})
+            return label
+        # Text written in deck.py's zones={...} moves to the slide's Markdown,
+        # where a marker can carry the settings.
+        md_path = self._slide_markdown(index, slide, deck, txn, zone)
+        md = txn.read(md_path).decode("utf-8")
+        txn.write(md_path, set_zone_params(md, zone, updates).encode("utf-8"))
+        return label
 
     def _zone_media(
         self, msg: dict[str, object], deck: Deck, txn: _Txn, _extra: dict[str, object]

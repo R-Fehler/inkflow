@@ -136,7 +136,11 @@ src/
                                Trigger.at) shared by pipeline.py (the animations=[...] list)
                                and zones.py (markdown reveals)
     zones.py          ::zone:: / ::step:: marker grammar, zone param extraction, and slide
-                               assembly (parsed markdown -> per-zone TextBox/Media)
+                               assembly (parsed markdown -> per-zone TextBox/Media);
+                               marker `size=80%`/`fit=none` -> `TextBox.size`/`.fit`,
+                               `set_zone_params` (a marker's params changed in place;
+                               auto-extracted zones get explicit markers, an unnamed
+                               zone an empty one at the end), `zone_params`
     server.py         HTTP server (the WebSocket on the same port, `/_inkflow/ws`),
                                file watcher, build pipeline; the door (`_share`:
                                `Access` + `People`, `allowed(role, msg)`), sharing
@@ -278,7 +282,9 @@ src/
     editor/           visual editor backend (see "The visual editor" below):
                                provenance.py (data-ink locators stamped on the composed
                                SVG + `locate`), svgops.py (write-back ops on one SVG:
-                               attrs/style/paint/text/insert/delete/duplicate/order/group),
+                               attrs/style/paint/text/insert/delete/duplicate/order/group;
+                               `OpResult.duplicates`: per duplicate op, every id copied ->
+                               its copy's),
                                deckedit.py (libcst edits of deck.py: slide list, Slide(...)
                                args, animations=[...], zones={...}, imports; keeps comments;
                                the slide list is read as `Group`s (unsectioned + one per
@@ -290,7 +296,18 @@ src/
                                one undoable whole-file step; EditorSession/History; the
                                `fonts` action (report / bundle / set) and the `pack`
                                action (check / plan / apply, `gitPaths` for the commit);
-                               `_Txn.copy` = a file copied in without its bytes; a video
+                               `_Txn.copy` = a file copied in without its bytes;
+                               the `svg` action with `zoneSlide` (the slide's own SVG):
+                               deleting an element takes the content of every `zone-*`
+                               inside it (Markdown section, zones= entry, Inline) and the
+                               slide's `animations=[...]` of it and everything inside it
+                               (`_drop_cues`; a zone's `-series-`/`-slice-`, a drawn-in
+                               diagram's `<id>-` shapes), duplicating copies every zone's
+                               content under its copy's id; `zone-format` (a zone's
+                               `size`/`fit` on one slide: its marker's params or its
+                               TextBox's fields, a zones= string moved to Markdown first;
+                               a zone shape's own `--inkflow-font-scale`/`--inkflow-fit`
+                               are the `svg` action's `style` op); a video
                                inserted anywhere is a new zone-video rect + a Video(...)
                                zones= entry in one step; the `ink` action adds / erases /
                                clears strokes, owner or share-link editor, and slide-list edits move a
@@ -345,7 +362,7 @@ src/
                                on the slide: geometry/label/style/delete in its source,
                                the picture patched until draw.io redraws it), context.py (.inkflow/context.json for agents),
                                outline.py (`inkflow outline`: `## <section>` lines, per-slide files, layout chain,
-                               zones with their origin and text, animations and clicks, read
+                               zones with their origin, text, size and fit, animations and clicks, read
                                off `build_model` + the editor build; `--slide N` adds zone
                                boxes, canvas size and the slide SVG's named ids; with
                                `--boxes` also the rendered boxes of `render --boxes`),
@@ -708,6 +725,7 @@ src/
       presenter.css   all presenter styles including the sidebar panel
       editor.js/.css  the visual editor (src/ts/editor, src/css/editor)
       render.js       single-slide renderer + layout measurement (src/ts/render)
+      fit.js          shrink-to-fit for the PDF export page (src/ts/fit, pdf.html)
     theme/            built-in theme: layouts/*.svg (the 16:9 ones, and poster-base/
                                poster-landscape-base with poster-2col/-3col/
                                -landscape-3col/-4col on the A canvas: zones title,
@@ -755,10 +773,17 @@ src/
                       pages): gestures.ts (pure: wheel delta -> zoom factor with
                       deltaMode, `ZoomAnchor`, the `TouchTracker` state machine;
                       tested), gesturepad.ts (`GesturePad`: the DOM glue, one per
-                      page), zoom-camera.ts (the presenter camera's viewBox maths)
+                      page), zoom-camera.ts (the presenter camera's viewBox maths);
+                      fit.ts (text size steps + shrink-to-fit: pure `searchScale`
+                      bisection, `floorScale`, `neededHeight`, `nextTextSize`,
+                      `parseTextSize`, `MIN_TEXT_FRACTION` (measure.ts's too); DOM
+                      `fitSlide`/`fitZone`/`scheduleFit`/`neededBoxHeight`,
+                      `onFontsLoaded`; tested)
     presenter/        main presenter modules — navigation, transitions (progress-driven
                       via progress-driver.ts), overview, picker, websocket, status bar,
                       keyboard, syncmenu.ts (sync-mode status-bar control),
+                      fit.ts (shared/fit.ts on each mounted slide, refit when
+                      fonts load unless a transition is in flight),
                       pv.ts (presenter panel sidebar; current section under the
                       strip), overview.ts (grid with a heading per section, up/down
                       by geometry), picker.ts (sections match too), video.ts (step-driven
@@ -785,13 +810,13 @@ src/
                       `openSocket()`: the relay channel when the page runs in
                       the guest page's frame; share.ts's Online section, its
                       words in sharetext.ts)
-                      visual editor: canvas.ts (render, hit-testing, handles, drag ->
+                      visual editor: canvas.ts (render + fit, the "Doesn't fit" badge, hit-testing, handles, drag ->
                       attribute plans), geom.ts (pure matrices + move/resize/rotate plans),
                       snap.ts (smart guides), textedit.ts, insert.ts (tools, images,
                       paste), sorter.ts (slide list rows + the drag model shared
                       with grid.ts), sections.ts (pure: rows, drop targets, move
                       requests), sectionui.ts (section headers, collapse state in
-                      localStorage, section menu, rename, section-* edits), props.ts, notes.ts, toolbar.ts (shortcuts),
+                      localStorage, section menu, rename, section-* edits), props.ts (its Text size section: A−/A+, a typed size, Shrink text to fit, Make box taller), notes.ts, toolbar.ts (shortcuts),
                       context.ts (agent context + goto/select), net.ts (edit-op requests),
                       animpreview.ts (▶ Play in the Animation order list and an
                       animation's panel: shared/step.ts runs played on the canvas
@@ -883,8 +908,12 @@ src/
                       picker, Take this slide, Merge branch) over comparelib.ts
                       (pure: rows, jumps, badges, word diff, take/merge rules;
                       tested)
+    fit/              main.ts: the PDF export page's script (bundles/fit.js, inlined
+                      into pdf.html by export.py): `fitSlide` on every slide, again
+                      on load and once fonts are ready
     render/           the single-slide page behind `inkflow render`: main.ts (step,
-                      waits for load/fonts/first video frames), measure.ts (zone
+                      `fitSlide`, waits for load/fonts/first video frames, fits
+                      again), measure.ts (zone
                       text vs its foreignObject box, code blocks cut off, drawn
                       objects vs the viewBox — skipping clipped/masked content,
                       unpainted shapes and anything spanning the slide — and text
@@ -1058,6 +1087,9 @@ The target zone is the `zones` dict key (`"content"` → `zone-content`); `TextB
 </foreignObject>
 ```
 Inline styles are only emitted when the corresponding param is non-`None`; CSS variables handle layout-level defaults without touching the element's `style`.
+
+**Text size and shrink-to-fit are source; the fitted size is the browser's.**
+A zone's text size is a factor, `--inkflow-font-scale`, and whether it shrinks to fit is `--inkflow-fit` (`none` = never; anything else, the default, shrinks). Both follow the alignment layers: `TextBox(size=, fit=)` or a marker's `size=80%`/`fit=none` go on the wrapper's inline style (`content.py`), which beats the zone shape's own style (carried onto the foreignObject like `--inkflow-padding`, so a text box of the slide or a layout's zone for all its slides), which beats layout/theme CSS (a deck-wide `:root { --inkflow-fit: none }` in styles.css works because custom properties inherit). contract.css sizes `.inkflow-wrapper` as `calc(1em * var(--inkflow-font-scale, 1) * var(--inkflow-fit-scale, 1))`; everything inside is in em. Fitting needs real text layout (fonts, line breaks, formulas), so it runs in the browser, in every page that shows a slide, with one module (`src/ts/shared/fit.ts`): the presenter on `slideMounted` (before a transition takes the slide; refit on fonts loaded only when no transition is in flight) and its overview/next preview, so the static build too; the editor canvas after each render plus its thumbnails, master list and compare view (`scheduleFit`, a frame later once attached); the PDF page (`fit.js` in pdf.html, at parse, on load and on fonts ready); and `inkflow render` before measuring, so `render --check` sees what the slide shows. `fitZone` bisects the factor (to 1 %) between 1 and the floor, measuring with every step shown (reveals are transparent, not removed, so the wrapper children's layout heights count them; `display: none` content does not take room) plus code blocks that scroll and tables wider than the box; the floor is the larger of a third of the box's own text size and the readable minimum: 1/80 of the slide's height (`MIN_TEXT_FRACTION`, shared with measure.ts) or, on a printed slide, `data-inkflow-min-text` that the pipeline stamps on the root (`sizes.print_min_text`: `PRINT_MIN_TEXT` of the sheet's body size, the constant render.py's print check uses). The result is an inline `--inkflow-fit-scale` on the wrapper and `data-inkflow-fit`/`data-inkflow-overflow` on the foreignObject (the editor's red *Doesn't fit* badge and panel, measure.ts's `scale` on an overflow finding: "even shrunk to N%"). Nothing fitted is ever written to a file. contract.css also resets margins and padding inside `.inkflow-wrapper` (`:where()`, as weak as the presenter's `*` reset), so the editor, the PDF page and the compare view lay text out exactly as the presenter does and fit it to the same size.
 
 **Charts are drawn at build time from data files, in theme tokens.**
 A `Chart` zone value or a ```` ```chart ```` Markdown fence is turned into plain SVG by `charts.py` while the deck builds, so serve, the static build, the PDF export, editor thumbnails and `inkflow render` show the same chart and nothing runs in the browser. The data is a CSV/TSV/JSON file (or inline `data={...}` / a Markdown table), its path resolving against the file it is written in like any asset; it is inlined into the slide, so nothing is copied or versioned, and the watcher's rebuild on any project file is what redraws a chart when its data changes. `zones.build_slide_content` resolves a deck chart to a `ResolvedChart` (data read, or the error to draw in its place) and expands fence placeholders with the Markdown file's `AssetSource`; `content.py` swaps the zone shape for a nested `<svg>` with the zone's box and user units (provenance carried, so the editor moves and resizes it as the zone rect). `y_min`/`y_max` fix the value axis's ends (`_bounded`: the fixed end is the first/last tick, round ticks too close to it dropped) and `y2` puts columns on a second axis on the right (`_Series.axis`, with `y2_min`/`y2_max`; refused for stacked or horizontal bars); with any end fixed the marks are clipped to the plot (`<id>-clip`). Marks are painted with the palette tokens (`charts.PALETTE`, the chromatic part of `colors.SVG_TOKENS` in a fixed order) in `style` (never presentation attributes, where `var()` is invalid) and text with the text tokens, so charts follow the theme and colour mode. Every series is a `<g id="<zone>-series-<slug>">` holding its marks, value labels and legend entry (pie slices `-slice-`), which is what `animations=[...]` targets to reveal them one by one (`verify` draws a slide's charts to know those ids, and reports unreadable data). A fence chart is inline SVG inside a zone's HTML: `html_fragment_to_xml` restores the camelCase names lxml's HTML parser lowercases, and `_replace_with_foreignobject` attaches the foreignObject before its content because lxml otherwise drops the inline `<svg>`'s xmlns as "redundant" with the slide root's. In the editor a placed chart is a `zone-chart` rect plus a `Chart(...)` zones= entry plus `data/chart-N.csv`, written in one step by `insert-chart`; `chart-preview` renders the dialog's unsaved settings and grid with the same `render`, and `chart-save-data` writes the grid back in the file's own format, cells as typed.
