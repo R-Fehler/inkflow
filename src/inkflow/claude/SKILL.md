@@ -84,7 +84,12 @@ them all as one undoable step (`--regex`, `--case`, `--word`, `-s SLIDE`,
 - `slides/*.svg`: one-off slide drawings. `inkflow:parent="<layout>"` on the root
   builds the slide on a layout. Elements need an `id` to be animated or morphed.
 - `layouts/*.svg`, `overlays/*.svg`: shared backgrounds and chrome. A change
-  here changes every slide that uses it; say so before doing it.
+  here changes every slide that uses it; say so before doing it. A theme's
+  layouts are never edited in place: `inkflow layout copy base` gives the deck
+  its own copy (`base` is behind every built-in layout; `agenda` only agenda
+  slides), `inkflow layout revert NAME` undoes that. `inkflow layout save N
+  NAME` turns slide N into a new layout; `inkflow overlay new logo` adds an
+  overlay on top of every slide to draw a logo or footer into.
 - `slides/*.md`: Markdown routed into a layout's zones (`::zone::` markers;
   a leading `# Title` fills the title zone; `::step::` reveals on click).
 - `notes/*.md`: speaker notes.

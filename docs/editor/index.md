@@ -37,6 +37,8 @@ the file watcher shows each one the others' changes within a moment.
 | A line or arrow attached to shapes | A `<path>` with `inkflow:connector` and `inkflow:connect-start` / `-end`; re-routed in the same edit whenever an attached shape moves |
 | An elbow's moved middle segment, a shape's extra connection points | `inkflow:bend` on the arrow, `inkflow:sites` on the shape |
 | A link, alt text, hiding, locking | The object in the SVG: an `<a href>` around it, a `<title>`, `display:none`, `inkflow:locked` |
+| A layout or overlay in the [slide master](#slide-master) | `layouts/<name>.svg` or `overlays/<name>.svg`; a theme's is first copied there, in the same step |
+| A slide saved as a layout, a new overlay | `layouts/<name>.svg`; `overlays/<name>.svg` plus `Overlay("<name>")` in `deck.py` |
 | Theme colours and fonts | One marked block in the project's `styles.css` |
 | Colour mode, base font size | `Deck(mode=..., font_size=...)` in `deck.py` |
 
@@ -757,13 +759,68 @@ a time.
 A chart written as a ```` ```chart ```` block in Markdown is edited as that
 Markdown: double-click it to open the zone's text.
 
-## Layouts and overlays
+## Slide master
 
 Objects that come from a layout or an overlay are shared by every slide built on
-them, so a normal click passes through them. **Edit layout** in the toolbar makes
-them selectable; changes then go to the layout or overlay file, and the editor
-reminds you how many slides that affects. Built-in and theme layouts are not part
-of your project and stay read-only.
+them, so on a slide a normal click passes through them. **Slide master** in the
+toolbar (or *Edit its layout* in the slide panel) is where they are edited, as
+in PowerPoint's master view. Its list replaces the slide list:
+
+- **All slides**
+    - **Background**: the layout every other layout is built on (`base` in the
+      built-in theme): what you draw here is behind every slide that uses a
+      layout.
+    - **On top**: the deck's overlays, drawn above every slide whatever its
+      layout: the place for a logo, footer text or a badge. A deck without one
+      offers **New overlay**, which creates `overlays/<name>.svg` at the deck's
+      size and adds `Overlay("<name>")` to `Deck(overlays=[...])`, in one undo
+      step. Slides with overlays of their own (`Slide(overlays=[...])`) are
+      listed under it.
+- **Layouts**: every layout the deck offers (the built-in ones in the deck's
+  shape, the project's own), indented under the layout each is built on
+  (`numbered` → `title` → `content`, `agenda`…), with how many slides use it.
+  Editing `agenda` changes all agenda slides and nothing else.
+
+Choosing an entry draws it on the canvas with sample text in its zones (an
+empty zone shows as a dashed box), the layouts behind it and the overlays on
+top faded: only its own objects can be selected. Everything the toolbar draws
+and inserts goes into that file: shapes, text, pictures (a logo), diagrams.
+**+ Text placeholder** and **+ Picture placeholder** in the panel add an empty
+zone (a `zone-<name>` rect) that each slide on the layout fills with its own text
+or picture; drag a zone to move it for every slide. *Show* draws the layout with
+one of its slides' own content instead of sample text. Edits reach the slides
+at once (the thumbnails follow); **Close** goes back to the slides and brings
+the files' [Inkscape previews](../authoring/inkscape.md) up to date, as part of
+your last edit's undo step.
+
+**The theme's layouts are copied on write.** A built-in or theme layout lives in
+an installed package and is never written. Your first edit of one copies it into
+the deck, `layouts/<name>.svg`, in the same undo step, and the editor says so
+(*This deck now has its own copy of 'agenda'; slides on it follow your copy*).
+The copy names the theme's file it replaces (`inkflow:copy-of="builtin:agenda"`)
+and stands in for it everywhere, also inside the theme's own layouts: a copy of
+`base` is the background of `title`, `content`, `agenda` and every other built-in
+layout. Only what you edit is copied: editing the background copies `base`,
+editing all agenda slides copies `agenda`. Each entry says where it comes from:
+*Theme*, *Deck's copy* or *Deck's own*. **Revert to the theme's layout** (the
+entry's ⋯ menu, or the panel) deletes the copy, after asking.
+
+**Templates: a slide saved as a layout.** *Save as layout…* (the slide list's
+menu, the slide panel, the canvas menu) asks for a name: `customCodeExamples`
+becomes `layouts/custom-code-examples.svg`, listed under the name as typed.
+The slide's drawing and the layout it is built on carry over; its text zones
+stay, empty. *Keep the slide's text as placeholder prompts* stores each zone's
+first line as a prompt (`<inkflow:hint zone="title">…`), which the empty zone
+shows on a new slide (*+ Code example title*) and types in when clicked. *Turn
+its pictures into picture placeholders* replaces each picture with a picture
+zone of the same box. The template is in the gallery and in **New slide** at
+once. A layout of the deck's own can be renamed (slides built on it follow, see
+[Renaming files](#renaming-files)) or deleted from its ⋯ menu; deleting one that
+slides use asks which layout they move to.
+
+From the command line: `inkflow layout copy|revert|save|rename|delete` and
+`inkflow overlay new` make the same changes (see
+[Claude Code](claude-code.md#the-slide-master)).
 
 The layout gallery offers the built-in layouts drawn in the deck's shape
 ([`Deck(size=...)`](../authoring/posters.md#sizes)): a poster deck gets the

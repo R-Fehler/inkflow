@@ -902,25 +902,25 @@
   function translate(x2, y2) {
     return { a: 1, b: 0, c: 0, d: 1, e: x2, f: y2 };
   }
-  function scaleAbout(sx, sy, origin) {
+  function scaleAbout(sx, sy, origin2) {
     return {
       a: sx,
       b: 0,
       c: 0,
       d: sy,
-      e: origin.x - sx * origin.x,
-      f: origin.y - sy * origin.y
+      e: origin2.x - sx * origin2.x,
+      f: origin2.y - sy * origin2.y
     };
   }
-  function rotateAbout(degrees, origin) {
+  function rotateAbout(degrees, origin2) {
     const r2 = degrees * Math.PI / 180;
     const cos = Math.cos(r2);
     const sin = Math.sin(r2);
     return multiply(
-      translate(origin.x, origin.y),
+      translate(origin2.x, origin2.y),
       multiply(
         { a: cos, b: sin, c: -sin, d: cos, e: 0, f: 0 },
-        translate(-origin.x, -origin.y)
+        translate(-origin2.x, -origin2.y)
       )
     );
   }
@@ -1323,7 +1323,7 @@
   // src/ts/editor/dialog.ts
   var host = document.getElementById("dialog");
   var onClose = null;
-  function openDialog(title2, body3, opts2 = {}) {
+  function openDialog(title3, body3, opts2 = {}) {
     closeDialog();
     onClose = opts2.onClose ?? null;
     const box = h(
@@ -1335,7 +1335,7 @@
       h(
         "div",
         { class: "dialog-head" },
-        h("h2", {}, title2),
+        h("h2", {}, title3),
         opts2.hint ? h("span", { class: "hint" }, opts2.hint) : null,
         h(
           "button",
@@ -1483,7 +1483,7 @@
     }
     return String(res.url);
   }
-  async function choosePage(path, current2 = 1) {
+  async function choosePage(path, current3 = 1) {
     const info4 = await request({ action: "pdf-pages", path });
     if (!info4.ok) {
       toast(info4.error ?? "cannot read the PDF", "error");
@@ -1497,16 +1497,16 @@
     }
     if (!info4.converter) {
       toast(`${name2} shows as a placeholder: ${String(info4.hint)}`, "error");
-      return { page: current2, url: null };
+      return { page: current3, url: null };
     }
     const pages = typeof info4.pages === "number" ? info4.pages : null;
     if (pages === 1) {
       const url = await pageUrl(path, 1);
       return url ? { page: 1, url } : null;
     }
-    return pageDialog(path, name2, pages, current2);
+    return pageDialog(path, name2, pages, current3);
   }
-  function pageDialog(path, name2, pages, current2) {
+  function pageDialog(path, name2, pages, current3) {
     return new Promise((resolve) => {
       let done = false;
       const finish2 = (choice) => {
@@ -1528,7 +1528,7 @@
             "button",
             {
               type: "button",
-              class: `pdf-page${page === current2 ? " current" : ""}`,
+              class: `pdf-page${page === current3 ? " current" : ""}`,
               title: `Page ${page}`,
               "data-page": page,
               onclick: () => void pick2(page)
@@ -1543,7 +1543,7 @@
         min: 1,
         max: pages ?? null,
         step: 1,
-        value: String(current2)
+        value: String(current3)
       });
       field2.addEventListener("keydown", (e2) => {
         if (e2.key === "Enter") void pick2(Math.max(1, Number(field2.value)));
@@ -1614,6 +1614,9 @@
     scope: null,
     // group entered by double-click
     layoutMode: false,
+    // The slide master is open (its list replaces the slide list).
+    masterMode: false,
+    master: null,
     step: null,
     // null: every element shown, no build state
     zoom: 0,
@@ -1660,15 +1663,22 @@
     for (const fn of [...listeners.get(event) ?? []]) fn();
   }
   function currentSlide() {
+    if (ed.master) return ed.master.slide;
     return ed.model?.slides[ed.current] ?? null;
   }
   function currentRendered() {
+    if (ed.master) return ed.master.data;
     const s2 = currentSlide();
     if (!s2 || s2.visibleIndex == null) return null;
     return ed.slides[s2.visibleIndex] ?? null;
   }
   function sourceOf(key) {
     return currentSlide()?.sources?.[key] ?? null;
+  }
+
+  // src/ts/editor/types.ts
+  function refBase(src) {
+    return src.copyTo ?? src.path;
   }
 
   // src/ts/editor/folderpicker.ts
@@ -1726,7 +1736,7 @@
       system.hidden = !folder.systemPicker;
       path.value = withSep(folder.path);
       filter = "";
-      renderList2();
+      renderList3();
       renderPlaces();
       where.textContent = folder.repo ? `In the git repository at ${folder.repo}` : "Not in a git repository";
       onChange(folder);
@@ -1748,7 +1758,7 @@
       );
       return b2;
     }
-    function renderList2() {
+    function renderList3() {
       clear(list4);
       const f2 = folder;
       if (!f2) return;
@@ -1868,7 +1878,7 @@
       const { dir, prefix } = splitTyped(path.value);
       if (folder && samePath(dir, folder.path)) {
         filter = prefix;
-        renderList2();
+        renderList3();
       } else if (dir && !prefix) {
         typing = window.setTimeout(
           () => void go(dir, { quiet: true }),
@@ -1891,7 +1901,7 @@
       const common = commonPrefix(matches);
       filter = common.length > prefix.length ? common : prefix;
       path.value = withSep(f2.path) + filter;
-      renderList2();
+      renderList3();
     }
     path.addEventListener("keydown", (e2) => {
       if (e2.key === "Tab" && !e2.shiftKey && !e2.ctrlKey && !e2.altKey) {
@@ -1920,7 +1930,7 @@
         e2.preventDefault();
         path.value = withSep(folder.path);
         filter = "";
-        renderList2();
+        renderList3();
       }
     });
     list4.addEventListener("keydown", (e2) => {
@@ -2536,6 +2546,7 @@
   async function ensureOwnDrawing() {
     const slide = currentSlide();
     if (!slide) return false;
+    if (ed.master) return true;
     if (!slide.srcShared) return true;
     if (!ed.model?.deckEditable) {
       toast(
@@ -2556,19 +2567,30 @@
     return waitForModel((s2) => s2.deckIndex === deckIndex && !s2.srcShared);
   }
   function ownSource() {
-    return currentSlide()?.sources?.find((s2) => s2.role === "slide") ?? null;
+    const sources = currentSlide()?.sources ?? [];
+    if (ed.master) {
+      const target = ed.master.path;
+      return sources.find((s2) => s2.path === target) ?? null;
+    }
+    return sources.find((s2) => s2.role === "slide") ?? null;
+  }
+  function ownKey() {
+    const src = ownSource();
+    const k2 = src ? (currentSlide()?.sources ?? []).indexOf(src) : 0;
+    return Math.max(0, k2);
   }
   function insertParent() {
     const svg = slideRoot();
-    if (ed.scope?.getAttribute("data-ink")?.startsWith("0:")) {
+    const key = `${ownKey()}:`;
+    if (ed.scope?.getAttribute("data-ink")?.startsWith(key)) {
       return { loc: ed.scope.getAttribute("data-ink"), el: ed.scope };
     }
-    const layers = svg ? [...svg.querySelectorAll('[data-ink-layer][data-ink^="0:"]')].filter(
-      (l2) => !l2.hasAttribute("data-ink-locked")
-    ) : [];
+    const layers = svg ? [
+      ...svg.querySelectorAll(`[data-ink-layer][data-ink^="${key}"]`)
+    ].filter((l2) => !l2.hasAttribute("data-ink-locked")) : [];
     const layer2 = layers[layers.length - 1];
     if (layer2) return { loc: layer2.getAttribute("data-ink"), el: layer2 };
-    return { loc: "0:", el: null };
+    return { loc: key, el: null };
   }
   function toParent(el2, x2, y2) {
     const svg = slideRoot();
@@ -2845,14 +2867,14 @@
     }
     if (!await ensureOwnDrawing()) return;
     const src = ownSource();
-    const current2 = currentSlide();
-    if (!src || !current2) return;
+    const current3 = currentSlide();
+    if (!src || !current3) return;
     const parent = insertParent();
     const p0 = toParent(parent.el, box.x, box.y);
     const p1 = toParent(parent.el, box.x + box.width, box.y + box.height);
     const result = await edit({
       action: "insert-textbox",
-      slide: current2.deckIndex,
+      slide: current3.deckIndex,
       file: src.path,
       hash: src.hash,
       parent: parent.loc,
@@ -2900,7 +2922,8 @@
   async function zoneText(zone) {
     const slide = currentSlide();
     if (!slide) return;
-    const text = zonePlaceholder(zone);
+    const hint = slide.emptyZones?.find((z) => z.zone === zone)?.hint;
+    const text = hint ?? zonePlaceholder(zone);
     const result = await edit({
       action: "zone-text",
       slide: slide.deckIndex,
@@ -3032,6 +3055,13 @@
     return file instanceof File && (file.type.startsWith("image/") || file.type === "application/pdf") || /\.(png|jpe?g|gif|webp|svg|pdf)$/i.test(file.name);
   }
   async function insertVideoFile(file, at3) {
+    if (ed.master) {
+      toast(
+        "A video belongs to a slide: add a picture placeholder here, and each slide puts its video in it",
+        "error"
+      );
+      return;
+    }
     if (!await ensureOwnDrawing()) return;
     const up = await upload(file);
     const src = ownSource();
@@ -3090,7 +3120,7 @@
     const up = await upload(file);
     const src = ownSource();
     if (!up || !src) return;
-    let href = relativePath(src.path, up.path);
+    let href = relativePath(refBase(src), up.path);
     let shown2 = up.rel;
     if (isPdfRef(up.path)) {
       const choice = await choosePage(up.path);
@@ -3129,7 +3159,7 @@
     const parent = insertParent().el;
     const p2 = toParent(parent, (slideW - w2) / 2, (slideH - ht) / 2);
     return insertXml(
-      `<image href="${relativePath(src.path, path)}" x="${fmt(p2.x)}" y="${fmt(p2.y)}" width="${fmt(w2)}" height="${fmt(ht)}" preserveAspectRatio="xMidYMid meet"/>`,
+      `<image href="${relativePath(refBase(src), path)}" x="${fmt(p2.x)}" y="${fmt(p2.y)}" width="${fmt(w2)}" height="${fmt(ht)}" preserveAspectRatio="xMidYMid meet"/>`,
       "diagram"
     );
   }
@@ -3425,7 +3455,8 @@
   var root = document.getElementById("gallery");
   var cache = null;
   function layoutLabel(name2) {
-    return LABELS[name2]?.[0] ?? name2;
+    const typed = ed.model?.layouts.find((l2) => l2.name === name2)?.label;
+    return typed || (LABELS[name2]?.[0] ?? name2);
   }
   async function previews() {
     if (cache) return cache;
@@ -3492,15 +3523,15 @@
       { class: "gallery-grid" },
       h("p", { class: "hint" }, "Rendering layouts\u2026")
     );
-    const title2 = opts2.mode === "insert" ? "New slide" : "Change layout";
+    const title3 = opts2.mode === "insert" ? "New slide" : "Change layout";
     root.append(
       h(
         "div",
-        { class: "gallery-box", role: "dialog", "aria-label": title2 },
+        { class: "gallery-box", role: "dialog", "aria-label": title3 },
         h(
           "div",
           { class: "gallery-head" },
-          h("h2", {}, title2),
+          h("h2", {}, title3),
           h(
             "span",
             { class: "hint" },
@@ -3524,14 +3555,15 @@
     const layouts = await previews();
     clear(grid);
     for (const p2 of layouts) {
-      const [label4, description] = LABELS[p2.name] ?? [p2.name, ""];
+      const [named, description] = LABELS[p2.name] ?? [p2.name, ""];
+      const label4 = p2.label || named;
       const lost = opts2.mode === "change" ? lostZones(p2) : [];
-      const current2 = opts2.mode === "change" && p2.name === opts2.current;
+      const current3 = opts2.mode === "change" && p2.name === opts2.current;
       const card = h(
         "button",
         {
           type: "button",
-          class: `gallery-card${current2 ? " current" : ""}`,
+          class: `gallery-card${current3 ? " current" : ""}`,
           title: p2.name,
           onclick: () => void choose(p2, opts2, lost)
         },
@@ -3540,7 +3572,14 @@
           "div",
           { class: "gallery-label" },
           h("strong", {}, label4),
-          p2.source === "local" && h("span", { class: "badge" }, "project")
+          p2.source === "local" && h(
+            "span",
+            {
+              class: "badge",
+              title: p2.copyOf ? `This deck's own copy of ${p2.copyOf} (slide master)` : "A layout of this deck's own (layouts/)"
+            },
+            p2.copyOf ? "deck's copy" : "project"
+          )
         ),
         description && h("div", { class: "gallery-desc" }, description),
         lost.length > 0 && h(
@@ -3600,8 +3639,909 @@
     );
   }
 
-  // src/ts/editor/rename.ts
+  // src/ts/editor/mastertree.ts
+  var ORDER = [
+    "numbered",
+    "title",
+    "content",
+    "two-cols",
+    "three-cols",
+    "comparison",
+    "agenda",
+    "quad",
+    "three-cards",
+    "media-left",
+    "media-right",
+    "title-media",
+    "full-media",
+    "cover",
+    "section",
+    "center",
+    "fact",
+    "quote",
+    "end",
+    "poster-3col",
+    "poster-2col",
+    "poster-landscape-3col",
+    "poster-landscape-4col"
+  ];
+  function rank(l2) {
+    const own = l2.source === "local" && !l2.copyOf && !ORDER.includes(l2.name);
+    const at3 = ORDER.indexOf(l2.name);
+    return [own ? 1 : 0, at3 < 0 ? ORDER.length : at3, l2.name];
+  }
+  function compare(a2, b2) {
+    const [x2, y2] = [rank(a2), rank(b2)];
+    return x2[0] - y2[0] || x2[1] - y2[1] || x2[2].localeCompare(y2[2]);
+  }
+  function layoutRows(tree2) {
+    const names = new Set(tree2.layouts.map((l2) => l2.name));
+    const children2 = /* @__PURE__ */ new Map();
+    for (const l2 of tree2.layouts) {
+      if (l2.name === tree2.background) continue;
+      const parent = l2.parent && names.has(l2.parent) && l2.parent !== tree2.background ? l2.parent : null;
+      const list4 = children2.get(parent) ?? [];
+      list4.push(l2);
+      children2.set(parent, list4);
+    }
+    const rows = [];
+    const seen = /* @__PURE__ */ new Set();
+    const walk = (parent, depth) => {
+      for (const l2 of (children2.get(parent) ?? []).sort(compare)) {
+        if (seen.has(l2.name)) continue;
+        seen.add(l2.name);
+        rows.push({ layout: l2, depth });
+        walk(l2.name, depth + 1);
+      }
+    };
+    walk(null, 0);
+    return rows;
+  }
+  function origin(l2) {
+    if (l2.copyOf) {
+      return {
+        text: "Deck's copy",
+        kind: "copy",
+        title: `This deck's own copy of ${l2.copyOf}: slides on it follow your copy. Revert to go back to the theme's.`
+      };
+    }
+    if (l2.source === "local") {
+      return {
+        text: "Deck's own",
+        kind: "own",
+        title: "A layout of this deck's own (layouts/ in the project)"
+      };
+    }
+    return {
+      text: "Theme",
+      kind: "theme",
+      title: "From the theme: your first edit gives this deck its own copy, which every slide on it then follows"
+    };
+  }
   function plural(n3, word) {
+    return `${n3} ${word}${n3 === 1 ? "" : "s"}`;
+  }
+  function usage(l2, background, total2 = 0) {
+    if (background) {
+      if (!l2.reach.length) return "no slides";
+      return l2.reach.length >= total2 ? "behind every slide" : `behind ${l2.reach.length} of ${total2} slides`;
+    }
+    if (!l2.slides.length && !l2.reach.length) return "no slides";
+    const direct = plural(l2.slides.length, "slide");
+    const through = l2.reach.length - l2.slides.length;
+    return through > 0 ? `${direct} (+${through} built on it)` : direct;
+  }
+  function copyTarget(path, projectDir, kind) {
+    const sep2 = path.includes("\\") && !path.includes("/") ? "\\" : "/";
+    const root2 = projectDir.replace(/[\\/]+$/, "");
+    if (path.startsWith(`${root2}${sep2}`)) return null;
+    const file = path.split(/[\\/]/).pop() ?? "";
+    return `${root2}${sep2}${kind === "overlay" ? "overlays" : "layouts"}${sep2}${file}`;
+  }
+  function layoutTitle(l2, labels) {
+    return l2.label || labels[l2.name] || l2.name;
+  }
+
+  // src/ts/editor/master.ts
+  var aside = document.getElementById("master");
+  var button = document.getElementById("btn-layout");
+  var menu2 = document.getElementById("context-menu");
+  var tree = null;
+  var item = null;
+  var onSlide = null;
+  var thumbs = /* @__PURE__ */ new Map();
+  var dirty = false;
+  var loading = 0;
+  async function openMaster(want) {
+    if (!ed.model) return;
+    if (!ed.masterMode) {
+      ed.masterMode = true;
+      ed.layoutMode = true;
+      dirty = false;
+      document.body.classList.add("master-mode", "layout-mode");
+      button.classList.add("on");
+      setTool("select");
+    }
+    enterGroup(null);
+    clearSelection();
+    await loadTree();
+    void loadThumbs();
+    const start = want?.name ? find(want) : initialItem();
+    if (start) await show(start);
+    else renderList();
+  }
+  async function closeMaster() {
+    if (!ed.masterMode) return;
+    ed.masterMode = false;
+    ed.layoutMode = false;
+    ed.master = null;
+    item = null;
+    onSlide = null;
+    document.body.classList.remove("master-mode", "layout-mode");
+    button.classList.remove("on");
+    enterGroup(null);
+    clearSelection();
+    render();
+    emit("slide");
+    emit("layout-mode");
+    if (dirty) {
+      dirty = false;
+      await edit({ action: "master", op: "previews", attach: true });
+    }
+  }
+  function toggle() {
+    if (ed.masterMode) void closeMaster();
+    else void openMaster();
+  }
+  function initialItem() {
+    if (!tree) return null;
+    const mine = tree.layouts.find((l2) => l2.slides.includes(ed.current));
+    const chosen = mine ?? tree.layouts.find((l2) => l2.name === tree?.background);
+    return chosen ? { kind: "layout", name: chosen.name, path: chosen.path } : null;
+  }
+  function find(want) {
+    if (!tree) return null;
+    if (want.kind === "overlay") {
+      const o2 = tree.overlays.find((x2) => x2.name === want.name && x2.path);
+      return o2?.path ? { kind: "overlay", name: o2.name, path: o2.path } : null;
+    }
+    const l2 = tree.layouts.find((x2) => x2.name === want.name);
+    return l2 ? { kind: "layout", name: l2.name, path: l2.path } : null;
+  }
+  async function loadTree() {
+    const result = await request({ action: "master-tree" });
+    if (result.ok) tree = result.master;
+  }
+  async function loadThumbs() {
+    const result = await request({ action: "layout-previews", all: true });
+    if (!result.ok) return;
+    const list4 = result.layouts;
+    thumbs = new Map(list4.map((p2) => [p2.name, p2.svg]));
+    if (ed.masterMode) renderList();
+  }
+  function withTarget(slide, path, kind) {
+    const root2 = ed.model?.projectDir ?? "";
+    for (const src of slide.sources ?? []) {
+      if (src.path !== path) continue;
+      const to = copyTarget(src.path, root2, kind);
+      if (to && !src.writable) src.copyTo = to;
+      src.writable = true;
+    }
+    return slide;
+  }
+  async function show(next, slideIndex2 = onSlide) {
+    const ticket = ++loading;
+    const changed2 = item?.path !== next.path || item?.kind !== next.kind;
+    item = next;
+    onSlide = slideIndex2;
+    let view3 = null;
+    if (slideIndex2 != null) {
+      const real = ed.model?.slides[slideIndex2];
+      const data = real?.visibleIndex != null ? ed.slides[real.visibleIndex] : null;
+      if (real && data) {
+        view3 = {
+          slide: withTarget(structuredClone(real), next.path, next.kind),
+          data
+        };
+      } else {
+        onSlide = null;
+      }
+    }
+    if (!view3) {
+      const result = await request({
+        action: "master-render",
+        kind: next.kind,
+        path: next.path
+      });
+      if (ticket !== loading || !ed.masterMode) return;
+      if (!result.ok) {
+        toast(result.error ?? "could not draw it", "error");
+        renderList();
+        return;
+      }
+      view3 = {
+        slide: withTarget(
+          result.entry,
+          result.target,
+          next.kind
+        ),
+        data: result.slide
+      };
+    }
+    if (ticket !== loading || !ed.masterMode) return;
+    ed.master = {
+      kind: next.kind,
+      name: next.name,
+      path: next.path,
+      onSlide,
+      ...view3
+    };
+    if (changed2) {
+      enterGroup(null);
+      clearSelection();
+    }
+    render();
+    renderList();
+  }
+  async function refresh() {
+    if (!ed.masterMode) return;
+    await loadTree();
+    void loadThumbs();
+    const again = item ? find(item) : null;
+    const next = again ?? initialItem();
+    if (next) await show(next);
+    else renderList();
+  }
+  function fadeContext() {
+    const svg = slideRoot();
+    if (!svg || !ed.master) return;
+    const sources = ed.master.slide.sources ?? [];
+    for (const el2 of svg.querySelectorAll("[data-ink-top]")) {
+      const src = sources[keyOf(el2)];
+      el2.classList.toggle(
+        "master-context",
+        !!src && src.path !== ed.master.path
+      );
+    }
+  }
+  function thumb(name2) {
+    const box = h("div", { class: "master-thumb" });
+    const svg = name2 ? thumbs.get(name2) : void 0;
+    if (svg) {
+      box.innerHTML = svg;
+      const el2 = box.querySelector("svg");
+      el2?.setAttribute("width", "100%");
+      el2?.setAttribute("height", "100%");
+      el2?.querySelectorAll(".anim-pending").forEach((x2) => {
+        x2.classList.remove("anim-pending");
+      });
+    }
+    return box;
+  }
+  function badge(of) {
+    const o2 = origin(of);
+    return h(
+      "span",
+      { class: `master-badge ${o2.kind}`, title: o2.title },
+      o2.text
+    );
+  }
+  function current(kind, path) {
+    return !!item && item.kind === kind && item.path === path;
+  }
+  function row(kind, entry, title3, sub, depth, thumbName) {
+    const path = entry.path;
+    const el2 = h(
+      "div",
+      {
+        class: `master-row${current(kind, path) ? " active" : ""}`,
+        style: `--depth:${depth}`,
+        role: "button",
+        tabindex: "0",
+        title: entry.rel ?? entry.name,
+        "data-name": entry.name,
+        "data-kind": kind
+      },
+      kind === "layout" ? thumb(thumbName) : h("div", { class: "master-thumb overlay-thumb" }, "On top"),
+      h(
+        "div",
+        { class: "master-text" },
+        h("div", { class: "master-title" }, title3),
+        h("div", { class: "master-sub" }, sub, " ", badge(entry))
+      ),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "master-more",
+          title: "More: copy, revert, rename, delete",
+          onclick: (e2) => {
+            e2.stopPropagation();
+            rowMenu(kind, entry, e2.clientX, e2.clientY);
+          }
+        },
+        "\u22EF"
+      )
+    );
+    const open5 = () => {
+      if (path) void show({ kind, name: entry.name, path }, null);
+    };
+    el2.addEventListener("click", open5);
+    el2.addEventListener("keydown", (e2) => {
+      if (e2.key === "Enter" || e2.key === " ") {
+        e2.preventDefault();
+        open5();
+      }
+    });
+    el2.addEventListener("contextmenu", (e2) => {
+      e2.preventDefault();
+      rowMenu(kind, entry, e2.clientX, e2.clientY);
+    });
+    return el2;
+  }
+  function title(l2) {
+    return layoutTitle(l2, { [l2.name]: layoutLabel(l2.name) });
+  }
+  function total() {
+    return ed.model?.slides.length ?? 0;
+  }
+  function slideName(i2) {
+    const s2 = ed.model?.slides[i2];
+    if (!s2) return `slide ${i2 + 1}`;
+    const n3 = s2.visibleIndex != null ? `Slide ${s2.visibleIndex + 1}` : "Hidden slide";
+    return s2.title ? `${n3}: ${s2.title}` : n3;
+  }
+  function renderList() {
+    clear(aside);
+    aside.append(
+      h(
+        "div",
+        { class: "master-head" },
+        h("strong", {}, "Slide master"),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            title: "Back to the slides",
+            onclick: () => void closeMaster()
+          },
+          "Close"
+        )
+      )
+    );
+    if (!tree) {
+      aside.append(h("p", { class: "hint" }, "Loading\u2026"));
+      return;
+    }
+    const list4 = h("div", { class: "master-list" });
+    list4.append(h("div", { class: "master-group" }, "All slides"));
+    const background = tree.layouts.find((l2) => l2.name === tree?.background);
+    if (background) {
+      list4.append(
+        row(
+          "layout",
+          background,
+          "Background",
+          `${background.name} \xB7 ${usage(background, true, total())}`,
+          0,
+          background.name
+        )
+      );
+    }
+    const onTop = tree.overlays.filter((o2) => o2.deck);
+    for (const o2 of onTop) {
+      list4.append(
+        row(
+          "overlay",
+          o2,
+          `On top \xB7 ${o2.name}`,
+          tree.overlaysFromTheme ? "from the theme" : plural(o2.slides.length, "slide"),
+          0,
+          null
+        )
+      );
+    }
+    list4.append(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "master-add",
+          title: "An overlay: drawn on top of every slide, whatever its layout (a logo, footer text)",
+          onclick: () => newOverlay()
+        },
+        onTop.length ? "+ Another overlay" : "+ New overlay (logo, footer\u2026)"
+      )
+    );
+    for (const o2 of tree.overlays.filter((x2) => !x2.deck)) {
+      const sub = o2.slides.length ? `on ${plural(o2.slides.length, "slide")} of their own` : "not used";
+      list4.append(row("overlay", o2, o2.name, sub, 0, null));
+    }
+    for (const over of tree.overrides) {
+      list4.append(
+        h(
+          "div",
+          { class: "master-note" },
+          `${slideName(over.slide)} has its own overlays: ${over.overlays.join(", ") || "none"}`
+        )
+      );
+    }
+    list4.append(h("div", { class: "master-group" }, "Layouts"));
+    for (const r2 of layoutRows(tree)) {
+      list4.append(
+        row(
+          "layout",
+          r2.layout,
+          title(r2.layout),
+          `${r2.layout.name === title(r2.layout) ? "" : `${r2.layout.name} \xB7 `}${usage(r2.layout, false)}`,
+          r2.depth,
+          r2.layout.name
+        )
+      );
+    }
+    aside.append(list4);
+    aside.querySelector(".master-row.active")?.scrollIntoView({ block: "nearest" });
+  }
+  function layoutOf(name2) {
+    return tree?.layouts.find((l2) => l2.name === name2) ?? null;
+  }
+  function rowMenu(kind, entry, x2, y2) {
+    clear(menu2);
+    const theme = !entry.copyOf && entry.source !== "local";
+    const editable = !!ed.model?.deckEditable;
+    if (theme) {
+      menu2.append(
+        menuItem(
+          "Make this deck's own copy",
+          () => void copyIn(kind, entry.name)
+        )
+      );
+    }
+    if (entry.copyOf) {
+      menu2.append(
+        menuItem(
+          `Revert to the theme's ${kind}`,
+          () => void revert(kind, entry.name)
+        )
+      );
+    }
+    if (kind === "layout" && entry.source === "local" && !entry.copyOf) {
+      menu2.append(
+        menuItem(
+          "Rename\u2026",
+          () => renameLayout(entry),
+          !editable
+        ),
+        menuItem(
+          "Delete\u2026",
+          () => deleteLayout(entry),
+          !editable
+        )
+      );
+    }
+    if (!menu2.childElementCount) {
+      menu2.append(menuItem("Nothing to change here", () => {
+      }, true));
+    }
+    showMenu(x2, y2);
+  }
+  async function copyIn(kind, name2) {
+    const result = await edit({
+      action: "master",
+      op: "copy",
+      kind,
+      name: name2
+    });
+    if (result.ok) {
+      const info4 = result.copied;
+      if (info4) toast(info4.note);
+      dirty = false;
+    }
+  }
+  async function revert(kind, name2) {
+    const what = kind === "layout" ? `layout \u201C${name2}\u201D` : `overlay \u201C${name2}\u201D`;
+    if (!window.confirm(
+      `Delete this deck's copy of the ${what}? Slides on it go back to the theme's ${kind}, and your changes to it are gone (Undo brings them back).`
+    )) {
+      return;
+    }
+    const result = await edit({ action: "master", op: "revert", kind, name: name2 });
+    if (result.ok) toast(`Back to the theme's ${what}`);
+  }
+  function nameDialog(heading, label4, value, extra, run) {
+    const input = h("input", {
+      type: "text",
+      class: "master-name",
+      value,
+      spellcheck: "false"
+    });
+    const ok = h("button", { type: "submit", class: "pbtn primary" }, "OK");
+    const form = h(
+      "form",
+      { class: "master-form" },
+      h("label", {}, label4, input),
+      extra,
+      h(
+        "div",
+        { class: "dialog-actions" },
+        h(
+          "button",
+          { type: "button", class: "pbtn", onclick: () => closeDialog() },
+          "Cancel"
+        ),
+        ok
+      )
+    );
+    form.addEventListener("submit", (e2) => {
+      e2.preventDefault();
+      const name2 = input.value.trim();
+      if (!name2) return;
+      ok.disabled = true;
+      void run(name2).then((done) => {
+        if (done) closeDialog();
+        else ok.disabled = false;
+      });
+    });
+    openDialog(heading, form);
+    input.focus();
+    input.select();
+  }
+  function newOverlay() {
+    const every = h(
+      "p",
+      { class: "hint" },
+      "An overlay is drawn on top of every slide, whatever its layout: put a logo, footer text or a badge in it. It is overlays/<name>.svg, added to Deck(overlays=[\u2026])."
+    );
+    nameDialog("New overlay", "Name", "logo", every, async (name2) => {
+      const result = await edit({
+        action: "master",
+        op: "new-overlay",
+        name: name2
+      });
+      if (!result.ok) return false;
+      const made = result.overlay;
+      pendingItem = { kind: "overlay", name: made.name };
+      toast(`Overlay \u201C${made.name}\u201D is on every slide: draw into it here`);
+      return true;
+    });
+  }
+  function renameLayout(l2) {
+    nameDialog(
+      `Rename \u201C${title(l2)}\u201D`,
+      "New name",
+      title(l2),
+      h(
+        "p",
+        { class: "hint" },
+        "Slides and layouts built on it follow the new name."
+      ),
+      async (name2) => {
+        const result = await edit({
+          action: "master",
+          op: "rename",
+          name: l2.name,
+          to: name2
+        });
+        if (result.ok && typeof result.layout === "string") {
+          pendingItem = { kind: "layout", name: result.layout };
+        }
+        return result.ok;
+      }
+    );
+  }
+  function deleteLayout(l2) {
+    const users = l2.slides.length;
+    const children2 = (tree?.layouts ?? []).filter((x2) => x2.parent === l2.name);
+    const others2 = (tree?.layouts ?? []).filter(
+      (x2) => x2.name !== l2.name && !children2.includes(x2)
+    );
+    const pickTo = h(
+      "select",
+      { class: "master-move" },
+      ...others2.map(
+        (x2) => h("option", { value: x2.name }, `${title(x2)} (${x2.name})`)
+      )
+    );
+    pickTo.value = l2.parent && others2.some((x2) => x2.name === l2.parent) ? l2.parent : others2[0]?.name ?? "";
+    const used = users > 0 || children2.length > 0;
+    const body3 = h(
+      "div",
+      { class: "master-form" },
+      h(
+        "p",
+        {},
+        used ? `${[users ? plural(users, "slide") : "", children2.length ? `layout ${children2.map((c2) => `\u201C${c2.name}\u201D`).join(", ")}` : ""].filter(Boolean).join(" and ")} ${users + children2.length === 1 ? "is" : "are"} built on \u201C${title(l2)}\u201D. Move ${users + children2.length === 1 ? "it" : "them"} to:` : `Delete the layout \u201C${title(l2)}\u201D (${l2.rel ?? l2.name})? No slide uses it.`
+      ),
+      used ? pickTo : null,
+      h(
+        "div",
+        { class: "dialog-actions" },
+        h(
+          "button",
+          { type: "button", class: "pbtn", onclick: () => closeDialog() },
+          "Cancel"
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn danger",
+            onclick: async () => {
+              const result = await edit({
+                action: "master",
+                op: "delete",
+                name: l2.name,
+                ...used ? { moveTo: pickTo.value } : {}
+              });
+              if (!result.ok) return;
+              closeDialog();
+              if (item?.name === l2.name) {
+                pendingItem = {
+                  kind: "layout",
+                  name: used ? pickTo.value : l2.parent ?? ""
+                };
+              }
+            }
+          },
+          used ? "Move and delete" : "Delete"
+        )
+      )
+    );
+    openDialog(`Delete layout \u201C${title(l2)}\u201D`, body3);
+  }
+  async function addPlaceholder(kind) {
+    const view3 = ed.master;
+    const src = view3?.slide.sources?.find((s2) => s2.path === view3.path);
+    const svg = slideRoot();
+    if (!view3 || !src || !svg) return;
+    const name2 = window.prompt(
+      kind === "picture" ? "Name of the picture placeholder (slides fill it with an image or video):" : "Name of the text placeholder (slides fill it with their text):",
+      kind === "picture" ? "picture" : "text"
+    );
+    if (name2 == null) return;
+    const vb = svg.viewBox.baseVal;
+    const w2 = (vb?.width || 1920) * (kind === "picture" ? 0.35 : 0.5);
+    const hgt = (vb?.height || 1080) * (kind === "picture" ? 0.35 : 0.2);
+    const result = await edit({
+      action: "master",
+      op: "add-zone",
+      file: src.path,
+      hash: src.hash,
+      zoneKind: kind,
+      name: name2,
+      x: Math.round(((vb?.width || 1920) - w2) / 2),
+      y: Math.round(((vb?.height || 1080) - hgt) / 2),
+      width: Math.round(w2),
+      height: Math.round(hgt)
+    });
+    if (result.ok && typeof result.zone === "string") {
+      afterRender.ids = [`zone-${result.zone}`];
+      toast(
+        `${kind === "picture" ? "Picture" : "Text"} placeholder \u201C${result.zone}\u201D added: drag it into place`
+      );
+    }
+  }
+  function masterPanel() {
+    if (!ed.master || !item || !tree) return null;
+    const view3 = ed.master;
+    const kind = item.kind;
+    const layout = kind === "layout" ? layoutOf(item.name) : null;
+    const overlay3 = kind === "overlay" ? tree.overlays.find((o3) => o3.name === item?.name) ?? null : null;
+    const entry = layout ?? overlay3;
+    if (!entry) return null;
+    const o2 = origin(entry);
+    const isBackground = layout?.name === tree.background;
+    const heading = isBackground ? "Background (every slide)" : layout ? `Layout: ${title(layout)}` : `On top: ${item.name}`;
+    const explain = {
+      theme: kind === "layout" ? `From the theme. Your first edit gives this deck its own copy (layouts/${item.name}.svg), which ${isBackground ? "every slide" : "every slide on it"} then follows.` : `From the theme. Your first edit gives this deck its own copy (overlays/${item.name}.svg).`,
+      copy: `This deck's own copy of ${entry.copyOf}: ${isBackground ? "every slide" : "the slides on it"} follow your copy, not the theme's.`,
+      own: kind === "overlay" ? "Drawn on top of every slide that gets it, whatever the slide's layout." : "A layout of this deck's own."
+    }[o2.kind];
+    const reach = layout ? layout.reach : overlay3?.slides ?? [];
+    const shown2 = h(
+      "select",
+      { title: "See the layout with a slide's own content" },
+      h(
+        "option",
+        { value: "" },
+        kind === "layout" ? "Alone, with sample text" : "Over the background"
+      ),
+      ...reach.map((i2) => h("option", { value: String(i2) }, slideName(i2)))
+    );
+    shown2.value = view3.onSlide != null ? String(view3.onSlide) : "";
+    shown2.addEventListener("change", () => {
+      const v2 = shown2.value;
+      if (item) void show(item, v2 === "" ? null : Number(v2));
+    });
+    const actions = [];
+    if (o2.kind === "theme") {
+      actions.push(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            onclick: () => void copyIn(kind, entry.name)
+          },
+          "Make this deck's copy"
+        )
+      );
+    }
+    if (o2.kind === "copy") {
+      actions.push(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            onclick: () => void revert(kind, entry.name)
+          },
+          `Revert to the theme's ${kind}`
+        )
+      );
+    }
+    if (layout && o2.kind === "own") {
+      actions.push(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            onclick: () => renameLayout(layout)
+          },
+          "Rename\u2026"
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            onclick: () => deleteLayout(layout)
+          },
+          "Delete\u2026"
+        )
+      );
+    }
+    const opener = entry.source === "local" ? openButton(view3.path) : null;
+    if (opener) actions.push(opener);
+    return h(
+      "div",
+      { class: "master-panel" },
+      h("h3", {}, heading),
+      h("p", { class: "hint" }, explain),
+      h(
+        "p",
+        { class: "hint" },
+        kind === "layout" ? usage(layout, isBackground, total()) : `${plural(reach.length, "slide")} get${reach.length === 1 ? "s" : ""} it`
+      ),
+      h(
+        "label",
+        { class: "prop-row" },
+        h("span", { class: "prop-label" }, "Show"),
+        shown2
+      ),
+      h(
+        "div",
+        { class: "master-actions" },
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            title: "An empty text zone each slide fills with its own text",
+            onclick: () => void addPlaceholder("text")
+          },
+          "+ Text placeholder"
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            title: "An empty zone each slide fills with a picture or video",
+            onclick: () => void addPlaceholder("picture")
+          },
+          "+ Picture placeholder"
+        )
+      ),
+      h(
+        "p",
+        { class: "hint" },
+        "Draw shapes, text and pictures with the toolbar: they go into this file."
+      ),
+      actions.length ? h("div", { class: "master-actions" }, ...actions) : null
+    );
+  }
+  function saveAsLayout(index = ed.current) {
+    const slide = ed.model?.slides[index];
+    if (!slide) return;
+    if (!ed.model?.deckEditable) {
+      toast(
+        "deck.py builds its slides in code; save the layout there",
+        "error"
+      );
+      return;
+    }
+    const hints = h("input", {
+      type: "checkbox",
+      checked: true
+    });
+    const pictures = h("input", { type: "checkbox" });
+    const extra = h(
+      "div",
+      {},
+      h(
+        "label",
+        { class: "check" },
+        hints,
+        "Keep the slide's text as placeholder prompts"
+      ),
+      h(
+        "label",
+        { class: "check" },
+        pictures,
+        "Turn its pictures into picture placeholders"
+      ),
+      h(
+        "p",
+        { class: "hint" },
+        "The slide's drawing and the layout it is built on carry over; its text zones stay, empty. New slides can then start from it."
+      )
+    );
+    nameDialog(
+      `Save ${slideName(index)} as a layout`,
+      "Layout name",
+      "",
+      extra,
+      async (name2) => {
+        const result = await edit({
+          action: "master",
+          op: "save",
+          slide: index,
+          name: name2,
+          hints: hints.checked,
+          pictures: pictures.checked
+        });
+        if (!result.ok) return false;
+        toast(
+          `Saved as the layout \u201C${name2}\u201D: \u201CNew slide\u201D offers it now`,
+          "ok"
+        );
+        return true;
+      }
+    );
+  }
+  var pendingItem = null;
+  function initMaster() {
+    button.addEventListener("click", toggle);
+    on("model", () => {
+      if (!ed.masterMode) return;
+      if (pendingItem) {
+        const want = pendingItem;
+        pendingItem = null;
+        void loadTree().then(() => {
+          const next = find(want);
+          void loadThumbs();
+          if (next) void show(next, null);
+          else void refresh();
+        });
+        return;
+      }
+      void refresh();
+    });
+    on("render", fadeContext);
+    on("history", () => {
+      if (ed.masterMode && ed.canUndo) dirty = true;
+    });
+    on("master-copied", renderList);
+    document.addEventListener("keydown", (e2) => {
+      if (e2.key === "Escape" && menu2.classList.contains("open")) closeMenu();
+    });
+  }
+
+  // src/ts/editor/rename.ts
+  function plural2(n3, word) {
     return `${n3} ${word}${n3 === 1 ? "" : "s"}`;
   }
   function relOf(path) {
@@ -3628,7 +4568,7 @@
   }
   function summaryLine(p2) {
     if (!p2.references) return "Nothing refers to it: only the file moves.";
-    return `Updates ${plural(p2.references, "reference")} in ${plural(p2.files, "file")}.`;
+    return `Updates ${plural2(p2.references, "reference")} in ${plural2(p2.files, "file")}.`;
   }
   function previewBody(p2, opts2) {
     const box = h("div", { class: "rename-preview" });
@@ -3668,7 +4608,7 @@
         h(
           "p",
           { class: "hint" },
-          `The slide id ${old} becomes ${now}; its saved ink follows${p2.links ? `, and ${plural(p2.links, "slide: link")} ${p2.links === 1 ? "is" : "are"} rewritten` : ""}.`
+          `The slide id ${old} becomes ${now}; its saved ink follows${p2.links ? `, and ${plural2(p2.links, "slide: link")} ${p2.links === 1 ? "is" : "are"} rewritten` : ""}.`
         )
       );
     }
@@ -3732,7 +4672,7 @@
     let token = 0;
     let timer6 = 0;
     let last = null;
-    const refresh2 = async () => {
+    const refresh3 = async () => {
       const mine = ++token;
       const req = opts2.build();
       go.disabled = true;
@@ -3763,7 +4703,7 @@
     };
     const schedule2 = () => {
       window.clearTimeout(timer6);
-      timer6 = window.setTimeout(() => void refresh2(), 200);
+      timer6 = window.setTimeout(() => void refresh3(), 200);
     };
     for (const input of opts2.inputs) {
       input.addEventListener("input", schedule2);
@@ -3790,7 +4730,7 @@
       const p2 = res.rename ?? last;
       closeDialog();
       toast(
-        `${res.label ?? "Renamed"}${p2?.references ? ` \xB7 ${plural(p2.references, "reference")} updated` : ""}`,
+        `${res.label ?? "Renamed"}${p2?.references ? ` \xB7 ${plural2(p2.references, "reference")} updated` : ""}`,
         "ok"
       );
       opts2.done(p2);
@@ -3872,10 +4812,10 @@
   function renameSlideFiles(deckIndex) {
     const slide = ed.model?.slides[deckIndex];
     if (!slide) return;
-    const current2 = slide.md?.kind === "file" && slide.md.rel ? splitFileName(slide.md.rel).stem : slide.srcRel && !slide.srcShared ? splitFileName(slide.srcRel).stem : slide.id ?? "";
+    const current3 = slide.md?.kind === "file" && slide.md.rel ? splitFileName(slide.md.rel).stem : slide.srcRel && !slide.srcShared ? splitFileName(slide.srcRel).stem : slide.id ?? "";
     const nameInput = h("input", {
       type: "text",
-      value: current2,
+      value: current3,
       spellcheck: "false",
       title: "Letters, digits, - and _ (no folder, no extension)"
     });
@@ -3950,7 +4890,7 @@
     );
     const sync = () => {
       deleteBtn.disabled = !picked.size;
-      deleteBtn.textContent = picked.size ? `Delete ${plural(picked.size, "file")}\u2026` : "Delete unused\u2026";
+      deleteBtn.textContent = picked.size ? `Delete ${plural2(picked.size, "file")}\u2026` : "Delete unused\u2026";
     };
     let folder = null;
     for (const f2 of files2) {
@@ -3982,7 +4922,7 @@
           h(
             "span",
             { class: "files-uses" },
-            f2.uses ? plural(f2.uses, "use") : "unused"
+            f2.uses ? plural2(f2.uses, "use") : "unused"
           ),
           h("span", { class: "files-size" }, size(f2.size)),
           h(
@@ -4001,7 +4941,7 @@
     deleteBtn.addEventListener("click", async () => {
       const paths = [...picked];
       if (!window.confirm(
-        `Delete ${plural(paths.length, "file")} nothing uses?
+        `Delete ${plural2(paths.length, "file")} nothing uses?
 
 ${paths.join("\n")}
 
@@ -4022,10 +4962,10 @@ Undo brings them back.`
         class: "pbtn",
         disabled: !unused.length,
         onclick: () => {
-          for (const row4 of list4.querySelectorAll(
+          for (const row5 of list4.querySelectorAll(
             ".files-row.unused input"
           )) {
-            row4.checked = true;
+            row5.checked = true;
           }
           for (const f2 of unused) picked.add(f2.path);
           sync();
@@ -4043,7 +4983,7 @@ Undo brings them back.`
         h(
           "span",
           { class: "hint rename-count" },
-          `${plural(files2.length, "file")} \xB7 ${unused.length} unused`
+          `${plural2(files2.length, "file")} \xB7 ${unused.length} unused`
         ),
         selectUnused,
         deleteBtn
@@ -4240,7 +5180,7 @@ Undo brings them back.`
     if (!indices.includes(ed.current)) gotoSlide(indices[0]);
     emit("slide-selection");
   }
-  function askName(title2, initial) {
+  function askName(title3, initial) {
     return new Promise((resolve) => {
       let answer = null;
       const input = h("input", {
@@ -4267,7 +5207,7 @@ Undo brings them back.`
         answer = name2;
         closeDialog();
       });
-      openDialog(title2, form, { onClose: () => resolve(answer) });
+      openDialog(title3, form, { onClose: () => resolve(answer) });
       input.focus();
       input.select();
     });
@@ -4312,13 +5252,13 @@ Undo brings them back.`
   }
   var renameNext = null;
   function openSectionMenu(x2, y2, k2) {
-    const menu6 = document.getElementById("context-menu");
+    const menu7 = document.getElementById("context-menu");
     const s2 = sections()[k2];
     if (!s2) return;
     const editable = !!ed.model?.deckEditable;
     const n3 = sections().length;
-    menu6.replaceChildren();
-    menu6.append(
+    menu7.replaceChildren();
+    menu7.append(
       menuItem(
         "Rename\u2026",
         () => {
@@ -4416,7 +5356,7 @@ Undo brings them back.`
   // src/ts/editor/sorter.ts
   var list = document.getElementById("sorter-list");
   var addBtn = document.getElementById("sorter-add");
-  var menu2 = document.getElementById("context-menu");
+  var menu3 = document.getElementById("context-menu");
   function pickSlide(i2, e2) {
     ed.focus = "sorter";
     if (e2.shiftKey) {
@@ -4511,7 +5451,7 @@ Undo brings them back.`
       return box;
     }
   };
-  var thumbs = new Thumbs();
+  var thumbs2 = new Thumbs();
   var dragging = { now: null };
   function dragSlides(i2) {
     if (ed.slideSelection.size > 1 && ed.slideSelection.has(i2)) {
@@ -4549,7 +5489,7 @@ Undo brings them back.`
     void moveSlidesTo(drag.slides, n3, all.length ? all.length - 1 : null);
   }
   function slideItem(slide, i2) {
-    const item = h(
+    const item2 = h(
       "div",
       {
         class: `sorter-item${i2 === ed.current ? " active" : ""}${ed.slideSelection.has(i2) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
@@ -4558,10 +5498,10 @@ Undo brings them back.`
         "data-index": i2
       },
       h("span", { class: "sorter-num" }, String(i2 + 1)),
-      thumbs.thumb(slide)
+      thumbs2.thumb(slide)
     );
-    item.addEventListener("click", (e2) => pickSlide(i2, e2));
-    item.addEventListener("contextmenu", (e2) => {
+    item2.addEventListener("click", (e2) => pickSlide(i2, e2));
+    item2.addEventListener("contextmenu", (e2) => {
       e2.preventDefault();
       ed.focus = "sorter";
       if (!ed.slideSelection.has(i2)) {
@@ -4570,17 +5510,17 @@ Undo brings them back.`
       }
       openSlideMenu(e2.clientX, e2.clientY, i2);
     });
-    item.addEventListener("dragstart", (e2) => {
+    item2.addEventListener("dragstart", (e2) => {
       dragging.now = { kind: "slides", slides: dragSlides(i2) };
       e2.dataTransfer?.setData("text/plain", String(i2));
-      item.classList.add("dragging");
+      item2.classList.add("dragging");
     });
-    item.addEventListener("dragend", () => {
+    item2.addEventListener("dragend", () => {
       dragging.now = null;
-      item.classList.remove("dragging");
+      item2.classList.remove("dragging");
       clearDropMarks(list);
     });
-    item.addEventListener("dragover", (e2) => {
+    item2.addEventListener("dragover", (e2) => {
       const drag = dragging.now;
       if (!drag) return;
       e2.preventDefault();
@@ -4590,13 +5530,13 @@ Undo brings them back.`
         markGap(list, gap, list.lastElementChild);
         return;
       }
-      const r2 = item.getBoundingClientRect();
+      const r2 = item2.getBoundingClientRect();
       clearDropMarks(list);
-      item.classList.add(
+      item2.classList.add(
         e2.clientY > r2.top + r2.height / 2 ? "drop-after" : "drop-before"
       );
     });
-    item.addEventListener("drop", (e2) => {
+    item2.addEventListener("drop", (e2) => {
       e2.preventDefault();
       e2.stopPropagation();
       const drag = dragging.now;
@@ -4607,12 +5547,12 @@ Undo brings them back.`
         void moveSectionToGap(drag.section, gap);
         return;
       }
-      const r2 = item.getBoundingClientRect();
+      const r2 = item2.getBoundingClientRect();
       const after = e2.clientY > r2.top + r2.height / 2;
       const target = dropOnSlide(sections(), i2, after);
       void moveSlidesTo(drag.slides, target.insertAt, target.section);
     });
-    return item;
+    return item2;
   }
   function headerItem(k2) {
     const head = sectionHeader(k2, "sorter", (e2) => {
@@ -4657,14 +5597,14 @@ Undo brings them back.`
   }
   function renderSorter() {
     clear(list);
-    thumbs.begin();
+    thumbs2.begin();
     const slides = ed.model?.slides ?? [];
-    for (const row4 of sorterRows(slides.length, sections(), isCollapsed)) {
+    for (const row5 of sorterRows(slides.length, sections(), isCollapsed)) {
       list.append(
-        row4.kind === "header" ? headerItem(row4.section) : slideItem(slides[row4.index], row4.index)
+        row5.kind === "header" ? headerItem(row5.section) : slideItem(slides[row5.index], row5.index)
       );
     }
-    thumbs.end();
+    thumbs2.end();
     list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
     emit("sorter");
   }
@@ -4742,8 +5682,8 @@ Undo brings them back.`
   }
   var pendingSelect = null;
   function closeMenu() {
-    menu2.classList.remove("open");
-    clear(menu2);
+    menu3.classList.remove("open");
+    clear(menu3);
   }
   function menuItem(label4, fn, disabled = false) {
     return h(
@@ -4764,21 +5704,21 @@ Undo brings them back.`
     const slide = ed.model?.slides[i2];
     const editable = !!ed.model?.deckEditable;
     const many = ed.slideSelection.size > 1;
-    clear(menu2);
-    menu2.append(
+    clear(menu3);
+    menu3.append(
       menuItem(
         many ? `Copy ${ed.slideSelection.size} slides` : "Copy",
         () => void copySlides()
       )
     );
-    menu2.append(
+    menu3.append(
       menuItem(
         many ? "Cut slides" : "Cut",
         () => void cutSlides(),
         !editable
       )
     );
-    menu2.append(
+    menu3.append(
       menuItem(
         "Paste after this slide",
         () => void pasteFromClipboard(),
@@ -4786,7 +5726,7 @@ Undo brings them back.`
       )
     );
     if (many) {
-      menu2.append(
+      menu3.append(
         menuItem(
           `Delete ${ed.slideSelection.size} slides`,
           () => void deleteSlides(),
@@ -4796,35 +5736,36 @@ Undo brings them back.`
       showMenu(x2, y2);
       return;
     }
-    menu2.append(
+    menu3.append(
       menuItem(
         "New slide after\u2026",
         () => void openGallery({ mode: "insert", after: i2 }),
         !editable
       )
     );
-    menu2.append(menuItem("Duplicate", () => void duplicateSlide(i2), !editable));
-    menu2.append(
+    menu3.append(menuItem("Duplicate", () => void duplicateSlide(i2), !editable));
+    menu3.append(
       menuItem(
         slide?.visible ? "Hide (skip in presentation)" : "Show",
         () => void toggleHidden(i2),
         !editable
       )
     );
-    menu2.append(
+    menu3.append(
       menuItem("Rename files\u2026", () => renameSlideFiles(i2), !editable)
     );
-    menu2.append(menuItem("Delete", () => void deleteSlide(i2), !editable));
-    menu2.append(
+    menu3.append(menuItem("Save as layout\u2026", () => saveAsLayout(i2), !editable));
+    menu3.append(menuItem("Delete", () => void deleteSlide(i2), !editable));
+    menu3.append(
       menuItem("Add section here\u2026", () => void addSectionAt(i2), !editable)
     );
     showMenu(x2, y2);
   }
   function showMenu(x2, y2) {
-    menu2.classList.add("open");
-    const r2 = menu2.getBoundingClientRect();
-    menu2.style.left = `${Math.min(x2, window.innerWidth - r2.width - 8)}px`;
-    menu2.style.top = `${Math.min(y2, window.innerHeight - r2.height - 8)}px`;
+    menu3.classList.add("open");
+    const r2 = menu3.getBoundingClientRect();
+    menu3.style.left = `${Math.min(x2, window.innerWidth - r2.width - 8)}px`;
+    menu3.style.top = `${Math.min(y2, window.innerHeight - r2.height - 8)}px`;
   }
   function initSorter() {
     on("model", () => {
@@ -4856,7 +5797,7 @@ Undo brings them back.`
       void openGallery({ mode: "insert", after: ed.current });
     });
     document.addEventListener("pointerdown", (e2) => {
-      if (!menu2.contains(e2.target)) closeMenu();
+      if (!menu3.contains(e2.target)) closeMenu();
     });
     document.addEventListener("keydown", (e2) => {
       if (e2.key === "Escape") closeMenu();
@@ -4966,9 +5907,9 @@ Undo brings them back.`
       byIndex.set(i2, [...byIndex.get(i2) ?? [], p2]);
     }
     for (const [i2, people] of byIndex) {
-      const item = document.querySelector(`.sorter-item[data-index="${i2}"]`);
-      if (!item) continue;
-      item.append(
+      const item2 = document.querySelector(`.sorter-item[data-index="${i2}"]`);
+      if (!item2) continue;
+      item2.append(
         h(
           "span",
           { class: "peer-dots" },
@@ -5234,10 +6175,32 @@ Undo brings them back.`
     const id = nextId++;
     const sock = ws;
     const base2 = req.action === "undo" || req.action === "redo" ? {} : ed.model?.build != null ? { baseBuild: ed.model.build } : {};
+    const cow = typeof req.file === "string" && ed.master?.slide.sources?.some(
+      (s2) => s2.path === req.file && s2.copyTo != null
+    ) ? { copyLayout: true } : {};
     return new Promise((resolve) => {
-      pending.set(id, resolve);
-      sock.send(JSON.stringify({ type: "edit-op", id, ...base2, ...req }));
+      pending.set(id, (result) => {
+        if (result.ok && result.copied) copied(result);
+        resolve(result);
+      });
+      sock.send(
+        JSON.stringify({ type: "edit-op", id, ...base2, ...cow, ...req })
+      );
     });
+  }
+  function copied(result) {
+    const info4 = result.copied;
+    const hash = result.hashes?.[info4.to];
+    for (const src of ed.master?.slide.sources ?? []) {
+      if (src.path !== info4.from) continue;
+      src.path = info4.to;
+      src.copyTo = void 0;
+      src.writable = true;
+      if (hash) src.hash = hash;
+    }
+    if (ed.master?.path === info4.from) ed.master.path = info4.to;
+    toast(info4.note, "info");
+    emit("master-copied");
   }
   var pendingTimer = 0;
   function newerBuild(than, ms = 4e3) {
@@ -5293,7 +6256,8 @@ Undo brings them back.`
     return result;
   }
   function updateHashes(hashes) {
-    for (const slide of ed.model?.slides ?? []) {
+    const shown2 = ed.master ? [ed.master.slide] : [];
+    for (const slide of [...ed.model?.slides ?? [], ...shown2]) {
       for (const src of slide.sources ?? []) {
         if (src.path in hashes) src.hash = hashes[src.path];
       }
@@ -5360,9 +6324,9 @@ Undo brings them back.`
     if (order2.length < 3) return out;
     const first = order2[0].b;
     const last = order2[order2.length - 1].b;
-    const total = order2.reduce((s2, o2) => s2 + o2.b[size4], 0);
+    const total2 = order2.reduce((s2, o2) => s2 + o2.b[size4], 0);
     const span = last[axis] + last[size4] - first[axis];
-    const gap = (span - total) / (order2.length - 1);
+    const gap = (span - total2) / (order2.length - 1);
     let pos = first[axis];
     for (const o2 of order2) {
       out[o2.i] = pos;
@@ -5710,6 +6674,7 @@ Undo brings them back.`
     if (!el2.hasAttribute("data-ink") || isLocked(el2)) return false;
     const src = sourceOf(keyOf(el2));
     if (!src) return false;
+    if (ed.master) return src.path === ed.master.path;
     if (src.role === "diagram") return src.writable && editableCell(el2);
     if (src.role === "ink") return src.writable;
     if (ed.layoutMode) return src.writable;
@@ -5717,6 +6682,7 @@ Undo brings them back.`
   }
   function canTransform(el2) {
     const src = sourceOf(keyOf(el2));
+    if (ed.master) return src?.path === ed.master.path;
     if (!src?.writable) return false;
     if (src.role === "diagram") return editableCell(el2);
     if (src.role === "ink") return true;
@@ -5808,9 +6774,9 @@ Undo brings them back.`
       clearSelection();
       return;
     }
-    const current2 = ed.selection.length === 1 ? ed.selection[0].el : null;
+    const current3 = ed.selection.length === 1 ? ed.selection[0].el : null;
     let index = near && cycle ? cycle.index + 1 : 0;
-    if (!near && current2 && all[0] === current2) index = 1;
+    if (!near && current3 && all[0] === current3) index = 1;
     index %= all.length;
     cycle = { x: e2.clientX, y: e2.clientY, index };
     select([all[index]]);
@@ -6102,7 +7068,7 @@ Undo brings them back.`
   var MEDIA_ZONES = /media|image|img|picture|photo|figure|video|logo/;
   function drawPlaceholders() {
     const slide = currentSlide();
-    if (!slide?.emptyZones || ed.step != null) return;
+    if (!slide?.emptyZones || ed.step != null || ed.master) return;
     for (const z of slide.emptyZones) {
       const key = parseInt(z.locator.split(":")[0] ?? "", 10);
       const src = sourceOf(key);
@@ -6123,7 +7089,7 @@ Undo brings them back.`
       if (media) outline.setAttribute("data-media-zone", z.zone);
       overlay2.append(outline);
       const g2 = svgEl("g", { class: "placeholder" });
-      const text = media ? `+ media \xB7 ${z.zone}` : `+ ${z.zone}`;
+      const text = media ? `+ media \xB7 ${z.hint ?? z.zone}` : `+ ${z.hint ?? z.zone}`;
       const w2 = 14 + text.length * 7.2;
       const tx = pb.x + 6;
       const ty = pb.y + 6;
@@ -6135,9 +7101,9 @@ Undo brings them back.`
       });
       label4.textContent = text;
       g2.append(label4);
-      const title2 = svgEl("title");
-      title2.textContent = media ? `Add an image or video to the ${z.zone} zone` : `Add ${z.zone} text`;
-      g2.append(title2);
+      const title3 = svgEl("title");
+      title3.textContent = media ? `Add an image or video to the ${z.zone} zone` : `Add ${z.zone} text`;
+      g2.append(title3);
       g2.addEventListener("pointerdown", (e2) => {
         e2.stopPropagation();
         e2.preventDefault();
@@ -6442,11 +7408,11 @@ Undo brings them back.`
   function bendPlans(drag, p2) {
     const sel = drag.snaps[0].sel;
     const conn = sel.el;
-    const current2 = connectorRoute(conn)?.bend;
-    if (!current2) return [];
+    const current3 = connectorRoute(conn)?.bend;
+    if (!current3) return [];
     const bend = {
-      axis: current2.axis,
-      at: Math.round(current2.axis === "x" ? p2.x : p2.y)
+      axis: current3.axis,
+      at: Math.round(current3.axis === "x" ? p2.x : p2.y)
     };
     const d2 = connectorPath(conn, {}, "elbow", bend);
     if (!d2) return [];
@@ -7270,8 +8236,8 @@ Undo brings them back.`
     return numericColumns(grid).filter((c2) => c2 !== x2);
   }
   function toggleSeries(grid, s2, column, on2) {
-    const current2 = plotted(grid, s2);
-    const next = on2 ? grid.columns.filter((c2) => c2 === column || current2.includes(c2)) : current2.filter((c2) => c2 !== column);
+    const current3 = plotted(grid, s2);
+    const next = on2 ? grid.columns.filter((c2) => c2 === column || current3.includes(c2)) : current3.filter((c2) => c2 !== column);
     const auto = plotted(grid, { ...s2, y: null });
     const same = next.length === auto.length && next.every((c2, i2) => c2 === auto[i2]);
     return same ? null : next;
@@ -7280,7 +8246,7 @@ Undo brings them back.`
     const body3 = text.replace(/\r\n?/g, "\n").replace(/\n$/, "");
     const sep2 = body3.includes("	") ? "	" : body3.includes(",") ? "," : "	";
     const rows = [];
-    let row4 = [];
+    let row5 = [];
     let cell = "";
     let quoted = false;
     let i2 = 0;
@@ -7299,18 +8265,18 @@ Undo brings them back.`
       }
       if (ch === '"' && cell === "") quoted = true;
       else if (ch === sep2) {
-        row4.push(cell);
+        row5.push(cell);
         cell = "";
       } else if (ch === "\n") {
-        row4.push(cell);
-        rows.push(row4);
-        row4 = [];
+        row5.push(cell);
+        rows.push(row5);
+        row5 = [];
         cell = "";
       } else cell += ch;
       i2++;
     }
-    row4.push(cell);
-    rows.push(row4);
+    row5.push(cell);
+    rows.push(row5);
     return rows;
   }
   function isMultiCell(text) {
@@ -7326,11 +8292,11 @@ Undo brings them back.`
     while (columns.includes(name2)) name2 = `${base2} ${n3++}`;
     return name2;
   }
-  function pasteCells(grid, row4, col, cells) {
+  function pasteCells(grid, row5, col, cells) {
     const columns = [...grid.columns];
     const rows = grid.rows.map((r2) => [...r2]);
     let body3 = cells;
-    if (row4 < 0) {
+    if (row5 < 0) {
       const head = cells[0] ?? [];
       head.forEach((name2, j2) => {
         const c2 = col + j2;
@@ -7342,7 +8308,7 @@ Undo brings them back.`
         columns[c2] = name2.trim() || columns[c2];
       });
       body3 = cells.slice(1);
-      row4 = 0;
+      row5 = 0;
     }
     const width = Math.max(
       columns.length,
@@ -7353,9 +8319,9 @@ Undo brings them back.`
     }
     for (const r2 of rows) while (r2.length < width) r2.push("");
     body3.forEach((line, i2) => {
-      while (rows.length <= row4 + i2) rows.push(blankRow(width));
+      while (rows.length <= row5 + i2) rows.push(blankRow(width));
       line.forEach((value, j2) => {
-        rows[row4 + i2][col + j2] = value;
+        rows[row5 + i2][col + j2] = value;
       });
     });
     return { columns, rows };
@@ -7464,6 +8430,10 @@ Undo brings them back.`
   async function insertChart(at3) {
     const slide = currentSlide();
     if (!slide) return;
+    if (ed.master) {
+      toast("A chart belongs to a slide: insert it on the slide", "error");
+      return;
+    }
     if (!ed.model?.deckEditable) {
       toast(
         "deck.py builds its slides in code; cannot add a chart here",
@@ -7541,15 +8511,15 @@ Undo brings them back.`
       status3.textContent = "";
       preview.innerHTML = String(res.svg ?? "");
     }
-    function cellInput(row4, col, value) {
+    function cellInput(row5, col, value) {
       const input = h("input", {
         type: "text",
         value,
-        "data-row": row4,
+        "data-row": row5,
         "data-col": col,
         spellcheck: "false"
       });
-      if (row4 < 0) {
+      if (row5 < 0) {
         input.classList.add("chart-head");
         input.addEventListener("change", () => {
           const r2 = renameColumn(grid, col, input.value, settings2);
@@ -7559,7 +8529,7 @@ Undo brings them back.`
         });
       } else {
         input.addEventListener("input", () => {
-          grid.rows[row4][col] = input.value;
+          grid.rows[row5][col] = input.value;
           schedule2();
         });
         input.addEventListener("change", renderFields);
@@ -7568,7 +8538,7 @@ Undo brings them back.`
         if (e2.key === "Enter" || e2.key === "ArrowDown" || e2.key === "ArrowUp") {
           e2.preventDefault();
           const down = e2.key !== "ArrowUp";
-          let next = row4 + (down ? 1 : -1);
+          let next = row5 + (down ? 1 : -1);
           if (down && next >= grid.rows.length && e2.key === "Enter") {
             grid = addRow(grid);
             renderGrid2();
@@ -7579,9 +8549,9 @@ Undo brings them back.`
       });
       return input;
     }
-    function focusCell2(row4, col) {
+    function focusCell2(row5, col) {
       const input = table.querySelector(
-        `input[data-row="${row4}"][data-col="${col}"]`
+        `input[data-row="${row5}"][data-col="${col}"]`
       );
       input?.focus();
       input?.select();
@@ -7697,13 +8667,13 @@ Undo brings them back.`
       const x2 = xColumn(grid, settings2);
       const shown2 = plotted(grid, settings2);
       const kind = settings2.kind;
-      const title2 = h("input", {
+      const title3 = h("input", {
         type: "text",
         value: settings2.title ?? "",
         placeholder: "none"
       });
-      title2.addEventListener("input", () => {
-        settings2.title = title2.value.trim() || null;
+      title3.addEventListener("input", () => {
+        settings2.title = title3.value.trim() || null;
         schedule2();
       });
       fields.append(
@@ -7723,7 +8693,7 @@ Undo brings them back.`
             }
           )
         ),
-        field2("Title", title2)
+        field2("Title", title3)
       );
       const series = h("div", { class: "chart-series" });
       const choices = grid.columns.filter((c2) => c2 !== x2);
@@ -8063,7 +9033,10 @@ Undo brings them back.`
     const src = sourceOf(sel.key);
     if (!image || !src) return;
     if (!src.writable) {
-      toast("This picture lives in a layout; switch to layout mode", "error");
+      toast(
+        "This picture lives in a layout: edit it in the Slide master",
+        "error"
+      );
       return;
     }
     void openDrawio({
@@ -8088,18 +9061,18 @@ Undo brings them back.`
       return;
     }
     const base2 = String(res.url);
-    let origin;
+    let origin2;
     try {
-      origin = new URL(base2).origin;
+      origin2 = new URL(base2).origin;
     } catch {
       toast(`INKFLOW_DRAWIO_URL is not a web address: ${base2}`, "error");
       return;
     }
-    const local = /^https?:\/\/(localhost|127\.|\[::1\])/.test(origin);
+    const local = /^https?:\/\/(localhost|127\.|\[::1\])/.test(origin2);
     if (!navigator.onLine && !local) {
       offerDesktop(
         target,
-        `This computer is offline, and draw.io loads from ${origin}.`
+        `This computer is offline, and draw.io loads from ${origin2}.`
       );
       return;
     }
@@ -8124,7 +9097,7 @@ Undo brings them back.`
     let exitAfterSave = false;
     let saving = false;
     let loaded = false;
-    const status3 = h("p", {}, `Loading draw.io from ${origin}\u2026`);
+    const status3 = h("p", {}, `Loading draw.io from ${origin2}\u2026`);
     const note = h(
       "div",
       { class: "drawio-note" },
@@ -8161,10 +9134,10 @@ Undo brings them back.`
     open2 = wrap2;
     const slow = window.setTimeout(() => {
       if (loaded) return;
-      status3.textContent = `draw.io did not load from ${origin}. Is this computer offline? Draw the diagram in draw.io desktop instead.`;
+      status3.textContent = `draw.io did not load from ${origin2}. Is this computer offline? Draw the diagram in draw.io desktop instead.`;
       note.classList.add("failed");
     }, 15e3);
-    const post = (msg) => frame.contentWindow?.postMessage(JSON.stringify(msg), origin);
+    const post = (msg) => frame.contentWindow?.postMessage(JSON.stringify(msg), origin2);
     const close2 = () => {
       window.clearTimeout(slow);
       window.removeEventListener("message", onMessage2);
@@ -8199,7 +9172,7 @@ Undo brings them back.`
       else post({ action: "status", message: "Saved", modified: false });
     };
     const onMessage2 = (e2) => {
-      if (e2.source !== frame.contentWindow || e2.origin !== origin) return;
+      if (e2.source !== frame.contentWindow || e2.origin !== origin2) return;
       let msg;
       try {
         msg = JSON.parse(String(e2.data));
@@ -8387,7 +9360,7 @@ Undo brings them back.`
       return renderer;
     }
     closeRenderer();
-    const origin = new URL(base2).origin;
+    const origin2 = new URL(base2).origin;
     const params = new URLSearchParams({
       embed: "1",
       proto: "json",
@@ -8408,7 +9381,7 @@ Undo brings them back.`
         reject(new Error("draw.io did not load"));
       }, 2e4);
       const onMessage2 = (e2) => {
-        if (e2.source !== frame.contentWindow || e2.origin !== origin) return;
+        if (e2.source !== frame.contentWindow || e2.origin !== origin2) return;
         const msg = parseMessage(e2.data);
         if (msg?.event === "configure") {
           frame.contentWindow?.postMessage(
@@ -8416,7 +9389,7 @@ Undo brings them back.`
               action: "configure",
               config: { compressXml: false }
             }),
-            origin
+            origin2
           );
         } else if (msg?.event === "init") {
           window.clearTimeout(give);
@@ -8430,7 +9403,7 @@ Undo brings them back.`
     renderer = {
       base: base2,
       frame,
-      origin,
+      origin: origin2,
       ready,
       closeTimer: window.setTimeout(closeRenderer, 18e4)
     };
@@ -8446,13 +9419,13 @@ Undo brings them back.`
   }
   function renderDiagram(xml, base2) {
     const run = renderQueue.then(async () => {
-      let origin;
+      let origin2;
       try {
-        origin = new URL(base2).origin;
+        origin2 = new URL(base2).origin;
       } catch {
         throw new Error(`INKFLOW_DRAWIO_URL is not a web address: ${base2}`);
       }
-      const local = /^https?:\/\/(localhost|127\.|\[::1\])/.test(origin);
+      const local = /^https?:\/\/(localhost|127\.|\[::1\])/.test(origin2);
       if (!navigator.onLine && !local)
         throw new Error("This computer is offline");
       const r2 = hiddenFrame(base2);
@@ -8753,13 +9726,13 @@ Undo brings them back.`
     }
     if (!selectable(el2)) {
       toast(
-        ed.layoutMode ? "This object cannot be edited here" : "From a layout or overlay: use Edit layout to change it"
+        ed.layoutMode ? "This object cannot be edited here" : "From a layout or overlay: change it in the Slide master"
       );
       return;
     }
     select([el2]);
   }
-  function row(el2, depth) {
+  function row2(el2, depth) {
     const loc = el2.getAttribute("data-ink") ?? "";
     const src = sourceOf(keyOf(el2));
     const writable = !!src?.writable && (canTransform(el2) || ed.layoutMode || isOwnObject(el2));
@@ -8771,7 +9744,7 @@ Undo brings them back.`
     const hidden = isHidden(el2);
     const name2 = h("span", { class: "obj-name" }, label(el2));
     const out = [];
-    const item = h(
+    const item2 = h(
       "div",
       {
         class: `obj-row${selected ? " on" : ""}${writable ? "" : " foreign"}${hidden ? " hidden-obj" : ""}`,
@@ -8821,13 +9794,13 @@ Undo brings them back.`
         icon(locked ? "lock" : "unlock", 14)
       ) : h("span", { class: "obj-badge" }, src?.role ?? "")
     );
-    item.addEventListener("click", () => pickFromList(el2));
-    item.addEventListener("dblclick", () => rename(el2, name2));
-    item.addEventListener("mouseenter", () => setHover(el2));
-    item.addEventListener("mouseleave", () => setHover(null));
-    out.push(item);
+    item2.addEventListener("click", () => pickFromList(el2));
+    item2.addEventListener("dblclick", () => rename(el2, name2));
+    item2.addEventListener("mouseenter", () => setHover(el2));
+    item2.addEventListener("mouseleave", () => setHover(null));
+    out.push(item2);
     if (open5) {
-      for (const k2 of [...kids].reverse()) out.push(...row(k2, depth + 1));
+      for (const k2 of [...kids].reverse()) out.push(...row2(k2, depth + 1));
     }
     return out;
   }
@@ -8857,7 +9830,7 @@ Undo brings them back.`
         "Top of the stack first. Middle-click (or Alt+click) on the slide steps through overlapping objects."
       )
     );
-    for (const el2 of top) host4.append(...row(el2, 0));
+    for (const el2 of top) host4.append(...row2(el2, 0));
   }
   function showTab(tab) {
     for (const b2 of tabs.querySelectorAll("[data-tab]")) {
@@ -8913,12 +9886,12 @@ Undo brings them back.`
   }
 
   // src/ts/editor/animpreview.ts
-  var current = null;
+  var current2 = null;
   function previewPlaying() {
-    return current !== null;
+    return current2 !== null;
   }
   function stopPreview() {
-    current?.cancel();
+    current2?.cancel();
   }
   function wait(ms, cancelled) {
     return new Promise((resolve) => {
@@ -8951,12 +9924,12 @@ Undo brings them back.`
   function showStep(step2) {
     const sel = document.getElementById("step-select");
     if (sel) sel.value = step2 == null ? "" : String(step2);
-    for (const row4 of document.querySelectorAll(
+    for (const row5 of document.querySelectorAll(
       ".anim-row[data-step]"
     )) {
-      row4.classList.toggle(
+      row5.classList.toggle(
         "playing",
-        step2 != null && row4.dataset.step === String(step2)
+        step2 != null && row5.dataset.step === String(step2)
       );
     }
   }
@@ -8971,7 +9944,7 @@ Undo brings them back.`
     const before = ed.step;
     let cancelled = false;
     const run = { cancel: () => cancelled = true };
-    current = run;
+    current2 = run;
     const stopOnClick = (e2) => {
       if (!e2.target.closest?.(".anim-preview-ctl")) run.cancel();
     };
@@ -8998,7 +9971,7 @@ Undo brings them back.`
     }
     document.removeEventListener("pointerdown", stopOnClick, true);
     document.removeEventListener("keydown", stopOnKey, true);
-    if (current === run) current = null;
+    if (current2 === run) current2 = null;
     document.body.classList.remove("anim-playing");
     document.body.classList.toggle("previewing", before != null);
     ed.step = before;
@@ -9054,15 +10027,15 @@ Undo brings them back.`
 
   // src/ts/editor/props.ts
   var panel = document.getElementById("props-body");
-  function section(title2, ...body3) {
+  function section(title3, ...body3) {
     return h(
       "section",
       { class: "props-section" },
-      h("h3", {}, title2),
+      h("h3", {}, title3),
       ...body3.filter((b2) => !!b2)
     );
   }
-  function row2(label4, ...controls) {
+  function row3(label4, ...controls) {
     return h(
       "label",
       { class: "prop-row" },
@@ -9110,10 +10083,10 @@ Undo brings them back.`
     sel.addEventListener("change", () => commit(sel.value));
     return sel;
   }
-  function button(label4, title2, fn, cls = "") {
+  function button2(label4, title3, fn, cls = "") {
     return h(
       "button",
-      { type: "button", class: `pbtn ${cls}`, title: title2, onclick: fn },
+      { type: "button", class: `pbtn ${cls}`, title: title3, onclick: fn },
       label4
     );
   }
@@ -9167,7 +10140,7 @@ Undo brings them back.`
     for (const f2 of schema) {
       const label4 = f2.name.replace(/_/g, " ");
       box.append(
-        row2(
+        row3(
           label4,
           fieldControl(
             f2,
@@ -9215,7 +10188,7 @@ Undo brings them back.`
               { class: "media-poster" },
               poster ? String(poster).split("/").pop() : "None"
             ),
-            button(
+            button2(
               poster ? "Change\u2026" : "Pick\u2026",
               poster ? `Poster: ${poster}` : "Still image shown before playback",
               async () => {
@@ -9224,7 +10197,7 @@ Undo brings them back.`
                 if (up) commit("poster", up.path);
               }
             ),
-            poster ? button(
+            poster ? button2(
               "\u2715",
               "Remove the poster",
               () => commit("poster", null)
@@ -9249,7 +10222,7 @@ Undo brings them back.`
           { value: "off", label: "Never" }
         ];
         rows.push(
-          row2(
+          row3(
             label4,
             selectInput(
               opts2,
@@ -9263,7 +10236,7 @@ Undo brings them back.`
       if (f2.name === "start" || f2.name === "end") {
         const v2 = values[f2.name];
         rows.push(
-          row2(
+          row3(
             label4,
             numberInput(
               typeof v2 === "number" ? v2 : null,
@@ -9280,7 +10253,7 @@ Undo brings them back.`
         continue;
       }
       rows.push(
-        row2(
+        row3(
           label4,
           fieldControl(
             f2,
@@ -9304,7 +10277,7 @@ Undo brings them back.`
   function zonePageRow(slide, zone, ref) {
     const file = projectFile(ref);
     const page = pdfPage(ref);
-    const show = (n3) => {
+    const show2 = (n3) => {
       if (!file || n3 === page) return;
       void edit({
         action: "zone-media",
@@ -9318,10 +10291,10 @@ Undo brings them back.`
       "div",
       { class: "prop-row" },
       h("span", { class: "prop-label" }, "Page"),
-      numberInput(page, (n3) => show(Math.max(1, Math.round(n3))), { min: 1 }),
-      button("Pages\u2026", "See the PDF's pages and pick one", async () => {
+      numberInput(page, (n3) => show2(Math.max(1, Math.round(n3))), { min: 1 }),
+      button2("Pages\u2026", "See the PDF's pages and pick one", async () => {
         const choice = file ? await choosePage(file, page) : null;
-        if (choice) show(choice.page);
+        if (choice) show2(choice.page);
       })
     );
   }
@@ -9344,7 +10317,7 @@ Undo brings them back.`
       const box = h("input", { type: "checkbox" });
       box.checked = on2;
       box.addEventListener("change", () => fn(box.checked));
-      return row2(label4, box);
+      return row3(label4, box);
     };
     const series = h("div", { class: "chart-series" });
     const twoAxes = secondAxisAllowed(s2);
@@ -9390,11 +10363,11 @@ Undo brings them back.`
       } else series.append(entry);
     }
     const rows = [
-      row2(
+      row3(
         "Kind",
         selectInput(CHART_KINDS, s2.kind, (v2) => commit({ kind: v2 }))
       ),
-      row2(
+      row3(
         s2.kind === "scatter" ? "X values" : "Categories",
         selectInput(
           grid.columns.map((c2) => ({ value: c2, label: c2 })),
@@ -9412,7 +10385,7 @@ Undo brings them back.`
         ),
         series
       ),
-      row2(
+      row3(
         "Title",
         textInput(s2.title ?? "", (v2) => commit({ title: v2 }), "none")
       )
@@ -9453,7 +10426,7 @@ Undo brings them back.`
     }
     rows.push(
       check("Value labels", s2.labels, (v2) => commit({ labels: v2 })),
-      row2(
+      row3(
         "Legend",
         selectInput(
           [
@@ -9491,7 +10464,7 @@ Undo brings them back.`
     panel.append(
       section(
         "Slide",
-        row2(
+        row3(
           "Title",
           textInput(slide.title ?? "", (v2) => {
             void edit({
@@ -9502,9 +10475,9 @@ Undo brings them back.`
             });
           })
         ),
-        row2(
+        row3(
           "Layout",
-          button(
+          button2(
             `${currentLayout ? layoutLabel(currentLayout) : "None"} \u25BE`,
             "Pick a layout from previews",
             () => void openGallery({
@@ -9514,7 +10487,21 @@ Undo brings them back.`
             "wide"
           )
         ),
-        row2(
+        editable && h(
+          "div",
+          { class: "prop-buttons" },
+          button2(
+            "Save as layout\u2026",
+            "Make a new layout (a template) from this slide: new slides can start from it",
+            () => saveAsLayout(di)
+          ),
+          currentLayout ? button2(
+            "Edit its layout",
+            "Open the slide master at the layout this slide is built on: edits change every slide on it",
+            () => void openMaster()
+          ) : null
+        ),
+        row3(
           "Font size",
           numberInput(
             slide.fontSize,
@@ -9527,7 +10514,7 @@ Undo brings them back.`
             { placeholder: "deck default" }
           )
         ),
-        row2(
+        row3(
           "Hidden",
           (() => {
             const cb = h("input", { type: "checkbox" });
@@ -9574,7 +10561,7 @@ Undo brings them back.`
     if (deckPath) addFile("Deck", fileName2(deckPath), deckPath);
     if (editable)
       files2.append(
-        button(
+        button2(
           "Rename files\u2026",
           "Give this slide's drawing, Markdown, notes and ink one new name (its id follows)",
           () => renameSlideFiles(di)
@@ -9583,7 +10570,7 @@ Undo brings them back.`
     const textInDeck = slide.md?.kind !== "file" && (slide.md?.kind === "inline" || Object.values(slide.zones).some((z) => z.kind === "text"));
     if (textInDeck && editable)
       files2.append(
-        button(
+        button2(
           "Move text to Markdown",
           "Move this slide's text out of deck.py into its own .md file",
           () => void edit({ action: "to-markdown", slide: di })
@@ -9606,7 +10593,7 @@ Undo brings them back.`
             { class: "hint warn" },
             `${stale} ${stale === 1 ? "arrow no longer meets its shape" : "arrows no longer meet their shapes"} (moved in draw.io or another editor).`
           ) : null,
-          button(
+          button2(
             "Re-route all",
             "Re-attach every arrow to its shapes",
             () => reroute(arrows)
@@ -9619,22 +10606,22 @@ Undo brings them back.`
         h(
           "p",
           { class: "hint" },
-          "This slide is drawn by a shared layout. Draw on it (or insert anything) and it gets its own SVG built on that layout. Use \u201CEdit layout\u201D to change the layout itself."
+          "This slide is drawn by a shared layout. Draw on it (or insert anything) and it gets its own SVG built on that layout. Use the \u201CSlide master\u201D to change the layout itself, for every slide on it."
         )
       );
     }
   }
-  function transitionSection(current2, di) {
+  function transitionSection(current3, di) {
     const model2 = ed.model;
     const types = model2.transitionTypes;
-    const value = current2?.type ?? "";
+    const value = current3?.type ?? "";
     const opts2 = [
       { value: "", label: `Deck default (${model2.defaultTransition.type})` },
       ...types.map((t2) => ({ value: t2.type, label: t2.type }))
     ];
     const send = (spec) => void edit({ action: "slide", op: "transition", slide: di, spec });
     const body3 = [
-      row2(
+      row3(
         "Type",
         selectInput(opts2, value, (v2) => {
           if (!v2) send(null);
@@ -9642,14 +10629,14 @@ Undo brings them back.`
         })
       )
     ];
-    if (current2) {
-      const info4 = typeInfo(types, current2.type);
+    if (current3) {
+      const info4 = typeInfo(types, current3.type);
       if (info4) {
         body3.push(
           fieldsEditor(
             info4.fields,
-            current2.fields,
-            (fields) => send({ type: current2.type, fields })
+            current3.fields,
+            (fields) => send({ type: current3.type, fields })
           )
         );
       }
@@ -9700,7 +10687,7 @@ Undo brings them back.`
         trigger,
         (v2) => replace2(i2, cue.type, { ...cue.fields, trigger: v2 })
       ) : null;
-      const item = h(
+      const item2 = h(
         "div",
         {
           class: "anim-row",
@@ -9731,13 +10718,13 @@ Undo brings them back.`
             },
             `#${cue.element}`
           ),
-          step2 != null && button(
+          step2 != null && button2(
             icon("play", 12),
             "Preview from this animation",
             () => void playAnimations(step2),
             "anim-preview-ctl"
           ),
-          editable && button(icon("up", 12), "Earlier", () => {
+          editable && button2(icon("up", 12), "Earlier", () => {
             if (i2 > 0)
               void edit({
                 action: "anim",
@@ -9747,7 +10734,7 @@ Undo brings them back.`
                 to: i2 - 1
               });
           }),
-          editable && button(icon("down", 12), "Later", () => {
+          editable && button2(icon("down", 12), "Later", () => {
             if (i2 < cues.length - 1) {
               void edit({
                 action: "anim",
@@ -9758,7 +10745,7 @@ Undo brings them back.`
               });
             }
           }),
-          editable && button(icon("trash", 12), "Remove", () => {
+          editable && button2(icon("trash", 12), "Remove", () => {
             void edit({
               action: "anim",
               slide: di,
@@ -9778,7 +10765,7 @@ Undo brings them back.`
           )
         )
       );
-      list4.append(item);
+      list4.append(item2);
     });
     if (!editable && cues.length) {
       list4.append(
@@ -9795,12 +10782,12 @@ Undo brings them back.`
     const controls = h(
       "div",
       { class: "btn-row anim-preview" },
-      playing ? button(
+      playing ? button2(
         "\u25A0 Stop",
         "Stop the preview (Esc)",
         () => stopPreview(),
         "anim-preview-ctl"
-      ) : button(
+      ) : button2(
         "\u25B6 Play",
         "Play this slide's animations here, click by click",
         () => void playAnimations(1),
@@ -9854,13 +10841,13 @@ Undo brings them back.`
             trigger: cue.fields.trigger ?? "on-click"
           })
         ) : h("span", {}, cue.type),
-        steps[index] != null && button(
+        steps[index] != null && button2(
           icon("play", 12),
           `Preview (click ${steps[index]})`,
           () => void playAnimations(steps[index] ?? 1),
           "anim-preview-ctl"
         ),
-        editable && button(icon("trash", 12), "Remove", () => {
+        editable && button2(icon("trash", 12), "Remove", () => {
           void edit({
             action: "anim",
             slide: di,
@@ -10004,9 +10991,9 @@ Undo brings them back.`
     custom.addEventListener("change", () => send({ color: custom.value }));
     swatches.append(custom);
     swatches.append(
-      button("\u2205", "None", () => send({ color: "none" }), "none-btn")
+      button2("\u2205", "None", () => send({ color: "none" }), "none-btn")
     );
-    return row2(prop === "fill" ? "Fill" : "Stroke", swatches);
+    return row3(prop === "fill" ? "Fill" : "Stroke", swatches);
   }
   function styleOps(sel, set, label4) {
     void sendSvgOps(
@@ -10029,7 +11016,7 @@ Undo brings them back.`
     probe.remove();
     return hex;
   }
-  function cellColorRow(label4, current2, pick2) {
+  function cellColorRow(label4, current3, pick2) {
     const swatches = h("div", { class: "swatches" });
     for (const t2 of ed.model?.colorTokens ?? []) {
       swatches.append(
@@ -10044,12 +11031,12 @@ Undo brings them back.`
     }
     const custom = h("input", {
       type: "color",
-      value: current2,
+      value: current3,
       title: "Custom colour"
     });
     custom.addEventListener("change", () => pick2(custom.value));
     swatches.append(custom);
-    return row2(label4, swatches);
+    return row3(label4, swatches);
   }
   function renderCellPanel(sel) {
     const el2 = sel.el;
@@ -10081,8 +11068,8 @@ Undo brings them back.`
     panel.append(
       section(
         "draw.io shape",
-        row2("Id", h("code", {}, el2.getAttribute("id") ?? "")),
-        row2("Label", area2),
+        row3("Id", h("code", {}, el2.getAttribute("id") ?? "")),
+        row3("Label", area2),
         cellColorRow(
           "Fill",
           hex(look?.fill),
@@ -10093,7 +11080,7 @@ Undo brings them back.`
           hex(look?.stroke),
           (v2) => style("strokeColor", v2, "Shape line")
         ),
-        row2(
+        row3(
           "Line width",
           numberInput(
             parseFloat(look?.strokeWidth ?? "1") || 1,
@@ -10108,7 +11095,7 @@ Undo brings them back.`
         h(
           "div",
           { class: "btn-row" },
-          button("Leave the diagram", "Esc", () => enterGroup(null))
+          button2("Leave the diagram", "Esc", () => enterGroup(null))
         )
       )
     );
@@ -10129,7 +11116,7 @@ Undo brings them back.`
     panel.append(
       section(
         tag,
-        row2(
+        row3(
           "Id",
           zone ? h("code", {}, id) : textInput(
             id,
@@ -10165,13 +11152,25 @@ Undo brings them back.`
         )
       )
     );
-    if (zone) {
+    if (zone && ed.master) {
+      panel.append(
+        section(
+          "Placeholder",
+          h(
+            "p",
+            { class: "hint" },
+            "Each slide on this layout fills this zone with its own content: here it shows sample text. Drag or resize it to move it on every slide."
+          )
+        )
+      );
+    }
+    if (zone && !ed.master) {
       const slide = currentSlide();
       const name2 = zoneName(el2);
-      const origin = slide.zoneOrigins?.[name2];
+      const origin2 = slide.zoneOrigins?.[name2];
       const media = slide.zones[name2];
-      const where = origin === "deck" ? "deck.py zones=" : origin === "md-file" ? `${slide.md?.rel ?? "Markdown"} (whole file)` : slide.md?.rel ? `${slide.md.rel} \xB7 ::${name2}::` : "deck.py";
-      const textFile = origin === "deck" || !slide.md?.path ? ed.model?.deckPath : slide.md.path;
+      const where = origin2 === "deck" ? "deck.py zones=" : origin2 === "md-file" ? `${slide.md?.rel ?? "Markdown"} (whole file)` : slide.md?.rel ? `${slide.md.rel} \xB7 ::${name2}::` : "deck.py";
+      const textFile = origin2 === "deck" || !slide.md?.path ? ed.model?.deckPath : slide.md.path;
       const isMedia = !!media && (media.kind === "image" || media.kind === "video" || media.kind === "chart");
       const body3 = [
         h(
@@ -10194,7 +11193,7 @@ Undo brings them back.`
             media.path ? openButton(media.path) : null,
             media.inline ? null : renameButton(media.path)
           ),
-          button(
+          button2(
             "Edit data\u2026",
             "Edit the chart's table (double-click)",
             () => void editChart(name2)
@@ -10210,12 +11209,12 @@ Undo brings them back.`
             renameButton(projectFile(media.src))
           ),
           ...media.kind === "image" && isPdfRef(media.src ?? "") ? [zonePageRow(slide, name2, media.src ?? "")] : [],
-          button(
+          button2(
             "Replace media\u2026",
             "Pick another image or video",
             () => void zoneMedia(name2)
           ),
-          button("Clear", "Empty this zone", () => {
+          button2("Clear", "Empty this zone", () => {
             void edit({
               action: "zone-media",
               slide: slide.deckIndex,
@@ -10225,11 +11224,11 @@ Undo brings them back.`
           })
         );
         const video = media.kind === "video" ? videoOf(el2) : null;
-        if (video) body3.push(previewButton(video, button));
+        if (video) body3.push(previewButton(video, button2));
         if (media.kind === "video" && media.src) {
           const src2 = media.src;
           body3.push(
-            button(
+            button2(
               "Check & convert\u2026",
               "Can every browser play it? Convert it to MP4 or WebM, smaller or at another resolution",
               () => void openVideoCheck({
@@ -10242,7 +11241,7 @@ Undo brings them back.`
         }
       } else {
         body3.push(
-          button(
+          button2(
             "Edit text",
             "Edit this zone's Markdown (double-click)",
             () => {
@@ -10261,7 +11260,7 @@ Undo brings them back.`
     }
     const innerVideo = zone ? null : videoOf(el2);
     if (innerVideo) {
-      panel.append(section("Video", previewButton(innerVideo, button)));
+      panel.append(section("Video", previewButton(innerVideo, button2)));
     }
     if (movable) panel.append(geometrySection([sel]));
     const textZone = zone && el2.localName === "foreignObject" && !!el2.querySelector(".inkflow-content");
@@ -10282,7 +11281,7 @@ Undo brings them back.`
           "Style",
           fills && !picture && paintRow([sel], "fill"),
           !picture && el2.localName !== "g" && paintRow([sel], "stroke"),
-          !picture && el2.localName !== "g" && row2(
+          !picture && el2.localName !== "g" && row3(
             "Stroke width",
             numberInput(
               strokeWidth,
@@ -10293,7 +11292,7 @@ Undo brings them back.`
               )
             )
           ),
-          row2(
+          row3(
             "Opacity",
             (() => {
               const r2 = h("input", {
@@ -10316,7 +11315,7 @@ Undo brings them back.`
               return r2;
             })()
           ),
-          shapeTag === "rect" && row2(
+          shapeTag === "rect" && row3(
             "Corner radius",
             numberInput(
               parseFloat(el2.getAttribute("rx") ?? "0") || 0,
@@ -10366,7 +11365,8 @@ Undo brings them back.`
       panel.append(detailsSection(sel));
     }
     if (movable) panel.append(arrangeSection([sel]));
-    if (id || zone || src?.writable) panel.append(elementAnimations(sel));
+    if (!ed.master && (id || zone || src?.writable))
+      panel.append(elementAnimations(sel));
   }
   var ARROW = "url(#inkflow-arrow)";
   function attachedConnectors() {
@@ -10412,7 +11412,7 @@ Undo brings them back.`
     };
     return section(
       "Connector",
-      row2(
+      row3(
         "Route",
         selectInput(
           [
@@ -10435,7 +11435,7 @@ Undo brings them back.`
           }
         )
       ),
-      row2(
+      row3(
         "Arrowheads",
         selectInput(
           [
@@ -10463,12 +11463,12 @@ Undo brings them back.`
       h(
         "div",
         { class: "btn-row" },
-        button(
+        button2(
           "Re-route",
           "Re-attach to the shapes where they are now",
           () => reroute([sel])
         ),
-        el2.hasAttribute("inkflow:bend") && button(
+        el2.hasAttribute("inkflow:bend") && button2(
           "Reset bend",
           "Put the elbow's middle segment back where it goes by default",
           () => {
@@ -10479,7 +11479,7 @@ Undo brings them back.`
             );
           }
         ),
-        button(
+        button2(
           "Detach",
           "Free both ends",
           () => send(
@@ -10497,7 +11497,7 @@ Undo brings them back.`
     const n3 = sitesPerSide(sel.el);
     const box = section(
       "Connection points",
-      row2(
+      row3(
         "Per side",
         selectInput(
           [1, 2, 3, 4, 5, 7, 9].map((k2) => ({
@@ -10570,8 +11570,8 @@ Undo brings them back.`
     const padding = parseFloat(value("--inkflow-padding"));
     return section(
       "Text box",
-      row2("Draw the box", box),
-      row2(
+      row3("Draw the box", box),
+      row3(
         "Padding",
         numberInput(
           Number.isFinite(padding) ? padding : null,
@@ -10587,7 +11587,7 @@ Undo brings them back.`
           }
         )
       ),
-      row2(
+      row3(
         "Align",
         selectInput(
           [
@@ -10601,7 +11601,7 @@ Undo brings them back.`
           (v2) => setVar("--inkflow-align", v2 || null, "Text align")
         )
       ),
-      row2(
+      row3(
         "Vertical",
         selectInput(
           [
@@ -10644,7 +11644,7 @@ Undo brings them back.`
       isDiagramHref(href) ? h(
         "div",
         { class: "btn-row" },
-        button(
+        button2(
           "Edit diagram",
           "Open it in draw.io (or double-click it)",
           () => editDiagram(sel),
@@ -10655,7 +11655,7 @@ Undo brings them back.`
       h(
         "div",
         { class: "btn-row" },
-        button(
+        button2(
           "Replace\u2026",
           "Pick another picture; it keeps this size and place",
           async () => {
@@ -10671,7 +11671,7 @@ Undo brings them back.`
             imageOps(
               {
                 href: withPage(
-                  relativePath(src.path, up.path),
+                  relativePath(refBase(src), up.path),
                   page
                 ),
                 "xlink:href": null
@@ -10680,23 +11680,23 @@ Undo brings them back.`
             );
           }
         ),
-        ed.cropMode ? button(
+        ed.cropMode ? button2(
           "Done cropping",
           "Enter",
           () => setCropMode(false),
           "on"
-        ) : button(
+        ) : button2(
           "Crop",
           "Crop (double-click the picture)",
           () => void startCrop(sel)
         ),
-        cropped ? button(
+        cropped ? button2(
           "Reset crop",
           "Show the whole picture again",
           () => void resetCrop(sel)
         ) : null
       ),
-      row2(
+      row3(
         "Fit",
         selectInput(
           FITS.map((f2) => ({ value: f2.value, label: f2.label })),
@@ -10720,13 +11720,13 @@ Undo brings them back.`
     return isPdfRef(ref) ? `${name2} \xB7 page ${pdfPage(ref)}` : name2;
   }
   function pdfPageRow(sel, image, file, page, imageOps) {
-    const show = async (n3, shown2) => {
+    const show2 = async (n3, shown2) => {
       const url = shown2 ?? await pageUrl(file, n3);
       const src = sourceOf(sel.key);
       const root2 = ed.model?.projectDir;
       if (!url || !src || !root2 || n3 === page) return;
       const set = {
-        href: withPage(relativePath(src.path, `${root2}/${file}`), n3),
+        href: withPage(relativePath(refBase(src), `${root2}/${file}`), n3),
         "xlink:href": null
       };
       const width = Number.parseFloat(image.getAttribute("width") ?? "");
@@ -10740,17 +11740,17 @@ Undo brings them back.`
       "div",
       { class: "prop-row" },
       h("span", { class: "prop-label" }, "Page"),
-      numberInput(page, (n3) => void show(Math.max(1, Math.round(n3))), {
+      numberInput(page, (n3) => void show2(Math.max(1, Math.round(n3))), {
         min: 1
       }),
-      button("Pages\u2026", "See the PDF's pages and pick one", async () => {
+      button2("Pages\u2026", "See the PDF's pages and pick one", async () => {
         const choice = await choosePage(file, page);
-        if (choice) void show(choice.page, choice.url);
+        if (choice) void show2(choice.page, choice.url);
       })
     );
   }
   function showAsRow(sel, mode2) {
-    return row2(
+    return row3(
       "Show as",
       selectInput(
         DIAGRAM_MODES.map((m2) => ({ value: m2.value, label: m2.label })),
@@ -10799,7 +11799,7 @@ Undo brings them back.`
       h(
         "div",
         { class: "btn-row" },
-        button(
+        button2(
           "Edit diagram",
           "Open it in draw.io (or double-click it)",
           () => editDiagram(sel),
@@ -10808,7 +11808,7 @@ Undo brings them back.`
       ),
       showAsRow(sel, diagramMode(svg)),
       editShapesRow(sel, svg),
-      row2(
+      row3(
         "Fit",
         selectInput(
           FITS.map((f2) => ({ value: f2.value, label: f2.label })),
@@ -10901,7 +11901,7 @@ Undo brings them back.`
         (c2) => c2.element === shape.id
       ).length;
       const name2 = shape.label || `(${shape.id.slice(svg.id.length + 1)})`;
-      const item = h(
+      const item2 = h(
         "div",
         { class: "diagram-shape" },
         h(
@@ -10918,8 +11918,8 @@ Undo brings them back.`
           `${count} \u2726`
         ) : null
       );
-      item.addEventListener("mouseenter", () => flash(shape.el, true));
-      item.addEventListener("mouseleave", () => flash(shape.el, false));
+      item2.addEventListener("mouseenter", () => flash(shape.el, true));
+      item2.addEventListener("mouseleave", () => flash(shape.el, false));
       if (editable) {
         const add = animationPicker(
           model2.animationTypes,
@@ -10937,9 +11937,9 @@ Undo brings them back.`
             spec: { type: add.value, element: shape.id, fields: {} }
           });
         });
-        item.append(add);
+        item2.append(add);
       }
-      list4.append(item);
+      list4.append(item2);
     }
     return section(
       "Shapes",
@@ -10951,8 +11951,8 @@ Undo brings them back.`
       list4
     );
   }
-  function backgroundRow(current2, commit) {
-    const value = typeof current2 === "string" ? current2 : "";
+  function backgroundRow(current3, commit) {
+    const value = typeof current3 === "string" ? current3 : "";
     const named = ["", "paper", "surface"];
     const choice = named.includes(value) ? value : "custom";
     const colour = h("input", {
@@ -11012,7 +12012,7 @@ Undo brings them back.`
     return list4;
   }
   function detailsSection(sel) {
-    const title2 = [...sel.el.children].find((c2) => c2.localName === "title")?.textContent ?? "";
+    const title3 = [...sel.el.children].find((c2) => c2.localName === "title")?.textContent ?? "";
     const link = textInput(
       linkOf(sel.el),
       (v2) => void sendSvgOps(
@@ -11036,11 +12036,11 @@ Undo brings them back.`
     return section(
       "Link & alt text",
       slideOptions(),
-      row2("Link", link),
-      row2(
+      row3("Link", link),
+      row3(
         "Alt text",
         textInput(
-          title2,
+          title3,
           (v2) => void sendSvgOps(
             [
               {
@@ -11080,14 +12080,14 @@ Undo brings them back.`
     const anchor2 = cs.textAnchor;
     return section(
       "Text",
-      row2(
+      row3(
         "Size",
         numberInput(
           parseFloat(cs.fontSize),
           (v2) => setAll({ "font-size": `${v2}px` }, "Font size")
         )
       ),
-      row2(
+      row3(
         "Font",
         textInput(
           cs.fontFamily,
@@ -11098,13 +12098,13 @@ Undo brings them back.`
       h(
         "div",
         { class: "btn-row" },
-        button(
+        button2(
           h("b", {}, "B"),
           "Bold",
           () => setAll({ "font-weight": bold ? null : "bold" }, "Bold"),
           bold ? "on" : ""
         ),
-        button(
+        button2(
           h("i", {}, "I"),
           "Italic",
           () => setAll(
@@ -11113,25 +12113,25 @@ Undo brings them back.`
           ),
           italic ? "on" : ""
         ),
-        button(
+        button2(
           "\u27F8",
           "Align start",
           () => setAll({ "text-anchor": null }, "Align"),
           anchor2 === "start" ? "on" : ""
         ),
-        button(
+        button2(
           "\u21D4",
           "Align middle",
           () => setAll({ "text-anchor": "middle" }, "Align"),
           anchor2 === "middle" ? "on" : ""
         ),
-        button(
+        button2(
           "\u27F9",
           "Align end",
           () => setAll({ "text-anchor": "end" }, "Align"),
           anchor2 === "end" ? "on" : ""
         ),
-        button("Edit", "Edit text (double-click)", () => emit("edit-text"))
+        button2("Edit", "Edit text (double-click)", () => emit("edit-text"))
       )
     );
   }
@@ -11163,15 +12163,15 @@ Undo brings them back.`
       h(
         "div",
         { class: "grid2" },
-        row2(
+        row3(
           "X",
           numberInput(box.x, (v2) => resizeTo({ ...box, x: v2 }))
         ),
-        row2(
+        row3(
           "Y",
           numberInput(box.y, (v2) => resizeTo({ ...box, y: v2 }))
         ),
-        row2(
+        row3(
           "W",
           numberInput(
             box.width,
@@ -11179,7 +12179,7 @@ Undo brings them back.`
             { min: 1 }
           )
         ),
-        row2(
+        row3(
           "H",
           numberInput(
             box.height,
@@ -11188,7 +12188,7 @@ Undo brings them back.`
           )
         )
       ),
-      sels.length === 1 && row2(
+      sels.length === 1 && row3(
         "Rotation",
         numberInput(
           rot,
@@ -11238,26 +12238,26 @@ Undo brings them back.`
       h(
         "div",
         { class: "btn-row" },
-        button("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
-        button("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
-        button("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
-        button("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
-        button(
+        button2("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
+        button2("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
+        button2("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
+        button2("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
+        button2(
           icon("copy", 14),
           "Duplicate (Ctrl+D)",
           () => emit("duplicate")
         ),
-        sels.length > 1 && button(
+        sels.length > 1 && button2(
           icon("group", 14),
           "Group (Ctrl+G)",
           () => emit("group")
         ),
-        isGroup && button(
+        isGroup && button2(
           "Ungroup",
           "Ungroup (Ctrl+Shift+G)",
           () => emit("ungroup")
         ),
-        button(
+        button2(
           icon("trash", 14),
           "Delete (Del)",
           () => emit("delete"),
@@ -11310,7 +12310,7 @@ Undo brings them back.`
     const movable = sels.every((s2) => canTransform(s2.el));
     panel.append(section(`${sels.length} objects`));
     if (movable) {
-      const a2 = (label4, title2, how) => button(label4, title2, () => alignSelection(how));
+      const a2 = (label4, title3, how) => button2(label4, title3, () => alignSelection(how));
       panel.append(
         section(
           "Align",
@@ -11356,7 +12356,10 @@ Undo brings them back.`
     }
     clear(panel);
     if (!ed.model) return;
-    if (ed.selection.length === 0) renderSlidePanel();
+    if (ed.selection.length === 0 && ed.master) {
+      const master = masterPanel();
+      if (master) panel.append(master);
+    } else if (ed.selection.length === 0) renderSlidePanel();
     else if (ed.selection.length === 1) renderObjectPanel(ed.selection[0]);
     else renderMultiPanel();
   }
@@ -11415,7 +12418,7 @@ Undo brings them back.`
   var SHAPES = "rect, ellipse, circle, path, line, polyline, polygon, text";
   var LINES = /* @__PURE__ */ new Set(["path", "line", "polyline"]);
   var SHOW_SHAPE = "inkflow:show-shape";
-  var copied = null;
+  var copied2 = null;
   function kindOf(el2) {
     if (el2.localName === "text") return "text";
     if (isZone(el2)) return "box";
@@ -11436,7 +12439,7 @@ Undo brings them back.`
     return [...sel.el.querySelectorAll(SHAPES)].filter((el2) => el2.hasAttribute("data-ink")).map((el2) => ({ ...sel, el: el2, loc: el2.getAttribute("data-ink") ?? "" }));
   }
   function hasCopiedStyle() {
-    return copied !== null;
+    return copied2 !== null;
   }
   function copyStyle() {
     const sel = ed.selection[0];
@@ -11447,7 +12450,7 @@ Undo brings them back.`
     }
     const kind = kindOf(el2);
     const names = [...COMMON, ...PAINT, ...MARKERS, ...FONT, ...BOX_VARS];
-    copied = {
+    copied2 = {
       kind,
       tag: el2.localName,
       classes: [...el2.classList].filter((c2) => PAINT_CLASS.test(c2)),
@@ -11494,7 +12497,7 @@ Undo brings them back.`
     return ops;
   }
   async function pasteStyle() {
-    const style = copied;
+    const style = copied2;
     if (!style) {
       toast("Copy a style first: select an object and press Ctrl+Alt+C");
       return;
@@ -11593,7 +12596,7 @@ Undo brings them back.`
         lastGroup = group2;
       }
       const where = hit.kind === "deck" ? "deck.py" : `${fileLabel(hit.file)}${on2.length > 1 ? ` \xB7 ${on2.length} slides` : ""}`;
-      const row4 = h(
+      const row5 = h(
         "button",
         {
           type: "button",
@@ -11610,7 +12613,7 @@ Undo brings them back.`
         ),
         h("span", { class: "find-where" }, where)
       );
-      list4.append(row4);
+      list4.append(row5);
     });
   }
   function goTo(i2) {
@@ -11658,22 +12661,22 @@ Undo brings them back.`
       toast(`Replaced ${n3} match${n3 === 1 ? "" : "es"}`);
     }
   }
-  function toggle(name2, btn) {
+  function toggle2(name2, btn) {
     opts[name2] = !opts[name2];
     btn.classList.toggle("on", opts[name2]);
     schedule();
   }
   function build() {
-    const flag = (label4, title2, name2) => {
+    const flag = (label4, title3, name2) => {
       const b2 = h(
         "button",
-        { type: "button", class: "find-flag", title: title2 },
+        { type: "button", class: "find-flag", title: title3 },
         label4
       );
-      b2.addEventListener("click", () => toggle(name2, b2));
+      b2.addEventListener("click", () => toggle2(name2, b2));
       return b2;
     };
-    const find = h("input", {
+    const find2 = h("input", {
       type: "text",
       class: "find-input",
       placeholder: "Find in slides, notes and deck.py",
@@ -11694,11 +12697,11 @@ Undo brings them back.`
       scope = where.value === "slide" ? "slide" : "deck";
       schedule();
     });
-    find.addEventListener("input", () => {
+    find2.addEventListener("input", () => {
       active = -1;
       schedule();
     });
-    find.addEventListener("keydown", (e2) => {
+    find2.addEventListener("keydown", (e2) => {
       if (e2.key === "Enter") {
         e2.preventDefault();
         if (hits.length)
@@ -11721,7 +12724,7 @@ Undo brings them back.`
       h(
         "div",
         { class: "find-row" },
-        find,
+        find2,
         flag("Aa", "Match case", "matchCase"),
         flag("ab", "Whole words", "wholeWord"),
         flag(".*", "Regular expression", "regex"),
@@ -11799,13 +12802,13 @@ Undo brings them back.`
     const me = boxes[i2];
     if (!me) return i2;
     const tops = [...new Set(boxes.map((b2) => b2.top))].sort((a2, b2) => a2 - b2);
-    const row4 = tops.indexOf(me.top) + dir;
-    if (row4 < 0 || row4 >= tops.length) return i2;
+    const row5 = tops.indexOf(me.top) + dir;
+    if (row5 < 0 || row5 >= tops.length) return i2;
     const center = me.left + me.width / 2;
     let best2 = i2;
     let bestD = Number.POSITIVE_INFINITY;
     boxes.forEach((b2, j2) => {
-      if (b2.top !== tops[row4]) return;
+      if (b2.top !== tops[row5]) return;
       const d2 = Math.abs(b2.left + b2.width / 2 - center);
       if (d2 < bestD) {
         best2 = j2;
@@ -11819,7 +12822,7 @@ Undo brings them back.`
   var view = document.getElementById("grid-view");
   var list2 = document.getElementById("grid-list");
   var sizeInput = document.getElementById("grid-size");
-  var thumbs2 = new Thumbs();
+  var thumbs3 = new Thumbs();
   function toggleGrid(on2 = view.hidden === true) {
     view.hidden = !on2;
     document.body.classList.toggle("grid-mode", on2);
@@ -11842,14 +12845,14 @@ Undo brings them back.`
     return list2.lastElementChild;
   }
   function gridItem(slide, i2) {
-    const item = h(
+    const item2 = h(
       "div",
       {
         class: `grid-item${i2 === ed.current ? " active" : ""}${ed.slideSelection.has(i2) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
         draggable: ed.model?.deckEditable ? "true" : null,
         "data-index": i2
       },
-      thumbs2.thumb(slide),
+      thumbs3.thumb(slide),
       h(
         "div",
         { class: "grid-caption" },
@@ -11869,12 +12872,12 @@ Undo brings them back.`
         ) : null
       )
     );
-    item.addEventListener("click", (e2) => {
+    item2.addEventListener("click", (e2) => {
       pickSlide(i2, e2);
       ed.focus = "sorter";
     });
-    item.addEventListener("dblclick", () => open3(i2));
-    item.addEventListener("contextmenu", (e2) => {
+    item2.addEventListener("dblclick", () => open3(i2));
+    item2.addEventListener("contextmenu", (e2) => {
       e2.preventDefault();
       if (!ed.slideSelection.has(i2)) {
         ed.slideSelection.clear();
@@ -11883,17 +12886,17 @@ Undo brings them back.`
       ed.focus = "sorter";
       openSlideMenu(e2.clientX, e2.clientY, i2);
     });
-    item.addEventListener("dragstart", (e2) => {
+    item2.addEventListener("dragstart", (e2) => {
       dragging.now = { kind: "slides", slides: dragSlides(i2) };
       e2.dataTransfer?.setData("text/plain", String(i2));
-      item.classList.add("dragging");
+      item2.classList.add("dragging");
     });
-    item.addEventListener("dragend", () => {
+    item2.addEventListener("dragend", () => {
       dragging.now = null;
       clearDropMarks(list2);
-      item.classList.remove("dragging");
+      item2.classList.remove("dragging");
     });
-    item.addEventListener("dragover", (e2) => {
+    item2.addEventListener("dragover", (e2) => {
       const drag = dragging.now;
       if (!drag) return;
       e2.preventDefault();
@@ -11902,13 +12905,13 @@ Undo brings them back.`
         markGap(list2, sectionGapAtSlide(sections(), i2), lastMark());
         return;
       }
-      const r2 = item.getBoundingClientRect();
+      const r2 = item2.getBoundingClientRect();
       clearDropMarks(list2);
-      item.classList.add(
+      item2.classList.add(
         e2.clientX > r2.left + r2.width / 2 ? "drop-after" : "drop-before"
       );
     });
-    item.addEventListener("drop", (e2) => {
+    item2.addEventListener("drop", (e2) => {
       e2.preventDefault();
       e2.stopPropagation();
       const drag = dragging.now;
@@ -11921,12 +12924,12 @@ Undo brings them back.`
         );
         return;
       }
-      const r2 = item.getBoundingClientRect();
+      const r2 = item2.getBoundingClientRect();
       const after = e2.clientX > r2.left + r2.width / 2;
       const target = dropOnSlide(sections(), i2, after);
       void moveSlidesTo(drag.slides, target.insertAt, target.section);
     });
-    return item;
+    return item2;
   }
   function gridHeader(k2) {
     const head = sectionHeader(k2, "grid", () => selectSection(k2));
@@ -11970,7 +12973,7 @@ Undo brings them back.`
   function renderGrid() {
     if (view.hidden) return;
     clear(list2);
-    thumbs2.begin();
+    thumbs3.begin();
     const slides = ed.model?.slides ?? [];
     const all = sections();
     for (const block of sectionBlocks(slides.length, all)) {
@@ -11995,7 +12998,7 @@ Undo brings them back.`
       }
       list2.append(wrap2);
     }
-    thumbs2.end();
+    thumbs3.end();
     list2.querySelector(".grid-item.active")?.scrollIntoView({
       block: "nearest"
     });
@@ -12230,8 +13233,8 @@ Undo brings them back.`
         }
         if (!plain(el2, ["href", "title"])) throw new Unsupported(tag);
         const href = el2.getAttribute("href") ?? "";
-        const title2 = el2.getAttribute("title");
-        const t2 = title2 ? ` "${title2.replace(/"/g, '\\"')}"` : "";
+        const title3 = el2.getAttribute("title");
+        const t2 = title3 ? ` "${title3.replace(/"/g, '\\"')}"` : "";
         return `[${inline(el2)}](${href.replace(/[()\s]/g, encodeURIComponent)}${t2})`;
       }
       case "span": {
@@ -12569,13 +13572,13 @@ $$`;
     area2.dispatchEvent(new Event("input"));
     area2.focus();
   }
-  async function putBack(deckIndex, zone, text, origin) {
+  async function putBack(deckIndex, zone, text, origin2) {
     const result = await edit({
       action: "zone-text",
       slide: deckIndex,
       zone,
       text,
-      origin
+      origin: origin2
     });
     return result.ok;
   }
@@ -12583,10 +13586,10 @@ $$`;
     void finishTextEdit();
     const slide = currentSlide();
     if (!slide) return;
-    const origin = slide.zoneOrigins?.[zone];
+    const origin2 = slide.zoneOrigins?.[zone];
     const original = slide.zoneText?.[zone] ?? "";
     const deckIndex = slide.deckIndex;
-    if (!ed.model?.deckEditable && (origin === "deck" || !slide.md)) {
+    if (!ed.model?.deckEditable && (origin2 === "deck" || !slide.md)) {
       toast(
         "deck.py builds its slides in code; edit this zone there",
         "error"
@@ -12618,7 +13621,7 @@ $$`;
           slide: deckIndex,
           zone,
           text: area2.value,
-          origin,
+          origin: origin2,
           coalesce,
           ...base2 != null ? { baseBuild: base2 } : {}
         },
@@ -12637,7 +13640,7 @@ $$`;
         showConflict(
           result.error ?? "",
           mine,
-          () => putBack(deckIndex, zone, mine, origin)
+          () => putBack(deckIndex, zone, mine, origin2)
         );
         return;
       }
@@ -12653,12 +13656,12 @@ $$`;
       window.clearTimeout(timer6);
       timer6 = window.setTimeout(() => void send(), 450);
     });
-    const button6 = (name2, title2, fn) => h(
+    const button7 = (name2, title3, fn) => h(
       "button",
       {
         type: "button",
         class: "fmt-btn",
-        title: title2,
+        title: title3,
         onmousedown: (e2) => {
           e2.preventDefault();
           fn();
@@ -12670,14 +13673,14 @@ $$`;
       "div",
       { class: "zone-toolbar" },
       h("span", { class: "zone-label" }, `${zone} \xB7 Markdown`),
-      button6("B", "Bold (Ctrl+B)", () => wrapSelection(area2, "**")),
-      button6("I", "Italic (Ctrl+I)", () => wrapSelection(area2, "*")),
-      button6("H", "Heading", () => prefixLines(area2, "## ")),
-      button6("\u2022", "Bullet list", () => prefixLines(area2, "- ")),
-      button6("1.", "Numbered list", () => prefixLines(area2, "1. ")),
-      button6("`", "Code", () => wrapSelection(area2, "`")),
-      button6("\u2211", "Math", () => wrapSelection(area2, "$")),
-      button6("\u23F5", "Reveal on click: insert a ::step:: marker", () => {
+      button7("B", "Bold (Ctrl+B)", () => wrapSelection(area2, "**")),
+      button7("I", "Italic (Ctrl+I)", () => wrapSelection(area2, "*")),
+      button7("H", "Heading", () => prefixLines(area2, "## ")),
+      button7("\u2022", "Bullet list", () => prefixLines(area2, "- ")),
+      button7("1.", "Numbered list", () => prefixLines(area2, "1. ")),
+      button7("`", "Code", () => wrapSelection(area2, "`")),
+      button7("\u2211", "Math", () => wrapSelection(area2, "$")),
+      button7("\u23F5", "Reveal on click: insert a ::step:: marker", () => {
         const pos = area2.selectionStart;
         area2.value = `${area2.value.slice(0, pos)}
 ::step::
@@ -12766,8 +13769,8 @@ ${area2.value.slice(pos)}`;
     const slide = currentSlide();
     const content2 = el2.querySelector(".inkflow-content");
     if (!slide || !content2 || ed.step != null) return false;
-    const origin = slide.zoneOrigins?.[zone];
-    if (!ed.model?.deckEditable && (origin === "deck" || !slide.md)) {
+    const origin2 = slide.zoneOrigins?.[zone];
+    if (!ed.model?.deckEditable && (origin2 === "deck" || !slide.md)) {
       return false;
     }
     let start;
@@ -12845,7 +13848,7 @@ ${area2.value.slice(pos)}`;
             slide: deckIndex,
             zone,
             text: md,
-            origin,
+            origin: origin2,
             svg: grow,
             ...base2 != null ? { baseBuild: base2 } : {}
           },
@@ -12860,7 +13863,7 @@ ${area2.value.slice(pos)}`;
           showConflict(
             result.error ?? "",
             md,
-            () => putBack(deckIndex, zone, md, origin)
+            () => putBack(deckIndex, zone, md, origin2)
           );
         }
       },
@@ -13040,10 +14043,10 @@ ${area2.value.slice(pos)}`;
   function editLink(content2) {
     const a2 = caretElement(content2)?.closest("a");
     const range = selectionRange(content2);
-    const current2 = a2?.getAttribute("href") ?? "";
+    const current3 = a2?.getAttribute("href") ?? "";
     const url = window.prompt(
       a2 ? "Link address: https://\u2026 or slide:<id> (empty removes the link)" : "Link address: https://\u2026 or slide:<id>",
-      current2 || "https://"
+      current3 || "https://"
     );
     if (url == null) return;
     const sel = window.getSelection();
@@ -13097,37 +14100,37 @@ ${area2.value.slice(pos)}`;
     return cell;
   }
   function addRow2(cell) {
-    const row4 = cell.parentElement;
-    const table = row4.closest("table");
+    const row5 = cell.parentElement;
+    const table = row5.closest("table");
     let body3 = table.tBodies[0];
     if (!body3) {
       body3 = document.createElement("tbody");
       table.append(body3);
     }
     const tr = document.createElement("tr");
-    for (const c2 of row4.children) tr.append(newCell("td", c2));
-    if (row4.parentElement?.localName === "thead") body3.prepend(tr);
-    else row4.after(tr);
+    for (const c2 of row5.children) tr.append(newCell("td", c2));
+    if (row5.parentElement?.localName === "thead") body3.prepend(tr);
+    else row5.after(tr);
   }
   function addColumn2(cell) {
     const table = cell.closest("table");
     const index = cell.cellIndex;
-    for (const row4 of table.rows) {
-      const ref = row4.cells[index];
-      const tag = row4.parentElement?.localName === "thead" ? "th" : "td";
+    for (const row5 of table.rows) {
+      const ref = row5.cells[index];
+      const tag = row5.parentElement?.localName === "thead" ? "th" : "td";
       const c2 = newCell(tag, ref);
       if (ref) ref.after(c2);
-      else row4.append(c2);
+      else row5.append(c2);
     }
   }
   function deleteRow(cell) {
-    const row4 = cell.parentElement;
-    const table = row4.closest("table");
+    const row5 = cell.parentElement;
+    const table = row5.closest("table");
     if (table.rows.length <= 1) {
       table.remove();
       return;
     }
-    if (row4.parentElement?.localName === "thead") {
+    if (row5.parentElement?.localName === "thead") {
       const next = table.tBodies[0]?.rows[0];
       if (!next) return;
       const head = document.createElement("tr");
@@ -13136,11 +14139,11 @@ ${area2.value.slice(pos)}`;
         th.replaceChildren(...c2.childNodes);
         head.append(th);
       }
-      row4.replaceWith(head);
+      row5.replaceWith(head);
       next.remove();
       return;
     }
-    row4.remove();
+    row5.remove();
   }
   function deleteColumn(cell) {
     const table = cell.closest("table");
@@ -13149,12 +14152,12 @@ ${area2.value.slice(pos)}`;
       table.remove();
       return;
     }
-    for (const row4 of [...table.rows]) row4.cells[index]?.remove();
+    for (const row5 of [...table.rows]) row5.cells[index]?.remove();
   }
   function alignColumn(cell, align2) {
     const table = cell.closest("table");
-    for (const row4 of table.rows) {
-      const c2 = row4.cells[cell.cellIndex];
+    for (const row5 of table.rows) {
+      const c2 = row5.cells[cell.cellIndex];
       if (c2) c2.style.textAlign = align2;
     }
   }
@@ -13163,13 +14166,13 @@ ${area2.value.slice(pos)}`;
     el2.classList.add("math-chip");
   }
   var formula2 = null;
-  function closeFormula(revert, refocus = true) {
+  function closeFormula(revert2, refocus = true) {
     if (!formula2) return;
     const f2 = formula2;
     formula2 = null;
     f2.pop.remove();
     f2.chip.classList.remove("editing");
-    if (revert) f2.revert();
+    if (revert2) f2.revert();
     if (refocus && f2.chip.isConnected) f2.done();
   }
   function insertFormula(content2) {
@@ -13343,10 +14346,10 @@ ${area2.value.slice(pos)}`;
     if (list4.classList.contains("contains-task-list")) {
       list4.classList.remove("contains-task-list");
       if (!list4.classList.length) list4.removeAttribute("class");
-      for (const item of list4.children) {
-        item.classList.remove("task-list-item");
-        if (!item.classList.length) item.removeAttribute("class");
-        item.querySelector(":scope > input[type=checkbox]")?.remove();
+      for (const item2 of list4.children) {
+        item2.classList.remove("task-list-item");
+        if (!item2.classList.length) item2.removeAttribute("class");
+        item2.querySelector(":scope > input[type=checkbox]")?.remove();
       }
     } else {
       list4.classList.add("contains-task-list");
@@ -13369,11 +14372,11 @@ ${area2.value.slice(pos)}`;
   }
   function insertTable(content2) {
     const head = "<th>Header</th><th>Header</th><th>Header</th>";
-    const row4 = "<td><br></td><td><br></td><td><br></td>";
+    const row5 = "<td><br></td><td><br></td><td><br></td>";
     document.execCommand(
       "insertHTML",
       false,
-      `<table><thead><tr>${head}</tr></thead><tbody><tr>${row4}</tr><tr>${row4}</tr></tbody></table><p><br></p>`
+      `<table><thead><tr>${head}</tr></thead><tbody><tr>${row5}</tr><tr>${row5}</tr></tbody></table><p><br></p>`
     );
     const after = caretElement(content2)?.closest("p");
     const table = after?.previousElementSibling;
@@ -13395,12 +14398,12 @@ ${area2.value.slice(pos)}`;
     syncToolbar(document.querySelector(".rich-bar"), content2);
   }
   function richToolbar(content2, toSource) {
-    const btn = (label4, title2, fn, cls = "") => h(
+    const btn = (label4, title3, fn, cls = "") => h(
       "button",
       {
         type: "button",
         class: `fmt-btn ${cls}`,
-        title: title2,
+        title: title3,
         onmousedown: (e2) => {
           e2.preventDefault();
           fn();
@@ -13677,16 +14680,6 @@ ${area2.value.slice(pos)}`;
     root2.dataset.theme = root2.dataset.theme === "light" ? "" : "light";
     render();
   }
-  function setLayoutMode(on2) {
-    ed.layoutMode = on2;
-    document.body.classList.toggle("layout-mode", on2);
-    $("btn-layout").classList.toggle("on", on2);
-    enterGroup(null);
-    clearSelection();
-    drawOverlay();
-    emit("layout-mode");
-    if (on2) toast("Layout mode: edits change the shared layout files");
-  }
   function renderStepSelect() {
     const sel = $("step-select");
     const svg = slideRoot();
@@ -13871,10 +14864,6 @@ ${area2.value.slice(pos)}`;
     $("zoom-in").addEventListener("click", () => setZoom(scale() * 1.25));
     $("zoom-out").addEventListener("click", () => setZoom(scale() / 1.25));
     $("zoom-fit").addEventListener("click", () => setZoom(0));
-    $("btn-layout").addEventListener(
-      "click",
-      () => setLayoutMode(!ed.layoutMode)
-    );
     $("btn-theme").addEventListener("click", toggleTheme);
     $("btn-present").addEventListener("click", present);
     $("btn-fullscreen").addEventListener("click", toggleFullscreen);
@@ -13905,12 +14894,12 @@ ${area2.value.slice(pos)}`;
   }
 
   // src/ts/editor/canvasmenu.ts
-  var menu3 = document.getElementById("context-menu");
+  var menu4 = document.getElementById("context-menu");
   var at = { x: 0, y: 0 };
   function sep() {
     return h("div", { class: "menu-sep" });
   }
-  function title(text) {
+  function title2(text) {
     return h("div", { class: "menu-title" }, text);
   }
   function objectMenu() {
@@ -14001,7 +14990,7 @@ ${area2.value.slice(pos)}`;
       items.push(
         sep(),
         menuItem("Group", () => void groupSelection()),
-        title("Align"),
+        title2("Align"),
         ...[
           ["left", "Left edges"],
           ["center", "Centres (horizontally)"],
@@ -14068,6 +15057,13 @@ ${area2.value.slice(pos)}`;
     const slide = currentSlide();
     const editable = !!ed.model?.deckEditable;
     const i2 = slide?.deckIndex ?? ed.current;
+    if (ed.master) {
+      return [
+        menuItem("Paste", () => void pasteFromClipboard()),
+        menuItem("Select all", () => selectAll()),
+        menuItem("New diagram (draw.io)\u2026", () => newDiagram())
+      ];
+    }
     return [
       menuItem("Paste", () => void pasteFromClipboard()),
       menuItem("Select all", () => selectAll()),
@@ -14075,7 +15071,7 @@ ${area2.value.slice(pos)}`;
       menuItem("New diagram (draw.io)\u2026", () => newDiagram()),
       menuItem("Insert chart\u2026", () => void insertChart(clickedAt())),
       sep(),
-      title("Slide"),
+      title2("Slide"),
       menuItem(
         "New slide after\u2026",
         () => void openGallery({ mode: "insert", after: ed.current }),
@@ -14092,6 +15088,11 @@ ${area2.value.slice(pos)}`;
       menuItem(
         "Duplicate slide",
         () => void duplicateSlide(ed.current),
+        !editable
+      ),
+      menuItem(
+        "Save slide as layout\u2026",
+        () => saveAsLayout(ed.current),
         !editable
       ),
       menuItem(
@@ -14121,8 +15122,8 @@ ${area2.value.slice(pos)}`;
     } else {
       clearSelection();
     }
-    clear(menu3);
-    menu3.append(...hit ? objectMenu() : slideMenu());
+    clear(menu4);
+    menu4.append(...hit ? objectMenu() : slideMenu());
     showMenu(e2.clientX, e2.clientY);
   }
   function initCanvasMenu() {
@@ -14150,8 +15151,8 @@ ${area2.value.slice(pos)}`;
     const i2 = pairs.findIndex(isChange);
     return i2 >= 0 ? i2 : 0;
   }
-  function followRow(before, row4, after) {
-    const old = before?.pairs[row4];
+  function followRow(before, row5, after) {
+    const old = before?.pairs[row5];
     if (!before || !old) return firstRow(after.pairs);
     const lid = old.left != null ? before.left.slides[old.left]?.id : null;
     const rid = old.right != null ? before.right.slides[old.right]?.id : null;
@@ -14159,9 +15160,9 @@ ${area2.value.slice(pos)}`;
       (p2) => lid != null && p2.left != null && after.left.slides[p2.left]?.id === lid || rid != null && p2.right != null && after.right.slides[p2.right]?.id === rid
     );
     if (same >= 0) return same;
-    return Math.min(row4, Math.max(0, after.pairs.length - 1));
+    return Math.min(row5, Math.max(0, after.pairs.length - 1));
   }
-  function badge(p2) {
+  function badge2(p2) {
     if (p2.status === "added")
       return { symbol: "+", cls: "added", title: "Only on the right" };
     if (p2.status === "removed")
@@ -14281,8 +15282,8 @@ ${area2.value.slice(pos)}`;
     while (j2 < m2) mid.push({ kind: "ins", text: ys[j2++] });
     return merge([...head, ...mid, ...tail]);
   }
-  function takeState(m2, row4) {
-    const p2 = m2.pairs[row4];
+  function takeState(m2, row5) {
+    const p2 = m2.pairs[row5];
     const liveLeft = m2.left.live && !m2.right.live;
     const liveRight = m2.right.live && !m2.left.live;
     if (!p2 || !(liveLeft || liveRight)) {
@@ -14377,7 +15378,7 @@ ${area2.value.slice(pos)}`;
   var model = null;
   var viewId = 0;
   var open4 = null;
-  var row3 = 0;
+  var row4 = 0;
   var onlyChanges = readPref("inkflow-compare-only", "0") === "1";
   var mode = readPref("inkflow-compare-mode", "side") || "side";
   var outlines = readPref("inkflow-compare-outlines", "1") === "1";
@@ -14525,27 +15526,27 @@ ${rules}`;
     root2.append(wrap2);
     return host5;
   }
-  var thumbs3 = /* @__PURE__ */ new Map();
-  function thumb(side, index) {
+  var thumbs4 = /* @__PURE__ */ new Map();
+  function thumb2(side, index) {
     const slide = index != null ? side.slides[index] ?? null : null;
     if (!slide) return h("div", { class: "cmp-thumb none" });
     const key = `${side.token}\0${slide.svg ?? `hidden:${slide.id}`}`;
-    const cached = thumbs3.get(key);
+    const cached = thumbs4.get(key);
     if (cached && !cached.isConnected) return cached;
     const el2 = slideView(side, slide, "cmp-thumb");
-    thumbs3.set(key, el2);
+    thumbs4.set(key, el2);
     return el2;
   }
   function onModel(msg) {
     if (msg.view !== viewId || view2.hidden) return;
     const next = msg;
     const before = model;
-    row3 = before ? followRow(before, row3, next) : firstRow(next.pairs);
+    row4 = before ? followRow(before, row4, next) : firstRow(next.pairs);
     model = next;
     view2.classList.remove("busy");
     const tokens2 = /* @__PURE__ */ new Set([next.left.token, next.right.token]);
-    for (const key of [...thumbs3.keys()]) {
-      if (!tokens2.has(key.split("\0")[0])) thumbs3.delete(key);
+    for (const key of [...thumbs4.keys()]) {
+      if (!tokens2.has(key.split("\0")[0])) thumbs4.delete(key);
     }
     addFonts(next.left);
     addFonts(next.right);
@@ -14575,7 +15576,7 @@ ${rules}`;
     only.addEventListener("change", () => {
       onlyChanges = only.checked;
       writePref("inkflow-compare-only", onlyChanges ? "1" : "0");
-      renderList();
+      renderList2();
     });
     const head = h(
       "div",
@@ -14642,7 +15643,7 @@ ${rules}`;
     listEl = h("div", { class: "cmp-list", role: "listbox" });
     mainEl = h("div", { class: "cmp-main" });
     view2.append(head, h("div", { class: "cmp-body" }, listEl, mainEl));
-    renderList();
+    renderList2();
     renderMain();
   }
   function sideChip(side, which) {
@@ -14669,7 +15670,7 @@ ${rules}`;
       notes.length ? h("span", { class: "cmp-warn" }, " \u26A0") : null
     );
   }
-  function renderList() {
+  function renderList2() {
     if (!model || !listEl) return;
     const m2 = model;
     clear(listEl);
@@ -14689,13 +15690,13 @@ ${rules}`;
     }
     for (const i2 of rows) {
       const p2 = m2.pairs[i2];
-      const b2 = badge(p2);
+      const b2 = badge2(p2);
       const slide = rowSlide(m2, p2);
       listEl.append(
         h(
           "div",
           {
-            class: `cmp-row s-${b2.cls.replace(/ /g, " s-")}${i2 === row3 ? " active" : ""}`,
+            class: `cmp-row s-${b2.cls.replace(/ /g, " s-")}${i2 === row4 ? " active" : ""}`,
             role: "option",
             "data-row": i2,
             title: `${b2.title}${p2.status === "changed" ? `: ${whatChanged(p2).join(", ")}` : ""}`,
@@ -14711,8 +15712,8 @@ ${rules}`;
           h(
             "div",
             { class: "cmp-row-thumbs" },
-            thumb(m2.left, p2.left),
-            thumb(m2.right, p2.right)
+            thumb2(m2.left, p2.left),
+            thumb2(m2.right, p2.right)
           )
         )
       );
@@ -14730,7 +15731,7 @@ ${rules}`;
   }
   function selectRow(i2) {
     if (!model || i2 < 0 || i2 >= model.pairs.length) return;
-    row3 = i2;
+    row4 = i2;
     listEl?.querySelectorAll(".cmp-row").forEach((el2) => {
       el2.classList.toggle(
         "active",
@@ -14742,7 +15743,7 @@ ${rules}`;
   }
   function jump(dir) {
     if (!model) return;
-    const next = nextChange(model.pairs, row3, dir);
+    const next = nextChange(model.pairs, row4, dir);
     if (next == null) {
       toast(dir > 0 ? "No more changes below" : "No more changes above");
       return;
@@ -14752,7 +15753,7 @@ ${rules}`;
   function step(dir) {
     if (!model) return;
     const rows = visibleRows(model.pairs, onlyChanges);
-    const at3 = rows.indexOf(row3);
+    const at3 = rows.indexOf(row4);
     const next = rows[at3 < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, at3 + dir))];
     if (next != null) selectRow(next);
   }
@@ -14760,7 +15761,7 @@ ${rules}`;
     if (!model || !mainEl) return;
     const m2 = model;
     clear(mainEl);
-    const p2 = m2.pairs[row3];
+    const p2 = m2.pairs[row4];
     if (!p2) {
       mainEl.append(h("div", { class: "cmp-empty" }, "Nothing to compare"));
       return;
@@ -14950,9 +15951,9 @@ ${rules}`;
       rect.setAttribute("height", String(box[3] + 2 * pad2));
       rect.setAttribute("rx", String(pad2));
       rect.setAttribute("class", `mark ${cls}`);
-      const title2 = document.createElementNS(SVG_NS2, "title");
-      title2.textContent = label4;
-      rect.append(title2);
+      const title3 = document.createElementNS(SVG_NS2, "title");
+      title3.textContent = label4;
+      rect.append(title3);
       layer2.append(rect);
     };
     for (const mark of marks) {
@@ -14979,8 +15980,8 @@ ${rules}`;
     frame.append(layer2);
   }
   function info(m2, p2, left, right) {
-    const b2 = badge(p2);
-    const take = takeState(m2, row3);
+    const b2 = badge2(p2);
+    const take = takeState(m2, row4);
     const what = p2.status === "changed" ? whatChanged(p2) : [];
     const summary2 = p2.status === "added" ? `Only in ${m2.right.label}` : p2.status === "removed" ? `Only in ${m2.left.label}` : p2.status === "same" ? p2.moved ? "The same slide, moved" : "No differences" : `${p2.moved ? "Moved, and changed: " : "Changed: "}${what.join(", ")}`;
     const box = h(
@@ -15063,8 +16064,8 @@ ${rules}`;
   async function taking() {
     if (!model) return;
     const m2 = model;
-    const p2 = m2.pairs[row3];
-    const state = takeState(m2, row3);
+    const p2 = m2.pairs[row4];
+    const state = takeState(m2, row4);
     if (!p2 || !state.enabled) return;
     const other = m2.left.live ? m2.right : m2.left;
     const files2 = p2.files.map((f2) => `  ${f2.path}`).join("\n");
@@ -15077,7 +16078,7 @@ Ctrl+Z takes it back.` : `Insert ${other.label}'s slide into the working copy?`;
     if (!confirm(question)) return;
     const res = await edit({
       action: "compare-take",
-      pair: row3,
+      pair: row4,
       left: p2.left,
       right: p2.right
     });
@@ -15126,11 +16127,11 @@ ${UNDO_NOTICE}` : question)) {
   async function openComparePicker(side = null) {
     await whenConnected();
     const data = await fetchSources();
-    const current2 = model;
+    const current3 = model;
     const pick2 = (chosen) => {
       closeDialog();
-      if (side && current2) {
-        const [l2, r2] = [current2.left.source, current2.right.source];
+      if (side && current3) {
+        const [l2, r2] = [current3.left.source, current3.right.source];
         openCompare(
           side === "left" ? chosen : l2,
           side === "right" ? chosen : r2
@@ -15397,7 +16398,7 @@ ${UNDO_NOTICE}` : question)) {
     document.addEventListener("keydown", onKey3, true);
     new MutationObserver(() => {
       if (!model || view2.hidden) return;
-      thumbs3.clear();
+      thumbs4.clear();
       render2();
     }).observe(document.documentElement, {
       attributes: true,
@@ -15501,8 +16502,8 @@ ${UNDO_NOTICE}` : question)) {
   }
 
   // src/ts/editor/decks.ts
-  var menu4 = document.getElementById("context-menu");
-  var button2 = document.getElementById("btn-deck");
+  var menu5 = document.getElementById("context-menu");
+  var button3 = document.getElementById("btn-deck");
   function lookThumb(look) {
     const c2 = look.preview;
     if (!c2) return null;
@@ -15511,7 +16512,7 @@ ${UNDO_NOTICE}` : question)) {
       el2.style.background = colour;
       return el2;
     };
-    const thumb2 = h(
+    const thumb3 = h(
       "span",
       { class: `look-thumb${look.id === "poster" ? " portrait" : ""}` },
       bar("look-thumb-title", c2.heading),
@@ -15520,9 +16521,9 @@ ${UNDO_NOTICE}` : question)) {
       bar("look-thumb-card", c2.surface),
       bar("look-thumb-accent", c2.accent)
     );
-    thumb2.style.background = c2.bg;
-    thumb2.style.borderColor = c2.surface;
-    return thumb2;
+    thumb3.style.background = c2.bg;
+    thumb3.style.borderColor = c2.surface;
+    return thumb3;
   }
   function baseName2(path) {
     return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
@@ -15535,8 +16536,8 @@ ${UNDO_NOTICE}` : question)) {
   }
   function renderButton() {
     const dir = ed.model?.projectDir;
-    button2.textContent = `${dir ? baseName2(dir) : "deck"} \u25BE`;
-    button2.title = dir ? `${dir}
+    button3.textContent = `${dir ? baseName2(dir) : "deck"} \u25BE`;
+    button3.title = dir ? `${dir}
 Decks: new, open, recent` : "Decks";
   }
   async function info2() {
@@ -15550,31 +16551,31 @@ Decks: new, open, recent` : "Decks";
   async function openMenu2() {
     const data = await info2();
     if (!data) return;
-    clear(menu4);
-    menu4.append(
+    clear(menu5);
+    menu5.append(
       menuItem("New deck\u2026", () => newDeckDialog(data)),
       menuItem("Open deck\u2026", () => openDeckDialog(data))
     );
     if (data.recent.length) {
-      menu4.append(h("div", { class: "menu-title" }, "Recent decks"));
+      menu5.append(h("div", { class: "menu-title" }, "Recent decks"));
       for (const path of data.recent) {
         const dir = path.replace(/[\\/]deck\.py$/, "");
-        const item = menuItem(baseName2(dir), () => void openDeck(path));
-        item.title = dir;
-        menu4.append(item);
+        const item2 = menuItem(baseName2(dir), () => void openDeck(path));
+        item2.title = dir;
+        menu5.append(item2);
       }
     }
     if (ed.model) {
-      menu4.append(
+      menu5.append(
         h("div", { class: "menu-sep" }),
         menuItem("Files\u2026", () => void openFiles())
       );
     }
-    menu4.append(
+    menu5.append(
       h("div", { class: "menu-sep" }),
       menuItem("Quit Inkflow", () => void quit())
     );
-    const r2 = button2.getBoundingClientRect();
+    const r2 = button3.getBoundingClientRect();
     showMenu(r2.left, r2.bottom + 4);
   }
   async function openDeck(path) {
@@ -15599,7 +16600,7 @@ Decks: new, open, recent` : "Decks";
     return true;
   }
   function newDeckDialog(data) {
-    const title2 = h("input", {
+    const title3 = h("input", {
       type: "text",
       value: "My presentation"
     });
@@ -15613,9 +16614,9 @@ Decks: new, open, recent` : "Decks";
       update();
     });
     let titleEdited = false;
-    title2.addEventListener("input", () => {
+    title3.addEventListener("input", () => {
       titleEdited = true;
-      if (!nameEdited) name2.value = slug(title2.value);
+      if (!nameEdited) name2.value = slug(title3.value);
       update();
     });
     let look = data.themes.some((t2) => t2.id === "current") ? "current" : "starter";
@@ -15647,8 +16648,8 @@ Decks: new, open, recent` : "Decks";
           look = t2.id;
           sizeRow.hidden = look !== "poster";
           if (look === "poster" && !titleEdited) {
-            title2.value = "My poster";
-            if (!nameEdited) name2.value = slug(title2.value);
+            title3.value = "My poster";
+            if (!nameEdited) name2.value = slug(title3.value);
             update();
           }
         });
@@ -15717,7 +16718,7 @@ Decks: new, open, recent` : "Decks";
       const res = await request({
         action: "new-deck",
         path: join(folder.path, name2.value.trim()),
-        title: title2.value,
+        title: title3.value,
         theme: look,
         size: look === "poster" ? size4.value : null,
         git: !folder.repo && git2.checked,
@@ -15741,7 +16742,7 @@ Decks: new, open, recent` : "Decks";
           "label",
           { class: "field" },
           h("span", { class: "field-label" }, "Title"),
-          title2
+          title3
         ),
         h(
           "div",
@@ -15775,7 +16776,7 @@ Decks: new, open, recent` : "Decks";
       { large: true }
     );
     update();
-    title2.select();
+    title3.select();
   }
   function openDeckDialog(data) {
     const open5 = h(
@@ -15908,7 +16909,7 @@ Decks: new, open, recent` : "Decks";
     document.body.append(page);
   }
   function initDecks() {
-    button2.addEventListener("click", () => void openMenu2());
+    button3.addEventListener("click", () => void openMenu2());
     on("model", renderButton);
     renderButton();
   }
@@ -16031,8 +17032,8 @@ Decks: new, open, recent` : "Decks";
   function consequences(summary2) {
     const seen = /* @__PURE__ */ new Set();
     const out = [];
-    for (const item of summary2.items.filter((i2) => i2.fixable)) {
-      const line = sentence(item.consequence);
+    for (const item2 of summary2.items.filter((i2) => i2.fixable)) {
+      const line = sentence(item2.consequence);
       if (!seen.has(line)) {
         seen.add(line);
         out.push(line);
@@ -16602,30 +17603,30 @@ Decks: new, open, recent` : "Decks";
   }
 
   // src/ts/editor/git.ts
-  var menu5 = document.getElementById("context-menu");
-  var button3 = document.getElementById("btn-git");
-  var label2 = button3.querySelector(".git-label");
-  var badge2 = button3.querySelector(".git-badge");
+  var menu6 = document.getElementById("context-menu");
+  var button4 = document.getElementById("btn-git");
+  var label2 = button4.querySelector(".git-label");
+  var badge3 = button4.querySelector(".git-badge");
   var status = { repo: false, git: false };
   function render3() {
-    button3.hidden = !status.git;
+    button4.hidden = !status.git;
     if (!status.repo) {
       label2.textContent = "Git";
-      badge2.hidden = true;
-      button3.title = "Not versioned: create a git repository for this deck";
+      badge3.hidden = true;
+      button4.title = "Not versioned: create a git repository for this deck";
       return;
     }
     label2.textContent = status.branch ?? `@${status.detached ?? "?"}`;
     const n3 = status.changes?.length ?? 0;
     const lfsIssues = lfsFiles().length;
-    button3.classList.toggle("warn", lfsIssues > 0);
-    badge2.hidden = n3 === 0 && lfsIssues === 0;
-    badge2.textContent = n3 ? String(n3) : "!";
+    button4.classList.toggle("warn", lfsIssues > 0);
+    badge3.hidden = n3 === 0 && lfsIssues === 0;
+    badge3.textContent = n3 ? String(n3) : "!";
     const sync = [
       status.ahead ? `${status.ahead} to push` : "",
       status.behind ? `${status.behind} to pull` : ""
     ].filter(Boolean).join(", ");
-    button3.title = [
+    button4.title = [
       status.branch ? `Branch ${status.branch}` : `Viewing ${status.detached}`,
       n3 ? `${n3} changed file${n3 === 1 ? "" : "s"}` : "No changes",
       sync,
@@ -16657,9 +17658,9 @@ Decks: new, open, recent` : "Decks";
 Continue?`)) return null;
       if (notice) undoNoticeShown();
     }
-    button3.classList.add("busy");
+    button4.classList.add("busy");
     const res = await request({ action: "git", op, ...args });
-    button3.classList.remove("busy");
+    button4.classList.remove("busy");
     if (res.git) {
       status = res.git;
       render3();
@@ -16678,9 +17679,9 @@ Continue?`)) return null;
   }
   async function openMenu3() {
     await refreshGit();
-    clear(menu5);
+    clear(menu6);
     if (!status.repo) {
-      menu5.append(
+      menu6.append(
         h("div", { class: "menu-title" }, "Not versioned"),
         menuItem("Create a git repository", async () => {
           if (await git("init"))
@@ -16702,7 +17703,7 @@ Continue?`)) return null;
       const n3 = status.changes?.length ?? 0;
       const deckChanges = (status.changes ?? []).filter((c2) => c2.inDeck);
       const where = status.branch ? `On ${status.branch}` : `Viewing ${status.detached} (no branch)`;
-      menu5.append(
+      menu6.append(
         h(
           "div",
           { class: "menu-title" },
@@ -16710,7 +17711,7 @@ Continue?`)) return null;
         )
       );
       if (status.last) {
-        menu5.append(
+        menu6.append(
           h(
             "div",
             { class: "menu-note" },
@@ -16720,14 +17721,14 @@ Continue?`)) return null;
       }
       const lfsCount = lfsFiles().length;
       if (lfsCount) {
-        const item = menuItem(
+        const item2 = menuItem(
           `\u26A0 ${lfsCount} media file${lfsCount === 1 ? "" : "s"} not in Git LFS\u2026`,
           () => lfsDialog()
         );
-        item.classList.add("warn");
-        menu5.append(item);
+        item2.classList.add("warn");
+        menu6.append(item2);
       } else if (status.lfs?.mode === "on" && !status.lfs.installed) {
-        menu5.append(
+        menu6.append(
           h(
             "div",
             { class: "menu-note warn" },
@@ -16735,7 +17736,7 @@ Continue?`)) return null;
           )
         );
       }
-      menu5.append(
+      menu6.append(
         menuItem(
           "Commit\u2026",
           () => commitDialog(),
@@ -16788,9 +17789,9 @@ Continue?`)) return null;
         h("div", { class: "menu-sep" }),
         ...publishItems()
       );
-      if (status.hasCommits) menu5.append(...await worktreeSection());
+      if (status.hasCommits) menu6.append(...await worktreeSection());
     }
-    const r2 = button3.getBoundingClientRect();
+    const r2 = button4.getBoundingClientRect();
     showMenu(Math.max(8, r2.right - 260), r2.bottom + 4);
   }
   function publishItems() {
@@ -17330,9 +18331,9 @@ Continue?`)) return null;
       if (!confirm(text)) return null;
       if (notice) undoNoticeShown();
     }
-    button3.classList.add("busy");
+    button4.classList.add("busy");
     const res = await request({ action: "worktree", op, ...args });
-    button3.classList.remove("busy");
+    button4.classList.remove("busy");
     if (res.git) {
       status = res.git;
       render3();
@@ -17593,7 +18594,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   var timer4 = 0;
   function initGit() {
-    button3.addEventListener("click", () => void openMenu3());
+    button4.addEventListener("click", () => void openMenu3());
     on("model", () => {
       window.clearTimeout(timer4);
       timer4 = window.setTimeout(() => void refreshGit(), 600);
@@ -18342,12 +19343,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   function icon2(name2) {
     return `<svg aria-hidden="true" viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${ICONS[name2]}</svg>`;
   }
-  function button4(title2, content2, data) {
+  function button5(title3, content2, data) {
     const b2 = document.createElement("button");
     b2.type = "button";
     b2.className = "ink-btn";
-    b2.title = title2;
-    b2.setAttribute("aria-label", title2);
+    b2.title = title3;
+    b2.setAttribute("aria-label", title3);
     b2.innerHTML = content2;
     for (const [k2, v2] of Object.entries(data)) b2.dataset[k2] = v2;
     return b2;
@@ -18377,12 +19378,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       this.el = el2;
       const tools = group(
         ...["pen", "highlighter", "eraser"].map(
-          (t2) => button4(TOOL_TITLES[t2], icon2(t2), { inkTool: t2 })
+          (t2) => button5(TOOL_TITLES[t2], icon2(t2), { inkTool: t2 })
         )
       );
       const swatches = group(
         ...SWATCHES.map((s2, i2) => {
-          const b2 = button4(
+          const b2 = button5(
             s2.label,
             `<span class="ink-swatch" style="background:${s2.token ? `var(--inkflow-${s2.token}, ${s2.hex})` : s2.hex}"></span>`,
             { inkSwatch: String(i2) }
@@ -18403,11 +19404,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       this.sizes = group();
       this.sizes.classList.add("ink-sizes");
       const actions = group(
-        button4(opts2.undoTitle, icon2("undo"), { inkAction: "undo" }),
-        button4(opts2.clearTitle, icon2("clear"), { inkAction: "clear" })
+        button5(opts2.undoTitle, icon2("undo"), { inkAction: "undo" }),
+        button5(opts2.clearTitle, icon2("clear"), { inkAction: "clear" })
       );
       const toggles = group(
-        button4(
+        button5(
           "Draw with a mouse or a finger too (off: only a pen draws, so clicks and swipes still navigate)",
           icon2("fingers"),
           { inkToggle: "fingers" }
@@ -18415,7 +19416,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       );
       if (opts2.keep) {
         toggles.append(
-          button4(
+          button5(
             "Keep: save new strokes with the slide (off: they last for this talk only)",
             icon2("keep"),
             { inkToggle: "keep" }
@@ -18424,7 +19425,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       }
       if (opts2.close) {
         toggles.append(
-          button4("Leave ink mode (i)", icon2("close"), {
+          button5("Leave ink mode (i)", icon2("close"), {
             inkAction: "close"
           })
         );
@@ -18522,7 +19523,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       this.sizes.replaceChildren(
         ...sizes.map((size4, i2) => {
           const px = Math.max(3, Math.round(size4 / largest * 16));
-          const b2 = button4(
+          const b2 = button5(
             ["Thin", "Medium", "Thick"][i2] ?? `Size ${i2 + 1}`,
             `<span class="ink-dot ${tool}" style="width:${px}px;height:${tool === "highlighter" ? Math.max(3, Math.round(px / 2.5)) : px}px"></span>`,
             { inkSize: String(i2) }
@@ -18568,7 +19569,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     pad?.cancel();
   }
   function penActive() {
-    return ed.tool === "pen" && ed.step == null && !ed.richEditing;
+    return ed.tool === "pen" && ed.step == null && !ed.richEditing && !ed.master;
   }
   var pending2 = /* @__PURE__ */ new Map();
   function liveLayer(svg) {
@@ -18674,6 +19675,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       onErase: (ids, hidden) => void erase(ids, hidden)
     });
     on("tool", () => {
+      if (ed.tool === "pen" && ed.master) {
+        toast(
+          "The pen draws on a slide: close the slide master to draw ink, or use the shapes here"
+        );
+      }
       palette.el.hidden = ed.tool !== "pen";
     });
     on("render", showPending);
@@ -18748,10 +19754,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       _moduleCount = _typeNumber * 4 + 17;
       _modules = (function(moduleCount) {
         const modules = new Array(moduleCount);
-        for (let row4 = 0; row4 < moduleCount; row4 += 1) {
-          modules[row4] = new Array(moduleCount);
+        for (let row5 = 0; row5 < moduleCount; row5 += 1) {
+          modules[row5] = new Array(moduleCount);
           for (let col = 0; col < moduleCount; col += 1) {
-            modules[row4][col] = null;
+            modules[row5][col] = null;
           }
         }
         return modules;
@@ -18770,15 +19776,15 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       }
       mapData(_dataCache, maskPattern);
     };
-    const setupPositionProbePattern = function(row4, col) {
+    const setupPositionProbePattern = function(row5, col) {
       for (let r2 = -1; r2 <= 7; r2 += 1) {
-        if (row4 + r2 <= -1 || _moduleCount <= row4 + r2) continue;
+        if (row5 + r2 <= -1 || _moduleCount <= row5 + r2) continue;
         for (let c2 = -1; c2 <= 7; c2 += 1) {
           if (col + c2 <= -1 || _moduleCount <= col + c2) continue;
           if (0 <= r2 && r2 <= 6 && (c2 == 0 || c2 == 6) || 0 <= c2 && c2 <= 6 && (r2 == 0 || r2 == 6) || 2 <= r2 && r2 <= 4 && 2 <= c2 && c2 <= 4) {
-            _modules[row4 + r2][col + c2] = true;
+            _modules[row5 + r2][col + c2] = true;
           } else {
-            _modules[row4 + r2][col + c2] = false;
+            _modules[row5 + r2][col + c2] = false;
           }
         }
       }
@@ -18814,17 +19820,17 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       const pos = QRUtil.getPatternPosition(_typeNumber);
       for (let i2 = 0; i2 < pos.length; i2 += 1) {
         for (let j2 = 0; j2 < pos.length; j2 += 1) {
-          const row4 = pos[i2];
+          const row5 = pos[i2];
           const col = pos[j2];
-          if (_modules[row4][col] != null) {
+          if (_modules[row5][col] != null) {
             continue;
           }
           for (let r2 = -2; r2 <= 2; r2 += 1) {
             for (let c2 = -2; c2 <= 2; c2 += 1) {
               if (r2 == -2 || r2 == 2 || c2 == -2 || c2 == 2 || r2 == 0 && c2 == 0) {
-                _modules[row4 + r2][col + c2] = true;
+                _modules[row5 + r2][col + c2] = true;
               } else {
-                _modules[row4 + r2][col + c2] = false;
+                _modules[row5 + r2][col + c2] = false;
               }
             }
           }
@@ -18869,7 +19875,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     };
     const mapData = function(data, maskPattern) {
       let inc = -1;
-      let row4 = _moduleCount - 1;
+      let row5 = _moduleCount - 1;
       let bitIndex = 7;
       let byteIndex = 0;
       const maskFunc = QRUtil.getMaskFunction(maskPattern);
@@ -18877,16 +19883,16 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         if (col == 6) col -= 1;
         while (true) {
           for (let c2 = 0; c2 < 2; c2 += 1) {
-            if (_modules[row4][col - c2] == null) {
+            if (_modules[row5][col - c2] == null) {
               let dark = false;
               if (byteIndex < data.length) {
                 dark = (data[byteIndex] >>> bitIndex & 1) == 1;
               }
-              const mask = maskFunc(row4, col - c2);
+              const mask = maskFunc(row5, col - c2);
               if (mask) {
                 dark = !dark;
               }
-              _modules[row4][col - c2] = dark;
+              _modules[row5][col - c2] = dark;
               bitIndex -= 1;
               if (bitIndex == -1) {
                 byteIndex += 1;
@@ -18894,9 +19900,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
               }
             }
           }
-          row4 += inc;
-          if (row4 < 0 || _moduleCount <= row4) {
-            row4 -= inc;
+          row5 += inc;
+          if (row5 < 0 || _moduleCount <= row5) {
+            row5 -= inc;
             inc = -inc;
             break;
           }
@@ -19008,11 +20014,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       _dataList.push(newData);
       _dataCache = null;
     };
-    _this.isDark = function(row4, col) {
-      if (row4 < 0 || _moduleCount <= row4 || col < 0 || _moduleCount <= col) {
-        throw row4 + "," + col;
+    _this.isDark = function(row5, col) {
+      if (row5 < 0 || _moduleCount <= row5 || col < 0 || _moduleCount <= col) {
+        throw row5 + "," + col;
       }
-      return _modules[row4][col];
+      return _modules[row5][col];
     };
     _this.getModuleCount = function() {
       return _moduleCount;
@@ -19071,23 +20077,23 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       qrHtml += "</table>";
       return qrHtml;
     };
-    _this.createSvgTag = function(cellSize, margin, alt, title2) {
+    _this.createSvgTag = function(cellSize, margin, alt, title3) {
       let opts2 = {};
       if (typeof arguments[0] == "object") {
         opts2 = arguments[0];
         cellSize = opts2.cellSize;
         margin = opts2.margin;
         alt = opts2.alt;
-        title2 = opts2.title;
+        title3 = opts2.title;
       }
       cellSize = cellSize || 2;
       margin = typeof margin == "undefined" ? cellSize * 4 : margin;
       alt = typeof alt === "string" ? { text: alt } : alt || {};
       alt.text = alt.text || null;
       alt.id = alt.text ? alt.id || "qrcode-description" : null;
-      title2 = typeof title2 === "string" ? { text: title2 } : title2 || {};
-      title2.text = title2.text || null;
-      title2.id = title2.text ? title2.id || "qrcode-title" : null;
+      title3 = typeof title3 === "string" ? { text: title3 } : title3 || {};
+      title3.text = title3.text || null;
+      title3.id = title3.text ? title3.id || "qrcode-title" : null;
       const size4 = _this.getModuleCount() * cellSize + margin * 2;
       let c2, mc, r2, mr, qrSvg2 = "", rect;
       rect = "l" + cellSize + ",0 0," + cellSize + " -" + cellSize + ",0 0,-" + cellSize + "z ";
@@ -19095,9 +20101,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       qrSvg2 += !opts2.scalable ? ' width="' + size4 + 'px" height="' + size4 + 'px"' : "";
       qrSvg2 += ' viewBox="0 0 ' + size4 + " " + size4 + '" ';
       qrSvg2 += ' preserveAspectRatio="xMinYMin meet"';
-      qrSvg2 += title2.text || alt.text ? ' role="img" aria-labelledby="' + escapeXml([title2.id, alt.id].join(" ").trim()) + '"' : "";
+      qrSvg2 += title3.text || alt.text ? ' role="img" aria-labelledby="' + escapeXml([title3.id, alt.id].join(" ").trim()) + '"' : "";
       qrSvg2 += ">";
-      qrSvg2 += title2.text ? '<title id="' + escapeXml(title2.id) + '">' + escapeXml(title2.text) + "</title>" : "";
+      qrSvg2 += title3.text ? '<title id="' + escapeXml(title3.id) + '">' + escapeXml(title3.text) + "</title>" : "";
       qrSvg2 += alt.text ? '<description id="' + escapeXml(alt.id) + '">' + escapeXml(alt.text) + "</description>" : "";
       qrSvg2 += '<rect width="100%" height="100%" fill="white" cx="0" cy="0"/>';
       qrSvg2 += '<path d="';
@@ -19253,10 +20259,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     _this.renderTo2dContext = function(context, cellSize) {
       cellSize = cellSize || 2;
       const length = _this.getModuleCount();
-      for (let row4 = 0; row4 < length; row4++) {
+      for (let row5 = 0; row5 < length; row5++) {
         for (let col = 0; col < length; col++) {
-          context.fillStyle = _this.isDark(row4, col) ? "black" : "white";
-          context.fillRect(col * cellSize, row4 * cellSize, cellSize, cellSize);
+          context.fillStyle = _this.isDark(row5, col) ? "black" : "white";
+          context.fillRect(col * cellSize, row5 * cellSize, cellSize, cellSize);
         }
       }
     };
@@ -19506,12 +20512,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     _this.getLostPoint = function(qrcode2) {
       const moduleCount = qrcode2.getModuleCount();
       let lostPoint = 0;
-      for (let row4 = 0; row4 < moduleCount; row4 += 1) {
+      for (let row5 = 0; row5 < moduleCount; row5 += 1) {
         for (let col = 0; col < moduleCount; col += 1) {
           let sameCount = 0;
-          const dark = qrcode2.isDark(row4, col);
+          const dark = qrcode2.isDark(row5, col);
           for (let r2 = -1; r2 <= 1; r2 += 1) {
-            if (row4 + r2 < 0 || moduleCount <= row4 + r2) {
+            if (row5 + r2 < 0 || moduleCount <= row5 + r2) {
               continue;
             }
             for (let c2 = -1; c2 <= 1; c2 += 1) {
@@ -19521,7 +20527,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
               if (r2 == 0 && c2 == 0) {
                 continue;
               }
-              if (dark == qrcode2.isDark(row4 + r2, col + c2)) {
+              if (dark == qrcode2.isDark(row5 + r2, col + c2)) {
                 sameCount += 1;
               }
             }
@@ -19532,36 +20538,36 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         }
       }
       ;
-      for (let row4 = 0; row4 < moduleCount - 1; row4 += 1) {
+      for (let row5 = 0; row5 < moduleCount - 1; row5 += 1) {
         for (let col = 0; col < moduleCount - 1; col += 1) {
           let count = 0;
-          if (qrcode2.isDark(row4, col)) count += 1;
-          if (qrcode2.isDark(row4 + 1, col)) count += 1;
-          if (qrcode2.isDark(row4, col + 1)) count += 1;
-          if (qrcode2.isDark(row4 + 1, col + 1)) count += 1;
+          if (qrcode2.isDark(row5, col)) count += 1;
+          if (qrcode2.isDark(row5 + 1, col)) count += 1;
+          if (qrcode2.isDark(row5, col + 1)) count += 1;
+          if (qrcode2.isDark(row5 + 1, col + 1)) count += 1;
           if (count == 0 || count == 4) {
             lostPoint += 3;
           }
         }
       }
-      for (let row4 = 0; row4 < moduleCount; row4 += 1) {
+      for (let row5 = 0; row5 < moduleCount; row5 += 1) {
         for (let col = 0; col < moduleCount - 6; col += 1) {
-          if (qrcode2.isDark(row4, col) && !qrcode2.isDark(row4, col + 1) && qrcode2.isDark(row4, col + 2) && qrcode2.isDark(row4, col + 3) && qrcode2.isDark(row4, col + 4) && !qrcode2.isDark(row4, col + 5) && qrcode2.isDark(row4, col + 6)) {
+          if (qrcode2.isDark(row5, col) && !qrcode2.isDark(row5, col + 1) && qrcode2.isDark(row5, col + 2) && qrcode2.isDark(row5, col + 3) && qrcode2.isDark(row5, col + 4) && !qrcode2.isDark(row5, col + 5) && qrcode2.isDark(row5, col + 6)) {
             lostPoint += 40;
           }
         }
       }
       for (let col = 0; col < moduleCount; col += 1) {
-        for (let row4 = 0; row4 < moduleCount - 6; row4 += 1) {
-          if (qrcode2.isDark(row4, col) && !qrcode2.isDark(row4 + 1, col) && qrcode2.isDark(row4 + 2, col) && qrcode2.isDark(row4 + 3, col) && qrcode2.isDark(row4 + 4, col) && !qrcode2.isDark(row4 + 5, col) && qrcode2.isDark(row4 + 6, col)) {
+        for (let row5 = 0; row5 < moduleCount - 6; row5 += 1) {
+          if (qrcode2.isDark(row5, col) && !qrcode2.isDark(row5 + 1, col) && qrcode2.isDark(row5 + 2, col) && qrcode2.isDark(row5 + 3, col) && qrcode2.isDark(row5 + 4, col) && !qrcode2.isDark(row5 + 5, col) && qrcode2.isDark(row5 + 6, col)) {
             lostPoint += 40;
           }
         }
       }
       let darkCount = 0;
       for (let col = 0; col < moduleCount; col += 1) {
-        for (let row4 = 0; row4 < moduleCount; row4 += 1) {
-          if (qrcode2.isDark(row4, col)) {
+        for (let row5 = 0; row5 < moduleCount; row5 += 1) {
+          if (qrcode2.isDark(row5, col)) {
             darkCount += 1;
           }
         }
@@ -20617,20 +21623,20 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     }
     return list4;
   }
-  function header(title2, back) {
+  function header(title3, back) {
     return h(
       "div",
       { class: "ssh-head" },
       h("button", { type: "button", class: "pbtn", onclick: back }, "\u2190 Back"),
-      h("h3", {}, title2)
+      h("h3", {}, title3)
     );
   }
   function setupPicture(here) {
-    const box = (title2, lines, mark) => h(
+    const box = (title3, lines, mark) => h(
       "div",
       { class: `ssh-box${mark ? " here" : ""}` },
       mark ? h("span", { class: "ssh-here" }, "you are here") : null,
-      h("strong", {}, title2),
+      h("strong", {}, title3),
       ...lines.map((l2) => h("span", {}, l2))
     );
     const tunnel = (dir) => h(
@@ -20679,7 +21685,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     );
   }
   function moveView(status3, opts2) {
-    let current2 = status3;
+    let current3 = status3;
     const login2 = textInput2(
       stored(LOGIN_KEY),
       "you@server.example.com",
@@ -20689,12 +21695,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const out = h("div", { class: "ssh-out" });
     const draw = () => {
       clear(out);
-      const info4 = current2.sshInfo;
+      const info4 = current3.sshInfo;
       if (!info4) {
         out.append(h("p", { class: "hint" }, "\u2026"));
         return;
       }
-      const p2 = parsePort(port.value, current2.port);
+      const p2 = parsePort(port.value, current3.port);
       out.append(stepList(moveSteps(info4, login2.value, p2), opts2.copy));
       out.append(
         h("h3", {}, "Next time"),
@@ -20740,14 +21746,14 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return {
       element,
       update: (s2) => {
-        const had = current2.sshInfo;
-        current2 = s2;
+        const had = current3.sshInfo;
+        current3 = s2;
         if (!had && s2.sshInfo) draw();
       }
     };
   }
   function inviteView(status3, opts2) {
-    let current2 = status3;
+    let current3 = status3;
     const info4 = status3.sshInfo;
     const guess = stored(SERVER_KEY) || info4?.serverNames[0] || "";
     const server = textInput2(guess, "server.example.com", "100%");
@@ -20759,7 +21765,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const out = h("div", { class: "ssh-out" });
     let drawn = "";
     const draw = (force = false) => {
-      const s2 = current2;
+      const s2 = current3;
       const key = JSON.stringify([
         s2.sharing,
         s2.links,
@@ -20795,13 +21801,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       const link = s2.links[0];
       const local = parsePort(localPort.value, s2.port);
       const host5 = server.value.trim();
-      for (const [role, url, title2] of [
+      for (const [role, url, title3] of [
         ["editor", link.editor, "For an editor"],
         ["viewer", link.view, "For a viewer"]
       ]) {
         const message = guestMessage(role, url, host5, local, s2.port);
         out.append(
-          h("h3", {}, title2),
+          h("h3", {}, title3),
           h(
             "p",
             { class: "hint" },
@@ -20865,7 +21871,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return {
       element,
       update: (s2) => {
-        current2 = s2;
+        current3 = s2;
         const names = s2.sshInfo?.serverNames ?? [];
         if (!server.value && names.length) server.value = names[0];
         draw();
@@ -20880,7 +21886,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   var status2 = null;
   var body2 = null;
   var ssh = null;
-  var button5 = document.getElementById("btn-share");
+  var button6 = document.getElementById("btn-share");
   function qrSvg(text) {
     const qr = qrcode_default(0, "M");
     qr.addData(text);
@@ -21283,8 +22289,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function setStatus(msg) {
     status2 = msg;
-    if (button5) {
-      button5.classList.toggle(
+    if (button6) {
+      button6.classList.toggle(
         "on",
         status2.sharing || Boolean(status2.online?.sharing)
       );
@@ -21307,7 +22313,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function initShare() {
     onMessage("share-status", setStatus);
-    button5?.addEventListener("click", openShare);
+    button6?.addEventListener("click", openShare);
   }
 
   // src/ts/editor/theme.ts
@@ -21631,10 +22637,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const res = await edit({ action: "fonts", op: "bundle" });
     if (res.ok) {
       toast(`Copied ${b2.families.join(", ")} into fonts/`, "ok");
-      await refresh();
+      await refresh2();
     }
   }
-  async function refresh() {
+  async function refresh2() {
     const result = await request({ action: "theme-get" });
     if (!result.ok) return;
     info3 = result.theme;
@@ -21659,7 +22665,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         document.documentElement.removeAttribute("style");
       }
     });
-    await refresh();
+    await refresh2();
   }
   function initTheme() {
     document.getElementById("btn-theme-panel")?.addEventListener("click", () => {
@@ -21667,7 +22673,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     });
     on("model", () => {
       document.documentElement.removeAttribute("style");
-      if (content) void refresh();
+      if (content) void refresh2();
     });
   }
 
@@ -22007,7 +23013,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const src = slide.sources?.[key];
     if (!src?.writable) {
       toast(
-        "This text lives in a layout; switch to layout mode to edit it",
+        "This text lives in a layout: edit it in the Slide master",
         "error"
       );
       return;
@@ -22057,6 +23063,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     readHash();
     hooks.editText = editTextOf;
     hooks.editZone = (zone, el2, at3) => {
+      if (ed.master) {
+        toast(
+          `\u201C${zone}\u201D is a placeholder: each slide on this layout fills it with its own content. Drag it to move it.`
+        );
+        return;
+      }
       if (currentSlide()?.zones[zone]?.kind === "chart") void editChart(zone);
       else editZone(zone, el2, { at: at3 });
     };
@@ -22094,6 +23106,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     initGit();
     initCanvasMenu();
     initCompare();
+    initMaster();
     on("slide", () => {
       void finishTextEdit();
       render();

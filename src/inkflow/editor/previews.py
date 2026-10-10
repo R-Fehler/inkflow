@@ -11,12 +11,22 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from inkflow import ns
 from inkflow.assets import AssetSource
 from inkflow.editor.model import is_media_zone
-from inkflow.layout import discover_layouts, layout_zones, layouts_for
+from inkflow.layout import (
+    copy_of,
+    discover_layouts,
+    label_of,
+    layout_zones,
+    layouts_for,
+    resolve_chain,
+)
 from inkflow.logging import collect_logs
 from inkflow.manifest import Deck, Slide, ZoneContent
 from inkflow.pipeline import deck_context, process_slide
+from inkflow.svgio import parse_svg_file
+from inkflow.themes import Theme
 
 # The order a slide editor lists layouts in: from the everyday to the special.
 BUILTIN_ORDER = (
@@ -63,7 +73,8 @@ _SAMPLES: dict[str, str] = {
 _CARD = "### Heading\n\nA sentence or two."
 
 
-def _sample(zone: str) -> str:
+def sample_text(zone: str) -> str:
+    """Sample Markdown showing what a zone of this name is for."""
     if zone in _SAMPLES:
         return _SAMPLES[zone]
     if zone.startswith("card"):
@@ -75,32 +86,81 @@ def _sample(zone: str) -> str:
     return _BULLETS
 
 
-def _layouts(deck: Deck, project_dir: Path) -> list[tuple[str, str, Path]]:
+def sample_zones(path: Path, project_dir: Path, theme: Theme | None) -> dict[str, str]:
+    """Sample text for a layout's text zones (its hints where it has them),
+    so the master view shows each zone's type and place."""
+    info = layout_zones(path, project_dir, theme)
+    hints = layout_hints(path, project_dir, theme)
+    out: dict[str, str] = {}
+    for zone in info.zones:
+        if is_media_zone(zone):
+            continue
+        hint = hints.get(zone)
+        if hint:
+            out[zone] = f"# {hint}" if zone == "title" else hint
+        else:
+            out[zone] = sample_text(zone)
+    return out
+
+
+def layout_hints(path: Path, project_dir: Path, theme: Theme | None) -> dict[str, str]:
+    """``inkflow:hint`` prompts of a layout and its ancestors (nearest wins)."""
+    try:
+        chain = [*resolve_chain(path, project_dir, theme), path]
+    except ValueError:
+        chain = [path]
+    hints: dict[str, str] = {}
+    for p in chain:
+        try:
+            root = parse_svg_file(p)
+        except Exception:
+            continue
+        for el in root.iter(ns.INKFLOW_HINT):
+            zone, text = el.get("zone"), (el.text or "").strip()
+            if zone and text:
+                hints[zone] = text
+    return hints
+
+
+def _layouts(
+    deck: Deck, project_dir: Path, roots: bool = False
+) -> list[tuple[str, str, Path]]:
     """(name, source, path) for every usable layout, the later source winning."""
     seen: dict[str, tuple[str, str, Path]] = {}
     found = discover_layouts(project_dir, deck.theme)
     for label, path in layouts_for(found, deck.effective_size):
         seen[path.stem] = (path.stem, label, path)
     order = {name: i for i, name in enumerate(BUILTIN_ORDER)}
-    entries = [v for k, v in seen.items() if k not in ("base", "poster-base")]
-    # The project's own layouts first, then the built-in order, then the rest.
+    hidden = () if roots else ("base", "poster-base")
+    entries = [v for k, v in seen.items() if k not in hidden]
+    # The project's own layouts first (its copies of the theme's keep their
+    # place), then the built-in order, then the rest.
     return sorted(
         entries,
-        key=lambda e: (e[1] != "local", order.get(e[0], len(order)), e[0]),
+        key=lambda e: (
+            e[1] != "local" or copy_of(e[2]) is not None,
+            order.get(e[0], len(order)),
+            e[0],
+        ),
     )
 
 
-def layout_previews(deck: Deck, deck_path: Path) -> list[dict[str, object]]:
+def layout_previews(
+    deck: Deck, deck_path: Path, roots: bool = False
+) -> list[dict[str, object]]:
+    """Every layout drawn with sample text; with ``roots`` also the
+    backgrounds the others are built on (``base``: the slide master's)."""
     project_dir = deck_path.parent
     ctx = deck_context(deck, project_dir, 1, editor=True)
     out: list[dict[str, object]] = []
-    for name, source, path in _layouts(deck, project_dir):
+    for name, source, path in _layouts(deck, project_dir, roots):
         prefix = {"builtin": "builtin", "theme": "theme"}.get(source, "local")
         try:
             info = layout_zones(path, project_dir, deck.theme)
-            zones: dict[str, ZoneContent] = {
-                z: _sample(z) for z in info.zones if not is_media_zone(z)
-            }
+            # Sample text, or what a template's zones are for (its hints).
+            zones: dict[str, ZoneContent] = dict(
+                sample_zones(path, project_dir, deck.theme)
+            )
             slide = Slide(f"{prefix}:{name}", zones=zones)
             # A preview that does not build is skipped rather than reported:
             # the deck itself never uses it.
@@ -114,6 +174,8 @@ def layout_previews(deck: Deck, deck_path: Path) -> list[dict[str, object]]:
         out.append(
             {
                 "name": name,
+                "label": label_of(path),
+                "copyOf": copy_of(path) if source == "local" else None,
                 "source": source,
                 "zones": info.zones,
                 "svg": svg,

@@ -104,6 +104,10 @@ function newChartBox(at?: { x: number; y: number }) {
 export async function insertChart(at?: { x: number; y: number }) {
     const slide = currentSlide();
     if (!slide) return;
+    if (ed.master) {
+        toast("A chart belongs to a slide: insert it on the slide", "error");
+        return;
+    }
     if (!ed.model?.deckEditable) {
         toast(
             "deck.py builds its slides in code; cannot add a chart here",

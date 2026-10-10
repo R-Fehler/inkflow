@@ -26,6 +26,7 @@ import { initGit } from "./git";
 import { initGrid } from "./grid";
 import { initInk } from "./ink";
 import { afterRender, initInsert } from "./insert";
+import { initMaster } from "./master";
 import { connect } from "./net";
 import { initNotes } from "./notes";
 import { initObjects } from "./objects";
@@ -58,7 +59,7 @@ function editTextOf(el: SVGGraphicsElement): void {
     const src = slide.sources?.[key];
     if (!src?.writable) {
         toast(
-            "This text lives in a layout; switch to layout mode to edit it",
+            "This text lives in a layout: edit it in the Slide master",
             "error",
         );
         return;
@@ -117,6 +118,13 @@ function boot(): void {
 
     hooks.editText = editTextOf;
     hooks.editZone = (zone, el, at) => {
+        if (ed.master) {
+            // A layout's zone is a placeholder: every slide fills in its own.
+            toast(
+                `“${zone}” is a placeholder: each slide on this layout fills it with its own content. Drag it to move it.`,
+            );
+            return;
+        }
         // A chart's "text" is its data.
         if (currentSlide()?.zones[zone]?.kind === "chart") void editChart(zone);
         else editZone(zone, el, { at });
@@ -156,6 +164,7 @@ function boot(): void {
     initGit();
     initCanvasMenu();
     initCompare();
+    initMaster();
 
     on("slide", () => {
         void finishTextEdit();

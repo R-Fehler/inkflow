@@ -87,7 +87,10 @@ export function editDiagram(sel: Selected): void {
     const src = sourceOf(sel.key);
     if (!image || !src) return;
     if (!src.writable) {
-        toast("This picture lives in a layout; switch to layout mode", "error");
+        toast(
+            "This picture lives in a layout: edit it in the Slide master",
+            "error",
+        );
         return;
     }
     void openDrawio({

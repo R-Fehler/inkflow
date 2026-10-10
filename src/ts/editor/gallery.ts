@@ -11,6 +11,8 @@ import type { EmptyZone } from "./types";
 
 interface Preview {
     name: string;
+    label?: string | null; // a template's name as typed
+    copyOf?: string | null; // the deck's copy of a theme's layout
     source: string;
     zones: string[];
     svg: string;
@@ -53,7 +55,8 @@ const root = document.getElementById("gallery")!;
 let cache: Preview[] | null = null;
 
 export function layoutLabel(name: string): string {
-    return LABELS[name]?.[0] ?? name;
+    const typed = ed.model?.layouts.find((l) => l.name === name)?.label;
+    return typed || (LABELS[name]?.[0] ?? name);
 }
 
 async function previews(): Promise<Preview[]> {
@@ -165,7 +168,8 @@ export async function openGallery(
     const layouts = await previews();
     clear(grid);
     for (const p of layouts) {
-        const [label, description] = LABELS[p.name] ?? [p.name, ""];
+        const [named, description] = LABELS[p.name] ?? [p.name, ""];
+        const label = p.label || named;
         const lost = opts.mode === "change" ? lostZones(p) : [];
         const current = opts.mode === "change" && p.name === opts.current;
         const card = h(
@@ -182,7 +186,16 @@ export async function openGallery(
                 { class: "gallery-label" },
                 h("strong", {}, label),
                 p.source === "local" &&
-                    h("span", { class: "badge" }, "project"),
+                    h(
+                        "span",
+                        {
+                            class: "badge",
+                            title: p.copyOf
+                                ? `This deck's own copy of ${p.copyOf} (slide master)`
+                                : "A layout of this deck's own (layouts/)",
+                        },
+                        p.copyOf ? "deck's copy" : "project",
+                    ),
             ),
             description && h("div", { class: "gallery-desc" }, description),
             lost.length > 0 &&

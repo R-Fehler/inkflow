@@ -32,6 +32,7 @@ from inkflow.layout import (
     resolve_chain,
     resolve_default_zone,
     resolve_parent_path,
+    zone_placeholder_css,
 )
 from inkflow.loaders import LoadedText, load_md, load_notes, load_style
 from inkflow.logging import logger
@@ -41,6 +42,7 @@ from inkflow.manifest import (
     Slide,
     Video,
 )
+from inkflow.ns import INKFLOW_HINT
 from inkflow.overlay import Overlay
 from inkflow.pdf import PdfPages
 from inkflow.steps import StepResolver
@@ -82,6 +84,8 @@ class EmptyZone(TypedDict):
     width: float
     height: float
     transform: str | None
+    hint: NotRequired[str]
+    """What the zone is for, as its layout says (an ``inkflow:hint``)."""
 
 
 class SlideEditInfo(TypedDict):
@@ -613,21 +617,37 @@ class SlideSvg:
         register = self.sources.key if self.sources is not None else None
         self.root = inline_diagrams(self.root, roots, register)
 
-    def empty_zones(self) -> list[EmptyZone]:
+    def pop_hints(self) -> dict[str, str]:
+        """The layouts' placeholder prompts (``<inkflow:hint zone=…>``), by
+        zone name, taken out of the slide: they are for the editor only."""
+        hints: dict[str, str] = {}
+        for el in list(self.root.iter(INKFLOW_HINT)):
+            zone = el.get("zone")
+            text = (el.text or "").strip()
+            if zone and text:
+                _ = hints.setdefault(zone, text)
+            parent = el.getparent()
+            if parent is not None:
+                parent.remove(el)
+        return hints
+
+    def empty_zones(self, hints: dict[str, str] | None = None) -> list[EmptyZone]:
         zones: list[EmptyZone] = []
         for el in unreferenced_zones(self.root):
             x, y, width, height = zone_box(el)
-            zones.append(
-                {
-                    "zone": (el.get("id") or "").removeprefix("zone-"),
-                    "locator": el.get(INK, ""),
-                    "x": x,
-                    "y": y,
-                    "width": width,
-                    "height": height,
-                    "transform": el.get("transform"),
-                }
-            )
+            name = (el.get("id") or "").removeprefix("zone-")
+            zone: EmptyZone = {
+                "zone": name,
+                "locator": el.get(INK, ""),
+                "x": x,
+                "y": y,
+                "width": width,
+                "height": height,
+                "transform": el.get("transform"),
+            }
+            if hints and name in hints:
+                zone["hint"] = hints[name]
+            zones.append(zone)
         return zones
 
     def tag_layout(self, chain: list[Path], overlay_chains: list[list[Path]]) -> None:
@@ -773,8 +793,12 @@ def process_slide(
     parsed: ParsedMarkdown | None,
     md_source: AssetSource,
     slide_id: str,
+    keep_zones: bool = False,
 ) -> ProcessedSlide:
-    """Return the processed SVG string, markdown-derived notes and editor facts."""
+    """Return the processed SVG string, markdown-derived notes and editor facts.
+
+    ``keep_zones`` leaves the unfilled zones in, drawn as dashed placeholders
+    (the editor's slide master shows a layout's zones as objects)."""
     src = resolve_slide_src(slide.src, ctx.project_dir, ctx.theme)
     chain = resolve_chain(src, ctx.project_dir, ctx.theme)
     overlays = slide.overlays if slide.overlays is not None else ctx.overlays
@@ -789,6 +813,7 @@ def process_slide(
     # annotation, so a cue can reveal a stroke like any other element.
     ink = ink_path(slide, slide_id, ctx.project_dir)
     doc.compose_ink(ink, ctx.assets, slide_id)
+    hints = doc.pop_hints()
     # Before annotation, so animations can target a diagram's shapes.
     doc.inline_diagrams(ctx.assets)
     doc.picture_backgrounds()
@@ -848,11 +873,14 @@ def process_slide(
     if sources is not None:
         edit = {
             "sources": [str(p) for p in sources.paths],
-            "emptyZones": doc.empty_zones(),
+            "emptyZones": doc.empty_zones(hints),
             "zoneOrigins": zone_origins,
             "ink": str(ink),
         }
-    doc.prune_zones()
+    if keep_zones:
+        doc.add_style(zone_placeholder_css(doc.root))
+    else:
+        doc.prune_zones()
     doc.resolve_links()
     doc.scope_styles(slide_number)
     return ProcessedSlide(doc.to_svg(), md_notes, edit)

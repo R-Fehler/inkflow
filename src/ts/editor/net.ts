@@ -234,10 +234,41 @@ export function request(req: EditRequest): Promise<EditResult> {
             : ed.model?.build != null
               ? { baseBuild: ed.model.build }
               : {};
+    // A theme's layout edited in the slide master: the server makes the
+    // deck's own copy in the same step (`EditorSession._copy_on_write`).
+    const cow =
+        typeof req.file === "string" &&
+        ed.master?.slide.sources?.some(
+            (s) => s.path === req.file && s.copyTo != null,
+        )
+            ? { copyLayout: true }
+            : {};
     return new Promise((resolve) => {
-        pending.set(id, resolve);
-        sock.send(JSON.stringify({ type: "edit-op", id, ...base, ...req }));
+        pending.set(id, (result) => {
+            if (result.ok && result.copied) copied(result);
+            resolve(result);
+        });
+        sock.send(
+            JSON.stringify({ type: "edit-op", id, ...base, ...cow, ...req }),
+        );
     });
+}
+
+// The deck now has its own copy of what the slide master shows: further
+// edits go to the copy (its hash from this result), and the user is told.
+function copied(result: EditResult): void {
+    const info = result.copied as { from: string; to: string; note: string };
+    const hash = result.hashes?.[info.to];
+    for (const src of ed.master?.slide.sources ?? []) {
+        if (src.path !== info.from) continue;
+        src.path = info.to;
+        src.copyTo = undefined;
+        src.writable = true;
+        if (hash) src.hash = hash;
+    }
+    if (ed.master?.path === info.from) ed.master.path = info.to;
+    toast(info.note, "info");
+    emit("master-copied");
 }
 
 // A request whose failure is shown to the user; returns the result either way.
@@ -320,7 +351,8 @@ export async function edit(
 // Keep source hashes current between an edit and the rebuild it triggers, so a
 // quick second edit to the same file is not refused as stale.
 function updateHashes(hashes: Record<string, string>): void {
-    for (const slide of ed.model?.slides ?? []) {
+    const shown = ed.master ? [ed.master.slide] : [];
+    for (const slide of [...(ed.model?.slides ?? []), ...shown]) {
         for (const src of slide.sources ?? []) {
             if (src.path in hashes) src.hash = hashes[src.path];
         }

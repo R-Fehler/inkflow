@@ -490,6 +490,8 @@ export function selectable(el: Element): boolean {
     if (!el.hasAttribute("data-ink") || isLocked(el)) return false;
     const src = sourceOf(keyOf(el));
     if (!src) return false;
+    // The slide master edits one file: the layout or overlay it shows.
+    if (ed.master) return src.path === ed.master.path;
     if (src.role === "diagram") return src.writable && editableCell(el);
     // A stroke of the slide's own ink file: drawn on this slide alone.
     if (src.role === "ink") return src.writable;
@@ -500,6 +502,7 @@ export function selectable(el: Element): boolean {
 // May the element be moved/resized here (vs. only its content edited)?
 export function canTransform(el: Element): boolean {
     const src = sourceOf(keyOf(el));
+    if (ed.master) return src?.path === ed.master.path;
     if (!src?.writable) return false;
     if (src.role === "diagram") return editableCell(el);
     if (src.role === "ink") return true;
@@ -1000,7 +1003,9 @@ const MEDIA_ZONES = /media|image|img|picture|photo|figure|video|logo/;
 
 function drawPlaceholders(): void {
     const slide = currentSlide();
-    if (!slide?.emptyZones || ed.step != null) return;
+    // The slide master draws a layout's zones themselves (dashed boxes), and
+    // a slide's empty zones are that slide's to fill, not the master's.
+    if (!slide?.emptyZones || ed.step != null || ed.master) return;
     for (const z of slide.emptyZones) {
         const key = parseInt(z.locator.split(":")[0] ?? "", 10);
         const src = sourceOf(key);
@@ -1024,7 +1029,9 @@ function drawPlaceholders(): void {
         if (media) outline.setAttribute("data-media-zone", z.zone);
         overlay.append(outline);
         const g = svgEl("g", { class: "placeholder" });
-        const text = media ? `+ media · ${z.zone}` : `+ ${z.zone}`;
+        const text = media
+            ? `+ media · ${z.hint ?? z.zone}`
+            : `+ ${z.hint ?? z.zone}`;
         const w = 14 + text.length * 7.2;
         const tx = pb.x + 6;
         const ty = pb.y + 6;

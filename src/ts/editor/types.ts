@@ -8,6 +8,15 @@ export interface SourceInfo {
     role: "slide" | "layout" | "overlay" | "diagram" | "ink";
     writable: boolean;
     usedBy: number[];
+    // A theme's file shown in the slide master: the first edit goes into
+    // the deck's own copy, made here (paths written into it are relative
+    // to this, not to `path`).
+    copyTo?: string;
+}
+
+/** The file a reference written into `src` is relative to. */
+export function refBase(src: SourceInfo): string {
+    return src.copyTo ?? src.path;
 }
 
 export interface EmptyZone {
@@ -18,6 +27,8 @@ export interface EmptyZone {
     width: number;
     height: number;
     transform: string | null;
+    // What the zone is for, as its layout says (a template's prompt).
+    hint?: string;
 }
 
 export interface TextSource {
@@ -117,6 +128,7 @@ export interface LayoutInfo {
     name: string;
     source: string;
     path: string;
+    label?: string; // a template's name as typed (inkflow:label)
 }
 
 // A Section(...) of deck.py: its slides are deck indices start..start+count-1.

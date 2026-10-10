@@ -24,6 +24,7 @@ import { diagramOf, drawnDiagram, editDiagram, newDiagram } from "./drawio";
 import { openGallery } from "./gallery";
 import { projectFile } from "./geom";
 import { insertVideoFile, typeInto } from "./insert";
+import { saveAsLayout } from "./master";
 import { edit } from "./net";
 import { isHidden, toggleHidden, toggleLocked } from "./objects";
 import { openMenu as openWithMenu } from "./openwith";
@@ -222,6 +223,14 @@ function slideMenu(): HTMLElement[] {
     const slide = currentSlide();
     const editable = !!ed.model?.deckEditable;
     const i = slide?.deckIndex ?? ed.current;
+    if (ed.master) {
+        // The slide master's canvas is a layout or an overlay, not a slide.
+        return [
+            menuItem("Paste", () => void pasteFromClipboard()),
+            menuItem("Select all", () => selectAll()),
+            menuItem("New diagram (draw.io)…", () => newDiagram()),
+        ];
+    }
     return [
         menuItem("Paste", () => void pasteFromClipboard()),
         menuItem("Select all", () => selectAll()),
@@ -249,6 +258,11 @@ function slideMenu(): HTMLElement[] {
         menuItem(
             "Duplicate slide",
             () => void duplicateSlide(ed.current),
+            !editable,
+        ),
+        menuItem(
+            "Save slide as layout…",
+            () => saveAsLayout(ed.current),
             !editable,
         ),
         menuItem(

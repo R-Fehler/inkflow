@@ -80,6 +80,7 @@ import {
     upload,
     zoneMedia,
 } from "./insert";
+import { masterPanel, openMaster, saveAsLayout } from "./master";
 import { edit } from "./net";
 import { fileName, openButton } from "./openwith";
 import { isPdfRef, pdfPage, withPage } from "./pathtext";
@@ -87,16 +88,17 @@ import { choosePage, pageUrl, sourceRef } from "./pdfpages";
 import { renameButton, renameSlideFiles } from "./rename";
 import { distribute } from "./snap";
 import { currentSlide, ed, emit, on, sourceOf } from "./state";
-import type {
-    CueInfo,
-    FieldSchema,
-    FieldValue,
-    Selected,
-    SlideModel,
-    SvgOp,
-    TransitionInfo,
-    TypeInfo,
-    ZoneValue,
+import {
+    type CueInfo,
+    type FieldSchema,
+    type FieldValue,
+    refBase,
+    type Selected,
+    type SlideModel,
+    type SvgOp,
+    type TransitionInfo,
+    type TypeInfo,
+    type ZoneValue,
 } from "./types";
 import { openVideoCheck } from "./videocheck";
 import { previewButton, videoOf } from "./videopreview";
@@ -637,6 +639,23 @@ function renderSlidePanel(): void {
                     "wide",
                 ),
             ),
+            editable &&
+                h(
+                    "div",
+                    { class: "prop-buttons" },
+                    button(
+                        "Save as layout…",
+                        "Make a new layout (a template) from this slide: new slides can start from it",
+                        () => saveAsLayout(di),
+                    ),
+                    currentLayout
+                        ? button(
+                              "Edit its layout",
+                              "Open the slide master at the layout this slide is built on: edits change every slide on it",
+                              () => void openMaster(),
+                          )
+                        : null,
+                ),
             row(
                 "Font size",
                 numberInput(
@@ -755,7 +774,7 @@ function renderSlidePanel(): void {
             h(
                 "p",
                 { class: "hint" },
-                "This slide is drawn by a shared layout. Draw on it (or insert anything) and it gets its own SVG built on that layout. Use “Edit layout” to change the layout itself.",
+                "This slide is drawn by a shared layout. Draw on it (or insert anything) and it gets its own SVG built on that layout. Use the “Slide master” to change the layout itself, for every slide on it.",
             ),
         );
     }
@@ -1395,7 +1414,19 @@ function renderObjectPanel(sel: Selected): void {
         ),
     );
 
-    if (zone) {
+    if (zone && ed.master) {
+        panel.append(
+            section(
+                "Placeholder",
+                h(
+                    "p",
+                    { class: "hint" },
+                    "Each slide on this layout fills this zone with its own content: here it shows sample text. Drag or resize it to move it on every slide.",
+                ),
+            ),
+        );
+    }
+    if (zone && !ed.master) {
         const slide = currentSlide()!;
         const name = zoneName(el);
         const origin = slide.zoneOrigins?.[name];
@@ -1636,7 +1667,9 @@ function renderObjectPanel(sel: Selected): void {
     }
 
     if (movable) panel.append(arrangeSection([sel]));
-    if (id || zone || src?.writable) panel.append(elementAnimations(sel));
+    // Animations are a slide's: the slide master has none to add to.
+    if (!ed.master && (id || zone || src?.writable))
+        panel.append(elementAnimations(sel));
 }
 
 // ── Connectors ──
@@ -1995,7 +2028,7 @@ function pictureSection(sel: Selected): HTMLElement {
                     imageOps(
                         {
                             href: withPage(
-                                relativePath(src.path, up.path),
+                                relativePath(refBase(src), up.path),
                                 page,
                             ),
                             "xlink:href": null,
@@ -2065,7 +2098,7 @@ function pdfPageRow(
         const root = ed.model?.projectDir;
         if (!url || !src || !root || n === page) return;
         const set: Record<string, string | null> = {
-            href: withPage(relativePath(src.path, `${root}/${file}`), n),
+            href: withPage(relativePath(refBase(src), `${root}/${file}`), n),
             "xlink:href": null,
         };
         const width = Number.parseFloat(image.getAttribute("width") ?? "");
@@ -2760,7 +2793,10 @@ export function renderProps(): void {
     }
     clear(panel);
     if (!ed.model) return;
-    if (ed.selection.length === 0) renderSlidePanel();
+    if (ed.selection.length === 0 && ed.master) {
+        const master = masterPanel();
+        if (master) panel.append(master);
+    } else if (ed.selection.length === 0) renderSlidePanel();
     else if (ed.selection.length === 1) renderObjectPanel(ed.selection[0]);
     else renderMultiPanel();
 }

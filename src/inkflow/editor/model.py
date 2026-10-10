@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -24,7 +25,7 @@ from inkflow.editor.chartedit import chart_json
 from inkflow.editor.codegen import field_schema, to_json
 from inkflow.editor.deckedit import DeckSource
 from inkflow.editor.svgops import file_hash
-from inkflow.layout import discover_layouts, layouts_for
+from inkflow.layout import discover_layouts, label_of, layouts_for
 from inkflow.loaders import load_md
 from inkflow.manifest import Chart, Deck, Image, Inline, Slide, TextBox, Video
 from inkflow.pipeline import SlideData, resolve_slide_src
@@ -276,21 +277,7 @@ def build_model(
             entry["title"] = data["title"]
             edit = data.get("edit")
             if edit is not None:
-                sources: list[SourceInfo] = []
-                for k, p in enumerate(edit["sources"]):
-                    path = Path(p)
-                    role = "slide" if k == 0 else "layout"
-                    sources.append(
-                        {
-                            "path": str(path),
-                            "rel": _rel(path, project_dir),
-                            "hash": hash_of(path),
-                            "role": role,
-                            "writable": _is_writable(path, project_dir),
-                            "usedBy": used_by.get(str(path.resolve()), []),
-                        }
-                    )
-                _mark_overlays(sources)
+                sources = source_infos(edit["sources"], project_dir, used_by, hash_of)
                 ink = Path(edit["ink"])
                 for info in sources:
                     if Path(info["path"]) == ink:
@@ -378,6 +365,31 @@ def is_media_zone(name: str) -> bool:
     return bool(_MEDIA_ZONE.search(name))
 
 
+def source_infos(
+    paths: list[str],
+    project_dir: Path,
+    used_by: dict[str, list[int]],
+    hash_of: Callable[[Path], str],
+) -> list[SourceInfo]:
+    """A slide's source files (``SlideEditInfo.sources``) as the editor sees
+    them: role, whether it may write them, which slides use them."""
+    sources: list[SourceInfo] = []
+    for k, p in enumerate(paths):
+        path = Path(p)
+        sources.append(
+            {
+                "path": str(path),
+                "rel": _rel(path, project_dir),
+                "hash": hash_of(path),
+                "role": "slide" if k == 0 else "layout",
+                "writable": _is_writable(path, project_dir),
+                "usedBy": used_by.get(str(path.resolve()), []),
+            }
+        )
+    _mark_overlays(sources)
+    return sources
+
+
 def _mark_overlays(sources: list[SourceInfo]) -> None:
     for s in sources:
         if drawio.is_drawio_path(Path(s["path"])):
@@ -391,7 +403,10 @@ def _layouts(project_dir: Path, deck: Deck) -> list[dict[str, str]]:
     found = discover_layouts(project_dir, deck.theme)
     for label, path in layouts_for(found, deck.effective_size):
         # Later sources (theme, local) shadow earlier ones with the same name.
-        seen[path.stem] = {"name": path.stem, "source": label, "path": str(path)}
+        entry = {"name": path.stem, "source": label, "path": str(path)}
+        if label == "local" and (typed := label_of(path)):
+            entry["label"] = typed
+        seen[path.stem] = entry
     hidden = {"base", "numbered", "poster-base"}
     return [v for k, v in sorted(seen.items()) if k not in hidden]
 
