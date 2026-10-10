@@ -4,6 +4,7 @@
 // section menu, and the header drags to move the whole section. Every change
 // is one `slide` edit of deck.py (session.py `section-*` ops).
 
+import { askSlideDelete } from "./deletedlg";
 import { closeDialog, openDialog } from "./dialog";
 import { h, icon } from "./dom";
 import { edit } from "./net";
@@ -131,15 +132,28 @@ export async function addSectionAt(slide: number | null): Promise<void> {
 async function removeSection(k: number, withSlides: boolean): Promise<void> {
     const s = sections()[k];
     if (!s) return;
-    if (
-        withSlides &&
-        !window.confirm(
-            `Remove section “${s.name}” and its ${s.count} slide${s.count === 1 ? "" : "s"} from the deck? (Their files stay on disk.)`,
-        )
-    ) {
+    if (!withSlides) {
+        await sectionEdit({ op: "section-remove", section: k });
         return;
     }
-    await sectionEdit({ op: "section-remove", section: k, slides: withSlides });
+    const req = {
+        action: "slide",
+        op: "section-remove",
+        section: k,
+        slides: true,
+    };
+    const answer = await askSlideDelete(
+        `Remove section “${s.name}” and its ${s.count} slide${s.count === 1 ? "" : "s"} from the deck?`,
+        s.count,
+        req,
+    );
+    if (!answer) return;
+    await sectionEdit({
+        op: "section-remove",
+        section: k,
+        slides: true,
+        files: answer.files,
+    });
 }
 
 export function selectSection(k: number): void {

@@ -22,8 +22,8 @@ import click
 from inkflow.cli._common import deck_option, main
 from inkflow.cli._edits import DeckSlides as _Slides
 from inkflow.cli._edits import apply_edit as _apply
-from inkflow.cli._edits import rename_request
-from inkflow.editor.remote import Applied
+from inkflow.cli._edits import rename_request, report_deleted
+from inkflow.editor.remote import Applied, RemoteEditError, apply_request
 from inkflow.logging import report
 
 
@@ -133,16 +133,26 @@ def add(
     is_flag=True,
     help="Leave its drawing, Markdown and notes files in place.",
 )
-def delete(refs: tuple[str, ...], deck_path: Path, keep_files: bool) -> None:
+@click.option(
+    "--dry-run",
+    "-n",
+    is_flag=True,
+    help="Print the files it would delete; change nothing.",
+)
+def delete(
+    refs: tuple[str, ...], deck_path: Path, keep_files: bool, dry_run: bool
+) -> None:
     """Delete slides, with the files only they use.
 
-    Its drawing, Markdown, notes and ink go too, unless another slide uses
-    them (a shared layout always stays). All the slides go in one step.
+    Its drawing, Markdown, notes and ink go too, and the pictures, data and
+    diagrams only it shows, unless another slide uses them (layouts and
+    overlays always stay). All the slides go in one step. Says which deleted
+    files version control cannot bring back.
     """
     slides = _Slides.load(deck_path)
     indices = sorted({slides.index(r) for r in refs})
     names = ", ".join(slides.name(i) for i in indices)
-    _apply(
+    _delete_request(
         slides,
         {
             "action": "slide",
@@ -151,7 +161,27 @@ def delete(refs: tuple[str, ...], deck_path: Path, keep_files: bool) -> None:
             "files": not keep_files,
         },
         f"Delete {names}",
+        dry_run,
     )
+
+
+def _delete_request(
+    slides: _Slides, request: dict[str, object], summary: str, dry_run: bool
+) -> None:
+    """A slide edit that deletes files: what it deletes and what version
+    control could bring back of them (with ``dry_run`` only that)."""
+    if dry_run:
+        try:
+            applied = apply_request(
+                slides.path, slides.deck, slides.hash, {**request, "dryRun": True}
+            )
+        except RemoteEditError as exc:
+            raise click.ClickException(str(exc)) from exc
+        report("Would", summary, style="yellow")
+        report_deleted(applied.result, dry_run=True, undo=applied.server is not None)
+        return
+    applied = _apply(slides, request, summary)
+    report_deleted(applied.result, dry_run=False, undo=applied.server is not None)
 
 
 @slide.command("duplicate")
@@ -324,7 +354,7 @@ def section_remove(
     summary = f"Remove section {slides.section_name(k)}"
     if with_slides:
         summary += " and its slides"
-    _apply(
+    _delete_request(
         slides,
         {
             "action": "slide",
@@ -334,6 +364,7 @@ def section_remove(
             "files": with_slides and not keep_files,
         },
         summary,
+        dry_run=False,
     )
 
 

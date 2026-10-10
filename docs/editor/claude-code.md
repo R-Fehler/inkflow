@@ -139,7 +139,7 @@ does, so nothing is left behind or orphaned:
 | Command | What it does |
 |---|---|
 | `inkflow slide add --layout content [--after N] [--id NAME] [--title T] [--md TEXT]` | A new slide with its own drawing on that layout (`--like N`: the layout of slide `N`), after slide `N` (`0`: first; default: last). `--title` and `--md` (`-` reads stdin) become its `slides/<id>.md`. |
-| `inkflow slide delete N [N…]` | Removes the slides, with the drawing, Markdown, notes and ink only they use (`--keep-files` leaves those). |
+| `inkflow slide delete N [N…]` | Removes the slides, with the files the deck reaches only through them: drawing, Markdown, notes, ink and pictures or data only they show (`--keep-files` leaves those, `-n` lists them). It names each deleted file and warns about those git cannot bring back. |
 | `inkflow slide duplicate N` | A copy right after it, with copies of its own files. |
 | `inkflow slide move N --to M` | Moves slide `N` so it becomes slide `M` (in the section of the slide it lands before). |
 | `inkflow slide move N --section S [--to M]` | Moves it into section `S`: at its end, or as slide `M` within it. |
@@ -217,6 +217,26 @@ extension never changes. A slide whose id came from the renamed file's name
 With the editor open, the rename is one *Agent: …* step there, undone with
 <kbd>Ctrl</kbd>+<kbd>Z</kbd>. A path built in code in `deck.py` cannot be
 followed: the command warns when `deck.py` still names the old file.
+
+## Files the deck no longer uses
+
+`inkflow files` lists the deck's files with their state: `used` (reached from
+`deck.py`, directly or through files the deck uses), `unused` (nothing names
+it), `orphan` (only unused files name it: a deleted slide's drawing's
+pictures) or `template` (a layout or overlay no slide uses), and in a git
+repository whether git could bring it back (committed, modified, untracked,
+ignored):
+
+```bash
+inkflow files --unused          # only what the deck does not use; --json for all fields
+inkflow files clean -n          # what would be deleted, with the git warnings
+inkflow files clean             # delete unused + orphan files (one undoable step)
+inkflow files clean --templates # unused layouts and overlays too
+```
+
+`clean` refuses a file the deck uses and says which deleted files git cannot
+bring back (never committed, or with uncommitted changes). With the editor
+open, it is one *Agent: …* step there, undone with <kbd>Ctrl</kbd>+<kbd>Z</kbd>.
 
 ## Fonts and a self-contained deck
 

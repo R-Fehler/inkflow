@@ -296,8 +296,8 @@ src/
                                clears strokes, owner or share-link editor, and slide-list edits move a
                                slide's ink file when its id changes: `_follow_ink`; the
                                `slide` action's ops: new (optional `md` text) / delete
-                               (`files`: also the drawing/md/notes/ink no remaining slide
-                               uses) / duplicate / move (`slides` for several, `section`
+                               (`files`: also what the deck reaches only through it,
+                               `slide_drop_files`) / duplicate / move (`slides` for several, `section`
                                target) / hide / title / id (ink and
                                `slide:` links follow) / detach / layout / font-size /
                                transition / section-add / -rename / -remove / -move
@@ -305,7 +305,10 @@ src/
                                `select`); a request's `agent` text labels its step
                                "Agent: …" and `deckHash` must match the build; each
                                result lists `changes` and the step's `seq`, which
-                               `undo` may name to take back only that step; the
+                               `undo` may name to take back only that step;
+                               `delete-files` and `slide` (`_DELETES`) return `deleted`
+                               (path, git state, size) + `written` + `repo`, and with
+                               `dryRun` only that, nothing written; the
                                `rename` action (`from`/`to`, or `slide`/`stem`, `dryRun`
                                returns the plan) records file moves as `_Move`s without
                                their bytes and removes the folders a step empties),
@@ -370,7 +373,14 @@ src/
                                style (bare layout name, `local:`, path); ids inferred from
                                renamed files follow (ink moved, `slide:` links rewritten);
                                `plan_slide_rename` = a slide's own files to one stem;
-                               `reference_counts`/`project_files` for the Files view;
+                               `reference_counts` (the rename's counts), `project_files`;
+                               `file_uses` (the Files view): reachability from deck.py's
+                               objects (+ any deck.py string naming a file) through
+                               `_reference_graph` (preview-layer markers reach, never
+                               count), states used/unused/orphan (only unused files name
+                               it, `by`)/template (layouts/, overlays/ nothing uses);
+                               `slide_drop_files` = reached before, not after a delete
+                               (no layouts/overlays, inferred ink left to `_follow_ink`);
                                `plan_copy_in` = every file named outside the deck or
                                through a symlink copied in (assets/, layouts/,
                                overlays/, slides/) and its references re-expressed
@@ -431,7 +441,9 @@ src/
                                push/pull, discard, undo commit, branches, deck-scoped log,
                                view/revert/restore a commit, `lfs_status` = media
                                no LFS rule covers or committed as full copies, `lfs_track`
-                               / `lfs_off`; shells out to git with GIT_TERMINAL_PROMPT=0),
+                               / `lfs_off`; `file_states` = per file committed/modified/
+                               untracked/ignored/no-repo (one `status --ignored`);
+                               shells out to git with GIT_TERMINAL_PROMPT=0),
                                worktrees.py (the session's `worktree` action and
                                `inkflow worktree`: `list_worktrees` = every worktree with
                                the deck.py at the same relative path, ahead/behind the
@@ -503,7 +515,9 @@ src/
                                editor/remote.py, then zips locally),
                                files.py (`inkflow mv OLD NEW [-n]`: the session's
                                `rename` action, through editor/remote.py; slides.py adds
-                               `slide rename-files`),
+                               `slide rename-files`; `inkflow files [--unused] [--json]`
+                               and `files clean [-n] [--templates]` = `delete-files`;
+                               `_edits.deletion_warnings` = the dialog's git words),
                                authoring.py
                                (clean, label2id, add, parent group, sync, layouts), color.py (colorize,
                                palette), verify.py, worktree.py (the `worktree` group: add,
@@ -800,7 +814,11 @@ src/
                       rename.ts ("Rename…" beside a file's Open ▾, "Rename files…"
                       for a slide, the deck menu's "Files…" view: a dialog that
                       previews the session's `rename` dry run as the name is
-                      typed; path maths in pathtext.ts),
+                      typed; path maths in pathtext.ts; the Files view's states,
+                      git badges, Pick all unused, Delete…), deletedlg.ts (the
+                      delete-from-disk dialog: a `dryRun`'s `deleted` files with
+                      git badges and warnings; slide deletes' "Also delete its
+                      files from disk") over deletetext.ts (pure words; tested),
                       master.ts (the slide master: "Slide master" in the
                       toolbar; its list replaces the sorter (`#master`), each
                       entry drawn by the session's `master-render` into

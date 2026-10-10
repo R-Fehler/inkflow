@@ -69,11 +69,12 @@ from inkflow.editor.deckedit import (
 )
 from inkflow.editor.drawioedit import DiagramEditError, apply_cell_ops
 from inkflow.editor.filerename import (
+    USED,
     RenameError,
+    file_uses,
     plan_rename,
     plan_slide_rename,
-    project_files,
-    reference_counts,
+    slide_drop_files,
 )
 from inkflow.editor.findreplace import (
     MAX_HITS,
@@ -468,6 +469,10 @@ def _role(msg: dict[str, object]) -> str:
         return cast("str", role)
     return "owner" if msg.get("_local") is True else "viewer"
 
+
+_DELETES = frozenset({"delete-files", "slide"})
+"""Actions whose result says what git could bring back of the files they
+delete, and which answer a ``dryRun`` with only that (`EditorSession._deleting`)."""
 
 _UNLOCKED = frozenset(
     {
@@ -881,7 +886,7 @@ class EditorSession:
         if action == "shape":
             return self._shapes(msg, deck)
         if action == "files":
-            return {"ok": True, "files": self._file_list(deck)}
+            return {"ok": True, **self._file_list(deck)}
         txn = _Txn(self.project_dir)
         extra: dict[str, object] = {}
         handler = {
@@ -950,6 +955,13 @@ class EditorSession:
         if isinstance(agent, str) and agent.strip():
             # Made by an agent through the CLI: the editor says so ("Agent: …").
             label = f"Agent: {agent.strip()}"
+        if action in _DELETES:
+            # What git could bring back of each file the step deletes, read
+            # before the files go; with ``dryRun`` only that, nothing written.
+            if msg.get("dryRun") or any(d is None for d in txn.staged.values()):
+                extra.update(self._deleting(txn))
+            if msg.get("dryRun"):
+                return {"ok": True, "dryRun": True, "label": label, **extra}
         base = msg.get("baseBuild")
         if isinstance(base, int) and not isinstance(base, bool):
             self._check_fresh(txn, base)
@@ -3120,9 +3132,7 @@ class EditorSession:
                 imports.add("Section")
             slides_after = [deck.slides[cast("int", i)] for i in flatten(after)]
             if op == "section-remove" and msg.get("slides") and msg.get("files"):
-                kept = {id(s) for s in slides_after}
-                gone = [s for s in deck.slides if id(s) not in kept]
-                self._drop_slide_files(gone, slides_after, deck, txn)
+                self._drop_slide_files(slides_after, deck, source, txn)
         elif op == "delete":
             many = msg.get("slides")
             if isinstance(many, list):
@@ -3139,8 +3149,7 @@ class EditorSession:
                 source.remove_slide(index)
             slides_after = [s for i, s in enumerate(deck.slides) if i not in indices]
             if msg.get("files"):
-                gone = [deck.slides[i] for i in indices]
-                self._drop_slide_files(gone, slides_after, deck, txn)
+                self._drop_slide_files(slides_after, deck, source, txn)
             label = "Delete slide" if len(indices) == 1 else "Delete slides"
         elif op == "hide":
             index, _ = self._deck_slide(deck, msg)
@@ -3382,17 +3391,18 @@ class EditorSession:
         return {p for p in found if p.is_relative_to(self.project_dir)}
 
     def _drop_slide_files(
-        self, gone: list[Slide], kept: list[Slide], deck: Deck, txn: _Txn
+        self, kept: list[Slide], deck: Deck, source: DeckSource, txn: _Txn
     ) -> None:
-        """Delete the files only the deleted slides were made of; whatever a
-        remaining slide still uses (or is built on) stays."""
-        in_use: set[Path] = set()
-        for slide in kept:
-            in_use |= self._slide_files(slide, deck, ancestors=True)
-        for slide in gone:
-            for path in sorted(self._slide_files(slide, deck, ancestors=False)):
-                if path not in in_use and txn.read_optional(path) is not None:
-                    txn.write(path, None)
+        """Delete the files the deck uses only through the deleted slides
+        (`filerename.slide_drop_files`: their drawings, Markdown, notes and
+        the pictures, data and diagrams only they show); whatever a remaining
+        slide still uses, and every layout and overlay, stays."""
+        for path in slide_drop_files(
+            self.project_dir, self.deck_path, deck, kept, source.code
+        ):
+            if txn.read_optional(path) is not None:
+                txn.write(path, None)
+        txn.prune = True
 
     def _relink(self, old: str, new: str, deck: Deck, txn: _Txn) -> int:
         """Point ``slide:<old>`` links at ``slide:<new>`` in deck.py and the
@@ -3457,40 +3467,81 @@ class EditorSession:
         extra["structural"] = True
         return label
 
-    def _file_list(self, deck: Deck) -> list[dict[str, object]]:
+    def _file_list(self, deck: Deck) -> dict[str, object]:
         """The project's files a deck may use (pictures, videos, data, PDFs,
-        diagrams, drawings, Markdown), each with how many references name it."""
-        counts = reference_counts(self.project_dir, self.deck_path, deck)
-        out: list[dict[str, object]] = []
-        for path in project_files(self.project_dir, self.deck_path):
-            rel = path.relative_to(self.project_dir).as_posix()
-            out.append(
-                {"path": rel, "uses": counts.get(rel, 0), "size": path.stat().st_size}
+        diagrams, drawings, Markdown), each with how the deck uses it
+        (`filerename.file_uses`) and what git could bring back of it."""
+        uses = file_uses(self.project_dir, self.deck_path, deck)
+        paths = [self.project_dir / rel for rel in uses]
+        states = gitops.file_states(self.project_dir, paths)
+        files: list[dict[str, object]] = []
+        for path, (rel, use) in zip(paths, uses.items(), strict=True):
+            files.append(
+                {
+                    "path": rel,
+                    "state": use.state,
+                    "uses": use.uses,
+                    "by": list(use.by),
+                    "git": states[path],
+                    "size": path.stat().st_size,
+                }
             )
-        return out
+        repo = gitops.open_repo(self.project_dir) is not None
+        return {"files": files, "repo": repo}
 
     def _delete_files(
         self, msg: dict[str, object], deck: Deck, txn: _Txn, _extra: dict[str, object]
     ) -> str:
-        """Delete project files nothing refers to (the Files view's "Delete
-        unused"); a file still in use is refused."""
+        """Delete project files the deck does not use (the Files view's
+        "Delete…", ``inkflow files clean``): unused, only named by files the
+        deck does not use, or templates nothing uses. A used file is refused."""
         raw = msg.get("paths")
         if not isinstance(raw, list) or not raw:
             raise EditError("no files to delete")
-        counts = reference_counts(self.project_dir, self.deck_path, deck)
-        listed = {
-            p.relative_to(self.project_dir).as_posix()
-            for p in project_files(self.project_dir, self.deck_path)
-        }
+        uses = file_uses(self.project_dir, self.deck_path, deck)
         names = [str(p) for p in cast("list[object]", raw)]
         for rel in names:
-            if rel not in listed:
+            use = uses.get(rel)
+            if use is None:
                 raise EditError(f"{rel} is not a deck file inkflow manages")
-            if counts.get(rel):
-                raise EditError(f"{rel} is in use ({counts[rel]} references)")
+            if use.state == USED:
+                n = use.uses
+                raise EditError(
+                    f"{rel} is in use ({n} reference{'' if n == 1 else 's'})"
+                )
             txn.write(self.project_dir / rel, None)
         txn.prune = True
         return f"Delete {names[0]}" if len(names) == 1 else f"Delete {len(names)} files"
+
+    def _deleting(self, txn: _Txn) -> dict[str, object]:
+        """The files a step deletes (``deleted``: path, git state, size) and
+        the others it writes (``written``), project-relative; ``repo``: the
+        deck is in a git repository."""
+        gone = sorted(
+            path
+            for path, data in txn.staged.items()
+            if data is None and txn.originals.get(path) is not None
+        )
+        states = gitops.file_states(self.project_dir, gone)
+
+        def rel(path: Path) -> str:
+            return path.relative_to(self.project_dir).as_posix()
+
+        deleted = [
+            {
+                "path": rel(path),
+                "git": states[path],
+                "size": len(txn.originals.get(path) or b""),
+            }
+            for path in gone
+        ]
+        written = sorted(
+            rel(path)
+            for path, data in txn.staged.items()
+            if data is not None and txn.originals.get(path) != data
+        )
+        repo = gitops.open_repo(self.project_dir) is not None
+        return {"deleted": deleted, "written": written, "repo": repo}
 
     # ── Ink ──
 

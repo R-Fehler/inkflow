@@ -1406,10 +1406,10 @@
     const norm = (p2) => p2.replace(/(.)[\\/]+$/, "$1");
     return norm(a2) === norm(b2);
   }
-  function commonPrefix(names) {
-    if (!names.length) return "";
-    let prefix = names[0];
-    for (const name2 of names.slice(1)) {
+  function commonPrefix(names2) {
+    if (!names2.length) return "";
+    let prefix = names2[0];
+    for (const name2 of names2.slice(1)) {
       let i2 = 0;
       while (i2 < prefix.length && i2 < name2.length && prefix[i2].toLowerCase() === name2[i2].toLowerCase()) {
         i2++;
@@ -1418,9 +1418,9 @@
     }
     return prefix;
   }
-  function startingWith(names, typed) {
+  function startingWith(names2, typed) {
     const t2 = typed.toLowerCase();
-    return names.filter((n3) => n3.toLowerCase().startsWith(t2));
+    return names2.filter((n3) => n3.toLowerCase().startsWith(t2));
   }
   function splitTyped(value) {
     const i2 = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
@@ -3420,6 +3420,276 @@
     await pasteText(text);
   }
 
+  // src/ts/editor/deletetext.ts
+  function plural(n3, word) {
+    return `${n3} ${word}${n3 === 1 ? "" : "s"}`;
+  }
+  function names(paths, limit = 3) {
+    const shown2 = paths.slice(0, limit).join(", ");
+    return paths.length > limit ? `${shown2} and ${paths.length - limit} more` : shown2;
+  }
+  function gitBadge(state) {
+    switch (state) {
+      case "committed":
+        return {
+          text: "in git",
+          title: "Committed: git can bring it back",
+          tone: "ok"
+        };
+      case "modified":
+        return {
+          text: "changed",
+          title: "Uncommitted changes: git has only the last committed version",
+          tone: "warn"
+        };
+      case "untracked":
+        return {
+          text: "not in git",
+          title: "Never committed: git cannot bring it back",
+          tone: "lost"
+        };
+      case "ignored":
+        return {
+          text: "ignored",
+          title: "Ignored by git: never committed, git cannot bring it back",
+          tone: "lost"
+        };
+      default:
+        return null;
+    }
+  }
+  function useText(f2) {
+    switch (f2.state) {
+      case "used":
+        return {
+          text: plural(f2.uses, "use"),
+          title: "The deck uses it"
+        };
+      case "orphan":
+        return {
+          text: "only used by unused files",
+          title: `Named only by files the deck does not use: ${f2.by.join(", ")}`
+        };
+      case "template":
+        return f2.by.length ? {
+          text: "used by a template",
+          title: `Named only by layouts or overlays no slide uses: ${f2.by.join(", ")}`
+        } : {
+          text: "unused template",
+          title: "A layout or overlay no slide uses: kept as a template"
+        };
+      default:
+        return { text: "unused", title: "Nothing refers to it" };
+    }
+  }
+  function pickable(state) {
+    return state === "unused" || state === "orphan";
+  }
+  var NOT_IN_GIT = (n3, list4) => `Not in git: ${plural(n3, "file")} (${list4}) can't be restored from version control. Undo brings ${n3 === 1 ? "it" : "them"} back only while this editor stays open.`;
+  function deleteWarnings(files2, repo) {
+    if (!files2.length) return [];
+    if (!repo) {
+      return [
+        {
+          tone: "warn",
+          text: "This deck is not in a git repository: deleted files can only be brought back with Undo while this editor is open."
+        }
+      ];
+    }
+    const lost = files2.filter((f2) => f2.git === "untracked" || f2.git === "ignored").map((f2) => f2.path);
+    const changed2 = files2.filter((f2) => f2.git === "modified").map((f2) => f2.path);
+    const out = [];
+    if (lost.length) {
+      out.push({ tone: "warn", text: NOT_IN_GIT(lost.length, names(lost)) });
+    }
+    if (changed2.length) {
+      out.push({
+        tone: "warn",
+        text: `Uncommitted changes in ${plural(changed2.length, "file")} (${names(changed2)}): git keeps only ${changed2.length === 1 ? "its" : "their"} last committed version.`
+      });
+    }
+    if (!out.length) {
+      out.push({
+        tone: "ok",
+        text: "All in git: Discard changes in the Git menu brings them back, or its history once you commit."
+      });
+    }
+    return out;
+  }
+  function slideQuestion(names2) {
+    return names2.length === 1 ? `Delete \u201C${names2[0]}\u201D from the deck?` : `Delete ${names2.length} slides from the deck?`;
+  }
+  function slideFilesLine(n3, slides) {
+    if (!n3) {
+      return slides === 1 ? "No file is this slide's alone: nothing else is deleted." : "No file is these slides' alone: nothing else is deleted.";
+    }
+    return `Also deletes ${plural(n3, "file")} no other slide uses:`;
+  }
+
+  // src/ts/editor/deletedlg.ts
+  function planOf(result) {
+    if (!result.ok) return null;
+    return {
+      files: result.deleted ?? [],
+      repo: Boolean(result.repo)
+    };
+  }
+  function fileList(files2) {
+    return h(
+      "ul",
+      { class: "delete-files" },
+      ...files2.map((f2) => {
+        const badge4 = gitBadge(f2.git);
+        return h(
+          "li",
+          {},
+          h("code", { class: "rename-code", title: f2.path }, f2.path),
+          badge4 ? h(
+            "span",
+            {
+              class: `git-state ${badge4.tone}`,
+              title: badge4.title
+            },
+            badge4.text
+          ) : null
+        );
+      })
+    );
+  }
+  function warnings(plan) {
+    const lines = deleteWarnings(plan.files, plan.repo);
+    if (!lines.length) return null;
+    return h(
+      "div",
+      { class: "delete-warnings" },
+      ...lines.map(
+        (w2) => h("p", { class: `delete-warning ${w2.tone}`, role: "note" }, w2.text)
+      )
+    );
+  }
+  function askDelete(opts2) {
+    return new Promise((resolve) => {
+      let answer = null;
+      const details = h("div", { class: "delete-details" });
+      let check = null;
+      const ok = h(
+        "button",
+        {
+          type: "button",
+          class: "pbtn primary danger",
+          "data-delete": "confirm",
+          onclick: () => {
+            answer = { files: check?.checked ?? false };
+            closeDialog();
+          }
+        },
+        opts2.confirm
+      );
+      const body3 = h(
+        "div",
+        { class: "delete-dialog" },
+        h("p", { class: "delete-question" }, opts2.question)
+      );
+      if (opts2.plan) {
+        body3.append(fileList(opts2.plan.files));
+        const w2 = warnings(opts2.plan);
+        if (w2) body3.append(w2);
+      }
+      if (opts2.option) {
+        const option2 = opts2.option;
+        check = h("input", {
+          type: "checkbox",
+          "data-delete": "files"
+        });
+        let plan = null;
+        const box = check;
+        box.addEventListener("change", async () => {
+          if (!box.checked) {
+            details.replaceChildren();
+            return;
+          }
+          details.replaceChildren(
+            h(
+              "p",
+              { class: "hint delete-line" },
+              "Looking for its files\u2026"
+            )
+          );
+          plan ??= option2.load();
+          const found = await plan;
+          if (!box.checked) return;
+          if (!found) {
+            details.replaceChildren(
+              h(
+                "p",
+                { class: "hint warn delete-line" },
+                "Cannot tell which files would go."
+              )
+            );
+            return;
+          }
+          details.replaceChildren(
+            h(
+              "p",
+              { class: "hint delete-line" },
+              slideFilesLine(found.files.length, option2.slides)
+            ),
+            ...found.files.length ? [fileList(found.files)] : [],
+            ...[warnings(found)].filter((w2) => w2 !== null)
+          );
+        });
+        body3.append(
+          h(
+            "label",
+            { class: "rename-check delete-option" },
+            check,
+            option2.label
+          ),
+          details
+        );
+      }
+      body3.append(
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => closeDialog()
+            },
+            "Cancel"
+          ),
+          ok
+        )
+      );
+      body3.addEventListener("keydown", (e2) => {
+        const target = e2.target;
+        if (e2.key !== "Enter" || target.tagName === "BUTTON") return;
+        e2.preventDefault();
+        ok.click();
+      });
+      openDialog(opts2.title, body3, {
+        wide: true,
+        onClose: () => resolve(answer)
+      });
+      ok.focus();
+    });
+  }
+  function askSlideDelete(question, slides, req) {
+    return askDelete({
+      title: slides === 1 ? "Delete slide" : "Delete slides",
+      question,
+      confirm: "Delete",
+      option: {
+        label: slides === 1 ? "Also delete its files from disk" : "Also delete their files from disk",
+        slides,
+        load: async () => planOf(await request({ ...req, files: true, dryRun: true }))
+      }
+    });
+  }
+
   // src/ts/editor/gallery.ts
   var LABELS = {
     numbered: ["Blank", "Background and slide number"],
@@ -3675,11 +3945,11 @@
     return x2[0] - y2[0] || x2[1] - y2[1] || x2[2].localeCompare(y2[2]);
   }
   function layoutRows(tree2) {
-    const names = new Set(tree2.layouts.map((l2) => l2.name));
+    const names2 = new Set(tree2.layouts.map((l2) => l2.name));
     const children2 = /* @__PURE__ */ new Map();
     for (const l2 of tree2.layouts) {
       if (l2.name === tree2.background) continue;
-      const parent = l2.parent && names.has(l2.parent) && l2.parent !== tree2.background ? l2.parent : null;
+      const parent = l2.parent && names2.has(l2.parent) && l2.parent !== tree2.background ? l2.parent : null;
       const list4 = children2.get(parent) ?? [];
       list4.push(l2);
       children2.set(parent, list4);
@@ -3718,7 +3988,7 @@
       title: "From the theme: your first edit gives this deck its own copy, which every slide on it then follows"
     };
   }
-  function plural(n3, word) {
+  function plural2(n3, word) {
     return `${n3} ${word}${n3 === 1 ? "" : "s"}`;
   }
   function usage(l2, background, total2 = 0) {
@@ -3727,7 +3997,7 @@
       return l2.reach.length >= total2 ? "behind every slide" : `behind ${l2.reach.length} of ${total2} slides`;
     }
     if (!l2.slides.length && !l2.reach.length) return "no slides";
-    const direct = plural(l2.slides.length, "slide");
+    const direct = plural2(l2.slides.length, "slide");
     const through = l2.reach.length - l2.slides.length;
     return through > 0 ? `${direct} (+${through} built on it)` : direct;
   }
@@ -4509,7 +4779,7 @@
           "overlay",
           o2,
           `On top \xB7 ${o2.name}`,
-          tree.overlaysFromTheme ? "from the theme" : plural(o2.slides.length, "slide"),
+          tree.overlaysFromTheme ? "from the theme" : plural2(o2.slides.length, "slide"),
           0,
           null
         )
@@ -4528,7 +4798,7 @@
       )
     );
     for (const o2 of tree.overlays.filter((x2) => !x2.deck)) {
-      const sub = o2.slides.length ? `on ${plural(o2.slides.length, "slide")} of their own` : "not used";
+      const sub = o2.slides.length ? `on ${plural2(o2.slides.length, "slide")} of their own` : "not used";
       list4.append(row2("overlay", o2, o2.name, sub, 0, null));
     }
     for (const over of tree.overrides) {
@@ -4724,7 +4994,7 @@
       h(
         "p",
         {},
-        used ? `${[users ? plural(users, "slide") : "", children2.length ? `layout ${children2.map((c2) => `\u201C${c2.name}\u201D`).join(", ")}` : ""].filter(Boolean).join(" and ")} ${users + children2.length === 1 ? "is" : "are"} built on \u201C${title(l2)}\u201D. Move ${users + children2.length === 1 ? "it" : "them"} to:` : `Delete the layout \u201C${title(l2)}\u201D (${l2.rel ?? l2.name})? No slide uses it.`
+        used ? `${[users ? plural2(users, "slide") : "", children2.length ? `layout ${children2.map((c2) => `\u201C${c2.name}\u201D`).join(", ")}` : ""].filter(Boolean).join(" and ")} ${users + children2.length === 1 ? "is" : "are"} built on \u201C${title(l2)}\u201D. Move ${users + children2.length === 1 ? "it" : "them"} to:` : `Delete the layout \u201C${title(l2)}\u201D (${l2.rel ?? l2.name})? No slide uses it.`
       ),
       used ? pickTo : null,
       h(
@@ -4854,7 +5124,7 @@
       h(
         "p",
         { class: "hint" },
-        kind === "layout" ? usage(layout, isBackground, total()) : `${plural(reach.length, "slide")} get${reach.length === 1 ? "s" : ""} it`
+        kind === "layout" ? usage(layout, isBackground, total()) : `${plural2(reach.length, "slide")} get${reach.length === 1 ? "s" : ""} it`
       ),
       h(
         "label",
@@ -4982,9 +5252,6 @@
   }
 
   // src/ts/editor/rename.ts
-  function plural2(n3, word) {
-    return `${n3} ${word}${n3 === 1 ? "" : "s"}`;
-  }
   function relOf(path) {
     if (!path) return null;
     const rel = projectRel(
@@ -5009,7 +5276,7 @@
   }
   function summaryLine(p2) {
     if (!p2.references) return "Nothing refers to it: only the file moves.";
-    return `Updates ${plural2(p2.references, "reference")} in ${plural2(p2.files, "file")}.`;
+    return `Updates ${plural(p2.references, "reference")} in ${plural(p2.files, "file")}.`;
   }
   function previewBody(p2, opts2) {
     const box = h("div", { class: "rename-preview" });
@@ -5049,7 +5316,7 @@
         h(
           "p",
           { class: "hint" },
-          `The slide id ${old} becomes ${now}; its saved ink follows${p2.links ? `, and ${plural2(p2.links, "slide: link")} ${p2.links === 1 ? "is" : "are"} rewritten` : ""}.`
+          `The slide id ${old} becomes ${now}; its saved ink follows${p2.links ? `, and ${plural(p2.links, "slide: link")} ${p2.links === 1 ? "is" : "are"} rewritten` : ""}.`
         )
       );
     }
@@ -5171,7 +5438,7 @@
       const p2 = res.rename ?? last;
       closeDialog();
       toast(
-        `${res.label ?? "Renamed"}${p2?.references ? ` \xB7 ${plural2(p2.references, "reference")} updated` : ""}`,
+        `${res.label ?? "Renamed"}${p2?.references ? ` \xB7 ${plural(p2.references, "reference")} updated` : ""}`,
         "ok"
       );
       opts2.done(p2);
@@ -5314,24 +5581,50 @@
     if (bytes >= 1e3) return `${Math.round(bytes / 1e3)} KB`;
     return `${bytes} B`;
   }
-  async function openFiles() {
+  async function deletePicked(paths) {
+    const dry = await request({ action: "delete-files", paths, dryRun: true });
+    const plan = planOf(dry);
+    if (!plan) {
+      toast(dry.error ?? "Cannot delete those files", "error");
+      void openFiles(new Set(paths));
+      return;
+    }
+    const answer = await askDelete({
+      title: "Delete files",
+      question: `Delete ${plural(plan.files.length, "file")} from disk?`,
+      confirm: "Delete",
+      plan
+    });
+    if (!answer) {
+      void openFiles(new Set(paths));
+      return;
+    }
+    const r2 = await edit({ action: "delete-files", paths });
+    if (r2.ok) toast(r2.label ?? "Deleted", "ok");
+    void openFiles(r2.ok ? /* @__PURE__ */ new Set() : new Set(paths));
+  }
+  async function openFiles(initial = /* @__PURE__ */ new Set()) {
     const res = await request({ action: "files" });
     if (!res.ok) {
       toast(res.error ?? "Cannot list the deck's files", "error");
       return;
     }
     const files2 = res.files ?? [];
-    const unused = files2.filter((f2) => !f2.uses);
-    const picked = /* @__PURE__ */ new Set();
+    const unused = files2.filter((f2) => pickable(f2.state));
+    const picked = new Set(
+      [...initial].filter(
+        (p2) => files2.some((f2) => f2.path === p2 && f2.state !== "used")
+      )
+    );
     const list4 = h("div", { class: "files-list" });
     const deleteBtn = h(
       "button",
       { type: "button", class: "pbtn", disabled: true },
-      "Delete unused\u2026"
+      "Delete\u2026"
     );
     const sync = () => {
       deleteBtn.disabled = !picked.size;
-      deleteBtn.textContent = picked.size ? `Delete ${plural2(picked.size, "file")}\u2026` : "Delete unused\u2026";
+      deleteBtn.textContent = picked.size ? `Delete ${plural(picked.size, "file")}\u2026` : "Delete\u2026";
     };
     let folder = null;
     for (const f2 of files2) {
@@ -5340,31 +5633,43 @@
         folder = dir;
         list4.append(h("div", { class: "files-folder" }, `${dir || "."}/`));
       }
+      const used = f2.state === "used";
       const check = h("input", {
         type: "checkbox",
-        disabled: f2.uses > 0,
-        title: f2.uses ? "In use" : "Pick it to delete"
+        disabled: used,
+        title: used ? "In use" : "Pick it to delete",
+        "data-path": f2.path
       });
+      check.checked = picked.has(f2.path);
       check.addEventListener("change", () => {
         if (check.checked) picked.add(f2.path);
         else picked.delete(f2.path);
         sync();
       });
+      const use = useText(f2);
+      const badge4 = gitBadge(f2.git);
       list4.append(
         h(
           "div",
-          { class: `files-row${f2.uses ? "" : " unused"}` },
+          {
+            class: `files-row${used ? "" : " unused"}${f2.state === "template" ? " template" : ""}`,
+            "data-state": f2.state
+          },
           check,
           h(
             "code",
             { class: "rename-code files-name", title: f2.path },
             f2.path.split("/").pop() ?? f2.path
           ),
-          h(
+          h("span", { class: "files-uses", title: use.title }, use.text),
+          badge4 ? h(
             "span",
-            { class: "files-uses" },
-            f2.uses ? plural2(f2.uses, "use") : "unused"
-          ),
+            {
+              class: `git-state ${badge4.tone}`,
+              title: badge4.title
+            },
+            badge4.text
+          ) : null,
           h("span", { class: "files-size" }, size(f2.size)),
           h(
             "button",
@@ -5379,41 +5684,27 @@
         )
       );
     }
-    deleteBtn.addEventListener("click", async () => {
-      const paths = [...picked];
-      if (!window.confirm(
-        `Delete ${plural2(paths.length, "file")} nothing uses?
-
-${paths.join("\n")}
-
-Undo brings them back.`
-      )) {
-        return;
-      }
-      const r2 = await edit({ action: "delete-files", paths });
-      if (r2.ok) {
-        toast(r2.label ?? "Deleted", "ok");
-        void openFiles();
-      }
-    });
+    deleteBtn.addEventListener("click", () => void deletePicked([...picked]));
     const selectUnused = h(
       "button",
       {
         type: "button",
         class: "pbtn",
         disabled: !unused.length,
+        title: "Unused files and those only unused files name; not templates",
         onclick: () => {
-          for (const row6 of list4.querySelectorAll(
-            ".files-row.unused input"
-          )) {
-            row6.checked = true;
-          }
           for (const f2 of unused) picked.add(f2.path);
+          for (const box of list4.querySelectorAll(
+            "input[data-path]"
+          )) {
+            box.checked = picked.has(box.dataset.path ?? "");
+          }
           sync();
         }
       },
       "Pick all unused"
     );
+    sync();
     const body3 = h(
       "div",
       { class: "files-body" },
@@ -5424,7 +5715,7 @@ Undo brings them back.`
         h(
           "span",
           { class: "hint rename-count" },
-          `${plural2(files2.length, "file")} \xB7 ${unused.length} unused`
+          `${plural(files2.length, "file")} \xB7 ${unused.length} unused`
         ),
         selectUnused,
         deleteBtn
@@ -5432,7 +5723,7 @@ Undo brings them back.`
     );
     openDialog("Files", body3, {
       wide: true,
-      hint: "Pictures, videos, data, diagrams and slide files; a use is a reference in a slide, Markdown or deck.py"
+      hint: "Pictures, videos, data, diagrams and slide files; a use is a reference from deck.py or from a file the deck uses"
     });
   }
 
@@ -5602,12 +5893,28 @@ Undo brings them back.`
   async function removeSection(k2, withSlides) {
     const s2 = sections()[k2];
     if (!s2) return;
-    if (withSlides && !window.confirm(
-      `Remove section \u201C${s2.name}\u201D and its ${s2.count} slide${s2.count === 1 ? "" : "s"} from the deck? (Their files stay on disk.)`
-    )) {
+    if (!withSlides) {
+      await sectionEdit({ op: "section-remove", section: k2 });
       return;
     }
-    await sectionEdit({ op: "section-remove", section: k2, slides: withSlides });
+    const req = {
+      action: "slide",
+      op: "section-remove",
+      section: k2,
+      slides: true
+    };
+    const answer = await askSlideDelete(
+      `Remove section \u201C${s2.name}\u201D and its ${s2.count} slide${s2.count === 1 ? "" : "s"} from the deck?`,
+      s2.count,
+      req
+    );
+    if (!answer) return;
+    await sectionEdit({
+      op: "section-remove",
+      section: k2,
+      slides: true,
+      files: answer.files
+    });
   }
   function selectSection(k2) {
     const indices = sectionSlides(sections(), k2);
@@ -5824,16 +6131,15 @@ Undo brings them back.`
       await deleteSlide(indices[0] ?? ed.current);
       return;
     }
-    if (!window.confirm(
-      `Delete ${indices.length} slides from the deck? (Their files stay on disk.)`
-    )) {
-      return;
-    }
-    const result = await edit({
-      action: "slide",
-      op: "delete",
-      slides: indices
-    });
+    const req = { action: "slide", op: "delete", slides: indices };
+    const names2 = indices.map((i2) => slideName2(i2));
+    const answer = await askSlideDelete(
+      slideQuestion(names2),
+      indices.length,
+      req
+    );
+    if (!answer) return;
+    const result = await edit({ ...req, files: answer.files });
     if (result.ok) {
       ed.slideSelection.clear();
       ed.current = Math.max(0, indices[0] - 1);
@@ -6099,17 +6405,18 @@ Undo brings them back.`
   async function deleteSlide(i2 = ed.current) {
     const slide = ed.model?.slides[i2];
     if (!slide) return;
-    const name2 = slide.title ?? slide.id ?? `slide ${i2 + 1}`;
-    if (!window.confirm(
-      `Delete \u201C${name2}\u201D from the deck? (Its files stay on disk.)`
-    )) {
-      return;
-    }
-    const result = await edit({ action: "slide", op: "delete", slide: i2 });
+    const req = { action: "slide", op: "delete", slide: i2 };
+    const answer = await askSlideDelete(slideQuestion([slideName2(i2)]), 1, req);
+    if (!answer) return;
+    const result = await edit({ ...req, files: answer.files });
     if (result.ok) {
       ed.current = Math.max(0, i2 - 1);
       emit("slide");
     }
+  }
+  function slideName2(i2) {
+    const slide = ed.model?.slides[i2];
+    return slide?.title ?? slide?.id ?? `slide ${i2 + 1}`;
   }
   async function toggleHidden(i2 = ed.current) {
     const slide = ed.model?.slides[i2];
@@ -11189,13 +11496,13 @@ Undo brings them back.`
         model2.animationTypes.filter((t2) => t2.kind === "video" === (cue.kind === "video")).map((t2) => ({ value: t2.type, label: t2.type })),
         cue.type,
         (v2) => {
-          const names = new Set(
+          const names2 = new Set(
             typeInfo(model2.animationTypes, v2)?.fields.map(
               (f2) => f2.name
             )
           );
           const kept = Object.fromEntries(
-            Object.entries(cue.fields).filter(([k2]) => names.has(k2))
+            Object.entries(cue.fields).filter(([k2]) => names2.has(k2))
           );
           replace2(i2, v2, { ...kept, trigger });
         }
@@ -12961,12 +13268,12 @@ Undo brings them back.`
       return;
     }
     const kind = kindOf2(el2);
-    const names = [...COMMON, ...PAINT, ...MARKERS, ...FONT, ...BOX_VARS];
+    const names2 = [...COMMON, ...PAINT, ...MARKERS, ...FONT, ...BOX_VARS];
     copied2 = {
       kind,
       tag: el2.localName,
       classes: [...el2.classList].filter((c2) => PAINT_CLASS.test(c2)),
-      props: Object.fromEntries(names.map((n3) => [n3, read2(el2, n3)])),
+      props: Object.fromEntries(names2.map((n3) => [n3, read2(el2, n3)])),
       radius: { rx: el2.getAttribute("rx"), ry: el2.getAttribute("ry") },
       showShape: el2.getAttribute(SHOW_SHAPE) === "true"
     };
@@ -17674,7 +17981,7 @@ Decks: new, open, recent` : "Decks";
     const summary2 = res.pack;
     const remaining = remainingLines(summary2.items);
     const copies = summary2.assets?.copies ?? [];
-    const warnings = summary2.fonts?.warnings ?? [];
+    const warnings2 = summary2.fonts?.warnings ?? [];
     if (!summary2.steps.length) {
       body3.append(
         h(
@@ -17696,10 +18003,10 @@ Decks: new, open, recent` : "Decks";
         );
       }
     }
-    if (warnings.length) {
+    if (warnings2.length) {
       body3.append(
         h("p", { class: "hint warn" }, "Font licences:"),
-        list3(warnings, "pack-list warn")
+        list3(warnings2, "pack-list warn")
       );
     }
     if (remaining.length) {
@@ -22369,8 +22676,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       element,
       update: (s2) => {
         current3 = s2;
-        const names = s2.sshInfo?.serverNames ?? [];
-        if (!server.value && names.length) server.value = names[0];
+        const names2 = s2.sshInfo?.serverNames ?? [];
+        if (!server.value && names2.length) server.value = names2[0];
         draw();
       }
     };

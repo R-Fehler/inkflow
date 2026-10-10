@@ -37,6 +37,7 @@ be followed; deck.py still naming the old file afterwards is reported.
 
 from __future__ import annotations
 
+import contextlib
 import html
 import json
 import os
@@ -54,8 +55,8 @@ from typing_extensions import override
 from inkflow.editor.codegen import Code
 from inkflow.editor.deckedit import DeckEditError, DeckSource
 from inkflow.ink import ink_path
-from inkflow.layout import AssetKind, builtin_theme_dir
-from inkflow.manifest import Deck, Inline, Slide
+from inkflow.layout import AssetKind, builtin_theme_dir, deck_copy, resolve_chain
+from inkflow.manifest import Deck, Image, Inline, Slide, TextBox, Video
 from inkflow.pipeline import slide_ids
 from inkflow.themes import Theme
 
@@ -886,10 +887,21 @@ _DECK_FILES = frozenset(
 )
 
 
+_NOT_DECK_NAME = re.compile(
+    r"(readme|licen[cs]e|copying|notice|changelog|changes|contributing|authors"
+    + r"|code_of_conduct|security)([._-].*)?$"
+    + r"|(package|package-lock|tsconfig|jsconfig|biome|renovate|deno|composer)\.json$",
+    re.I,
+)
+"""The project's own documents and tool settings at its top, not files a
+deck shows (and fonts/ holds bundled fonts and their licences)."""
+
+
 def project_files(project_dir: Path, deck_path: Path) -> list[Path]:
     """The project's files a deck can name (drawings, Markdown, pictures,
     videos, data, PDFs, styles), for the editor's Files view; not the files
-    inkflow finds by their name (styles.css, deck.py)."""
+    inkflow finds by their name (styles.css, deck.py), bundled fonts, or the
+    project's README, licence and tool settings."""
     root = _abs(project_dir)
     deck = _abs(deck_path)
     return [
@@ -898,7 +910,14 @@ def project_files(project_dir: Path, deck_path: Path) -> list[Path]:
         if path.suffix.lower() in _DECK_FILES
         and path != deck
         and _rel(path, root) not in _FOUND_BY_NAME
+        and not _not_deck_file(Path(_rel(path, root)).parts)
     ]
+
+
+def _not_deck_file(parts: tuple[str, ...]) -> bool:
+    return parts[0] == "fonts" or (
+        len(parts) == 1 and bool(_NOT_DECK_NAME.match(parts[0]))
+    )
 
 
 def _scan(
@@ -1458,6 +1477,349 @@ def reference_counts(project_dir: Path, deck_path: Path, deck: Deck) -> dict[str
                 rel = _rel(path, root)
                 counts[rel] = counts.get(rel, 0) + 1
     return counts
+
+
+# ── What the deck uses (the Files view, deleting files) ──────────────────────
+
+USED = "used"
+"""Reached from the deck: a slide, its Markdown, a picture in either…"""
+UNUSED = "unused"
+"""Nothing refers to it."""
+ORPHAN = "orphan"
+"""Only files the deck does not use refer to it (a deleted slide's picture)."""
+TEMPLATE = "template"
+"""A layout or overlay no slide uses (a template to keep), or a file only
+such templates use."""
+
+_PDF_PAGE = re.compile(r"^(?P<pdf>.+\.pdf)\.p\d+\.svg$", re.I)
+"""A PDF page committed beside its PDF (``pdf.committed_path``)."""
+
+
+@dataclass(frozen=True)
+class FileUse:
+    state: str
+    uses: int
+    """References from files the deck uses, and from deck.py."""
+    by: tuple[str, ...] = ()
+    """For a file the deck does not use: the files that still name it."""
+
+
+@dataclass
+class _Graph:
+    """Every project file and the project files it names, once per reference."""
+
+    world: _World
+    edges: dict[Path, list[Path]]
+    markers: dict[Path, list[Path]] = field(default_factory=dict)
+    """What preview-layer markers name: reached through, never a use."""
+
+    @property
+    def root(self) -> Path:
+        return self.world.root
+
+
+def _stand_ins(world: _World, target: Path, kind: Kind) -> list[Path]:
+    """The project files a resolved reference reaches: the file itself, or
+    for a theme's layout or overlay the project's marked copy standing in for
+    it (``layout.deck_copy``), else the copies in its chain."""
+    root = world.root
+    if target.is_relative_to(root):
+        return [target]
+    if kind is Kind.PATH or target.suffix.lower() != ".svg" or not target.is_file():
+        return []
+    asset = AssetKind.OVERLAY if kind is Kind.OVERLAY else AssetKind.LAYOUT
+    copy = deck_copy(target, root, world.theme, asset)
+    if copy is not None:
+        return [_abs(copy)]
+    try:
+        chain = resolve_chain(target, root, world.theme, asset)
+    except (ValueError, OSError):
+        return []
+    return [p for p in map(_abs, chain) if p.is_relative_to(root)]
+
+
+def _file_refs(
+    world: _World,
+    path: Path,
+    text: str,
+    overlay: bool,
+    declared: dict[tuple[str, Kind], Path],
+) -> tuple[list[Path], list[Path]]:
+    """The project files one text file names, and those its preview layers'
+    markers name (each resolved against the file that declared it, `_Chains`)."""
+    found: list[Path] = []
+    marked: list[Path] = []
+
+    def resolve(raw: str, kind: Kind, base: Path, into: list[Path]) -> None:
+        target = world.resolve(raw, kind, base, after=False)
+        if target is not None:
+            into.extend(p for p in _stand_ins(world, target, kind) if p != path)
+
+    def visit(raw: str, kind: Kind, _label: str) -> None:
+        resolve(raw, kind, path.parent, found)
+
+    def marker(raw: str, kind: Kind, _label: str) -> None:
+        declarer = declared.get((raw, kind))
+        resolve(raw, kind, declarer.parent if declarer else path.parent, marked)
+
+    _ = _scan(path, text, visit, overlay, marker)
+    return found, marked
+
+
+def _reference_graph(project_dir: Path, deck_path: Path, deck: Deck) -> _Graph:
+    """What each of the project's text files names (resolved as the rename
+    resolves it). A preview layer's contents are copies, not uses: only its
+    marker counts, resolved against the file that declared it."""
+    root = _abs(project_dir)
+    deck_file = _abs(deck_path)
+    world = _World(root, deck.theme, {})
+    chains = _Chains(world, deck_file, _overlay_srcs(deck))
+    overlays = _overlay_files(root, deck)
+    edges: dict[Path, list[Path]] = {}
+    markers: dict[Path, list[Path]] = {}
+    for path in text_files(root, deck_file):
+        text = _read(path)
+        if text is not None:
+            overlay = _is_overlay(path, root, overlays)
+            edges[path], markers[path] = _file_refs(
+                world, path, text, overlay, chains.declarers(path, overlay)
+            )
+    for path in _walk(root):
+        page = _PDF_PAGE.match(path.name)
+        if page:
+            edges.setdefault(path.with_name(page.group("pdf")), []).append(path)
+    return _Graph(world, edges, markers)
+
+
+def _deck_literals(code: str) -> list[str]:
+    """Every string literal in deck.py (what custom code may read)."""
+    try:
+        module = cst.parse_module(code)
+    except cst.ParserSyntaxError:
+        return []
+    found: list[str] = []
+
+    class _Strings(cst.CSTVisitor):
+        @override
+        def visit_SimpleString(self, node: cst.SimpleString) -> None:
+            value = _string_value(node)
+            if value and "\n" not in value and len(value) < 1024:
+                found.append(value)
+
+    _ = module.visit(_Strings())
+    return found
+
+
+def _ink_ids(slides: list[Slide]) -> dict[int, str]:
+    """Each slide's id as its ink file is named: a shown slide's own, a hidden
+    slide's the one it gets when shown again."""
+    ids = _visible_ids(slides)
+    for index, slide in enumerate(slides):
+        if index not in ids:
+            shown = [s for s in slides if s.visible or s is slide]
+            ids[index] = slide_ids(shown)[shown.index(slide)]
+    return ids
+
+
+def _deck_roots(
+    graph: _Graph, deck_path: Path, deck: Deck, slides: list[Slide], code: str
+) -> list[Path]:
+    """The project files deck.py names, once per reference: every slide's
+    drawing, Markdown, notes, style, ink, zone pictures, videos and chart data
+    (hidden slides too), the overlays, the deck's style and styles.css; and,
+    for code inkflow cannot read, any string in deck.py naming a project file."""
+    world = graph.world
+    root = world.root
+    found: list[Path] = []
+
+    def add(raw: str | None, kind: Kind) -> None:
+        if not raw:
+            return
+        target = world.resolve(raw, kind, root, after=False)
+        if target is not None:
+            found.extend(_stand_ins(world, target, kind))
+
+    def visit(raw: str, kind: Kind, _label: str) -> None:
+        add(raw, kind)
+
+    def content(value: object, kind: Kind, css: bool) -> None:
+        if not isinstance(value, str) or not value:
+            return
+        if isinstance(value, Inline):
+            _ = (rewrite_css if css else rewrite_markdown)(value, visit)
+        else:
+            add(value, kind)
+
+    ink_ids = _ink_ids(slides)
+    for index, slide in enumerate(slides):
+        add(slide.src, Kind.SLIDE)
+        content(slide.md, Kind.MD, css=False)
+        content(slide.notes, Kind.PATH, css=False)
+        content(slide.extra_style, Kind.PATH, css=True)
+        if slide.ink:
+            add(slide.ink, Kind.PATH)
+        else:
+            ink = _abs(ink_path(slide, ink_ids[index], root))
+            if ink.is_file():
+                found.append(ink)
+        for value in slide.zones.values():
+            if isinstance(value, str):
+                _ = rewrite_markdown(value, visit)
+            elif isinstance(value, TextBox):
+                _ = rewrite_markdown(value.text or "", visit)
+            elif isinstance(value, Image | Video):
+                add(value.src, Kind.PATH)
+                add(value.alt_src, Kind.PATH)
+                if isinstance(value, Video):
+                    add(value.poster, Kind.PATH)
+            else:
+                add(value.src, Kind.PATH)
+        overlays = (
+            slide.overlays if slide.overlays is not None else deck.effective_overlays
+        )
+        for overlay in overlays:
+            add(overlay.src, Kind.OVERLAY)
+    content(deck.style, Kind.PATH, css=True)
+    for name in ("styles.css", "scripts.js"):
+        if (root / name).is_file():
+            found.append(_abs(root / name))
+    # The project's own documents (a README showing a screenshot) keep what
+    # they name too, though no slide shows it.
+    found.extend(
+        path
+        for path in graph.edges
+        if path.is_relative_to(root) and _not_deck_file(Path(_rel(path, root)).parts)
+    )
+    base = _abs(deck_path).parent
+    for value in _deck_literals(code):
+        if _is_file_ref(value) and not value.startswith("/"):
+            target = world.resolve(value, Kind.PATH, base, after=False)
+            if target is not None and target.is_relative_to(root) and target.is_file():
+                found.append(target)
+    return found
+
+
+def _reach(graph: _Graph, start: list[Path]) -> set[Path]:
+    seen: set[Path] = set()
+    todo = list(start)
+    while todo:
+        path = todo.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        todo.extend(graph.edges.get(path, ()))
+        todo.extend(graph.markers.get(path, ()))
+    return seen
+
+
+def _is_template(path: Path, root: Path, overlays: set[Path]) -> bool:
+    parts = Path(_rel(path, root)).parts
+    return (bool(parts) and parts[0] == "layouts") or _is_overlay(path, root, overlays)
+
+
+def used_files(
+    project_dir: Path,
+    deck_path: Path,
+    deck: Deck,
+    *,
+    slides: list[Slide] | None = None,
+    code: str | None = None,
+    graph: _Graph | None = None,
+) -> set[Path]:
+    """Every project file the deck reaches (absolute paths): what deck.py
+    names, then whatever those files name, followed to the end, never from a
+    file the deck does not use. ``slides`` and ``code`` stand for the deck's
+    slides and deck.py's text as an edit would leave them."""
+    graph = graph or _reference_graph(project_dir, deck_path, deck)
+    if code is None:
+        code = _abs(deck_path).read_text(encoding="utf-8")
+    slides = list(deck.slides) if slides is None else slides
+    return _reach(graph, _deck_roots(graph, deck_path, deck, slides, code))
+
+
+def file_uses(project_dir: Path, deck_path: Path, deck: Deck) -> dict[str, FileUse]:
+    """How the deck uses each of the project's files (`project_files`), by
+    project-relative path: used (and how often), unused, only named by files
+    the deck does not use (orphan), or a template."""
+    root = _abs(project_dir)
+    deck_file = _abs(deck_path)
+    graph = _reference_graph(root, deck_file, deck)
+    code = deck_file.read_text(encoding="utf-8")
+    roots = _deck_roots(graph, deck_file, deck, list(deck.slides), code)
+    used = _reach(graph, roots)
+    overlays = _overlay_files(root, deck)
+    files = project_files(root, deck_file)
+    templates = _reach(
+        graph,
+        [p for p in files if p not in used and _is_template(p, root, overlays)],
+    )
+    # deck.py's references counted as written (a computed one, an inferred
+    # ink file or styles.css once).
+    named: dict[Path, int] = {}
+
+    def count(raw: str, kind: Kind, _label: str) -> None:
+        target = graph.world.resolve(raw, kind, root, after=False)
+        for path in _stand_ins(graph.world, target, kind) if target else ():
+            named[path] = named.get(path, 0) + 1
+
+    with contextlib.suppress(cst.ParserSyntaxError):
+        _ = scan_deck(code, count)
+    uses: dict[Path, int] = dict(named)
+    for path in set(roots) - set(named):
+        uses[path] = 1
+    by: dict[Path, list[Path]] = {}
+    for source, targets in graph.edges.items():
+        for target in targets:
+            if source in used:
+                uses[target] = uses.get(target, 0) + 1
+            elif target != source:
+                by.setdefault(target, []).append(source)
+    out: dict[str, FileUse] = {}
+    for path in files:
+        rel = _rel(path, root)
+        names = tuple(sorted({_rel(p, root) for p in by.get(path, ())}))
+        if path in used:
+            out[rel] = FileUse(USED, uses.get(path, 0))
+        elif path in templates:
+            out[rel] = FileUse(TEMPLATE, 0, names)
+        elif names:
+            out[rel] = FileUse(ORPHAN, 0, names)
+        else:
+            out[rel] = FileUse(UNUSED, 0)
+    return out
+
+
+def slide_drop_files(
+    project_dir: Path, deck_path: Path, deck: Deck, kept: list[Slide], code: str
+) -> list[Path]:
+    """The files deleting slides takes along: what the deck reaches now and
+    no longer reaches with only ``kept`` left (deck.py then reading
+    ``code``), such as the slide's drawing, Markdown, notes and the pictures
+    only it showed. Layouts and overlays stay (templates), and so does saved
+    ink found by a slide's id, which the session moves with the ids."""
+    root = _abs(project_dir)
+    graph = _reference_graph(root, deck_path, deck)
+    before = used_files(root, deck_path, deck, graph=graph)
+    after = used_files(root, deck_path, deck, slides=kept, code=code, graph=graph)
+    overlays = _overlay_files(root, deck)
+    ids = _ink_ids(list(deck.slides))
+    inks = {
+        _abs(ink_path(s, ids[i], root))
+        for i, s in enumerate(deck.slides)
+        if s.ink is None
+    }
+    out: list[Path] = []
+    for path in sorted(before - after - inks):
+        parts = Path(_rel(path, root)).parts
+        if (
+            not path.is_file()
+            or _is_template(path, root, overlays)
+            or _rel(path, root) in _FOUND_BY_NAME
+            or any(p.startswith(".") for p in parts)
+        ):
+            continue
+        out.append(path)
+    return out
 
 
 def posix_join(folder: str, name: str) -> str:

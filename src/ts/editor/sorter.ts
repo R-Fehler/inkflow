@@ -12,6 +12,8 @@ import {
     followPastedSlides,
     pasteFromClipboard,
 } from "./clipboard";
+import { askSlideDelete } from "./deletedlg";
+import { slideQuestion } from "./deletetext";
 import { clear, h, icon, toast } from "./dom";
 import { openGallery } from "./gallery";
 import { saveAsLayout } from "./master";
@@ -70,18 +72,15 @@ export async function deleteSlides(): Promise<void> {
         await deleteSlide(indices[0] ?? ed.current);
         return;
     }
-    if (
-        !window.confirm(
-            `Delete ${indices.length} slides from the deck? (Their files stay on disk.)`,
-        )
-    ) {
-        return;
-    }
-    const result = await edit({
-        action: "slide",
-        op: "delete",
-        slides: indices,
-    });
+    const req = { action: "slide", op: "delete", slides: indices };
+    const names = indices.map((i) => slideName(i));
+    const answer = await askSlideDelete(
+        slideQuestion(names),
+        indices.length,
+        req,
+    );
+    if (!answer) return;
+    const result = await edit({ ...req, files: answer.files });
     if (result.ok) {
         ed.slideSelection.clear();
         ed.current = Math.max(0, indices[0] - 1);
@@ -401,19 +400,19 @@ export async function duplicateSlide(i = ed.current): Promise<void> {
 export async function deleteSlide(i = ed.current): Promise<void> {
     const slide = ed.model?.slides[i];
     if (!slide) return;
-    const name = slide.title ?? slide.id ?? `slide ${i + 1}`;
-    if (
-        !window.confirm(
-            `Delete “${name}” from the deck? (Its files stay on disk.)`,
-        )
-    ) {
-        return;
-    }
-    const result = await edit({ action: "slide", op: "delete", slide: i });
+    const req = { action: "slide", op: "delete", slide: i };
+    const answer = await askSlideDelete(slideQuestion([slideName(i)]), 1, req);
+    if (!answer) return;
+    const result = await edit({ ...req, files: answer.files });
     if (result.ok) {
         ed.current = Math.max(0, i - 1);
         emit("slide");
     }
+}
+
+function slideName(i: number): string {
+    const slide = ed.model?.slides[i];
+    return slide?.title ?? slide?.id ?? `slide ${i + 1}`;
 }
 
 export async function toggleHidden(i = ed.current): Promise<void> {
