@@ -19,6 +19,13 @@ export interface ChartSettings {
     legend: boolean | null;
     labels: boolean;
     donut: boolean;
+    // The value axis's ends (null: from the data).
+    y_min: number | null;
+    y_max: number | null;
+    // Columns on a second value axis, on the right (null: none).
+    y2: string[] | null;
+    y2_min: number | null;
+    y2_max: number | null;
 }
 
 export const CHART_KINDS: { value: string; label: string }[] = [
@@ -40,7 +47,31 @@ export function defaultSettings(): ChartSettings {
         legend: null,
         labels: false,
         donut: false,
+        y_min: null,
+        y_max: null,
+        y2: null,
+        y2_min: null,
+        y2_max: null,
     };
+}
+
+/** Whether these settings can have a second value axis (charts.py refuses
+ * one for stacked or horizontal bars, and a pie has no axes). */
+export function secondAxisAllowed(s: ChartSettings): boolean {
+    if (s.kind === "pie") return false;
+    if (s.stacked && (s.kind === "bar" || s.kind === "area")) return false;
+    return !(s.horizontal && s.kind === "bar");
+}
+
+/** Put a series on the right axis or back on the left; none left: null. */
+export function toggleRight(
+    s: ChartSettings,
+    column: string,
+    on: boolean,
+): string[] | null {
+    const now = (s.y2 ?? []).filter((c) => c !== column);
+    const next = on ? [...now, column] : now;
+    return next.length ? next : null;
 }
 
 /** A small table to start a new chart from. */
@@ -243,6 +274,7 @@ export function removeColumn(
             ...s,
             x: s.x === name ? null : s.x,
             y: s.y ? s.y.filter((c) => c !== name) : null,
+            y2: toggleRight(s, name, false),
         },
     };
 }
@@ -264,6 +296,7 @@ export function renameColumn(
             ...s,
             x: s.x === old ? name : s.x,
             y: s.y ? s.y.map((c) => (c === old ? name : c)) : null,
+            y2: s.y2 ? s.y2.map((c) => (c === old ? name : c)) : null,
         },
     };
 }

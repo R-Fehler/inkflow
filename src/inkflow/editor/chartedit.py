@@ -34,6 +34,11 @@ SETTINGS = (
     "legend",
     "labels",
     "donut",
+    "y_min",
+    "y_max",
+    "y2",
+    "y2_min",
+    "y2_max",
 )
 """The ``Chart`` fields the editor's chart panel and dialog set."""
 
@@ -59,7 +64,14 @@ def settings(raw: object) -> dict[str, object]:
             out[name] = ChartKind(str(value))
         elif name in ("x", "title"):
             out[name] = str(value) if value not in (None, "") else None
-        elif name == "y":
+        elif name in ("y_min", "y_max", "y2_min", "y2_max"):
+            if value in (None, ""):
+                out[name] = None
+            elif isinstance(value, int | float) and not isinstance(value, bool):
+                out[name] = float(value)
+            else:
+                raise ValueError(f"{name} must be a number")
+        elif name in ("y", "y2"):
             if value is None:
                 out[name] = None
             elif isinstance(value, list) and all(
@@ -67,7 +79,7 @@ def settings(raw: object) -> dict[str, object]:
             ):
                 out[name] = list(cast("list[str]", value)) or None
             else:
-                raise ValueError("y must be a list of column names")
+                raise ValueError(f"{name} must be a list of column names")
         elif name == "legend":
             out[name] = None if value is None else bool(value)
         else:
@@ -153,9 +165,10 @@ def chart_json(chart: Chart, project_dir: Path) -> dict[str, object]:
     fields: dict[str, object] = {
         name: to_json(cast("object", getattr(chart, name)))
         for name in SETTINGS
-        if name != "y"
+        if name not in ("y", "y2")
     }
     fields["y"] = list(chart.y) if chart.y is not None else None
+    fields["y2"] = list(chart.y2) if chart.y2 is not None else None
     out: dict[str, object] = {
         "kind": "chart",
         "src": chart.src,

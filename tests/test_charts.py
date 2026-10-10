@@ -501,3 +501,86 @@ class TestVerify:
         messages = [m for _, m in self._verify(tmp_path, missing)]
         assert any("none.csv" in m for m in messages)
         assert any("sales-series-nope" in m for m in messages)
+
+
+# ── Axis range and a second axis ──
+
+
+def _axis_labels(root: etree._Element, anchor: str) -> list[str]:  # pyright: ignore[reportPrivateUsage]
+    """The value axis's tick labels on one side (end: left, start: right)."""
+    axes = next(el for el in root.iter() if el.get("class") == "inkflow-chart-axes")
+    return [
+        "".join(str(s) for s in t.itertext())
+        for t in axes.iter(f"{{{SVG_NS}}}text")
+        if t.get("text-anchor") == anchor
+    ]
+
+
+def test_y_min_and_max_are_the_axis_ends() -> None:
+    root = _draw(Chart(data={}, kind=ChartKind.LINE, y_min=50, y_max=250))
+    assert _axis_labels(root, "end") == ["50", "100", "150", "200", "250"]
+    # Values beyond a fixed end are cut off at the plot.
+    clip = next(el for el in root.iter() if el.tag == f"{{{SVG_NS}}}clipPath")
+    marks = [el for el in root.iter() if el.get("class") == "inkflow-chart-marks"]
+    assert marks and all(m.get("clip-path") == f"url(#{clip.get('id')})" for m in marks)
+
+
+def test_an_end_that_is_not_round_keeps_its_label() -> None:
+    root = _draw(Chart(data={}, kind=ChartKind.BAR, y_max=230))
+    labels = _axis_labels(root, "end")
+    assert labels[0] == "0" and labels[-1] == "230"
+    assert "200" in labels  # the round ticks below it stay
+
+
+def test_without_a_range_nothing_is_clipped() -> None:
+    root = _draw(Chart(data={}))
+    assert not any(el.tag == f"{{{SVG_NS}}}clipPath" for el in root.iter())
+
+
+def test_a_second_axis_on_the_right() -> None:
+    table = parse_delimited("month,visitors,rate\nJan,1200,0.5\nFeb,1800,0.7\n")
+    root = _draw(Chart(data={}, kind=ChartKind.LINE, y2=["rate"], y2_max=1), table)
+    right = _axis_labels(root, "start")
+    left = _axis_labels(root, "end")
+    assert right[-1] == "1" and "0.5" in right
+    assert left[-1] == "1,800"
+    text = _text(root)
+    assert "rate (right)" in text and "visitors (right)" not in text
+    # Each series still has its own group, ids as before.
+    assert {"sales-series-visitors", "sales-series-rate"} <= _ids(root)
+
+
+def test_y2_columns_are_plotted_even_if_y_leaves_them_out() -> None:
+    root = _draw(Chart(data={}, y=["revenue"], y2=["cost"]))
+    assert {"sales-series-revenue", "sales-series-cost"} <= _ids(root)
+
+
+@pytest.mark.parametrize(
+    ("chart", "message"),
+    [
+        (Chart(data={}, y2=["cost"], stacked=True), "side by side"),
+        (Chart(data={}, y2=["cost"], horizontal=True), "upright bars"),
+        (Chart(data={}, y=["cost"], y2=["cost"]), "not all of them"),
+    ],
+)
+def test_a_second_axis_it_cannot_draw(chart: Chart, message: str) -> None:
+    assert message in _text(_draw(chart))
+
+
+def test_a_range_upside_down_is_refused() -> None:
+    with pytest.raises(ValueError, match="y_min must be below y_max"):
+        Chart(data={}, y_min=10, y_max=5)
+
+
+def test_range_and_second_axis_in_a_fence_and_in_deck_source() -> None:
+    fence = parse_fence(
+        "kind: line\ndata: x.csv\ny-min: 0\ny_max: 300\ny2: rate\ny2_max: 1"
+    )
+    chart = fence.chart
+    assert (chart.y_min, chart.y_max, chart.y2, chart.y2_max) == (0, 300, ["rate"], 1)
+    with pytest.raises(ChartError, match="not a number"):
+        parse_fence("data: x.csv\ny_min: low")
+    assert (
+        Code().call(Chart("data/x.csv", y_min=0.0, y2=["rate"]))
+        == 'Chart("data/x.csv", y_min=0.0, y2=["rate"])'
+    )

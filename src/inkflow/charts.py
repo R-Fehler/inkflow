@@ -23,7 +23,7 @@ import io
 import json
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
@@ -473,6 +473,10 @@ class _Series:
     colour: str
     gid: str
     group: SvgElement | None = None
+    axis: int = 1
+    """1: the value axis on the left; 2: the second one, on the right."""
+    label: str = ""
+    """The legend's text (the name, marked when on the right axis)."""
 
 
 @dataclass
@@ -565,11 +569,20 @@ def _draw(
     x = chart.x if chart.x is not None else table.columns[0]
     if x not in table.columns:
         raise ChartError(f"no column {x!r} in the data")
-    ys = (
+    ys = list(
         chart.y
         if chart.y is not None
         else [c for c in table.columns if c != x and table.is_numeric(c)]
     )
+    right = list(chart.y2 or []) if chart.kind != ChartKind.PIE else []
+    # A column on the right axis is plotted whether or not y names it.
+    ys += [c for c in right if c not in ys]
+    if right and chart.stacked and chart.kind in (ChartKind.BAR, ChartKind.AREA):
+        raise ChartError("a second axis needs the series side by side, not stacked")
+    if right and chart.horizontal and chart.kind == ChartKind.BAR:
+        raise ChartError("a second axis needs upright bars, not horizontal ones")
+    if right and len(right) == len(ys):
+        raise ChartError("y2 takes some of the series, not all of them")
     for name in ys:
         if name not in table.columns:
             raise ChartError(f"no column {name!r} in the data")
@@ -608,6 +621,8 @@ def _draw(
             [v if isinstance(v, float) else None for v in table.column(name)],
             colour(i),
             unique(f"{chart_id}-series-{slug(name)}"),
+            axis=2 if name in right else 1,
+            label=f"{name} (right)" if name in right else name,
         )
         for i, name in enumerate(ys)
     ]
@@ -659,7 +674,9 @@ def _legend(
     size = f * 0.85
     swatch = f * 0.8
     gap = f * 1.2
-    entries = [(s, swatch + f * 0.4 + _text_width(s.name, size)) for s in series]
+    entries = [
+        (s, swatch + f * 0.4 + _text_width(s.label or s.name, size)) for s in series
+    ]
     rows: list[list[tuple[_Series, float]]] = [[]]
     used = 0.0
     for entry in entries:
@@ -694,7 +711,13 @@ def _legend(
                 stroke = svg.el(g, "line", x1=x, y1=cy, x2=x + swatch, y2=cy)
                 stroke.set("style", _style(stroke=s.colour, stroke_width=f * 0.12))
             svg.text(
-                g, x + swatch + f * 0.4, cy + size * 0.35, s.name, size, TEXT, "start"
+                g,
+                x + swatch + f * 0.4,
+                cy + size * 0.35,
+                s.label or s.name,
+                size,
+                TEXT,
+                "start",
             )
             x += w + gap
     return top + line * len(rows)
@@ -703,9 +726,14 @@ def _legend(
 # ── Cartesian charts ──
 
 
-def _domain(chart: Chart, series: list[_Series], categories: int) -> list[float]:
+def _domain(
+    chart: Chart, every: list[_Series], categories: int, axis: int = 1
+) -> list[float]:
     """The value axis ticks: bars and areas always include zero (their marks
-    grow from it), lines and dots span their data."""
+    grow from it), lines and dots span their data. ``y_min``/``y_max`` (or
+    ``y2_min``/``y2_max`` for the right axis) fix the ends instead: they are
+    the first and last ticks, the round steps between kept."""
+    series = [s for s in every if s.axis == axis]
     stacked = chart.stacked and chart.kind in (ChartKind.BAR, ChartKind.AREA)
     if stacked:
         highs = [
@@ -722,7 +750,126 @@ def _domain(chart: Chart, series: list[_Series], categories: int) -> list[float]
         lo, hi = min(values), max(values)
     if chart.kind in (ChartKind.BAR, ChartKind.AREA):
         lo, hi = min(lo, 0.0), max(hi, 0.0)
-    return nice_ticks(lo, hi)
+    fixed_lo, fixed_hi = (
+        (chart.y_min, chart.y_max) if axis == 1 else (chart.y2_min, chart.y2_max)
+    )
+    return _bounded(lo, hi, fixed_lo, fixed_hi)
+
+
+def _bounded(
+    lo: float, hi: float, fixed_lo: float | None, fixed_hi: float | None
+) -> list[float]:
+    """Round ticks from ``lo`` to ``hi``, with either end fixed where given."""
+    if fixed_lo is not None:
+        lo = fixed_lo
+    if fixed_hi is not None:
+        hi = fixed_hi
+    if hi <= lo:  # one end fixed beyond all the data
+        if fixed_hi is None:
+            hi = lo + (abs(lo) or 1.0)
+        else:
+            lo = hi - (abs(hi) or 1.0)
+    ticks = nice_ticks(lo, hi)
+    step = ticks[1] - ticks[0] if len(ticks) > 1 else hi - lo
+    # An end's own label, the round ticks too close to it dropped.
+    if fixed_lo is not None:
+        ticks = [fixed_lo] + [t for t in ticks if t > fixed_lo + step * 0.35]
+    if fixed_hi is not None:
+        ticks = [t for t in ticks if t < fixed_hi - step * 0.35] + [fixed_hi]
+    return ticks
+
+
+def _scale(
+    ticks: list[float], frame: _Frame, horizontal: bool
+) -> Callable[[float], float]:
+    """A value's position along the value axis these ticks span."""
+    lo, hi = ticks[0], ticks[-1]
+
+    def pos(v: float) -> float:
+        t = (v - lo) / (hi - lo)
+        return (
+            frame.left + t * frame.width
+            if horizontal
+            else frame.bottom - t * frame.height
+        )
+
+    return pos
+
+
+def _right_axis(svg: _Svg, axes: SvgElement, ticks: list[float], frame: _Frame) -> None:
+    """The second value axis: tick labels along the plot's right edge (the
+    gridlines are the left axis's)."""
+    f = frame.font
+    size = f * 0.8
+    pos = _scale(ticks, frame, False)
+    hair = max(1.0, f * 0.05)
+    edge = svg.el(
+        axes, "line", x1=frame.right, y1=frame.top, x2=frame.right, y2=frame.bottom
+    )
+    edge.set("style", _style(stroke=GRID, stroke_width=hair))
+    for t in ticks:
+        p = pos(t)
+        mark = svg.el(
+            axes, "line", x1=frame.right, y1=p, x2=frame.right + f * 0.25, y2=p
+        )
+        mark.set("style", _style(stroke=MUTED, stroke_width=hair))
+        svg.text(
+            axes,
+            frame.right + f * 0.4,
+            p + size * 0.35,
+            format_tick(t, ticks),
+            size,
+            anchor="start",
+        )
+
+
+def _clipped(chart: Chart) -> bool:
+    """Whether a fixed axis end can leave values outside the plot."""
+    return any(
+        v is not None for v in (chart.y_min, chart.y_max, chart.y2_min, chart.y2_max)
+    )
+
+
+def _marks(
+    svg: _Svg, s: _Series, chart: Chart, frame: _Frame, horizontal: bool = False
+) -> SvgElement:
+    """A series' marks; cut off at the plot when an axis end is fixed (a value
+    past it would otherwise be drawn over the labels)."""
+    assert s.group is not None
+    marks = svg.group(s.group, "inkflow-chart-marks")
+    if not _clipped(chart):
+        return marks
+    clip_id = f"{_chart_id([s])}-clip"
+    if svg.root.find(f".//*[@id='{clip_id}']") is None:
+        defs = svg.root.find(f"{{{ns.SVG}}}defs")
+        if defs is None:
+            defs = etree.Element(f"{{{ns.SVG}}}defs")
+            svg.root.insert(0, defs)
+        clip = svg.el(defs, "clipPath", id=clip_id)
+        # Room along the categories (end dots); the value axis cut exactly
+        # but for a mark's own width.
+        f = frame.font
+        pad_v, pad_c = f * 0.3, f * 1.5
+        if horizontal:
+            svg.el(
+                clip,
+                "rect",
+                x=frame.left - pad_v,
+                y=frame.top - pad_c,
+                width=frame.width + 2 * pad_v,
+                height=frame.height + 2 * pad_c,
+            )
+        else:
+            svg.el(
+                clip,
+                "rect",
+                x=frame.left - pad_c,
+                y=frame.top - pad_v,
+                width=frame.width + 2 * pad_c,
+                height=frame.height + 2 * pad_v,
+            )
+    marks.set("clip-path", f"url(#{clip_id})")
+    return marks
 
 
 def _value_axis(
@@ -776,11 +923,20 @@ def _value_axis(
 
 
 def _plot_frame(
-    frame: _Frame, ticks: list[float], categories: list[str], horizontal: bool
+    frame: _Frame,
+    ticks: list[float],
+    categories: list[str],
+    horizontal: bool,
+    ticks2: list[float] | None = None,
 ) -> None:
-    """Make room for tick labels (left) and category labels (below or left)."""
+    """Make room for tick labels (left, and right for a second axis) and
+    category labels (below or left)."""
     f = frame.font
     size = f * 0.8
+    if ticks2:
+        frame.right -= (
+            max(_text_width(format_tick(t, ticks2), size) for t in ticks2) + f * 0.6
+        )
     if horizontal:
         widest = max((_text_width(c, size) for c in categories), default=0.0)
         frame.left += min(widest, frame.width * 0.35) + f * 0.5
@@ -868,11 +1024,13 @@ def _bars(
     horizontal = chart.horizontal
     n = len(categories)
     ticks = _domain(chart, series, n)
-    _plot_frame(frame, ticks, categories, horizontal)
+    ticks2 = _domain(chart, series, n, 2) if any(s.axis == 2 for s in series) else None
+    _plot_frame(frame, ticks, categories, horizontal, ticks2)
     axes, zero = _value_axis(svg, ticks, frame, horizontal, _chart_id(series))
+    if ticks2:
+        _right_axis(svg, axes, ticks2, frame)
     _category_labels(svg, axes, categories, frame, horizontal, points=False)
     f = frame.font
-    lo, hi = ticks[0], ticks[-1]
     span = frame.height if horizontal else frame.width
     band = span / n
     gap = max(2.0, f * 0.1)
@@ -884,20 +1042,17 @@ def _bars(
     group = thick * k + gap * (k - 1)
     radius = f * 0.25
     size = f * 0.75
-
-    def pos(v: float) -> float:
-        t = (v - lo) / (hi - lo)
-        return (
-            frame.left + t * frame.width
-            if horizontal
-            else frame.bottom - t * frame.height
-        )
+    scales = {1: _scale(ticks, frame, horizontal)}
+    zeros = {1: zero}
+    if ticks2:
+        scales[2] = _scale(ticks2, frame, horizontal)
+        zeros[2] = scales[2](min(max(0.0, ticks2[0]), ticks2[-1]))
 
     up = [0.0] * n
     down = [0.0] * n
     for si, s in enumerate(series):
-        assert s.group is not None
-        marks = svg.group(s.group, "inkflow-chart-marks")
+        pos = scales[s.axis]
+        marks = _marks(svg, s, chart, frame, horizontal)
         for i, value in enumerate(s.values):
             if value is None:
                 continue
@@ -924,7 +1079,7 @@ def _bars(
                 )
                 r = radius if top_segment else 0.0
             else:
-                base, end = zero, pos(value)
+                base, end = zeros[s.axis], pos(value)
                 r = radius
             bar = svg.el(
                 marks, "path", d=_bar_path(along, thick, base, end, r, horizontal)
@@ -975,7 +1130,8 @@ def _lines(
 ) -> None:
     n = len(categories)
     ticks = _domain(chart, series, n)
-    _plot_frame(frame, ticks, categories, horizontal=False)
+    ticks2 = _domain(chart, series, n, 2) if any(s.axis == 2 for s in series) else None
+    _plot_frame(frame, ticks, categories, horizontal=False, ticks2=ticks2)
     # Lines run end to end: room for the first and last labels' halves.
     edge = min(
         frame.width * 0.15,
@@ -988,23 +1144,23 @@ def _lines(
     frame.left += edge
     frame.right -= edge
     axes, _ = _value_axis(svg, ticks, frame, False, _chart_id(series))
+    if ticks2:
+        _right_axis(svg, axes, ticks2, frame)
     _category_labels(svg, axes, categories, frame, False, points=True)
     f = frame.font
-    lo, hi = ticks[0], ticks[-1]
+    all_ticks = {1: ticks, 2: ticks2 or ticks}
     area = chart.kind == ChartKind.AREA
     stacked = area and chart.stacked
     stroke = max(2.0, f * 0.12)
     dot = max(4.0, f * 0.22)
     size = f * 0.75
 
-    def y_of(v: float) -> float:
-        return frame.bottom - (v - lo) / (hi - lo) * frame.height
-
     xs = [frame.left + _band_centre(i, n, frame.width, True) for i in range(n)]
     below = [0.0] * n
     for s in series:
-        assert s.group is not None
-        marks = svg.group(s.group, "inkflow-chart-marks")
+        y_of = _scale(all_ticks[s.axis], frame, False)
+        lo, hi = all_ticks[s.axis][0], all_ticks[s.axis][-1]
+        marks = _marks(svg, s, chart, frame)
         if stacked:
             tops = [below[i] + (s.values[i] or 0.0) for i in range(n)]
             runs = [list(range(n))]
@@ -1092,19 +1248,24 @@ def _scatter(
         raise ChartError("no numbers to plot")
     xticks = nice_ticks(min(present), max(present))
     yticks = _domain(chart, series, len(xs))
+    yticks2 = (
+        _domain(chart, series, len(xs), 2) if any(s.axis == 2 for s in series) else None
+    )
     f = frame.font
     size = f * 0.8
-    _plot_frame(frame, yticks, [], horizontal=False)
-    frame.right -= _text_width(format_tick(xticks[-1], xticks), size) / 2
+    _plot_frame(frame, yticks, [], horizontal=False, ticks2=yticks2)
+    if not yticks2:
+        frame.right -= _text_width(format_tick(xticks[-1], xticks), size) / 2
     axes, _ = _value_axis(svg, yticks, frame, False, _chart_id(series))
+    if yticks2:
+        _right_axis(svg, axes, yticks2, frame)
     x0, x1 = xticks[0], xticks[-1]
-    y0, y1 = yticks[0], yticks[-1]
+    scales = {1: _scale(yticks, frame, False)}
+    if yticks2:
+        scales[2] = _scale(yticks2, frame, False)
 
     def px(v: float) -> float:
         return frame.left + (v - x0) / (x1 - x0) * frame.width
-
-    def py(v: float) -> float:
-        return frame.bottom - (v - y0) / (y1 - y0) * frame.height
 
     hair = max(1.0, f * 0.05)
     for t in xticks:
@@ -1113,8 +1274,8 @@ def _scatter(
         svg.text(axes, px(t), frame.bottom + size * 1.3, format_tick(t, xticks), size)
     r = max(4.0, f * 0.3)
     for s in series:
-        assert s.group is not None
-        marks = svg.group(s.group, "inkflow-chart-marks")
+        py = scales[s.axis]
+        marks = _marks(svg, s, chart, frame)
         for xv, yv in zip(xs, s.values, strict=True):
             if xv is None or yv is None:
                 continue
@@ -1232,8 +1393,28 @@ _FENCE_KEYS = frozenset(
         "data",
         "id",
         "aspect",
+        "y_min",
+        "y_max",
+        "y2",
+        "y2_min",
+        "y2_max",
     }
 )
+
+
+def _float_option(options: dict[str, str], key: str) -> float | None:
+    text = options.get(key, "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        raise ChartError(f"{key} {text!r} is not a number") from None
+
+
+def _list_option(options: dict[str, str], key: str) -> list[str] | None:
+    text = options.get(key)
+    return [c.strip() for c in text.split(",") if c.strip()] if text else None
 
 
 @dataclass(frozen=True)
@@ -1255,7 +1436,7 @@ def parse_fence(body: str) -> FenceChart:
             table_lines.append(stripped)
             continue
         key, sep, value = stripped.partition(":")
-        key = key.strip().lower()
+        key = key.strip().lower().replace("-", "_")
         if not sep or key not in _FENCE_KEYS:
             raise ChartError(f"unknown chart option {stripped!r}")
         options[key] = value.strip()
@@ -1263,7 +1444,6 @@ def parse_fence(body: str) -> FenceChart:
         kind = ChartKind(options.get("kind", "bar").lower())
     except ValueError:
         raise ChartError(f"unknown chart kind {options['kind']!r}") from None
-    y = options.get("y")
     legend = options.get("legend")
     table = parse_markdown_table("\n".join(table_lines)) if table_lines else None
     if table is None and not options.get("data"):
@@ -1273,13 +1453,18 @@ def parse_fence(body: str) -> FenceChart:
         data=table.to_columns() if table is not None else None,
         kind=kind,
         x=options.get("x") or None,
-        y=[c.strip() for c in y.split(",") if c.strip()] if y else None,
+        y=_list_option(options, "y"),
         title=options.get("title") or None,
         stacked=options.get("stacked", "").lower() in _TRUE,
         horizontal=options.get("horizontal", "").lower() in _TRUE,
         labels=options.get("labels", "").lower() in _TRUE,
         legend=None if legend is None else legend.lower() in _TRUE,
         donut=options.get("donut", "").lower() in _TRUE,
+        y_min=_float_option(options, "y_min"),
+        y_max=_float_option(options, "y_max"),
+        y2=_list_option(options, "y2"),
+        y2_min=_float_option(options, "y2_min"),
+        y2_max=_float_option(options, "y2_max"),
     )
     return FenceChart(chart, options.get("id") or None, _aspect(options.get("aspect")))
 

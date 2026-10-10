@@ -3098,8 +3098,23 @@
       horizontal: false,
       legend: null,
       labels: false,
-      donut: false
+      donut: false,
+      y_min: null,
+      y_max: null,
+      y2: null,
+      y2_min: null,
+      y2_max: null
     };
+  }
+  function secondAxisAllowed(s) {
+    if (s.kind === "pie") return false;
+    if (s.stacked && (s.kind === "bar" || s.kind === "area")) return false;
+    return !(s.horizontal && s.kind === "bar");
+  }
+  function toggleRight(s, column, on2) {
+    const now = (s.y2 ?? []).filter((c) => c !== column);
+    const next = on2 ? [...now, column] : now;
+    return next.length ? next : null;
   }
   function sampleGrid() {
     return {
@@ -3251,7 +3266,8 @@
       settings: {
         ...s,
         x: s.x === name2 ? null : s.x,
-        y: s.y ? s.y.filter((c) => c !== name2) : null
+        y: s.y ? s.y.filter((c) => c !== name2) : null,
+        y2: toggleRight(s, name2, false)
       }
     };
   }
@@ -3265,7 +3281,8 @@
       settings: {
         ...s,
         x: s.x === old ? name2 : s.x,
-        y: s.y ? s.y.map((c) => c === old ? name2 : c) : null
+        y: s.y ? s.y.map((c) => c === old ? name2 : c) : null,
+        y2: s.y2 ? s.y2.map((c) => c === old ? name2 : c) : null
       }
     };
   }
@@ -5774,8 +5791,27 @@
       horizontal: f.horizontal === true,
       legend: typeof f.legend === "boolean" ? f.legend : null,
       labels: f.labels === true,
-      donut: f.donut === true
+      donut: f.donut === true,
+      y_min: typeof f.y_min === "number" ? f.y_min : null,
+      y_max: typeof f.y_max === "number" ? f.y_max : null,
+      y2: Array.isArray(f.y2) ? f.y2 : null,
+      y2_min: typeof f.y2_min === "number" ? f.y2_min : null,
+      y2_max: typeof f.y2_max === "number" ? f.y2_max : null
     };
+  }
+  function rangeInput(value, commit, placeholder = "auto") {
+    const input = h("input", {
+      type: "number",
+      step: "any",
+      class: "chart-range",
+      placeholder,
+      value: value == null ? "" : String(value)
+    });
+    input.addEventListener("change", () => {
+      const v = input.value.trim();
+      commit(v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+    });
+    return input;
   }
   function newChartBox(at2) {
     const vb = slideRoot()?.viewBox.baseVal;
@@ -6053,16 +6089,31 @@
       );
       const series = h("div", { class: "chart-series" });
       const choices = grid.columns.filter((c) => c !== x);
+      const twoAxes = secondAxisAllowed(settings);
       for (const c of choices) {
         const usable = numeric.includes(c);
         const box = check(c, shown.includes(c), (on2) => {
           settings.y = toggleSeries(grid, settings, c, on2);
+          if (!on2) settings.y2 = toggleRight(settings, c, false);
         });
         if (!usable) {
           box.classList.add("off");
           box.title = "Not all numbers";
         }
-        series.append(box);
+        if (twoAxes && usable && shown.includes(c)) {
+          const right = check(
+            "right axis",
+            (settings.y2 ?? []).includes(c),
+            (on2) => {
+              settings.y2 = toggleRight(settings, c, on2);
+            }
+          );
+          right.classList.add("chart-right");
+          right.title = `Draw ${c} against a second axis, on the right`;
+          series.append(
+            h("span", { class: "chart-series-row" }, box, right)
+          );
+        } else series.append(box);
       }
       fields.append(
         h(
@@ -6099,6 +6150,42 @@
           settings.labels = v;
         })
       );
+      const range = (label4, lo, hi) => field(
+        label4,
+        h(
+          "span",
+          { class: "chart-range-row" },
+          rangeInput(
+            settings[lo],
+            (v) => {
+              settings[lo] = v;
+              schedule2();
+            },
+            "from"
+          ),
+          h("span", { class: "hint" }, "to"),
+          rangeInput(
+            settings[hi],
+            (v) => {
+              settings[hi] = v;
+              schedule2();
+            },
+            "auto"
+          )
+        )
+      );
+      if (kind !== "pie") {
+        fields.append(
+          range(
+            settings.y2 ? "Left axis" : "Value axis",
+            "y_min",
+            "y_max"
+          )
+        );
+        if (settings.y2 && twoAxes) {
+          fields.append(range("Right axis", "y2_min", "y2_max"));
+        }
+      }
       fields.append(
         opts2,
         field(
@@ -7622,6 +7709,7 @@
       return row2(label4, box);
     };
     const series = h("div", { class: "chart-series" });
+    const twoAxes = secondAxisAllowed(s);
     for (const c of grid.columns.filter((c2) => c2 !== x)) {
       const box = h("input", { type: "checkbox" });
       box.checked = shown.includes(c);
@@ -7632,9 +7720,36 @@
         );
         const auto = numeric.filter((n2) => n2 !== x);
         const same = next.length === auto.length && next.every((n2, i) => n2 === auto[i]);
-        commit({ y: same ? null : next });
+        commit({
+          y: same ? null : next,
+          ...box.checked ? {} : { y2: toggleRight(s, c, false) }
+        });
       });
-      series.append(h("label", { class: "chart-check" }, box, c));
+      const entry = h("label", { class: "chart-check" }, box, c);
+      if (twoAxes && shown.includes(c) && numeric.includes(c)) {
+        const right = h("input", { type: "checkbox" });
+        right.checked = (s.y2 ?? []).includes(c);
+        right.addEventListener(
+          "change",
+          () => commit({ y2: toggleRight(s, c, right.checked) })
+        );
+        series.append(
+          h(
+            "span",
+            { class: "chart-series-row" },
+            entry,
+            h(
+              "label",
+              {
+                class: "chart-check chart-right",
+                title: `Draw ${c} against a second axis, on the right`
+              },
+              right,
+              "right axis"
+            )
+          )
+        );
+      } else series.append(entry);
     }
     const rows = [
       row2(
@@ -7664,6 +7779,29 @@
         textInput(s.title ?? "", (v) => commit({ title: v }), "none")
       )
     ];
+    const range = (label4, lo, hi) => h(
+      "div",
+      { class: "prop-row" },
+      h(
+        "span",
+        {
+          class: "prop-label",
+          title: "Where the axis starts and ends; empty: from the data"
+        },
+        label4
+      ),
+      h(
+        "span",
+        { class: "chart-range-row" },
+        rangeInput(s[lo], (v) => commit({ [lo]: v }), "from"),
+        h("span", { class: "hint" }, "to"),
+        rangeInput(s[hi], (v) => commit({ [hi]: v }), "auto")
+      )
+    );
+    if (s.kind !== "pie") {
+      rows.push(range(s.y2 ? "Left axis" : "Value axis", "y_min", "y_max"));
+      if (s.y2 && twoAxes) rows.push(range("Right axis", "y2_min", "y2_max"));
+    }
     if (s.kind === "bar" || s.kind === "area") {
       rows.push(check("Stacked", s.stacked, (v) => commit({ stacked: v })));
     }

@@ -117,12 +117,14 @@ Slide(
 ```
 
 Kinds: `BAR` (`stacked=`, `horizontal=`), `LINE`, `AREA` (`stacked=`),
-`SCATTER`, `PIE` (`donut=`). `Chart(data={"col": [...], ...})` writes the data
+`SCATTER`, `PIE` (`donut=`). `y_min=`/`y_max=` fix the value axis's ends;
+`y2=["col"]` measures those columns on a second axis on the right (`y2_min=`,
+`y2_max=`; not for stacked or horizontal bars). `Chart(data={"col": [...], ...})` writes the data
 inline; `.tsv` and `.json` (records or columns) work too. Each series is the
 group `<zone>-series-<column>` (pie slices `<zone>-slice-<category>`). In
 Markdown, a ```` ```chart ```` block takes `key: value` lines (`kind`, `x`,
 `y: a, b`, `title`, `stacked`, `horizontal`, `labels`, `legend`, `donut`,
-`id`, `aspect: 4:3`) and either `data: ../data/x.csv` (relative to the `.md`)
+`y_min`, `y_max`, `y2: c`, `y2_min`, `y2_max`, `id`, `aspect: 4:3`) and either `data: ../data/x.csv` (relative to the `.md`)
 or a Markdown table. To change a chart, edit its data file; never edit the
 drawn SVG.
 

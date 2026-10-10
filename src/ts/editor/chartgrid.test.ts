@@ -13,6 +13,8 @@ import {
     removeColumn,
     removeRow,
     renameColumn,
+    secondAxisAllowed,
+    toggleRight,
     toggleSeries,
     trimmed,
     xColumn,
@@ -149,5 +151,37 @@ describe("rows and columns", () => {
         expect(
             trimmed({ columns: ["a"], rows: [["1"], [" "], [""], ["2"]] }).rows,
         ).toEqual([["1"], ["2"]]);
+    });
+});
+
+describe("second axis", () => {
+    it("is offered where the renderer draws one", () => {
+        const s = defaultSettings();
+        expect(secondAxisAllowed(s)).toBe(true);
+        expect(secondAxisAllowed({ ...s, kind: "line" })).toBe(true);
+        expect(secondAxisAllowed({ ...s, stacked: true })).toBe(false);
+        expect(secondAxisAllowed({ ...s, horizontal: true })).toBe(false);
+        expect(secondAxisAllowed({ ...s, kind: "pie" })).toBe(false);
+        // Stacking only matters to bars and areas.
+        expect(secondAxisAllowed({ ...s, kind: "line", stacked: true })).toBe(
+            true,
+        );
+    });
+
+    it("moves series right and back, none left being null", () => {
+        const s = defaultSettings();
+        const one = toggleRight(s, "rate", true);
+        expect(one).toEqual(["rate"]);
+        expect(toggleRight({ ...s, y2: one }, "rate", false)).toBeNull();
+    });
+
+    it("follows a renamed or removed column", () => {
+        const grid: Grid = {
+            columns: ["m", "a", "b"],
+            rows: [["x", "1", "2"]],
+        };
+        const s = { ...defaultSettings(), y2: ["b"] };
+        expect(renameColumn(grid, 2, "c", s).settings.y2).toEqual(["c"]);
+        expect(removeColumn(grid, 2, s).settings.y2).toBeNull();
     });
 });

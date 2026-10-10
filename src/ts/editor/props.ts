@@ -31,8 +31,13 @@ import {
     slideSize,
     zoneName,
 } from "./canvas";
-import { chartSettings, editChart } from "./chart";
-import { CHART_KINDS, xColumn } from "./chartgrid";
+import { chartSettings, editChart, rangeInput } from "./chart";
+import {
+    CHART_KINDS,
+    secondAxisAllowed,
+    toggleRight,
+    xColumn,
+} from "./chartgrid";
 import { parseConnection } from "./connectors";
 import {
     isCropped,
@@ -451,6 +456,7 @@ function chartSection(
         return row(label, box);
     };
     const series = h("div", { class: "chart-series" });
+    const twoAxes = secondAxisAllowed(s);
     for (const c of grid.columns.filter((c) => c !== x)) {
         const box = h("input", { type: "checkbox" });
         box.checked = shown.includes(c);
@@ -463,9 +469,35 @@ function chartSection(
             const same =
                 next.length === auto.length &&
                 next.every((n, i) => n === auto[i]);
-            commit({ y: same ? null : next });
+            commit({
+                y: same ? null : next,
+                ...(box.checked ? {} : { y2: toggleRight(s, c, false) }),
+            });
         });
-        series.append(h("label", { class: "chart-check" }, box, c));
+        const entry = h("label", { class: "chart-check" }, box, c);
+        if (twoAxes && shown.includes(c) && numeric.includes(c)) {
+            const right = h("input", { type: "checkbox" });
+            right.checked = (s.y2 ?? []).includes(c);
+            right.addEventListener("change", () =>
+                commit({ y2: toggleRight(s, c, right.checked) }),
+            );
+            series.append(
+                h(
+                    "span",
+                    { class: "chart-series-row" },
+                    entry,
+                    h(
+                        "label",
+                        {
+                            class: "chart-check chart-right",
+                            title: `Draw ${c} against a second axis, on the right`,
+                        },
+                        right,
+                        "right axis",
+                    ),
+                ),
+            );
+        } else series.append(entry);
     }
     const rows: Node[] = [
         row(
@@ -495,6 +527,34 @@ function chartSection(
             textInput(s.title ?? "", (v) => commit({ title: v }), "none"),
         ),
     ];
+    const range = (
+        label: string,
+        lo: "y_min" | "y2_min",
+        hi: "y_max" | "y2_max",
+    ) =>
+        h(
+            "div",
+            { class: "prop-row" },
+            h(
+                "span",
+                {
+                    class: "prop-label",
+                    title: "Where the axis starts and ends; empty: from the data",
+                },
+                label,
+            ),
+            h(
+                "span",
+                { class: "chart-range-row" },
+                rangeInput(s[lo], (v) => commit({ [lo]: v }), "from"),
+                h("span", { class: "hint" }, "to"),
+                rangeInput(s[hi], (v) => commit({ [hi]: v }), "auto"),
+            ),
+        );
+    if (s.kind !== "pie") {
+        rows.push(range(s.y2 ? "Left axis" : "Value axis", "y_min", "y_max"));
+        if (s.y2 && twoAxes) rows.push(range("Right axis", "y2_min", "y2_max"));
+    }
     if (s.kind === "bar" || s.kind === "area") {
         rows.push(check("Stacked", s.stacked, (v) => commit({ stacked: v })));
     }

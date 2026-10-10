@@ -224,6 +224,20 @@ class Chart:
     """Write each value at its bar, point or slice."""
     donut: bool = False
     """Cut the middle out of a pie."""
+    y_min: float | None = None
+    """Where the value axis starts. ``None``: from the data (bars and areas
+    from zero). Values beyond ``y_min``/``y_max`` are cut off at the plot."""
+    y_max: float | None = None
+    """Where the value axis ends. ``None``: from the data."""
+    y2: list[str] | None = None
+    """Columns drawn against a second value axis on the right, with a scale of
+    their own (a rate next to totals, say); plotted even when ``y`` leaves
+    them out, and marked "(right)" in the legend. Bars (side by side), lines,
+    areas and scatter; not with stacked or horizontal bars."""
+    y2_min: float | None = None
+    """Where the right axis starts. ``None``: from its data."""
+    y2_max: float | None = None
+    """Where the right axis ends. ``None``: from its data."""
     data: dict[str, list[ChartValue]] | None = None
     """The columns inline, ``{column: [values]}``, instead of a file."""
 
@@ -233,6 +247,14 @@ class Chart:
         self.kind = ChartKind(self.kind)
         if isinstance(self.y, str):
             self.y = [self.y]
+        if isinstance(self.y2, str):
+            self.y2 = [self.y2]
+        for lo, hi, name in (
+            (self.y_min, self.y_max, "y"),
+            (self.y2_min, self.y2_max, "y2"),
+        ):
+            if lo is not None and hi is not None and lo >= hi:
+                raise ValueError(f"Chart {name}_min must be below {name}_max")
 
 
 ZoneContent = str | Media | TextBox | Chart

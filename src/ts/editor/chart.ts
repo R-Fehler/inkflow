@@ -24,6 +24,8 @@ import {
     removeRow,
     renameColumn,
     sampleGrid,
+    secondAxisAllowed,
+    toggleRight,
     toggleSeries,
     trimmed,
     xColumn,
@@ -59,7 +61,32 @@ export function chartSettings(value: ZoneValue): ChartSettings {
         legend: typeof f.legend === "boolean" ? f.legend : null,
         labels: f.labels === true,
         donut: f.donut === true,
+        y_min: typeof f.y_min === "number" ? f.y_min : null,
+        y_max: typeof f.y_max === "number" ? f.y_max : null,
+        y2: Array.isArray(f.y2) ? f.y2 : null,
+        y2_min: typeof f.y2_min === "number" ? f.y2_min : null,
+        y2_max: typeof f.y2_max === "number" ? f.y2_max : null,
     };
+}
+
+/** A number field where empty means "from the data" (null). */
+export function rangeInput(
+    value: number | null,
+    commit: (v: number | null) => void,
+    placeholder = "auto",
+): HTMLInputElement {
+    const input = h("input", {
+        type: "number",
+        step: "any",
+        class: "chart-range",
+        placeholder,
+        value: value == null ? "" : String(value),
+    }) as HTMLInputElement;
+    input.addEventListener("change", () => {
+        const v = input.value.trim();
+        commit(v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+    });
+    return input;
 }
 
 // The size a new chart gets: 60% of the slide's width, 16:9.
@@ -378,16 +405,31 @@ function openChartDialog(
         );
         const series = h("div", { class: "chart-series" });
         const choices = grid.columns.filter((c) => c !== x);
+        const twoAxes = secondAxisAllowed(settings);
         for (const c of choices) {
             const usable = numeric.includes(c);
             const box = check(c, shown.includes(c), (on) => {
                 settings.y = toggleSeries(grid, settings, c, on);
+                if (!on) settings.y2 = toggleRight(settings, c, false);
             });
             if (!usable) {
                 box.classList.add("off");
                 box.title = "Not all numbers";
             }
-            series.append(box);
+            if (twoAxes && usable && shown.includes(c)) {
+                const right = check(
+                    "right axis",
+                    (settings.y2 ?? []).includes(c),
+                    (on) => {
+                        settings.y2 = toggleRight(settings, c, on);
+                    },
+                );
+                right.classList.add("chart-right");
+                right.title = `Draw ${c} against a second axis, on the right`;
+                series.append(
+                    h("span", { class: "chart-series-row" }, box, right),
+                );
+            } else series.append(box);
         }
         fields.append(
             h(
@@ -426,6 +468,47 @@ function openChartDialog(
                 settings.labels = v;
             }),
         );
+        const range = (
+            label: string,
+            lo: "y_min" | "y2_min",
+            hi: "y_max" | "y2_max",
+        ) =>
+            field(
+                label,
+                h(
+                    "span",
+                    { class: "chart-range-row" },
+                    rangeInput(
+                        settings[lo],
+                        (v) => {
+                            settings[lo] = v;
+                            schedule();
+                        },
+                        "from",
+                    ),
+                    h("span", { class: "hint" }, "to"),
+                    rangeInput(
+                        settings[hi],
+                        (v) => {
+                            settings[hi] = v;
+                            schedule();
+                        },
+                        "auto",
+                    ),
+                ),
+            );
+        if (kind !== "pie") {
+            fields.append(
+                range(
+                    settings.y2 ? "Left axis" : "Value axis",
+                    "y_min",
+                    "y_max",
+                ),
+            );
+            if (settings.y2 && twoAxes) {
+                fields.append(range("Right axis", "y2_min", "y2_max"));
+            }
+        }
         fields.append(
             opts,
             field(

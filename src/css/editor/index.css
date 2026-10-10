@@ -2907,3 +2907,34 @@ body.start-mode #workspace {
 .hint.error {
     color: var(--red);
 }
+
+/* A chart's axis range ("from … to …") and a series' right-axis toggle. */
+.chart-range-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+}
+
+.chart-range-row input.chart-range {
+    flex: 1;
+    min-width: 0;
+    width: 0;
+    height: 26px;
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-line);
+    border-radius: 5px;
+    padding: 0 6px;
+}
+
+.chart-series-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chart-check.chart-right {
+    color: var(--subtext);
+    font-size: 11px;
+}

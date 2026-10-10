@@ -614,7 +614,10 @@ an empty spot, which places it there) opens the chart dialog:
   (and adds a row at the bottom).
 - **The settings**: the kind (bar, line, area, scatter, pie), the column of
   categories, which columns to plot (only columns of numbers can be), a title,
-  stacked, horizontal, donut, value labels and the legend.
+  stacked, horizontal, donut, value labels and the legend. A plotted column's
+  **right axis** box measures it on a second axis on the right (not for stacked
+  or horizontal bars), and the **Left axis** / **Right axis** rows fix an
+  axis's minimum and maximum (left empty, they follow the data).
 - **The preview** is drawn by the server exactly as the slide will draw it, at
   the chart's size and in the deck's theme.
 
