@@ -623,6 +623,45 @@ def plan_slide_paste(project_dir: Path, deck: Deck, bundle: object) -> PastePlan
     return PastePlan(writes, calls, imports, reused)
 
 
+def plan_slide_replace(project_dir: Path, bundle: object) -> PastePlan:
+    """Another version of one slide, taken over in place (the compare view's
+    "Take this slide"): unlike a paste, its files are written at their own
+    paths, so the slide's SVG, Markdown, notes, layouts and pictures become
+    that version's, and its ``Slide(...)`` call needs no rewriting. Files
+    already as they should be are left alone (``reused``)."""
+    if not isinstance(bundle, dict):
+        raise TransferError("there is no slide to take")
+    data = cast("dict[str, object]", bundle)
+    if data.get("type") != "inkflow-slides" or data.get("version") != BUNDLE_VERSION:
+        raise TransferError("there is no slide to take")
+    entries = cast("list[object]", data.get("slides") or [])
+    if len(entries) != 1 or not isinstance(entries[0], dict):
+        raise TransferError("take one slide at a time")
+    raw_files: object = data.get("files") or {}
+    if not isinstance(raw_files, dict):
+        raise TransferError("a malformed slide bundle")
+    writes: dict[str, bytes] = {}
+    reused: list[str] = []
+    for raw_rel, info in cast("dict[str, object]", raw_files).items():
+        rel = _safe_rel(raw_rel)
+        entry = cast("dict[str, str]", info)
+        if entry.get("role") not in ROLES:
+            raise TransferError(f"unknown file role {entry.get('role')!r}")
+        try:
+            payload = base64.b64decode(entry.get("data", ""), validate=True)
+        except ValueError as exc:
+            raise TransferError("a damaged file in the slide bundle") from exc
+        existing = project_dir / rel
+        if existing.is_file() and existing.read_bytes() == payload:
+            reused.append(rel)
+        else:
+            writes[rel] = payload
+    slide = cast("dict[str, object]", entries[0])
+    call = check_slide_code(str(slide.get("code", "")))
+    code = cst.Module([]).code_for_node(call)
+    return PastePlan(writes, [code], _names_used(call), reused)
+
+
 def plan_asset_paste(
     project_dir: Path, files: object
 ) -> tuple[dict[str, bytes], dict[str, str]]:

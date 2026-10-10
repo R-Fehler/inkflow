@@ -18,6 +18,22 @@ export function onCommand(fn: (msg: Record<string, unknown>) => void): void {
     commandHandler = fn;
 }
 
+// Pushes other modules own (the compare view's "compare-*" messages), and
+// what to do each time the connection (re)opens.
+const handlers = new Map<string, (msg: Record<string, unknown>) => void>();
+const connectHooks: (() => void)[] = [];
+
+export function onMessage(
+    type: string,
+    fn: (msg: Record<string, unknown>) => void,
+): void {
+    handlers.set(type, fn);
+}
+
+export function onConnect(fn: () => void): void {
+    connectHooks.push(fn);
+}
+
 export function connected(): boolean {
     return ws !== null && ws.readyState === WebSocket.OPEN;
 }
@@ -46,6 +62,7 @@ export function connect(port: number): void {
         document.body.classList.remove("offline");
         for (const resolve of waiting) resolve();
         waiting = [];
+        for (const fn of connectHooks) fn();
     };
     sock.onclose = () => {
         document.body.classList.add("offline");
@@ -113,6 +130,8 @@ export function connect(port: number): void {
             case "notify":
                 toast(String(msg.message ?? ""));
                 break;
+            default:
+                handlers.get(String(msg.type))?.(msg);
         }
     };
 }

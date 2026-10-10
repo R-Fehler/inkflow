@@ -11,6 +11,7 @@ import {
 } from "./canvas";
 import { initCanvasMenu } from "./canvasmenu";
 import { editChart } from "./chart";
+import { initCompare } from "./compare";
 import { initContext } from "./context";
 import { isCropped, setCropMode, startCrop } from "./crop";
 import { initDecks, showStart } from "./decks";
@@ -150,6 +151,7 @@ function boot(): void {
     initDecks();
     initGit();
     initCanvasMenu();
+    initCompare();
 
     on("slide", () => {
         void finishTextEdit();

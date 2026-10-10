@@ -6,6 +6,7 @@
 // (editor/gitops.py); files it changes reach the editor through the usual
 // rebuild.
 
+import { openCompare, openComparePicker } from "./compare";
 import { closeDialog, openDialog } from "./dialog";
 import { clear, h, toast } from "./dom";
 import { connected, request } from "./net";
@@ -198,6 +199,11 @@ async function openMenu(): Promise<void> {
                 if (await git("init", { lfs: false }))
                     toast("This deck is now versioned with git", "ok");
             }),
+            h("div", { class: "menu-sep" }),
+            menuItem(
+                "Compare with another deck…",
+                () => void openComparePicker(),
+            ),
         );
     } else {
         const n = status.changes?.length ?? 0;
@@ -287,6 +293,7 @@ async function openMenu(): Promise<void> {
                 () => void historyDialog(),
                 !status.hasCommits,
             ),
+            menuItem("Compare…", () => void openComparePicker()),
         );
     }
     const r = button.getBoundingClientRect();
@@ -731,6 +738,25 @@ async function historyDialog(): Promise<void> {
                               h(
                                   "div",
                                   { class: "btn-row" },
+                                  h(
+                                      "button",
+                                      {
+                                          type: "button",
+                                          class: "pbtn",
+                                          title: "Compare with the working copy, slide by slide",
+                                          onclick: () => {
+                                              closeDialog();
+                                              openCompare(
+                                                  { kind: "live" },
+                                                  {
+                                                      kind: "commit",
+                                                      rev: c.sha,
+                                                  },
+                                              );
+                                          },
+                                      },
+                                      "Compare",
+                                  ),
                                   h(
                                       "button",
                                       {

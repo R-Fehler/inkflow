@@ -16,6 +16,7 @@ from inkflow.cli._common import main
 for _submodule in (
     "agent",
     "authoring",
+    "compare",
     "color",
     "present",
     "project",

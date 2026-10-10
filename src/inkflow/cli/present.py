@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 import click
 
@@ -120,6 +121,14 @@ def _already_served(deck_py: Path, path: str, *, open_it: bool) -> bool:
     help="Stop once no editor or presenter page has been open this long "
     + "[default when given: 60]. For a server without a terminal.",
 )
+@click.option(
+    "--compare",
+    "compare_with",
+    default=None,
+    metavar="REV|PATH",
+    help="Open the compare view: the working copy beside a git revision "
+    + "(branch, tag, sha, HEAD~2) or another deck folder.",
+)
 @click.pass_obj
 def edit(
     levels: Levels,
@@ -130,6 +139,7 @@ def edit(
     no_open: bool,
     start: bool,
     quit_when_idle: float | None,
+    compare_with: str | None,
 ) -> None:
     """Open the visual editor: click, drag and type on your slides.
 
@@ -153,14 +163,20 @@ def edit(
     editor again.
     """
     resolved: Path | None
+    page = "/edit"
+    if compare_with:
+        # A path is passed as one the server can find from anywhere.
+        candidate = Path(compare_with).expanduser()
+        spec = str(candidate.resolve()) if candidate.exists() else compare_with
+        page = f"/edit?compare={quote(spec, safe='')}"
     if start or (deck_path == Path("deck.py") and not deck_path.exists()):
         resolved = None
         report("Starting", "no deck here: the editor opens on its start page")
     else:
         resolved = resolve_deck_path(deck_path)
-        if _already_served(resolved, "/edit", open_it=not no_open):
+        if _already_served(resolved, page, open_it=not no_open):
             return
-    open_path = None if no_open else "/edit"
+    open_path = None if no_open else page
     port, ws_port = pick_ports(host, port, ws_port)
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(

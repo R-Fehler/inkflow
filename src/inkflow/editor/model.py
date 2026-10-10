@@ -195,11 +195,14 @@ def _md_json(slide: Slide, project_dir: Path) -> dict[str, object] | None:
 
 
 def build_model(
-    deck: Deck, deck_path: Path, slides: list[SlideData]
+    deck: Deck,
+    deck_path: Path,
+    slides: list[SlideData],
+    deck_module: str = "_inkflow_deck",
 ) -> dict[str, object]:
-    """The editor model for one build. ``slides`` must come from an editor build."""
+    """The editor model for one build. ``slides`` must come from an editor build;
+    ``deck_module`` is the module deck.py ran as (`server.load_deck`)."""
     project_dir = deck_path.parent
-    deck_module = "_inkflow_deck"
     try:
         source = DeckSource.read(deck_path)
         calls = source.slide_calls(expected=len(deck.slides))
