@@ -14,6 +14,7 @@ import {
 } from "./clipboard";
 import { clear, h, icon, toast } from "./dom";
 import { openGallery } from "./gallery";
+import { saveAsLayout } from "./master";
 import { edit } from "./net";
 import { renameSlideFiles } from "./rename";
 import {
@@ -508,6 +509,7 @@ export function openSlideMenu(x: number, y: number, i: number): void {
     menu.append(
         menuItem("Rename files…", () => renameSlideFiles(i), !editable),
     );
+    menu.append(menuItem("Save as layout…", () => saveAsLayout(i), !editable));
     menu.append(menuItem("Delete", () => void deleteSlide(i), !editable));
     menu.append(
         menuItem("Add section here…", () => void addSectionAt(i), !editable),

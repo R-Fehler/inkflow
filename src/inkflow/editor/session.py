@@ -854,7 +854,9 @@ class EditorSession:
         if action == "chart-data":
             return self._chart_data(msg, deck)
         if action == "layout-previews":
-            return {"ok": True, "layouts": layout_previews(deck, self.deck_path)}
+            roots = bool(msg.get("all"))
+            previews = layout_previews(deck, self.deck_path, roots)
+            return {"ok": True, "layouts": previews}
         if action == "master-tree":
             return {"ok": True, "master": master_tree(deck, self.deck_path)}
         if action == "master-render":
@@ -949,6 +951,13 @@ class EditorSession:
             self._refresh_previews(step, refresh)
         coalesce = msg.get("coalesce")
         step.coalesce = coalesce if isinstance(coalesce, str) else None
+        last = self.history.done[-1] if self.history.done else None
+        if msg.get("attach") and last is not None and last.author == self.author:
+            # Bookkeeping that belongs to the edits just made (the Inkscape
+            # previews refreshed on leaving the slide master): part of the
+            # last step, so Undo takes back what the user sees.
+            step.coalesce = last.coalesce = last.coalesce or f"attach-{last.seq}"
+            step.label = last.label
         if step.changes or step.moves:
             self._record(step)
         return {**self._result(step), **extra}

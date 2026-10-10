@@ -7,7 +7,6 @@ import {
     canTransform,
     canTypeInto,
     clearSelection,
-    drawOverlay,
     enterGroup,
     isZone,
     layoutPaper,
@@ -175,17 +174,6 @@ function toggleTheme(): void {
     const root = document.documentElement;
     root.dataset.theme = root.dataset.theme === "light" ? "" : "light";
     render();
-}
-
-function setLayoutMode(on: boolean): void {
-    ed.layoutMode = on;
-    document.body.classList.toggle("layout-mode", on);
-    $("btn-layout").classList.toggle("on", on);
-    enterGroup(null);
-    clearSelection();
-    drawOverlay();
-    emit("layout-mode");
-    if (on) toast("Layout mode: edits change the shared layout files");
 }
 
 function renderStepSelect(): void {
@@ -410,9 +398,6 @@ export function initToolbar(): void {
     $("zoom-in").addEventListener("click", () => setZoom(scale() * 1.25));
     $("zoom-out").addEventListener("click", () => setZoom(scale() / 1.25));
     $("zoom-fit").addEventListener("click", () => setZoom(0));
-    $("btn-layout").addEventListener("click", () =>
-        setLayoutMode(!ed.layoutMode),
-    );
     $("btn-theme").addEventListener("click", toggleTheme);
     $("btn-present").addEventListener("click", present);
     $("btn-fullscreen").addEventListener("click", toggleFullscreen);

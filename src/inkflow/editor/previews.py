@@ -12,8 +12,14 @@ import re
 from pathlib import Path
 
 from inkflow.assets import AssetSource
-from inkflow.editor.model import is_media_zone
-from inkflow.layout import discover_layouts, label_of, layout_zones, layouts_for
+from inkflow.editor.master import sample_zones
+from inkflow.layout import (
+    copy_of,
+    discover_layouts,
+    label_of,
+    layout_zones,
+    layouts_for,
+)
 from inkflow.logging import collect_logs
 from inkflow.manifest import Deck, Slide, ZoneContent
 from inkflow.pipeline import deck_context, process_slide
@@ -76,32 +82,45 @@ def sample_text(zone: str) -> str:
     return _BULLETS
 
 
-def _layouts(deck: Deck, project_dir: Path) -> list[tuple[str, str, Path]]:
+def _layouts(
+    deck: Deck, project_dir: Path, roots: bool = False
+) -> list[tuple[str, str, Path]]:
     """(name, source, path) for every usable layout, the later source winning."""
     seen: dict[str, tuple[str, str, Path]] = {}
     found = discover_layouts(project_dir, deck.theme)
     for label, path in layouts_for(found, deck.effective_size):
         seen[path.stem] = (path.stem, label, path)
     order = {name: i for i, name in enumerate(BUILTIN_ORDER)}
-    entries = [v for k, v in seen.items() if k not in ("base", "poster-base")]
-    # The project's own layouts first, then the built-in order, then the rest.
+    hidden = () if roots else ("base", "poster-base")
+    entries = [v for k, v in seen.items() if k not in hidden]
+    # The project's own layouts first (its copies of the theme's keep their
+    # place), then the built-in order, then the rest.
     return sorted(
         entries,
-        key=lambda e: (e[1] != "local", order.get(e[0], len(order)), e[0]),
+        key=lambda e: (
+            e[1] != "local" or copy_of(e[2]) is not None,
+            order.get(e[0], len(order)),
+            e[0],
+        ),
     )
 
 
-def layout_previews(deck: Deck, deck_path: Path) -> list[dict[str, object]]:
+def layout_previews(
+    deck: Deck, deck_path: Path, roots: bool = False
+) -> list[dict[str, object]]:
+    """Every layout drawn with sample text; with ``roots`` also the
+    backgrounds the others are built on (``base``: the slide master's)."""
     project_dir = deck_path.parent
     ctx = deck_context(deck, project_dir, 1, editor=True)
     out: list[dict[str, object]] = []
-    for name, source, path in _layouts(deck, project_dir):
+    for name, source, path in _layouts(deck, project_dir, roots):
         prefix = {"builtin": "builtin", "theme": "theme"}.get(source, "local")
         try:
             info = layout_zones(path, project_dir, deck.theme)
-            zones: dict[str, ZoneContent] = {
-                z: sample_text(z) for z in info.zones if not is_media_zone(z)
-            }
+            # Sample text, or what a template's zones are for (its hints).
+            zones: dict[str, ZoneContent] = dict(
+                sample_zones(path, project_dir, deck.theme)
+            )
             slide = Slide(f"{prefix}:{name}", zones=zones)
             # A preview that does not build is skipped rather than reported:
             # the deck itself never uses it.
@@ -116,6 +135,7 @@ def layout_previews(deck: Deck, deck_path: Path) -> list[dict[str, object]]:
             {
                 "name": name,
                 "label": label_of(path),
+                "copyOf": copy_of(path) if source == "local" else None,
                 "source": source,
                 "zones": info.zones,
                 "svg": svg,

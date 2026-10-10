@@ -35,7 +35,7 @@ import {
     on,
     type Tool,
 } from "./state";
-import type { SlideModel } from "./types";
+import { refBase, type SlideModel } from "./types";
 import { checkVideo, convertForInsert } from "./videocheck";
 
 const overlay = document.getElementById("overlay") as unknown as SVGSVGElement;
@@ -86,6 +86,8 @@ function waitForModel(
 export async function ensureOwnDrawing(): Promise<boolean> {
     const slide = currentSlide();
     if (!slide) return false;
+    // The slide master draws into the layout or overlay it shows.
+    if (ed.master) return true;
     if (!slide.srcShared) return true;
     if (!ed.model?.deckEditable) {
         toast(
@@ -106,25 +108,39 @@ export async function ensureOwnDrawing(): Promise<boolean> {
     return waitForModel((s) => s.deckIndex === deckIndex && !s.srcShared);
 }
 
+// The file new objects are drawn into: the slide's own, or in the slide
+// master the layout or overlay it shows.
 export function ownSource() {
-    return currentSlide()?.sources?.find((s) => s.role === "slide") ?? null;
+    const sources = currentSlide()?.sources ?? [];
+    if (ed.master) {
+        const target = ed.master.path;
+        return sources.find((s) => s.path === target) ?? null;
+    }
+    return sources.find((s) => s.role === "slide") ?? null;
+}
+
+function ownKey(): number {
+    const src = ownSource();
+    const k = src ? (currentSlide()?.sources ?? []).indexOf(src) : 0;
+    return Math.max(0, k);
 }
 
 // Where new objects go: the entered group, else the topmost unlocked layer of
 // the slide's own file, else its root.
 export function insertParent(): { loc: string; el: Element | null } {
     const svg = slideRoot();
-    if (ed.scope?.getAttribute("data-ink")?.startsWith("0:")) {
+    const key = `${ownKey()}:`;
+    if (ed.scope?.getAttribute("data-ink")?.startsWith(key)) {
         return { loc: ed.scope.getAttribute("data-ink")!, el: ed.scope };
     }
     const layers = svg
-        ? [...svg.querySelectorAll('[data-ink-layer][data-ink^="0:"]')].filter(
-              (l) => !l.hasAttribute("data-ink-locked"),
-          )
+        ? [
+              ...svg.querySelectorAll(`[data-ink-layer][data-ink^="${key}"]`),
+          ].filter((l) => !l.hasAttribute("data-ink-locked"))
         : [];
     const layer = layers[layers.length - 1];
     if (layer) return { loc: layer.getAttribute("data-ink")!, el: layer };
-    return { loc: "0:", el: null };
+    return { loc: key, el: null };
 }
 
 // Slide coordinates → the insertion parent's user space.
@@ -549,7 +565,9 @@ export function zonePlaceholder(zone: string): string {
 export async function zoneText(zone: string): Promise<void> {
     const slide = currentSlide();
     if (!slide) return;
-    const text = zonePlaceholder(zone);
+    // A template's prompt for the zone, else its name.
+    const hint = slide.emptyZones?.find((z) => z.zone === zone)?.hint;
+    const text = hint ?? zonePlaceholder(zone);
     const result = await edit({
         action: "zone-text",
         slide: slide.deckIndex,
@@ -741,6 +759,13 @@ export async function insertVideoFile(
     file: MediaIn,
     at?: { x: number; y: number },
 ): Promise<void> {
+    if (ed.master) {
+        toast(
+            "A video belongs to a slide: add a picture placeholder here, and each slide puts its video in it",
+            "error",
+        );
+        return;
+    }
     if (!(await ensureOwnDrawing())) return;
     const up = await upload(file);
     const src = ownSource();
@@ -813,7 +838,7 @@ export async function insertImageFile(
     const up = await upload(file);
     const src = ownSource();
     if (!up || !src) return;
-    let href = relativePath(src.path, up.path);
+    let href = relativePath(refBase(src), up.path);
     let shown: string | null = up.rel;
     if (isPdfRef(up.path)) {
         const choice = await choosePage(up.path);
@@ -860,7 +885,7 @@ export async function insertDiagramImage(
     const parent = insertParent().el;
     const p = toParent(parent, (slideW - w) / 2, (slideH - ht) / 2);
     return insertXml(
-        `<image href="${relativePath(src.path, path)}" x="${fmt(p.x)}" y="${fmt(p.y)}" width="${fmt(w)}" height="${fmt(ht)}" preserveAspectRatio="xMidYMid meet"/>`,
+        `<image href="${relativePath(refBase(src), path)}" x="${fmt(p.x)}" y="${fmt(p.y)}" width="${fmt(w)}" height="${fmt(ht)}" preserveAspectRatio="xMidYMid meet"/>`,
         "diagram",
     );
 }

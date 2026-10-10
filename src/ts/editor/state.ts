@@ -22,6 +22,18 @@ export const CONNECTOR_TOOLS: Partial<
     curve: "curved",
 };
 
+/** What the slide master shows on the canvas (master.ts): a layout or an
+ * overlay drawn alone (`master-render`), or with a slide's content
+ * (`onSlide`), and the one file whose objects are edited there. */
+export interface MasterView {
+    kind: "layout" | "overlay";
+    path: string; // the file edited (the deck's copy once one is made)
+    name: string;
+    slide: SlideModel;
+    data: SlideData;
+    onSlide: number | null; // deck index of the slide shown, else null
+}
+
 // All mutable editor state, in one place (mirrors presenter/state.ts).
 export const ed = {
     model: null as EditorModel | null,
@@ -30,6 +42,9 @@ export const ed = {
     selection: [] as Selected[],
     scope: null as SVGGElement | null, // group entered by double-click
     layoutMode: false,
+    // The slide master is open (its list replaces the slide list).
+    masterMode: false,
+    master: null as MasterView | null,
     step: null as number | null, // null: every element shown, no build state
     zoom: 0, // 0 = fit to window, else device px per slide unit
     tool: "select" as Tool,
@@ -74,10 +89,12 @@ export function emit(event: string): void {
 }
 
 export function currentSlide(): SlideModel | null {
+    if (ed.master) return ed.master.slide;
     return ed.model?.slides[ed.current] ?? null;
 }
 
 export function currentRendered(): SlideData | null {
+    if (ed.master) return ed.master.data;
     const s = currentSlide();
     if (!s || s.visibleIndex == null) return null;
     return ed.slides[s.visibleIndex] ?? null;

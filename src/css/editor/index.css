@@ -3,6 +3,7 @@
 @import "../shared/ink.css";
 @import "./compare.css";
 @import "./collab.css";
+@import "./master.css";
 
 /* inkflow visual editor. Chrome colours come from theme-vars (the presenter's
    palette); the slide itself is styled by the deck's own CSS (__STYLES__). */
