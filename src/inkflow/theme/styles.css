@@ -221,3 +221,121 @@
     color: var(--inkflow-accent);
     margin-top: 0;
 }
+
+/* poster ------------------------------------------------------------------- */
+/* The poster layouts (poster-*.svg, on the A sizes' shared canvas: 3179 x 4494
+   portrait, 4494 x 3179 landscape). Sizes are in em of the deck's body text,
+   which a print deck sets to 1/80 of the sheet's shorter side: on A0 the body
+   is 30 pt, section headings 52 pt and the title 100 pt, and on a smaller A
+   size all of it in proportion. */
+.layout-poster-base,
+.layout-poster-landscape-base {
+    --poster-gap: 0.6em;
+}
+
+/* Paper white in light mode: a full-page tint wastes ink and needs bleed. */
+[data-theme="light"]
+    :is(.layout-poster-base, .layout-poster-landscape-base)
+    .poster-paper {
+    fill: #fff;
+}
+
+:is(.layout-poster-base, .layout-poster-landscape-base) #zone-title {
+    --inkflow-valign: end;
+}
+:is(.layout-poster-base, .layout-poster-landscape-base)
+    #zone-title
+    .inkflow-content
+    :is(h1, h2, p) {
+    font-size: 3.4em;
+    font-weight: 700;
+    line-height: 1.15;
+    margin: 0;
+    color: var(--inkflow-heading);
+}
+:is(.layout-poster-base, .layout-poster-landscape-base) #zone-authors {
+    --inkflow-valign: center;
+}
+:is(.layout-poster-base, .layout-poster-landscape-base)
+    #zone-authors
+    .inkflow-content {
+    font-size: 1.3em;
+}
+:is(.layout-poster-base, .layout-poster-landscape-base)
+    #zone-affiliations
+    .inkflow-content {
+    color: var(--inkflow-text-muted);
+}
+:is(.layout-poster-base, .layout-poster-landscape-base)
+    :is(#zone-authors, #zone-affiliations)
+    .inkflow-content
+    p {
+    margin: 0;
+}
+:is(.layout-poster-base, .layout-poster-landscape-base) #zone-logos {
+    --inkflow-align: right;
+    --inkflow-valign: center;
+}
+
+/* Sections: a heading in the accent colour over a rule. */
+:is(.layout-poster-base, .layout-poster-landscape-base)
+    :is(#zone-col-1, #zone-col-2, #zone-col-3, #zone-col-4)
+    .inkflow-content
+    h2 {
+    font-size: 1.75em;
+    color: var(--inkflow-accent);
+    border-bottom: 0.06em solid var(--inkflow-accent);
+    padding-bottom: 0.12em;
+    margin: 1.1em 0 0.45em;
+}
+:is(.layout-poster-base, .layout-poster-landscape-base)
+    :is(#zone-col-1, #zone-col-2, #zone-col-3, #zone-col-4)
+    .inkflow-content
+    > :first-child {
+    margin-top: 0;
+}
+:is(.layout-poster-base, .layout-poster-landscape-base)
+    :is(#zone-col-1, #zone-col-2, #zone-col-3, #zone-col-4)
+    .inkflow-content
+    h3 {
+    font-size: 1.3em;
+    margin-top: 0.8em;
+}
+:is(.layout-poster-base, .layout-poster-landscape-base)
+    :is(#zone-col-1, #zone-col-2, #zone-col-3, #zone-col-4)
+    .inkflow-content
+    :is(p, ul, ol) {
+    margin-bottom: var(--poster-gap);
+}
+:is(.layout-poster-base, .layout-poster-landscape-base)
+    :is(#zone-col-1, #zone-col-2, #zone-col-3, #zone-col-4)
+    .inkflow-content
+    img {
+    display: block;
+    max-width: 100%;
+    margin: 0.3em auto var(--poster-gap);
+}
+
+/* Footer: references and a contact line or QR code, at 24 pt on A0. */
+:is(.layout-poster-base, .layout-poster-landscape-base)
+    :is(#zone-references, #zone-contact)
+    .inkflow-content {
+    font-size: 0.8em;
+    line-height: 1.3;
+    color: var(--inkflow-text-muted);
+}
+:is(.layout-poster-base, .layout-poster-landscape-base)
+    :is(#zone-references, #zone-contact)
+    .inkflow-content
+    :is(p, ol, ul, li) {
+    margin-bottom: 0.15em;
+}
+:is(.layout-poster-base, .layout-poster-landscape-base) #zone-contact {
+    --inkflow-align: right;
+}
+:is(.layout-poster-base, .layout-poster-landscape-base)
+    #zone-contact
+    .inkflow-content
+    img {
+    max-height: 4.5em;
+}

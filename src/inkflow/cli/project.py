@@ -53,7 +53,28 @@ def _sync_layout_previews(target: Path) -> None:
     is_flag=True,
     help="Scaffold even into a non-empty directory.",
 )
-def init_cmd(directory: Path, no_git: bool, no_lfs: bool, force: bool) -> None:
+@click.option(
+    "--poster",
+    "poster",
+    is_flag=True,
+    help="A conference poster instead of a talk: one page at a paper size.",
+)
+@click.option(
+    "--size",
+    "size",
+    default=None,
+    metavar="SIZE",
+    help="The poster's paper size: a0 (default), a1, a0-landscape, letter, "
+    + "841x1189mm. Implies --poster.",
+)
+def init_cmd(
+    directory: Path,
+    no_git: bool,
+    no_lfs: bool,
+    force: bool,
+    poster: bool,
+    size: str | None,
+) -> None:
     """Scaffold a new presentation project in DIRECTORY (default: current).
 
     Writes a starter `deck.py`, slides, and a `pyproject.toml` declaring inkflow.
@@ -68,6 +89,11 @@ def init_cmd(directory: Path, no_git: bool, no_lfs: bool, force: bool) -> None:
 
     Refuses to scaffold into a non-empty directory (dotfiles like `.git` are ignored)
     unless `--force` is given.
+
+    `--poster` scaffolds a conference poster instead: `Deck(size="a0")` (or
+    `--size`), one slide on a built-in poster layout with its sections in
+    `slides/poster.md`, a chart from `data/results.csv` and a figure and a logo
+    placeholder in `figures/`. `inkflow export` prints it as a PDF at its size.
     """
     target = directory.resolve()
     if (target / "deck.py").exists():
@@ -79,10 +105,18 @@ def init_cmd(directory: Path, no_git: bool, no_lfs: bool, force: bool) -> None:
                 f"directory {target} is not empty — run in a new directory "
                 + "(inkflow init my-talk) or pass --force"
             )
-    init.scaffold(target)
-    report("Created", "slides/ (title.svg, diagram.svg, guide.md, diagram.md)")
-    report("Created", "notes/ (title.md, guide.md, diagram.md)")
-    report("Created", "deck.py")
+    if poster or size is not None:
+        try:
+            sheet = init.scaffold_poster(target, size or "a0")
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+        report("Created", "slides/poster.md, figures/, data/results.csv")
+        report("Created", f"deck.py (a poster, {sheet.label})")
+    else:
+        init.scaffold(target)
+        report("Created", "slides/ (title.svg, diagram.svg, guide.md, diagram.md)")
+        report("Created", "notes/ (title.md, guide.md, diagram.md)")
+        report("Created", "deck.py")
     report("Created", "pyproject.toml")
     _sync_layout_previews(target)
     if not no_git:

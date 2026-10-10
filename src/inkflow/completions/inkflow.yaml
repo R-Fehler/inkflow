@@ -24,6 +24,8 @@ commands:
       --no-git: Skip git hook setup
       --no-lfs: Git only, no Git LFS rules for media
       --force: Scaffold even into a non-empty directory
+      --poster: A conference poster instead of a talk
+      --size=: The poster's paper size (a0, a1, a0-landscape, letter)
     completion:
       positional:
         - ["$directories"]

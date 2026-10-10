@@ -277,7 +277,7 @@ class PageSize(str):
     def chart_text_scale(self) -> float:
         """A chart's text size relative to the body text: larger on paper, where
         a figure is read from a step back rather than projected large."""
-        return 0.8 if self._print else 0.6
+        return 1.0 if self._print else 0.6
 
 
 _Spec = tuple[tuple[float, float], tuple[float, float], tuple[str, str], bool, str]

@@ -1530,6 +1530,7 @@ class EditorSession:
                     git=msg.get("git") is not False,
                     lfs=msg.get("lfs") is not False,
                     current=self.deck_path if self.has_deck else None,
+                    size=str(msg["size"]) if msg.get("size") else None,
                 )
             else:
                 deck_py = projects.deck_file(str(msg.get("path") or ""))

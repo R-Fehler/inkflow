@@ -39,6 +39,10 @@ BUILTIN_ORDER = (
     "fact",
     "quote",
     "end",
+    "poster-3col",
+    "poster-2col",
+    "poster-landscape-3col",
+    "poster-landscape-4col",
 )
 
 _BULLETS = "- A first point\n- A second point\n- A third point"
@@ -51,6 +55,10 @@ _SAMPLES: dict[str, str] = {
     "attribution": "Someone notable",
     "left-title": "Option A",
     "right-title": "Option B",
+    "authors": "Ada Lovelace, Charles Babbage, Grace Hopper",
+    "affiliations": "University of Somewhere",
+    "references": "1. Author, A. (2024). A title. *Journal* 1, 2-3.",
+    "contact": "name@example.org",
 }
 _CARD = "### Heading\n\nA sentence or two."
 
@@ -60,6 +68,8 @@ def _sample(zone: str) -> str:
         return _SAMPLES[zone]
     if zone.startswith("card"):
         return _CARD
+    if zone.startswith("col-"):
+        return f"## Section\n\nA sentence or two.\n\n{_BULLETS}"
     if re.match(r"(top|bottom)-", zone):
         return "**Point**  \nA short explanation"
     return _BULLETS

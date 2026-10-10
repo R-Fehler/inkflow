@@ -3448,7 +3448,17 @@
     center: ["Centered", "One centered block"],
     fact: ["Big number", "One number or claim"],
     quote: ["Quote", "A pull quote with attribution"],
-    end: ["Closing", "The last slide"]
+    end: ["Closing", "The last slide"],
+    "poster-3col": ["Poster, three columns", "Title band, sections, footer"],
+    "poster-2col": ["Poster, two columns", "Title band, sections, footer"],
+    "poster-landscape-3col": [
+      "Landscape poster, three columns",
+      "Title band, sections, footer"
+    ],
+    "poster-landscape-4col": [
+      "Landscape poster, four columns",
+      "Title band, sections, footer"
+    ]
   };
   var root = document.getElementById("gallery");
   var cache = null;
@@ -13737,11 +13747,27 @@ Decks: new, open, recent` : "Decks";
       nameEdited = true;
       update();
     });
+    let titleEdited = false;
     title2.addEventListener("input", () => {
+      titleEdited = true;
       if (!nameEdited) name2.value = slug(title2.value);
       update();
     });
     let look = data.themes.some((t2) => t2.id === "current") ? "current" : "starter";
+    const size3 = h(
+      "select",
+      {},
+      ...(data.posterSizes ?? []).map(
+        (s2) => h("option", { value: s2.id }, s2.label)
+      )
+    );
+    const sizeRow = h(
+      "label",
+      { class: "field inline poster-size" },
+      h("span", { class: "field-label" }, "Paper size"),
+      size3
+    );
+    sizeRow.hidden = true;
     const looks = h(
       "div",
       { class: "look-list" },
@@ -13754,6 +13780,12 @@ Decks: new, open, recent` : "Decks";
         radio.checked = t2.id === look;
         radio.addEventListener("change", () => {
           look = t2.id;
+          sizeRow.hidden = look !== "poster";
+          if (look === "poster" && !titleEdited) {
+            title2.value = "My poster";
+            if (!nameEdited) name2.value = slug(title2.value);
+            update();
+          }
         });
         return h(
           "label",
@@ -13821,6 +13853,7 @@ Decks: new, open, recent` : "Decks";
         path: join(folder.path, name2.value.trim()),
         title: title2.value,
         theme: look,
+        size: look === "poster" ? size3.value : null,
         git: !folder.repo && git2.checked,
         lfs: lfs.checked
       });
@@ -13848,7 +13881,7 @@ Decks: new, open, recent` : "Decks";
           "div",
           { class: "field" },
           h("span", { class: "field-label" }, "Look"),
-          looks
+          h("div", {}, looks, sizeRow)
         ),
         h(
           "div",
@@ -13983,7 +14016,7 @@ Decks: new, open, recent` : "Decks";
           // picker since counts.
           action(
             "New deck\u2026",
-            "Start from one of four looks",
+            "Start from one of five looks",
             async () => {
               const fresh = await info2();
               if (fresh) newDeckDialog(fresh);

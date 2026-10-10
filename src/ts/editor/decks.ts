@@ -26,6 +26,7 @@ interface DeckInfo {
     home: string;
     current: string;
     themes: Look[];
+    posterSizes?: { id: string; label: string }[];
     git: boolean;
     lfs: boolean;
     recent: string[];
@@ -135,7 +136,9 @@ function newDeckDialog(data: DeckInfo): void {
         nameEdited = true;
         update();
     });
+    let titleEdited = false;
     title.addEventListener("input", () => {
+        titleEdited = true;
         if (!nameEdited) name.value = slug(title.value);
         update();
     });
@@ -143,6 +146,22 @@ function newDeckDialog(data: DeckInfo): void {
     let look = data.themes.some((t) => t.id === "current")
         ? "current"
         : "starter";
+    // A poster's paper size; the A sizes share one canvas, so it can change
+    // later in deck.py (Deck(size=...)) without redrawing anything.
+    const size = h(
+        "select",
+        {},
+        ...(data.posterSizes ?? []).map((s) =>
+            h("option", { value: s.id }, s.label),
+        ),
+    ) as HTMLSelectElement;
+    const sizeRow = h(
+        "label",
+        { class: "field inline poster-size" },
+        h("span", { class: "field-label" }, "Paper size"),
+        size,
+    );
+    sizeRow.hidden = true;
     const looks = h(
         "div",
         { class: "look-list" },
@@ -155,6 +174,12 @@ function newDeckDialog(data: DeckInfo): void {
             radio.checked = t.id === look;
             radio.addEventListener("change", () => {
                 look = t.id;
+                sizeRow.hidden = look !== "poster";
+                if (look === "poster" && !titleEdited) {
+                    title.value = "My poster";
+                    if (!nameEdited) name.value = slug(title.value);
+                    update();
+                }
             });
             return h(
                 "label",
@@ -232,6 +257,7 @@ function newDeckDialog(data: DeckInfo): void {
             path: join(folder.path, name.value.trim()),
             title: title.value,
             theme: look,
+            size: look === "poster" ? size.value : null,
             git: !folder.repo && git.checked,
             lfs: lfs.checked,
         });
@@ -260,7 +286,7 @@ function newDeckDialog(data: DeckInfo): void {
                 "div",
                 { class: "field" },
                 h("span", { class: "field-label" }, "Look"),
-                looks,
+                h("div", {}, looks, sizeRow),
             ),
             h(
                 "div",
@@ -410,7 +436,7 @@ export async function showStart(): Promise<void> {
                 // picker since counts.
                 action(
                     "New deck…",
-                    "Start from one of four looks",
+                    "Start from one of five looks",
                     async () => {
                         const fresh = await info();
                         if (fresh) newDeckDialog(fresh);
