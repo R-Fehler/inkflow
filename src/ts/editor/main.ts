@@ -21,6 +21,7 @@ import { initFind } from "./find";
 import { initGallery } from "./gallery";
 import { initGit } from "./git";
 import { initGrid } from "./grid";
+import { initInk } from "./ink";
 import { afterRender, initInsert } from "./insert";
 import { connect } from "./net";
 import { initNotes } from "./notes";
@@ -128,6 +129,7 @@ function boot(): void {
 
     initCanvas();
     initInsert();
+    initInk();
     initSorter();
     initProps();
     initObjects();

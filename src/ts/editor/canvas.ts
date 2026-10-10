@@ -483,6 +483,8 @@ export function selectable(el: Element): boolean {
     const src = sourceOf(keyOf(el));
     if (!src) return false;
     if (src.role === "diagram") return src.writable && editableCell(el);
+    // A stroke of the slide's own ink file: drawn on this slide alone.
+    if (src.role === "ink") return src.writable;
     if (ed.layoutMode) return src.writable;
     return isOwn(el) || (el.hasAttribute("data-ink-top") && isZone(el));
 }
@@ -492,6 +494,7 @@ export function canTransform(el: Element): boolean {
     const src = sourceOf(keyOf(el));
     if (!src?.writable) return false;
     if (src.role === "diagram") return editableCell(el);
+    if (src.role === "ink") return true;
     return ed.layoutMode || isOwn(el);
 }
 

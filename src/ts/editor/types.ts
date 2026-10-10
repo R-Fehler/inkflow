@@ -5,7 +5,7 @@ export interface SourceInfo {
     path: string;
     rel: string;
     hash: string;
-    role: "slide" | "layout" | "overlay" | "diagram";
+    role: "slide" | "layout" | "overlay" | "diagram" | "ink";
     writable: boolean;
     usedBy: number[];
 }
@@ -98,6 +98,8 @@ export interface SlideModel {
     animationsEditable: boolean;
     fontSize: number | null;
     sources?: SourceInfo[];
+    // The slide's ink file (inkflow/ink.py), which need not exist yet.
+    ink?: { path: string; rel: string; exists: boolean };
     emptyZones?: EmptyZone[];
     zoneOrigins?: Record<string, string>;
     zoneText?: Record<string, string>;

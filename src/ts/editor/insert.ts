@@ -324,7 +324,9 @@ async function insertConnector(
 
 function onToolDown(e: PointerEvent, start: { x: number; y: number }): boolean {
     const tool = ed.tool;
-    if (tool === "select") return false;
+    // The pen draws through its own pad (ink.ts); a pointer that does not
+    // draw (a mouse while only a pen does) selects as usual.
+    if (tool === "select" || tool === "pen") return false;
     e.preventDefault();
     clearSelection();
     const paperEl = e.currentTarget as HTMLElement;

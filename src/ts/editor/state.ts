@@ -9,7 +9,8 @@ export type Tool =
     | "line"
     | "arrow"
     | "elbow"
-    | "curve";
+    | "curve"
+    | "pen";
 
 /** The tools that draw a connector, and the route each draws. */
 export const CONNECTOR_TOOLS: Partial<
