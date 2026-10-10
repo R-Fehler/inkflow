@@ -261,7 +261,7 @@ src/
     cli/              CLI package (entry point inkflow.cli:main). _common.py holds the
                                `main` group, shared options, and the Project/Target helpers;
                                commands are grouped by area: project.py (init, setup-git,
-                               completion), present.py (serve, edit, build, export), agent.py
+                               setup-pages, completion), present.py (serve, edit, build, export), agent.py
                                (outline, context, render, goto, select, setup-claude),
                                compare.py (`inkflow compare [LEFT] RIGHT`), slides.py
                                (the `slide` group: add, delete, duplicate, move, hide, show,
@@ -342,6 +342,26 @@ src/
                                .gitattributes section (rules, or the committed
                                `# inkflow: lfs off` git-only opt-out), `mode` (on/off/none
                                from the deck's .gitattributes up to the repo root)
+    publish.py        GitHub Pages / GitLab Pages (`inkflow setup-pages`, `init --pages`,
+                               the editor's Git → Publish…, session action `publish`
+                               ops status/setup, setup local only, one History step
+                               though the files sit at the repo root): renders
+                               templates/ci/ (pages.yml, release.yml, gitlab-ci.yml
+                               + gitlab-release.yml; `__TOKEN__` placeholders) for the
+                               deck's `layout` (repo root, deck folder → `--deck`,
+                               nearest pyproject.toml → `uv run --project`, else
+                               `--with inkflow~=…`; GitHub branch = origin's HEAD or
+                               the current one, GitLab uses $CI_DEFAULT_BRANCH). LFS
+                               and PDF converter are handled at run time (checkout
+                               `lfs: true`; GitLab `git grep filter=lfs`; poppler when
+                               `git ls-files '<deck>/*.pdf'`), so the files do not
+                               depend on them; release names use the repo name at run
+                               time. `parse_remote`/`pages_url`/`settings_url` (user
+                               sites, GitLab subgroups; self-hosted → no URL),
+                               `detect` (the marker `inkflow setup-pages` in the file;
+                               git status's `pages`), `plan` (conflicts: refuses
+                               unless force), `font_warnings` (fonts.font_sources:
+                               fonts outside the project's/theme's fonts/)
     init.py           project scaffolding (inkflow init): copies templates/ into
                                slides/ + notes/, writes a 3-slide deck.py and a bare
                                pyproject.toml pinning inkflow (`~=` compatible release);
@@ -402,7 +422,8 @@ src/
     templates/        inkflow init starter files (title.svg, diagram.svg, guide.md,
                                diagram.md, notes/*.md) copied verbatim into new projects;
                                example/ is the demo deck's look (footer overlay + styles)
-                               for the editor's "Inkflow example" new deck
+                               for the editor's "Inkflow example" new deck; ci/ is
+                               publish.py's CI templates
   ts/                 TypeScript source
     globals.d.ts      ambient declarations for Python-injected globals (__SLIDES_JSON__ etc.)
                       shared/viewbox.ts falls back to the deck canvas (`setDeckCanvas`,
@@ -454,7 +475,10 @@ src/
                       Compare = `inkflow:compare` CustomEvent {kind: "path",
                       deck, label} for the compare view, a dialog with what to
                       tell the agent (worktreetext.ts, pure + tested), Merge,
-                      Remove with a force retry, New worktree for an agent…),
+                      Remove with a force retry, New worktree for an agent…;
+                      "Published at <url>" + Publish… → publish.ts: host,
+                      release, README link, files to write, then commit + next
+                      steps; its pure parts in publishtext.ts, tested),
                       canvasmenu.ts (right-click menu on the canvas; text fields and
                       Shift+right-click keep the browser's), videopreview.ts (canvas
                       videos lose controls + pointer events so they select and drag;

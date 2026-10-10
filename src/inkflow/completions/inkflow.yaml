@@ -26,7 +26,11 @@ commands:
       --force: Scaffold even into a non-empty directory
       --poster: A conference poster instead of a talk
       --size=: The poster's paper size (a0, a1, a0-landscape, letter)
+      --pages=: Publish on GitHub Pages or GitLab Pages at every push
+      --release: With --pages, also release the slides at every tag v*
     completion:
+      flag:
+        pages: ["github", "gitlab"]
       positional:
         - ["$directories"]
 
@@ -290,6 +294,20 @@ commands:
 
   - name: setup-git
     description: Configure git hooks and SVG diff driver.
+
+  - name: setup-pages
+    description: Publish the deck on GitHub Pages or GitLab Pages at every push.
+    flags:
+      -d, --deck=: Path to deck.py
+      --release: Also release the slides (HTML and PDF) at every tag v*
+      --force: Replace workflow files that exist with other contents
+      --readme: Add an 'Open the slides' link to README.md
+      --print: Print the files instead of writing them
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+      positional:
+        - ["github", "gitlab"]
 
   - name: parent
     description: Manage slide layout parents.

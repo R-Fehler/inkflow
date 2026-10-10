@@ -4,7 +4,8 @@
 // switches or creates branches and browses the deck's history (view an old
 // version, revert a commit, restore the deck to it), and keeps worktrees: a
 // branch of the deck in a folder of its own for a coding agent to work in,
-// compared, merged or removed from here. The server runs git
+// compared, merged or removed from here; "Publish…" (publish.ts) sets up
+// GitHub Pages or GitLab Pages and links the published deck. The server runs git
 // (editor/gitops.py, editor/worktrees.py); files it changes reach the editor
 // through the usual rebuild.
 
@@ -13,6 +14,7 @@ import { closeDialog, openDialog } from "./dialog";
 import { clear, h, toast } from "./dom";
 import { UNDO_NOTICE, undoNoticeDue, undoNoticeShown } from "./gitnotice";
 import { connected, request } from "./net";
+import { openPublishDialog } from "./publish";
 import { closeMenu, menuItem, showMenu } from "./sorter";
 import { ed, emit, on } from "./state";
 import type { EditResult } from "./types";
@@ -53,6 +55,13 @@ interface Status {
     canUndoCommit?: boolean;
     lfs?: Lfs;
     suggestedMessage?: string;
+    // Set up by Publish… (publish.py's `detect`), else null.
+    pages?: {
+        host: "github" | "gitlab";
+        release: boolean;
+        url: string | null;
+        settingsUrl: string | null;
+    } | null;
 }
 
 interface LfsFile {
@@ -282,11 +291,60 @@ async function openMenu(): Promise<void> {
                 !status.hasCommits,
             ),
             menuItem("Compare…", () => void openComparePicker()),
+            h("div", { class: "menu-sep" }),
+            ...publishItems(),
         );
         if (status.hasCommits) menu.append(...(await worktreeSection()));
     }
     const r = button.getBoundingClientRect();
     showMenu(Math.max(8, r.right - 260), r.bottom + 4);
+}
+
+// ── Publishing ──
+
+// "Published at <address>" (a link) once Publish… set it up, and Publish…
+// itself (to set it up, or update the workflow).
+function publishItems(): HTMLElement[] {
+    const pages = status.pages;
+    const items: HTMLElement[] = [];
+    if (pages?.url) {
+        items.push(
+            h(
+                "a",
+                {
+                    class: "menu-item publish-link",
+                    href: pages.url,
+                    target: "_blank",
+                    rel: "noopener",
+                    title: "Open the published slides",
+                    onclick: () => closeMenu(),
+                },
+                `Published at ${pages.url.replace(/^https:\/\//, "")}`,
+            ),
+        );
+    }
+    items.push(
+        menuItem(pages ? "Publish… (update)" : "Publish…", () => {
+            void openPublishDialog(commitFiles, !!status.remotes?.length);
+        }),
+    );
+    return items;
+}
+
+async function commitFiles(
+    paths: string[],
+    message: string,
+    push: boolean,
+): Promise<boolean> {
+    await refreshGit();
+    if (!status.identity) {
+        // git needs a name and email first: the Commit dialog asks for them.
+        commitDialog(paths, message);
+        return true;
+    }
+    if (!(await git("commit", { message, paths }))) return false;
+    if (push) await git("push");
+    return true;
 }
 
 // ── Git LFS ──
@@ -408,17 +466,20 @@ function checkedPaths(list: HTMLElement): string[] {
     );
 }
 
-function commitDialog(): void {
+/** `ticked`: the files to tick (else the deck's own); `text`: the message. */
+function commitDialog(ticked?: string[], text?: string): void {
     const changes = status.changes ?? [];
     const message = h("textarea", {
         class: "git-message",
         rows: "3",
     }) as HTMLTextAreaElement;
-    message.value = status.suggestedMessage ?? "Update slides";
+    message.value = text ?? status.suggestedMessage ?? "Update slides";
     const files = h(
         "div",
         { class: "git-files" },
-        ...changes.map((c) => fileRow(c, c.inDeck)),
+        ...changes.map((c) =>
+            fileRow(c, ticked ? ticked.includes(c.path) : c.inDeck),
+        ),
     );
     const outside = changes.some((c) => !c.inDeck);
     const name = h("input", {

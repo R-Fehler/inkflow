@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from inkflow import lfs
+from inkflow import lfs, publish
 
 MAX_LOG = 100
 _TIMEOUT = 60
@@ -198,6 +198,7 @@ def status(deck_dir: Path) -> dict[str, object]:
         ),
         "canUndoCommit": _can_undo_commit(repo),
         "lfs": lfs_status(repo),
+        "pages": publish.detect(repo.root),
         "suggestedMessage": default_message(),
     }
 

@@ -114,6 +114,10 @@ orange yellow green teal blue purple pink grey`.
   `:root { --inkflow-accent: #e8590c; }` for dark mode,
   `:root[data-theme="light"] { --inkflow-accent: #c2410c; }` for light.
   After changing `mode`, run `inkflow sync` (refreshes Inkscape previews).
+- **Put it online**: `inkflow setup-pages github` (or `gitlab`; `--release`
+  for HTML+PDF releases at tags `v*`) writes the CI file publishing the deck at
+  every push; commit and push it, and on GitHub set Settings → Pages → Source
+  "GitHub Actions" once.
 
 ## Animations and transitions (deck.py)
 

@@ -153,6 +153,11 @@ Git won't run hooks automatically on clone — that's an intentional security
 boundary — so commit `.githooks/pre-commit` and `.gitattributes`, and have
 teammates run `inkflow setup-git` once in their own clone to activate it.
 
+To put the deck online at every push, `inkflow init my-talk --pages github` (or
+`gitlab`) also writes the CI file that publishes it with GitHub Pages or GitLab
+Pages; for an existing project, run `inkflow setup-pages`. See
+[Publishing online](presenting/publish.md).
+
 ## Next steps
 
 - [Concepts](concepts.md): understand the mental model before writing more slides
