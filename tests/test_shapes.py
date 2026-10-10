@@ -294,6 +294,18 @@ def test_text_line_image_and_chart(project: Path) -> None:
     assert not (project / "data" / "chart-1.csv").exists()
 
 
+def test_zone_names_inkflow_reads_itself_are_refused(project: Path) -> None:
+    # ::notes:: would turn the text box into speaker notes, ::step:: into a
+    # reveal, zone-slide-number into the slide's number.
+    for name in ("notes", "slide-number", "step-1", "Notes"):
+        result = _run(
+            project, "add", "textbox", "-s", "1", "--id", name, "--text", "Hi"
+        )
+        assert result.exit_code != 0, name
+        assert "reserved" in result.output or "'step'" in result.output
+    _ok(project, "add", "textbox", "-s", "1", "--id", "notes-box", "--text", "Hi")
+
+
 def test_a_video_with_its_settings(project: Path) -> None:
     (project / "assets" / "clip.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
     (project / "assets" / "still.png").write_bytes(

@@ -89,17 +89,23 @@ def zone_name(kind: str, typed: str) -> str:
     return name
 
 
+def reserved_problem(name: str) -> str | None:
+    """Why ``name`` is taken by inkflow itself (speaker notes, the slide
+    numbers, step reveals), or None."""
+    if name.lower() in _RESERVED:
+        return f"'{name}' is a reserved zone name"
+    if _STEP.match(name.lower()):
+        return "a zone name cannot start with 'step': Markdown reads that as a reveal"
+    return None
+
+
 def name_problem(name: str) -> str | None:
     """Why ``name`` cannot name a zone, or None."""
     if not name:
         return "give the placeholder a name"
     if not _NAME.match(name):
         return f"'{name}' is not a zone name: start with a letter"
-    if name in _RESERVED:
-        return f"'{name}' is a reserved zone name"
-    if _STEP.match(name):
-        return "a zone name cannot start with 'step': Markdown reads that as a reveal"
-    return None
+    return reserved_problem(name)
 
 
 # ── Reading a file's zones ────────────────────────────────────────────────────

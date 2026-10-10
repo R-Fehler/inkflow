@@ -695,6 +695,9 @@ def _zone_base(msg: dict[str, object], default: str) -> str:
     name = name.removeprefix("zone-")
     if not _ZONE_NAME.fullmatch(name):
         raise EditError(f"{name!r} is not a zone name: letters, digits, - and _")
+    reserved = placeholders.reserved_problem(name)
+    if reserved:
+        raise EditError(reserved)
     return name
 
 
