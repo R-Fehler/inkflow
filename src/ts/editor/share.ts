@@ -5,12 +5,15 @@
 // via SSH" opens sshdialog.ts in its place. In SSH mode (a server others log
 // in to) the links name localhost, for each guest's own tunnel, and turning
 // them on never listens on the network.
+// Online: the same through the user's relay (src/inkflow/online), with links
+// that work from anywhere; the relay is set here or with `inkflow relay`.
 
 import qrcode from "qrcode-generator";
 import { collab } from "./collab";
 import { dialogOpen, openDialog } from "./dialog";
 import { clear, h, toast } from "./dom";
 import { onMessage, sendRaw } from "./net";
+import { GUIDE_URL, type OnlineStatus, onlineSummary } from "./sharetext";
 import { type SshView, sshView } from "./sshdialog";
 import type { SshInfo } from "./sshtext";
 
@@ -34,7 +37,9 @@ interface ShareStatus {
         role: string;
         page: string;
         slide: number | null;
+        online?: boolean;
     }[];
+    online?: OnlineStatus;
     error?: string;
 }
 
@@ -125,7 +130,7 @@ function sshSection(s: ShareStatus): HTMLElement {
     return h(
         "section",
         { class: "share-ssh" },
-        h("h3", {}, "Over SSH"),
+        h("h3", { class: "share-section" }, "Over SSH"),
         h(
             "div",
             { class: "share-state" },
@@ -165,6 +170,13 @@ function render(): void {
     clear(body);
     const s = status;
     const onLabel = s.ssh ? "Turn on links" : "Share on the network";
+    body.append(
+        h(
+            "h3",
+            { class: "share-section" },
+            s.ssh ? "Through SSH tunnels" : "On this network",
+        ),
+    );
     body.append(
         h(
             "div",
@@ -262,6 +274,7 @@ function render(): void {
         );
     }
     body.append(sshSection(s));
+    if (s.online) renderOnline(body, s.online);
     const people = s.people.filter((p) => p.id !== collab.me?.id);
     body.append(
         h("h3", {}, people.length ? "Connected" : "No one else is connected"),
@@ -282,7 +295,7 @@ function render(): void {
                 h(
                     "span",
                     { class: "hint" },
-                    `${p.role}${where ? ` · ${where}` : ""}`,
+                    `${p.role}${p.online ? " · online" : ""}${where ? ` · ${where}` : ""}`,
                 ),
                 p.role === "owner"
                     ? null
@@ -306,9 +319,191 @@ function render(): void {
     body.append(list);
 }
 
+// The relay form is open (no relay yet, or "Change relay…").
+let editingRelay = false;
+
+function renderOnline(into: HTMLElement, o: OnlineStatus): void {
+    const sharing = o.sharing;
+    into.append(h("h3", { class: "share-section" }, "Online"));
+    if (!o.available) {
+        into.append(
+            h("p", {}, "Sharing online needs one more package here:"),
+            h("p", {}, h("code", {}, o.installHint)),
+        );
+        return;
+    }
+    if (!o.relay || editingRelay) {
+        into.append(relayForm(o));
+        return;
+    }
+    const summary = onlineSummary(o);
+    into.append(
+        h(
+            "div",
+            { class: "share-state" },
+            h("p", {}, summary.text),
+            h(
+                "button",
+                {
+                    type: "button",
+                    class: sharing ? "pbtn" : "pbtn primary",
+                    "data-op": sharing ? "online-off" : "online-on",
+                    onclick: () =>
+                        sendRaw({
+                            type: "share",
+                            op: sharing ? "online-off" : "online-on",
+                        }),
+                },
+                sharing ? "Stop sharing online" : "Share online",
+            ),
+        ),
+    );
+    if (summary.error) {
+        into.append(h("p", { class: "share-error" }, summary.error));
+    }
+    if (o.links) {
+        into.append(
+            h(
+                "section",
+                { class: "share-online-links" },
+                linkRow(
+                    "Online editor link",
+                    o.links.editor,
+                    "Edits the deck with you from anywhere (not your computer's files, git or programs).",
+                ),
+                linkRow(
+                    "Online view link",
+                    o.links.view,
+                    "Watches the presentation from anywhere and follows your slide.",
+                ),
+            ),
+        );
+    }
+    const rotate = () => {
+        if (
+            confirm(
+                "Make new online links? Everyone who joined online with the current ones is disconnected.",
+            )
+        ) {
+            sendRaw({ type: "share", op: "online-rotate" });
+        }
+    };
+    into.append(
+        h(
+            "div",
+            { class: "share-actions" },
+            sharing && o.links
+                ? h(
+                      "button",
+                      { type: "button", class: "pbtn", onclick: rotate },
+                      "New online links",
+                  )
+                : null,
+            h(
+                "button",
+                {
+                    type: "button",
+                    class: "pbtn",
+                    disabled: sharing,
+                    title: sharing
+                        ? "Stop sharing online to change the relay"
+                        : null,
+                    onclick: () => {
+                        editingRelay = true;
+                        render();
+                    },
+                },
+                "Change relay…",
+            ),
+        ),
+        h(
+            "p",
+            { class: "hint" },
+            "End-to-end encrypted: the relay passes the deck on without being able to read it. A link is its key: anyone with the editor link can edit until you make new links.",
+        ),
+    );
+}
+
+function relayForm(o: OnlineStatus): HTMLElement {
+    const url = h("input", {
+        type: "url",
+        placeholder: "https://inkflow-relay.you.workers.dev",
+        value: o.relay ?? "",
+        "aria-label": "Relay address",
+    });
+    const token = h("input", {
+        type: "password",
+        placeholder: "Access token (if the relay has one)",
+        "aria-label": "Access token",
+        autocomplete: "off",
+    });
+    const save = () => {
+        editingRelay = false;
+        sendRaw({
+            type: "share",
+            op: "relay-set",
+            url: url.value.trim(),
+            token: token.value.trim(),
+        });
+    };
+    return h(
+        "div",
+        { class: "share-relay" },
+        h(
+            "p",
+            {},
+            o.relay
+                ? "The relay sharing online goes through: "
+                : "Sharing online goes through a relay of your own: a free Cloudflare Worker, or a server you run. ",
+            h(
+                "a",
+                { href: GUIDE_URL, target: "_blank", rel: "noopener" },
+                "How to set one up",
+            ),
+        ),
+        h(
+            "div",
+            { class: "share-relay-fields" },
+            url,
+            token,
+            h(
+                "button",
+                { type: "button", class: "pbtn primary", onclick: save },
+                "Use this relay",
+            ),
+            o.relay
+                ? h(
+                      "button",
+                      {
+                          type: "button",
+                          class: "pbtn",
+                          onclick: () => {
+                              editingRelay = false;
+                              render();
+                          },
+                      },
+                      "Cancel",
+                  )
+                : null,
+        ),
+        h(
+            "p",
+            { class: "hint" },
+            "Or in a terminal: ",
+            h("code", {}, "inkflow relay deploy cloudflare"),
+            " deploys one and sets it here.",
+        ),
+    );
+}
+
 function setStatus(msg: Record<string, unknown>): void {
     status = msg as unknown as ShareStatus;
-    if (button) button.classList.toggle("on", status.sharing);
+    if (button) {
+        button.classList.toggle(
+            "on",
+            status.sharing || Boolean(status.online?.sharing),
+        );
+    }
     if (status.error) toast(status.error, "error");
     if (body && dialogOpen()) render();
 }

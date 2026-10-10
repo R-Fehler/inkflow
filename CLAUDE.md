@@ -168,6 +168,32 @@ src/
                                handler hands it an upgrade request it has read
                                (`adopt`), so pages, files and the WebSocket share
                                one port
+    online/           sharing online through a relay (see "Sharing online" below):
+                               crypto.py (link/room secrets, `room_id`, HKDF, the
+                               hello/welcome handshake `hello`/`accept`/`finish`,
+                               `Session` seal/open with sequence numbers; AES-GCM
+                               from `cryptography`, the optional `online` extra,
+                               imported by name: `available`, `INSTALL_HINT`),
+                               frames.py (envelope `pack`/`unpack`, `wrap`/`unwrap`
+                               coding byte (host-only DEFLATE), `chunks`/
+                               `Reassembler` below 512 KiB frames), relay.py (the
+                               Python relay = `inkflow relay`: `Relay` rooms, host
+                               proof, caps, `Bucket` rate limits, close codes, the
+                               guest page as static files, `--dump`), host.py
+                               (`OnlineHost`: the room, reconnects, `rotate`/`stop`
+                               with `bye`; `Guest` per relay peer; `VirtualConnection`
+                               shaped as a `ServerConnection`; `_Capture` turning a
+                               routed HTTP response into `res`/`body`/`end`; `Hooks`
+                               given by server.py), config.py (`relay.json` in the
+                               user config dir, `INKFLOW_RELAY_URL`/`_TOKEN`),
+                               deploy.py (`inkflow relay deploy cloudflare`: stages
+                               cloudflare/worker.js + guest/ with a generated
+                               wrangler.toml, `npx wrangler@<pinned> deploy
+                               --secrets-file`, the URL from
+                               `WRANGLER_OUTPUT_FILE_PATH`), guest/ (the guest page:
+                               index.html, `_headers`, `_guest/boot.js|sw.js` bundled
+                               from src/ts/guest), cloudflare/worker.js (bundled from
+                               relay/cloudflare/src/worker.ts)
     edit.py           launching external programs on source files: INKFLOW_EDIT_CMD*
                                resolution (extension > kind > default) for the presenter's
                                edit menu, and the editor's "Open" catalog (`open_choices`)
@@ -681,7 +707,10 @@ src/
                       sshtext.ts (pure + tested: `shellQuote`, commands, messages),
                       conflict.ts = the box keeping typing a stale write
                       refused; shared/identity.ts = name + private key in
-                      localStorage, shared/wsurl.ts = `socketUrl(location)`)
+                      localStorage, shared/wsurl.ts = `socketUrl(location)` and
+                      `openSocket()`: the relay channel when the page runs in
+                      the guest page's frame; share.ts's Online section, its
+                      words in sharetext.ts)
                       visual editor: canvas.ts (render, hit-testing, handles, drag ->
                       attribute plans), geom.ts (pure matrices + move/resize/rotate plans),
                       snap.ts (smart guides), textedit.ts, insert.ts (tools, images,
@@ -769,6 +798,14 @@ src/
                       contrast.ts (each text run vs the hidden-text shot's pixels
                       where its glyphs are, worst tenth decides; halo strokes,
                       shadows that help, alpha blended; pure WCAG maths tested)
+    guest/            the guest page for sharing online (bundled into
+                      src/inkflow/online/guest/_guest/): crypto.ts (Web Crypto
+                      twin of online/crypto.py), frames.ts, channel.ts (`Channel`:
+                      handshake, sealed frames, `RelaySocket` page connections,
+                      `fetch` through the host), boot.ts (top mode: link from the
+                      fragment -> sessionStorage, service worker, channel, the
+                      page frame; frame mode: the host's page for this address,
+                      document.open/write), sw.ts (the service worker)
   css/                CSS source
     shared/           theme variables, animation keyframes, ink.css (the ink palette)
     presenter/        presenter partials including pv.css (sidebar panel)
@@ -779,6 +816,13 @@ demo/
   deck.py             12-slide demo deck (SVG slides, some filling zones with Markdown via md=)
   slides/             source SVGs and Markdown content files
   data/               chart data (sales.csv)
+relay/
+  cloudflare/         the relay as a Cloudflare Worker (src/worker.ts: one Durable
+                      Object per room, Hibernation API; wrangler.toml for `wrangler
+                      dev` from the repo; its own package.json/tsconfig with
+                      @cloudflare/workers-types, `pnpm install --ignore-workspace`)
+  e2e/online.e2e.mjs  sharing online end to end in Chromium (Playwright), against
+                      the Python relay or the Worker under `wrangler dev`
 mise.toml             task runner + tool versions (replaces poethepoet)
 package.json          JS devDependencies: biome, esbuild, typescript
 pnpm-lock.yaml        pnpm lockfile (JS deps); package manager is pnpm, not npm
@@ -969,6 +1013,51 @@ anything in a hidden folder), and every machine-reaching action is `_local_only`
 files outside the deck, worktree add/merge/remove, publish setup, pack, fonts
 bundle, quit).
 
+**Sharing online: a dumb relay, end-to-end encryption, guests as virtual connections.**
+The host (`online/host.OnlineHost`, started by the Share dialog's `share` ops
+`online-on`/`-off`/`-rotate`/`relay-set` or `--share-online`) connects out to
+the relay's `/_relay/host?room=<id>` with `Inkflow-Room-Secret` (room id =
+b64url(SHA-256("inkflow-room/1" + secret))[:22], so a guest link cannot host)
+and, if the relay has one, `Authorization: Bearer <access token>`. The relay
+(Python `online/relay.py` or the Worker, same rules, tested by the same
+`TestAnyRelay` with `INKFLOW_TEST_RELAY_PORT`) forwards binary frames: host side
+`u32 peer + frame`, guest side the frame; text `ready`/`join`/`leave` to the
+host and `kick` from it; a room lives while its host is connected (4404 no
+room, 4410 host gone, 4409 full, 4401 refused, 4403 kicked, 4429 rate, 4408
+replaced). Crypto (`online/crypto.py` = `src/ts/guest/crypto.ts`, held together
+by tests/data/online_vectors.json): per-role 32-byte link secrets in the link
+fragment (`<relay>/#r=<room>&k=<secret>`); `hello` = guest nonce + HMAC(auth key);
+the host tries each role's auth key (the one that matches is the role) and
+answers `welcome` = host nonce + HMAC over both (only the host can); session keys
+per connection and direction = HKDF(link secret, both nonces); frames =
+`0x03 | seq u64 | AES-256-GCM` with the header as AAD, each side expecting the
+next seq (replay/reorder/tamper ends the guest). Messages (`online/frames.py`):
+a coding byte (DEFLATE from the host only; the host refuses it from guests),
+envelope `u32 len | JSON header | body`, chunks of < 512 KiB. Inner protocol:
+`open`/`ws`/`close` per page connection `c`, `get`(path, range)/`cancel` ->
+`res`/`body`/`end`, `hi` {role}, `bye` {reason}. Each `open` becomes a
+`VirtualConnection` run through the deck server's own `make_ws_handler`
+(`_share.ws_handler`, joined as a `collab.Client` with `online=True`), and each
+`get` through `make_http_route` (`_share.route`) for that role, so roles,
+`allowed()`, presence, per-person undo, stale-write refusal and owner-only
+actions are the LAN ones; open byte ranges are capped at 4 MiB. LAN share
+off/rotate leaves online guests alone and vice versa; a deck switch drops the
+online pages' connections (they reconnect to the new deck). The guest page
+(`src/ts/guest`, static on the relay; the relay answers every navigation with
+index.html): **top mode** reads the fragment, keeps the link in sessionStorage
+(the address bar loses the key; a reload or a window the page opens finds it
+there), registers `/_guest/sw.js` (scope `/`, `Service-Worker-Allowed`), opens
+the `Channel` and shows `/edit` (editor link) or `/` in a full-window iframe;
+**frame mode** (the same index.html inside that iframe) fetches the host's page
+for its own path through `parent.__inkflowRelay` and replaces itself with it
+(`document.open/write`), so the host's own editor/presenter of its own version
+runs at the right path. Its socket is `wsurl.openSocket()` -> `RelaySocket`; its
+subresource requests (pictures, fonts, video ranges, downloads) reach the
+service worker, which posts them to the requesting client (`inkflow-fetch` +
+MessagePort), whose boot.ts forwards them through the channel and streams the
+answer back (no keys or channel in the worker, nothing else routed). Chosen over
+rewriting URLs to blob:, which would need every asset (videos) fetched up front.
+
 **The compare view builds both decks in one server (`editor/comparehub.py`).**
 A side is a `comparesrc.Source`: `{"kind":"live"}`, `{"kind":"commit","rev"}` (any rev git resolves; refused if it starts with `-`), `{"kind":"path","deck"}` (a deck.py or its folder; outside the project only for a local request), `{"kind":"branch","name"}` (its worktree when one has it checked out, the live deck if that is this one, else its commit; a remote request falls back to the commit), plus `{"kind":"spec","spec"}` for `?compare=` (`inkflow edit --compare REV|PATH`) and the CLI, resolved by `spec_source`. A commit is materialized into `.inkflow/cache/compare/<sha>/` (ignored, unwatched) with a throwaway `GIT_INDEX_FILE`: `read-tree` + `checkout-index` of the deck's folder only, so filters run (LFS smudged; `filter.lfs.required=false`) and nothing is registered as a worktree; a pointer left over is replaced by the working copy's file when its sha256 is the pointer's oid (`missing` lists the rest); `prune` keeps the 6 most recent plus those in use. Other decks load as their own module (`load_deck(path, module)`, `build_model(deck_module=…)`), never `_inkflow_deck`, so the served deck's custom classes stay the session's; comparesrc/comparehub cannot import server.py (a cycle), so the loader is handed in (`CompareHub(deck, load_deck)`). The live side is the server's own build (`side_build_from` after every `rebuild`), never rebuilt by the hub. Protocol: `{"type":"compare-open","view":n,"left":src,"right":src}` → `{"type":"compare-model","view":n,"left":side,"right":side,"deck":[…],"pairs":[pair_json…]}`, where a side carries `kind/label/branch/sha/live/deckPath/token/missing/error/source`, `css` (its `load_deck_styles` with `:root` aimed at `.cmp-root`, `@font-face` split off into `fonts` for the document; `shadow_css`) and `slides` (`display_svg`: no `data-ink*`, pictures at `/_cmp/<token>/<ref>?v=<mtime>`, plus plain-text `notes`); re-sent to every page comparing a side whenever it rebuilds (live: each rebuild; a path side: its own `awatch`, ignoring its `.inkflow/`/`build/`/`.git`; a commit: never). `{"type":"compare-close"}` (or disconnecting) drops sides nobody compares, their tokens and modules. `{"type":"compare-sources"}` → commits, branches and worktrees for the picker; failures answer `{"type":"compare-error","for","view","message"}`. `/_cmp/<token>/<ref>` resolves with that side's own `AssetRoots.locate` and the served-suffix list, so it reaches nothing outside that deck's roots. Pairing (`compare.pair_slides`): ids that name a slide whatever its place (explicit, or an inferred id no other slide shares), then the file it is written in (`key_file`: its Markdown, or its own unshared SVG), then identical normalized SVG+notes, then the remaining ids (`content-2` numbering), then what is left by order between pairs kept in order, only when built on the same layout or file (`_related`); rows follow the right deck, a slide only on the left before what was added in its place; `moved` = outside the longest in-order run. Normalization drops `data-ink*`/`data-cell-geometry`/`data-drawn-geometry`, `?v=` stamps, the root's `inkflow-slide-N` id and its `@scope`, and the slide number/total texts. A pair is `changed` when the normalized SVG, the notes text, the slide's settings (`_slide_settings`: hidden, layout, id, title, md, notes file, transition, animations, zones, overlays, style, font size; model JSON minus `custom`/`path`/chart columns) or its files (sources by role, md, notes, ink, chart data, pictures) differ. `element_changes` matches elements with an id by id, the rest as sequences under their nearest named ancestor (`difflib`), leaf units being SVG shapes and HTML blocks; boxes are approximate server-side (transforms, path points, a foreignObject's box for its HTML) and the page measures the element at the same child-index `path` in the shadow DOM instead when it finds it. The page draws each slide in a shadow root with the side's constructed stylesheet (both in the colour mode the editor's light/dark button shows), so neither deck's CSS reaches the other or the editor. "Take this slide" is the edit-op `compare-take` (`pair`, `left`, `right` must match the hub's current pair): the server pops any client `_take` and puts the hub's `take_request` there (`export_slides` of the other deck, `replace` = the live index or `after`, `inPlace` when every file can keep its path, its ink), and the session's `_compare_take` writes it as one History step (`transfer.plan_slide_replace` writes files at their own paths; else `plan_slide_paste`). "Merge branch" sends `{"action":"worktree","op":"merge","branch"}` (the worktrees session action) and shows its error; `document` event `inkflow:compare` (`{kind:"path",deck,label}`) opens the view on a deck. While the view is open, keys other than its own and Ctrl+Z/Y stop in its capture listener, and the toolbar's tools are disabled (`body.compare-mode`).
 
@@ -1076,4 +1165,5 @@ rich>=15.0           terminal UI
 watchfiles>=0.21     inotify-based file watcher
 websockets>=12.0     WebSocket server (uses 16.x asyncio API)
 libcst>=1.9          deck.py edits from the visual editor (formatting-preserving)
+cryptography>=42     optional (`inkflow[online]`): AES-GCM for sharing online
 ```

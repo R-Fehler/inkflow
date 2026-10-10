@@ -190,6 +190,9 @@ at the same time and see each other's changes live.
   view link (`inkflow edit --share`, or the Share… button), or reach it over SSH; see who
   is on which slide and what they selected, and undo your own changes, not theirs.
   [More](https://ll-nick.github.io/inkflow/editor/collaborate/).
+- **Share online.** Links that work from anywhere, end-to-end encrypted through a relay on
+  your own free Cloudflare account (`inkflow relay deploy cloudflare`) or server: the relay
+  never sees the deck. [More](https://ll-nick.github.io/inkflow/editor/share-online/).
 - **Decks and git.** A start page for new and recent decks, commit/push/pull with Git LFS
   for media, export to HTML or PDF, copy slides between decks, find and replace, and undo
   for every change.

@@ -1259,6 +1259,22 @@
     return `${scheme}://${loc.host || "localhost"}${WS_PATH}`;
   }
   var SENT_AWAY = 4001;
+  function relay() {
+    try {
+      if (window.parent !== window) {
+        return window.parent.__inkflowRelay;
+      }
+    } catch {
+    }
+    return void 0;
+  }
+  function openSocket() {
+    const online = relay();
+    if (!online) return new WebSocket(socketUrl(location));
+    const sock = online.openSocket();
+    window.addEventListener("pagehide", () => sock.close(1001, "page left"));
+    return sock;
+  }
 
   // src/ts/shared/identity.ts
   var NAME_KEY = "inkflow-name";
@@ -5090,7 +5106,7 @@ Undo brings them back.`
     return new Promise((resolve) => waiting.push(resolve));
   }
   function connect(port) {
-    const sock = new WebSocket(socketUrl(location));
+    const sock = openSocket();
     ws = sock;
     sock.onopen = () => {
       presenceConnected();
@@ -20351,6 +20367,40 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   var qrcode_default = qrcode;
   var stringToBytes = qrcode.stringToBytes;
 
+  // src/ts/editor/sharetext.ts
+  var GUIDE_URL = "https://ll-nick.github.io/inkflow/editor/share-online/";
+  function onlineSummary(o2) {
+    const host5 = o2.relay ? o2.relay.replace(/^https?:\/\//, "") : "";
+    if (!o2.sharing) {
+      return {
+        text: `Not shared online. Share it to get links that work from anywhere, through ${host5}.`,
+        error: null
+      };
+    }
+    switch (o2.state) {
+      case "open": {
+        const n3 = o2.guests ?? 0;
+        const who = n3 === 0 ? "no one has joined yet" : n3 === 1 ? "1 guest connected" : `${n3} guests connected`;
+        return {
+          text: `Shared online through ${host5}: ${who}.`,
+          error: null
+        };
+      }
+      case "retrying":
+        return {
+          text: `Reconnecting to ${host5}\u2026 (the links work again once it is back)`,
+          error: o2.error ?? null
+        };
+      case "error":
+        return {
+          text: `Could not share through ${host5}.`,
+          error: o2.error ?? "the relay refused"
+        };
+      default:
+        return { text: `Connecting to ${host5}\u2026`, error: null };
+    }
+  }
+
   // src/ts/editor/sshtext.ts
   var DEFAULT_PORT = 7777;
   var LOGIN_PLACEHOLDER = "you@server";
@@ -20902,7 +20952,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return h(
       "section",
       { class: "share-ssh" },
-      h("h3", {}, "Over SSH"),
+      h("h3", { class: "share-section" }, "Over SSH"),
       h(
         "div",
         { class: "share-state" },
@@ -20934,6 +20984,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     clear(body2);
     const s2 = status2;
     const onLabel = s2.ssh ? "Turn on links" : "Share on the network";
+    body2.append(
+      h(
+        "h3",
+        { class: "share-section" },
+        s2.ssh ? "Through SSH tunnels" : "On this network"
+      )
+    );
     body2.append(
       h(
         "div",
@@ -21026,6 +21083,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       );
     }
     body2.append(sshSection(s2));
+    if (s2.online) renderOnline(body2, s2.online);
     const people = s2.people.filter((p2) => p2.id !== collab.me?.id);
     body2.append(
       h("h3", {}, people.length ? "Connected" : "No one else is connected")
@@ -21041,7 +21099,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           h(
             "span",
             { class: "hint" },
-            `${p2.role}${where ? ` \xB7 ${where}` : ""}`
+            `${p2.role}${p2.online ? " \xB7 online" : ""}${where ? ` \xB7 ${where}` : ""}`
           ),
           p2.role === "owner" ? null : h(
             "button",
@@ -21061,9 +21119,176 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     }
     body2.append(list4);
   }
+  var editingRelay = false;
+  function renderOnline(into, o2) {
+    const sharing = o2.sharing;
+    into.append(h("h3", { class: "share-section" }, "Online"));
+    if (!o2.available) {
+      into.append(
+        h("p", {}, "Sharing online needs one more package here:"),
+        h("p", {}, h("code", {}, o2.installHint))
+      );
+      return;
+    }
+    if (!o2.relay || editingRelay) {
+      into.append(relayForm(o2));
+      return;
+    }
+    const summary2 = onlineSummary(o2);
+    into.append(
+      h(
+        "div",
+        { class: "share-state" },
+        h("p", {}, summary2.text),
+        h(
+          "button",
+          {
+            type: "button",
+            class: sharing ? "pbtn" : "pbtn primary",
+            "data-op": sharing ? "online-off" : "online-on",
+            onclick: () => sendRaw({
+              type: "share",
+              op: sharing ? "online-off" : "online-on"
+            })
+          },
+          sharing ? "Stop sharing online" : "Share online"
+        )
+      )
+    );
+    if (summary2.error) {
+      into.append(h("p", { class: "share-error" }, summary2.error));
+    }
+    if (o2.links) {
+      into.append(
+        h(
+          "section",
+          { class: "share-online-links" },
+          linkRow(
+            "Online editor link",
+            o2.links.editor,
+            "Edits the deck with you from anywhere (not your computer's files, git or programs)."
+          ),
+          linkRow(
+            "Online view link",
+            o2.links.view,
+            "Watches the presentation from anywhere and follows your slide."
+          )
+        )
+      );
+    }
+    const rotate = () => {
+      if (confirm(
+        "Make new online links? Everyone who joined online with the current ones is disconnected."
+      )) {
+        sendRaw({ type: "share", op: "online-rotate" });
+      }
+    };
+    into.append(
+      h(
+        "div",
+        { class: "share-actions" },
+        sharing && o2.links ? h(
+          "button",
+          { type: "button", class: "pbtn", onclick: rotate },
+          "New online links"
+        ) : null,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            disabled: sharing,
+            title: sharing ? "Stop sharing online to change the relay" : null,
+            onclick: () => {
+              editingRelay = true;
+              render4();
+            }
+          },
+          "Change relay\u2026"
+        )
+      ),
+      h(
+        "p",
+        { class: "hint" },
+        "End-to-end encrypted: the relay passes the deck on without being able to read it. A link is its key: anyone with the editor link can edit until you make new links."
+      )
+    );
+  }
+  function relayForm(o2) {
+    const url = h("input", {
+      type: "url",
+      placeholder: "https://inkflow-relay.you.workers.dev",
+      value: o2.relay ?? "",
+      "aria-label": "Relay address"
+    });
+    const token = h("input", {
+      type: "password",
+      placeholder: "Access token (if the relay has one)",
+      "aria-label": "Access token",
+      autocomplete: "off"
+    });
+    const save4 = () => {
+      editingRelay = false;
+      sendRaw({
+        type: "share",
+        op: "relay-set",
+        url: url.value.trim(),
+        token: token.value.trim()
+      });
+    };
+    return h(
+      "div",
+      { class: "share-relay" },
+      h(
+        "p",
+        {},
+        o2.relay ? "The relay sharing online goes through: " : "Sharing online goes through a relay of your own: a free Cloudflare Worker, or a server you run. ",
+        h(
+          "a",
+          { href: GUIDE_URL, target: "_blank", rel: "noopener" },
+          "How to set one up"
+        )
+      ),
+      h(
+        "div",
+        { class: "share-relay-fields" },
+        url,
+        token,
+        h(
+          "button",
+          { type: "button", class: "pbtn primary", onclick: save4 },
+          "Use this relay"
+        ),
+        o2.relay ? h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            onclick: () => {
+              editingRelay = false;
+              render4();
+            }
+          },
+          "Cancel"
+        ) : null
+      ),
+      h(
+        "p",
+        { class: "hint" },
+        "Or in a terminal: ",
+        h("code", {}, "inkflow relay deploy cloudflare"),
+        " deploys one and sets it here."
+      )
+    );
+  }
   function setStatus(msg) {
     status2 = msg;
-    if (button5) button5.classList.toggle("on", status2.sharing);
+    if (button5) {
+      button5.classList.toggle(
+        "on",
+        status2.sharing || Boolean(status2.online?.sharing)
+      );
+    }
     if (status2.error) toast(status2.error, "error");
     if (body2 && dialogOpen()) render4();
   }

@@ -22,7 +22,7 @@ from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from html import escape as escape_html
 from pathlib import Path
-from typing import Literal, TypedDict, cast
+from typing import Literal, Protocol, TypedDict, cast
 from urllib.parse import unquote
 
 from rich.console import Console
@@ -54,6 +54,7 @@ from inkflow.access import (
     redacted,
     split_host,
 )
+from inkflow.access import Request as AccessRequest
 from inkflow.assets import MIME_TYPES, AssetRoots, is_local_ref, rewrite_references
 from inkflow.collab import Client, People
 from inkflow.edit import (
@@ -82,6 +83,9 @@ from inkflow.fonts import (
 from inkflow.loaders import load_deck_scripts, load_deck_styles
 from inkflow.logging import Levels, collect_logs, logger, report
 from inkflow.manifest import Deck
+from inkflow.online import config as relay_config
+from inkflow.online import crypto as online_crypto
+from inkflow.online.host import Hooks, OnlineHost, VirtualConnection
 from inkflow.os_compat import install_shutdown_handler, raw_keypresses
 from inkflow.pipeline import SlideData, process_deck, resolve_transitions
 from inkflow.titles import resolve_deck_title
@@ -169,12 +173,25 @@ class _Share:
     ssh_info: dict[str, object] | None
     """What "Share via SSH" writes its commands from (``sshshare.details``),
     gathered when the owner opens the Share dialog."""
+    online: OnlineHost | None
+    """The room on a relay while sharing online (``online.host``)."""
+    route: Route | None
+    """How the one port answers a request: online guests' requests too."""
+    ws_handler: Callable[[ServerConnection], Awaitable[None]] | None
+    """The WebSocket handler of the deck being served: online guests'
+    page connections run through it too."""
+    on_change: Callable[[], None] | None
+    """Refresh the terminal's share lines (set while serving)."""
 
     def __init__(self) -> None:
         self.access = Access(DEFAULT_PORT)
         self.people = People()
         self.rebind = None
         self.ssh_info = None
+        self.online = None
+        self.route = None
+        self.ws_handler = None
+        self.on_change = None
 
 
 _share = _Share()
@@ -494,6 +511,7 @@ def _share_status() -> dict[str, object]:
         "ssh": access.ssh,
         "sshInfo": _share.ssh_info,
         "people": _share.people.listing(),
+        "online": _online_status(),
     }
 
 
@@ -540,15 +558,17 @@ async def _handle_share(websocket: ServerConnection, msg: dict[str, object]) -> 
             access.sharing = False
             if _share.rebind is not None:
                 await _share.rebind(False)
-            _ = await _disconnect(lambda _c: True, "sharing stopped")
+            _ = await _disconnect(lambda c: not c.online, "sharing stopped")
             logger.info("sharing off")
         elif op == "rotate":
             access.rotate()
-            gone = await _disconnect(lambda _c: True, "new links")
+            gone = await _disconnect(lambda c: not c.online, "new links")
             logger.info(f"new share links ({gone} guests disconnected)")
         elif op == "kick":
             target = str(msg.get("id") or "")
             _ = await _disconnect(lambda c: c.id == target, "disconnected by the owner")
+        elif isinstance(op, str) and op.startswith(("online-", "relay-")):
+            error = await _online_op(op, msg)
     except OSError as exc:
         access.sharing = False
         error = f"cannot listen on the network: {exc}"
@@ -559,8 +579,118 @@ async def _handle_share(websocket: ServerConnection, msg: dict[str, object]) -> 
     if error:
         reply["error"] = error
     await websocket.send(json.dumps(reply))
-    if op in ("on", "off", "rotate"):
+    if op in ("on", "off", "rotate") or (
+        isinstance(op, str) and op.startswith(("online-", "relay-"))
+    ):
         await _send_owners(_share_status())
+
+
+# ── Sharing online (through a relay, see inkflow/online) ──────────────────────
+
+
+def _online_status() -> dict[str, object]:
+    """The Share dialog's Online section."""
+    configured = relay_config.load()
+    host = _share.online
+    status: dict[str, object] = {
+        "available": online_crypto.available(),
+        "installHint": online_crypto.INSTALL_HINT,
+        "relay": configured.url if configured else None,
+        "sharing": host is not None,
+    }
+    if host is not None:
+        status.update(host.status())
+    return status
+
+
+async def _online_connect(conn: VirtualConnection, role: Role) -> None:
+    """An online guest's page: a connection like any other, of its role."""
+    handler = _share.ws_handler
+    if handler is None:
+        await conn.close(1013, "the server is starting")
+        return
+    client = _share.people.join(conn, role, None, "online")
+    client.online = True
+    await handler(cast("ServerConnection", cast("object", conn)))
+
+
+async def _online_fetch(
+    path: str, range_: str | None, role: Role, writer: ResponseWriter
+) -> None:
+    """An online guest's GET (a page, picture, font, download), answered as
+    this server answers one from the network, for that role."""
+    route = _share.route
+    head = f"GET {path} HTTP/1.1\r\nHost: online\r\n"
+    if range_:
+        head += f"Range: {range_}\r\n"
+    raw = (head + "\r\n").encode("latin-1", "replace")
+    request = parse_request(raw)
+    if route is None or request is None:
+        await _respond(writer, "503 Service Unavailable", b"", "text/plain")
+        return
+    await route(request, raw, role, None, writer)
+
+
+async def _online_changed() -> None:
+    if _share.on_change is not None:
+        _share.on_change()
+    await _send_owners(_share_status())
+
+
+def _online_hooks() -> Hooks:
+    return Hooks(connect=_online_connect, fetch=_online_fetch, changed=_online_changed)
+
+
+async def start_online(url: str | None = None, token: str | None = None) -> str | None:
+    """Share online through the configured relay (or ``url``); an error
+    message when it cannot start."""
+    if _share.online is not None:
+        return None
+    if not online_crypto.available():
+        return online_crypto.INSTALL_HINT
+    configured = relay_config.load()
+    if url is None and configured is None:
+        return "no relay set: see Share online in the docs, or `inkflow relay set URL`"
+    relay = url or (configured.url if configured else "")
+    try:
+        host = OnlineHost(
+            relay, token or (configured.token if configured else None), _online_hooks()
+        )
+    except ValueError as exc:
+        return str(exc)
+    _share.online = host
+    host.start()
+    logger.info(f"sharing online through {host.relay}")
+    return None
+
+
+async def stop_online(reason: str = "sharing stopped") -> None:
+    host, _share.online = _share.online, None
+    if host is not None:
+        await host.stop(reason)
+        logger.info("sharing online off")
+
+
+async def _online_op(op: str, msg: dict[str, object]) -> str | None:
+    """The Share dialog's Online section: on/off, new links, the relay."""
+    if op == "online-on":
+        return await start_online()
+    if op == "online-off":
+        await stop_online()
+    elif op == "online-rotate" and _share.online is not None:
+        await _share.online.rotate()
+        logger.info("new online links")
+    elif op == "relay-set":
+        url = msg.get("url")
+        token = msg.get("token")
+        if not isinstance(url, str) or not url.strip():
+            relay_config.forget()
+            return None
+        try:
+            relay_config.save(url, token if isinstance(token, str) else None)
+        except (ValueError, OSError) as exc:
+            return f"cannot use that relay address: {exc}"
+    return None
 
 
 # ── WebSocket handler ─────────────────────────────────────────────────────────
@@ -879,6 +1009,21 @@ def make_ws_handler(
 _StreamHandler = Callable[[asyncio.StreamReader, asyncio.StreamWriter], Awaitable[None]]
 
 
+class ResponseWriter(Protocol):
+    """Where a response is written: a socket's ``asyncio.StreamWriter``, or
+    an online guest's (``online.host._Capture``)."""
+
+    def write(self, data: bytes) -> None: ...
+
+    async def drain(self) -> None: ...
+
+
+Route = Callable[
+    [AccessRequest, bytes, Role, str | None, ResponseWriter], Awaitable[None]
+]
+"""Answer one admitted request (see ``make_http_route``)."""
+
+
 @functools.cache
 def favicon_data_uri() -> str:
     """Base64 data URI for the built-in adaptive favicon, computed once."""
@@ -1048,7 +1193,7 @@ def byte_range(
 
 
 async def _send_file(
-    writer: asyncio.StreamWriter,
+    writer: ResponseWriter,
     path: Path,
     wanted: tuple[int | None, int | None] | None,
 ) -> None:
@@ -1137,7 +1282,7 @@ _HTML_HEADERS = (
 
 
 async def _respond(
-    writer: asyncio.StreamWriter,
+    writer: ResponseWriter,
     status: str,
     body: bytes,
     content_type: str = "text/html; charset=utf-8",
@@ -1155,9 +1300,7 @@ async def _respond(
     await writer.drain()
 
 
-async def _refuse(
-    writer: asyncio.StreamWriter, status: str, title: str, text: str
-) -> None:
+async def _refuse(writer: ResponseWriter, status: str, title: str, text: str) -> None:
     await _respond(writer, status, page(title, text))
 
 
@@ -1187,6 +1330,123 @@ def _probe_body() -> bytes:
     ).encode()
 
 
+def make_http_route(
+    ws_port: int,
+    project_dir: Path | None = None,
+    edit_commands: EditCommands = NO_EDIT_COMMANDS,
+) -> Route:
+    """Everything the one port answers once it knows who asks (``role``,
+    and the share ``token`` that admitted them): pages, pictures, fonts,
+    downloads. A guest online gets its requests answered by this too
+    (``online.host``), so what each role may fetch is decided here once."""
+
+    async def route(
+        request: AccessRequest,
+        raw: bytes,
+        role: Role,
+        token: str | None,
+        writer: ResponseWriter,
+    ) -> None:
+        access = _share.access
+        request_path = request.target
+        path = request.path
+        if token is not None and TOKEN_PARAM in request.query:
+            # A share link (or the owner link): the cookie keeps them in;
+            # the page moves on to the same address without the token.
+            who = "owner signed in" if role == "owner" else f"guest joined as {role}"
+            logger.info(f"{who} with {redacted(token)}")
+            cookie = access.set_cookie(token, request.host)
+            await _respond(
+                writer,
+                "200 OK",
+                enter_page(request.without_token()),
+                extra=f"Set-Cookie: {cookie}\r\n".encode(),
+            )
+            return
+        editor_only = _is_editor_path(request_path) or path.startswith(
+            ("/_export/", "/_cmp/")
+        )
+        if editor_only and role == "viewer":
+            await _refuse(writer, "403 Forbidden", "View-only link", _VIEW_ONLY)
+            return
+
+        if path == instances.PROBE_PATH:
+            # Who is serving here (see instances.py): another inkflow
+            # opening a deck asks before starting a second server for it.
+            if role != "owner":
+                await _refuse(writer, "404 Not Found", "Not found", "")
+                return
+            await _respond(writer, "200 OK", _probe_body(), "application/json")
+            return
+
+        font = shipped_font_file(request_path)
+        if font is not None:
+            # A font inkflow ships (the deck's and the interface's): the
+            # same bytes for as long as this inkflow is installed.
+            body = await asyncio.to_thread(font.read_bytes)
+            writer.write(
+                b"HTTP/1.1 200 OK\r\n"
+                + f"Content-Type: {font_mime(font)}\r\n".encode()
+                + b"Cache-Control: public, max-age=86400\r\n"
+                + b"Access-Control-Allow-Origin: *\r\n"
+                + b"Connection: close\r\n"
+                + f"Content-Length: {len(body)}\r\n\r\n".encode()
+                + body
+            )
+            await writer.drain()
+            return
+
+        download = _export_download(request_path)
+        if download is not None:
+            name, mime, body = await asyncio.to_thread(*download)
+            await _respond(
+                writer,
+                "200 OK",
+                body,
+                mime,
+                f'Content-Disposition: attachment; filename="{name}"\r\n'.encode(),
+            )
+            return
+
+        hub = _editor["compare"]
+        if hub is not None and request_path.startswith("/_cmp/"):
+            # A compared deck's picture, inside that deck's own roots.
+            compared = hub.asset(request_path)
+            if compared is None:
+                await _respond(writer, "404 Not Found", b"")
+            else:
+                await _send_file(writer, compared, _range_header(raw))
+            return
+
+        if project_dir is not None and request_path != "/":
+            roots = AssetRoots(project_dir, _state["theme_dir"])
+            asset_path = _resolve_asset(roots, request_path)
+            if asset_path is not None:
+                await _send_file(writer, asset_path, _range_header(raw))
+                return
+
+        session = _editor["session"]
+        starting = session is not None and not session.has_deck
+        # The start page (no deck yet) is the editor's, at any path.
+        if starting and role != "owner":
+            await _refuse(
+                writer, "404 Not Found", "No deck open", "Nothing is shared yet."
+            )
+            return
+        if _is_editor_path(request_path) or starting:
+            body = build_editor_html(_state, _editor, ws_port)
+        else:
+            # Opening a source file in a program is the owner's alone.
+            body = build_html(
+                _state,
+                ws_port,
+                edit_commands if role == "owner" else NO_EDIT_COMMANDS,
+            )
+        await _respond(writer, "200 OK", body)
+
+    return route
+
+
 def make_http_handler(
     ws_port: int,
     project_dir: Path | None = None,
@@ -1197,6 +1457,7 @@ def make_http_handler(
     ``bridge``) the WebSocket at ``/_inkflow/ws``. ``ws_port`` is what the
     pages are told (they connect to their own address; it only says the
     deck is served)."""
+    route = make_http_route(ws_port, project_dir, edit_commands)
 
     async def handler(
         reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -1229,10 +1490,8 @@ def make_http_handler(
                 return
             peer = peer_host(cast("object", writer.get_extra_info("peername")))
             role, token = access.admit(peer, request)
-            request_path = request.target
-            path = request.path
 
-            if path == WS_PATH:
+            if request.path == WS_PATH:
                 if not access.origin_ok(request.headers.get("origin"), request.host):
                     # Another site's page opening a socket to this server.
                     await _refuse(writer, "403 Forbidden", "Forbidden", "")
@@ -1263,101 +1522,7 @@ def make_http_handler(
                     + "working when they make new ones or stop sharing.",
                 )
                 return
-            if token is not None and TOKEN_PARAM in request.query:
-                # A share link (or the owner link): the cookie keeps them in;
-                # the page moves on to the same address without the token.
-                who = (
-                    "owner signed in" if role == "owner" else f"guest joined as {role}"
-                )
-                logger.info(f"{who} with {redacted(token)}")
-                cookie = access.set_cookie(token, request.host)
-                await _respond(
-                    writer,
-                    "200 OK",
-                    enter_page(request.without_token()),
-                    extra=f"Set-Cookie: {cookie}\r\n".encode(),
-                )
-                return
-            editor_only = _is_editor_path(request_path) or path.startswith(
-                ("/_export/", "/_cmp/")
-            )
-            if editor_only and role == "viewer":
-                await _refuse(writer, "403 Forbidden", "View-only link", _VIEW_ONLY)
-                return
-
-            if path == instances.PROBE_PATH:
-                # Who is serving here (see instances.py): another inkflow
-                # opening a deck asks before starting a second server for it.
-                if role != "owner":
-                    await _refuse(writer, "404 Not Found", "Not found", "")
-                    return
-                await _respond(writer, "200 OK", _probe_body(), "application/json")
-                return
-
-            font = shipped_font_file(request_path)
-            if font is not None:
-                # A font inkflow ships (the deck's and the interface's): the
-                # same bytes for as long as this inkflow is installed.
-                body = await asyncio.to_thread(font.read_bytes)
-                writer.write(
-                    b"HTTP/1.1 200 OK\r\n"
-                    + f"Content-Type: {font_mime(font)}\r\n".encode()
-                    + b"Cache-Control: public, max-age=86400\r\n"
-                    + b"Access-Control-Allow-Origin: *\r\n"
-                    + b"Connection: close\r\n"
-                    + f"Content-Length: {len(body)}\r\n\r\n".encode()
-                    + body
-                )
-                await writer.drain()
-                return
-
-            download = _export_download(request_path)
-            if download is not None:
-                name, mime, body = await asyncio.to_thread(*download)
-                await _respond(
-                    writer,
-                    "200 OK",
-                    body,
-                    mime,
-                    f'Content-Disposition: attachment; filename="{name}"\r\n'.encode(),
-                )
-                return
-
-            hub = _editor["compare"]
-            if hub is not None and request_path.startswith("/_cmp/"):
-                # A compared deck's picture, inside that deck's own roots.
-                compared = hub.asset(request_path)
-                if compared is None:
-                    await _respond(writer, "404 Not Found", b"")
-                else:
-                    await _send_file(writer, compared, _range_header(raw))
-                return
-
-            if project_dir is not None and request_path != "/":
-                roots = AssetRoots(project_dir, _state["theme_dir"])
-                asset_path = _resolve_asset(roots, request_path)
-                if asset_path is not None:
-                    await _send_file(writer, asset_path, _range_header(raw))
-                    return
-
-            session = _editor["session"]
-            starting = session is not None and not session.has_deck
-            # The start page (no deck yet) is the editor's, at any path.
-            if starting and role != "owner":
-                await _refuse(
-                    writer, "404 Not Found", "No deck open", "Nothing is shared yet."
-                )
-                return
-            if _is_editor_path(request_path) or starting:
-                body = build_editor_html(_state, _editor, ws_port)
-            else:
-                # Opening a source file in a program is the owner's alone.
-                body = build_html(
-                    _state,
-                    ws_port,
-                    edit_commands if role == "owner" else NO_EDIT_COMMANDS,
-                )
-            await _respond(writer, "200 OK", body)
+            await route(request, raw, role, token, writer)
         except Exception:
             # File sink only, never the TUI. The client still gets the 500 body below.
             logger.exception("error handling HTTP request")
@@ -1535,6 +1700,9 @@ class Sharing:
     """More names to answer to: a reverse proxy's, a tailnet name."""
     tls: tuple[Path, Path] | None = None
     """Certificate and key: HTTPS and WSS on the one port."""
+    online: bool = False
+    """Share online from the start, through the relay set with ``inkflow
+    relay set`` (``--share-online``)."""
 
 
 def _local_host(host: str) -> str:
@@ -1583,12 +1751,28 @@ def owner_lines(access: Access, port: int) -> list[str]:
     ]
 
 
+def online_lines() -> list[str]:
+    """What the terminal says about sharing online: the two links, or why
+    there are none yet."""
+    host = _share.online
+    if host is None:
+        return []
+    if host.state == "open":
+        return [
+            f"edit  {host.link('editor')}  (online)",
+            f"view  {host.link('viewer')}  (online)",
+        ]
+    why = f": {host.error}" if host.error else ""
+    return [f"online  {host.state} ({host.relay}){why}"]
+
+
 def share_lines(access: Access, port: int) -> list[str]:
     """What the terminal says about sharing: the two links per address, the
-    mDNS name, and how to reach the server through SSH instead. In SSH mode
-    the links name ``localhost``, for each guest's own tunnel."""
+    mDNS name, and how to reach the server through SSH instead; the online
+    links when sharing online. In SSH mode the links name ``localhost``, for
+    each guest's own tunnel."""
     if not access.sharing:
-        return []
+        return online_lines()
     lines: list[str] = []
     links = access.links(_link_addresses(access))
     for link in links:
@@ -1598,7 +1782,7 @@ def share_lines(access: Access, port: int) -> list[str]:
             f"guests: ssh -N -L {port}:localhost:{port} <their login>@<this "
             + "server>, then their link (Share → Share via SSH writes it out)"
         )
-        return lines
+        return lines + online_lines()
     names = {n for n in access.names if n.endswith(".local")} | access.allow_hosts
     for name in sorted(names):
         lines.append(f"also  {access.scheme}://{name}:{port} (same ?k= links)")
@@ -1608,7 +1792,7 @@ def share_lines(access: Access, port: int) -> list[str]:
         f"ssh   ssh -L {port}:localhost:{port} <you>@<this machine>, "
         + f"then http://localhost:{port}/edit (as the owner)"
     )
-    return lines
+    return lines + online_lines()
 
 
 async def serve(
@@ -1651,6 +1835,40 @@ async def serve(
         sharing=sharing.share or _shares(host),
         ssh=sharing.ssh,
     )
+    if sharing.online:
+        problem = await start_online()
+        if problem is not None:
+            report("Error", f"cannot share online: {problem}", style="red")
+    try:
+        await _serve_decks(
+            deck_path,
+            host,
+            http_port,
+            ws_port,
+            levels,
+            open_path,
+            exporters,
+            quit_when_idle,
+            auto_ports,
+            sharing,
+        )
+    finally:
+        await stop_online("the server stopped")
+
+
+async def _serve_decks(
+    deck_path: Path | None,
+    host: str,
+    http_port: int,
+    ws_port: int | None,
+    levels: Levels,
+    open_path: str | None,
+    exporters: Exporters | None,
+    quit_when_idle: float | None,
+    auto_ports: bool,
+    sharing: Sharing,
+) -> None:
+    """``serve``'s loop: one deck after another, as the editor opens them."""
     retries = 5 if auto_ports else 0
     while True:
         try:
@@ -1736,11 +1954,15 @@ async def listening(
     listener = await asyncio.start_server(http, host, port)
     actual = cast("tuple[str, int]", listener.sockets[0].getsockname())[1]
     handlers.append(make_http_handler(actual, project_dir, edit_commands, bridge))
+    _share.ws_handler = make_ws_handler(ui, edit_commands, session)
+    _share.route = make_http_route(actual, project_dir, edit_commands)
     try:
         yield actual
     finally:
         listener.close()
         await bridge.shutdown()
+        _share.ws_handler = None
+        _share.route = None
 
 
 class Listener:
@@ -1877,6 +2099,8 @@ async def _serve_deck(
         # Image uploads from the editor arrive as base64 frames.
         bridge = Bridge(ws_entry, max_size=80 * 1024 * 1024, forget=_share.people.leave)
         http_handler = make_http_handler(http_port, project_dir, edit_commands, bridge)
+        _share.ws_handler = ws_entry
+        _share.route = make_http_route(http_port, project_dir, edit_commands)
         listener = Listener(http_handler, http_port, _tls_context(tls))
 
         # Bind before the Live UI so port conflicts fail fast with a clean message
@@ -1938,6 +2162,7 @@ async def _serve_deck(
             ui.set_owner(owner)
             ui.set_share(share_lines(access, http_port))
             ui_ref.append(ui)
+            _share.on_change = lambda: ui.set_share(share_lines(access, http_port))
             try:
                 async with contextlib.AsyncExitStack() as stack:
                     if ws_port is not None:
@@ -2012,6 +2237,12 @@ async def _serve_deck(
         if bridge is not None:
             await bridge.shutdown()
         _share.rebind = None
+        _share.on_change = None
+        _share.ws_handler = None
+        _share.route = None
+        if _share.online is not None:
+            # Online guests' pages reconnect, to the next deck if one opens.
+            await _share.online.drop_pages()
         if _editor["compare"] is not None:
             _editor["compare"].close_all()
             _editor["compare"] = None

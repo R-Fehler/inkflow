@@ -67,6 +67,15 @@ def _share_options(f: Callable[..., None]) -> Callable[..., None]:
         help="Also answer to this host name (a reverse proxy's, a VPN name); "
         + "requests naming any other host are refused. Repeatable.",
     )(f)
+    f = click.option(
+        "--share-online",
+        "share_online",
+        is_flag=True,
+        help="Share online through your relay (see `inkflow relay`): prints "
+        + "an editor link and a view link that work from anywhere, end-to-end "
+        + "encrypted. Needs `inkflow relay set` (or `relay deploy cloudflare`) "
+        + "once.",
+    )(f)
     return click.option(
         "--share",
         is_flag=True,
@@ -82,12 +91,14 @@ def _sharing(
     allow_hosts: tuple[str, ...],
     tls: tuple[Path, Path] | None,
     ssh: bool | None,
+    share_online: bool = False,
 ) -> Sharing:
     return Sharing(
         share=share,
         allow_hosts=allow_hosts,
         tls=tls or None,
         ssh=over_ssh() if ssh is None else ssh,
+        online=share_online,
     )
 
 
@@ -113,6 +124,7 @@ def serve(
     allow_hosts: tuple[str, ...],
     tls: tuple[Path, Path] | None,
     ssh: bool | None,
+    share_online: bool,
 ) -> None:
     """Start the presentation server with live reload.
 
@@ -148,7 +160,7 @@ def serve(
                 levels,
                 exporters=EXPORTERS,
                 auto_ports=auto,
-                sharing=_sharing(share, allow_hosts, tls, ssh),
+                sharing=_sharing(share, allow_hosts, tls, ssh, share_online),
             )
         )
 
@@ -229,6 +241,7 @@ def edit(
     allow_hosts: tuple[str, ...],
     tls: tuple[Path, Path] | None,
     ssh: bool | None,
+    share_online: bool,
     no_open: bool,
     start: bool,
     quit_when_idle: float | None,
@@ -264,6 +277,10 @@ def edit(
     Share → Share via SSH writes out the commands and links for your
     collaborators, who open them through tunnels of their own.
 
+    Share it with anyone, anywhere, with `--share-online` (or Share… →
+    Online): through a relay on your Cloudflare account or your own server
+    (`inkflow relay`), end-to-end encrypted; the relay never sees the deck.
+
     Keyboard shortcuts in the terminal are those of `serve`, plus `e` to open the
     editor again.
     """
@@ -296,7 +313,7 @@ def edit(
                 exporters=EXPORTERS,
                 quit_when_idle=quit_when_idle,
                 auto_ports=auto,
-                sharing=_sharing(share, allow_hosts, tls, ssh),
+                sharing=_sharing(share, allow_hosts, tls, ssh, share_online),
             )
         )
 

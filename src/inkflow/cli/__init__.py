@@ -23,6 +23,7 @@ for _submodule in (
     "fonts",
     "present",
     "project",
+    "relay",
     "shapes",
     "slides",
     "text",
