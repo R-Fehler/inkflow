@@ -3,20 +3,34 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import click
+from typing_extensions import override
 
 from inkflow import logging as inkflow_logging
 from inkflow import sync
 from inkflow.enums import ColorMode
 from inkflow.manifest import Deck
-from inkflow.server import load_deck
+from inkflow.server import DeckError, load_deck
 from inkflow.themes import Theme
 
 _level_choice = click.Choice(inkflow_logging.LEVEL_NAMES)
 
 
-@click.group()
+class _Group(click.Group):
+    """Reports a deck.py that does not load as one line, not a traceback: the
+    reader (often an agent) needs the file, line and error to fix it."""
+
+    @override
+    def invoke(self, ctx: click.Context) -> object:
+        try:
+            return cast(object, super().invoke(ctx))
+        except DeckError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+
+@click.group(cls=_Group)
 @click.version_option()
 @click.option(
     "--log-level",

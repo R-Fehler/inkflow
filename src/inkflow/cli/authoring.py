@@ -424,11 +424,8 @@ def sync_cmd(
             plan = sync.plan_preview(target.path, ctx)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
-        # A file with no layers only gains the preview style block, which is worth
-        # writing when it was named explicitly but not when sweeping the whole deck.
-        # An overlay file is the exception: it is swept precisely to get that block,
-        # and it legitimately has no layers until it names a backdrop.
-        if plan.is_bare and not plan.is_overlay and not (files or no_deck):
+        # A file named explicitly is always written; a sweep follows `swept`.
+        if not (files or no_deck or plan.swept(target.path)):
             continue
         label = _sync_label(target.label, plan)
         if check:

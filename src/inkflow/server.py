@@ -122,7 +122,40 @@ _editor: EditorState = {
 # ── Deck loader ───────────────────────────────────────────────────────────────
 
 
+class DeckError(Exception):
+    """deck.py did not load: the file, line and error, without the traceback
+    through inkflow (the cause stays chained for the server's error overlay)."""
+
+
+def _deck_failure(deck_path: Path, exc: BaseException) -> str:
+    """Where in deck.py ``exc`` happened, as ``deck.py:41: NameError: …``."""
+    lineno, line = None, None
+    if isinstance(exc, SyntaxError) and exc.filename == str(deck_path):
+        lineno, line = exc.lineno, exc.text
+    else:
+        frames = [
+            f
+            for f in traceback.extract_tb(exc.__traceback__)
+            if f.filename == str(deck_path)
+        ]
+        if frames:
+            lineno, line = frames[-1].lineno, frames[-1].line
+    where = f"{deck_path.name}:{lineno}" if lineno else deck_path.name
+    detail = f"\n    {line.strip()}" if line and line.strip() else ""
+    return f"{where}: {type(exc).__name__}: {exc}{detail}"
+
+
 def load_deck(deck_path: Path) -> Deck:
+    """Run deck.py's ``main()``; any failure in it is a ``DeckError``."""
+    try:
+        return _load_deck(deck_path)
+    except DeckError:
+        raise
+    except Exception as exc:
+        raise DeckError(_deck_failure(deck_path, exc)) from exc
+
+
+def _load_deck(deck_path: Path) -> Deck:
     spec = importlib.util.spec_from_file_location("_inkflow_deck", deck_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load module from {deck_path}")

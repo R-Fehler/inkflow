@@ -365,6 +365,12 @@ def _preview_css(root: SvgElement, layers: PreviewLayers) -> str:
     return "\n".join(filter(None, [layers.preview_css, zone_placeholder_css(root)]))
 
 
+def has_preview_style(svg_path: Path) -> bool:
+    """Whether the file carries the preview ``<style>`` block ``sync`` writes."""
+    root = parse_svg_file(svg_path)
+    return root.find(f'.//{{{ns.SVG}}}style[@id="inkflow-preview"]') is not None
+
+
 def are_preview_layers_current(svg_path: Path, layers: PreviewLayers) -> bool:
     """Return True if svg_path already carries exactly these layers and style."""
     root = parse_svg_file(svg_path)
