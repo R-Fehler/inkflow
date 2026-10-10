@@ -64,6 +64,13 @@ from inkflow.editor.deckedit import (
     remove_section,
 )
 from inkflow.editor.drawioedit import DiagramEditError, apply_cell_ops
+from inkflow.editor.filerename import (
+    RenameError,
+    plan_rename,
+    plan_slide_rename,
+    project_files,
+    reference_counts,
+)
 from inkflow.editor.findreplace import (
     MAX_HITS,
     DeckStrings,
@@ -169,6 +176,32 @@ class _Change:
 
 
 @dataclass
+class _Move:
+    """A file renamed by a step (``rename``). Its bytes are not kept: a picture
+    or a video may be large, and undo only has to move it back. A move whose
+    file also changes (``content``) is recorded in the step's changes instead,
+    as the old path deleted and the new one created; it is listed here only to
+    be reported as a rename."""
+
+    src: Path
+    dst: Path
+    content: bool = False
+
+
+def _prune_empty(paths: list[Path], root: Path) -> None:
+    """Remove the folders ``paths`` lived in once they are empty (a rename that
+    moved the last file out), up to the project folder."""
+    for path in paths:
+        folder = path.parent
+        while folder != root and folder.is_relative_to(root):
+            try:
+                folder.rmdir()
+            except OSError:
+                break
+            folder = folder.parent
+
+
+@dataclass
 class _Step:
     label: str
     changes: list[_Change]
@@ -177,6 +210,9 @@ class _Step:
     seq: int = 0
     """Serial number in its History (0 until recorded), which an undo can name
     so it undoes that step only (the editor's "Undo" on an agent's edit)."""
+    moves: list[_Move] = field(default_factory=list)
+    prune: Path | None = None
+    """The project folder, for a step that removes the folders it empties."""
 
 
 @dataclass
@@ -205,7 +241,9 @@ class History:
             merged += [
                 c for c in last.changes if c.path not in {m.path for m in merged}
             ]
-            self.done[-1] = _Step(last.label, merged, step.coalesce, step.seq)
+            self.done[-1] = _Step(
+                last.label, merged, step.coalesce, step.seq, [*last.moves, *step.moves]
+            )
             self.undone.clear()
             return
         self.done.append(step)
@@ -213,6 +251,17 @@ class History:
         self.undone.clear()
 
     def _swap(self, step: _Step, forward: bool) -> None:
+        moves = [
+            (m.src, m.dst) if forward else (m.dst, m.src)
+            for m in step.moves
+            if not m.content
+        ]
+        for src, dst in moves:
+            if not src.is_file() or dst.exists():
+                raise EditError(
+                    f"{src.name} moved or changed outside the editor; "
+                    + "cannot undo past that edit"
+                )
         for change in step.changes:
             expected = change.before if forward else change.after
             current = change.path.read_bytes() if change.path.exists() else None
@@ -221,6 +270,8 @@ class History:
                     f"{change.path.name} changed outside the editor; "
                     + "cannot undo past that edit"
                 )
+        if forward:
+            _do_moves(moves)
         for change in step.changes:
             target = change.after if forward else change.before
             if target is None:
@@ -228,6 +279,16 @@ class History:
             else:
                 change.path.parent.mkdir(parents=True, exist_ok=True)
                 change.path.write_bytes(target)
+        if not forward:
+            _do_moves(list(reversed(moves)))
+        if step.prune is not None:
+            left = [m.src if forward else m.dst for m in step.moves]
+            left += [
+                c.path
+                for c in step.changes
+                if (c.after if forward else c.before) is None
+            ]
+            _prune_empty(left, step.prune)
 
     def undo(self, seq: int | None = None) -> _Step:
         """Undo the last step; with ``seq``, only when that is the step."""
@@ -249,6 +310,12 @@ class History:
         return step
 
 
+def _do_moves(moves: list[tuple[Path, Path]]) -> None:
+    for src, dst in moves:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(src, dst)
+
+
 class _Txn:
     """The files one request writes, staged in memory until commit."""
 
@@ -257,10 +324,25 @@ class _Txn:
     """New contents by path; None deletes the file."""
     originals: dict[Path, bytes | None]
 
+    moves: list[_Move]
+    prune: bool
+    """Remove the folders the moves empty (a rename)."""
+
     def __init__(self, project_dir: Path) -> None:
         self.project_dir = project_dir
         self.staged = {}
         self.originals = {}
+        self.moves = []
+        self.prune = False
+
+    def move(self, src: Path, dst: Path, content: bytes | None = None) -> None:
+        """Rename ``src`` to ``dst``; with ``content``, also give it new bytes
+        (recorded as a delete and a create, reported as the rename)."""
+        src, dst = self._check(src), self._check(dst)
+        if content is not None:
+            self.write(src, None)
+            self.write(dst, content)
+        self.moves.append(_Move(src, dst, content is not None))
 
     def read(self, path: Path) -> bytes:
         data = self.read_optional(path)
@@ -296,13 +378,18 @@ class _Txn:
             for path, data in self.staged.items()
             if self.originals[path] != data
         ]
+        _do_moves([(m.src, m.dst) for m in self.moves if not m.content])
         for change in changes:
             if change.after is None:
                 change.path.unlink(missing_ok=True)
                 continue
             change.path.parent.mkdir(parents=True, exist_ok=True)
             change.path.write_bytes(change.after)
-        return _Step(label, changes)
+        prune = self.project_dir.resolve() if self.prune else None
+        if prune is not None:
+            gone = [c.path for c in changes if c.after is None]
+            _prune_empty([m.src for m in self.moves] + gone, prune)
+        return _Step(label, changes, moves=list(self.moves), prune=prune)
 
 
 def _slug(text: str) -> str:
@@ -486,6 +573,8 @@ class EditorSession:
             return {"ok": True, "bundle": bundle}
         if action == "shape":
             return self._shapes(msg, deck)
+        if action == "files":
+            return {"ok": True, "files": self._file_list(deck)}
         txn = _Txn(self.project_dir)
         extra: dict[str, object] = {}
         handler = {
@@ -512,6 +601,8 @@ class EditorSession:
             "drawio-save": self._drawio_save,
             "drawio-new": self._drawio_new,
             "ink": self._ink,
+            "rename": self._rename,
+            "delete-files": self._delete_files,
         }.get(cast("str", action))
         if handler is None:
             raise EditError(f"unknown action {action!r}")
@@ -531,6 +622,7 @@ class EditorSession:
             SvgOpError,
             TransferError,
             InkError,
+            RenameError,
             ValueError,
             KeyError,
             TypeError,
@@ -544,7 +636,7 @@ class EditorSession:
         step = txn.commit(label)
         coalesce = msg.get("coalesce")
         step.coalesce = coalesce if isinstance(coalesce, str) else None
-        if step.changes:
+        if step.changes or step.moves:
             self.history.record(step)
         return {**self._result(step), **extra}
 
@@ -587,9 +679,15 @@ class EditorSession:
             (c.path, c.after, c.before) if undo else (c.path, c.before, c.after)
             for c in step.changes
         ]
-        gone = {path: before for path, before, after in pairs if after is None}
         out: list[dict[str, str]] = []
         renamed: set[Path] = set()
+        moved: set[Path] = set()
+        for m in step.moves:
+            src, dst = (m.dst, m.src) if undo else (m.src, m.dst)
+            out.append({"path": rel(dst), "change": "renamed", "from": rel(src)})
+            moved |= {src, dst}
+        pairs = [p for p in pairs if p[0] not in moved]
+        gone = {path: before for path, before, after in pairs if after is None}
         for path, before, after in pairs:
             if after is None:
                 continue
@@ -2632,6 +2730,82 @@ class EditorSession:
                 count += n
                 txn.write(path, text.encode("utf-8", errors="surrogateescape"))
         return count
+
+    # ── Renaming files ──
+
+    def _rename(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """Rename or move a file (``from``/``to``), or a slide's own files to a
+        new stem (``slide``/``stem``), with every reference following; with
+        ``dryRun``, only say what would change (``rename`` in the result)."""
+        _ = self._deck_source(txn)  # refused when deck.py changed since the build
+        if "slide" in msg:
+            index, _slide = self._deck_slide(deck, msg)
+            stem = str(msg.get("stem") or "")
+            plan = plan_slide_rename(
+                self.project_dir,
+                self.deck_path,
+                deck,
+                index,
+                stem,
+                keep_id=bool(msg.get("keepId")),
+            )
+            label = f"Rename slide files to {stem.strip()}"
+        else:
+            old, new = msg.get("from"), msg.get("to")
+            if not isinstance(old, str) or not isinstance(new, str):
+                raise EditError("name the file to rename and its new name")
+            plan = plan_rename(self.project_dir, self.deck_path, deck, {old: new})
+            label = f"Rename {Path(old).name} to {new.strip()}"
+        extra["rename"] = plan.summary(self.project_dir)
+        extra["links"] = plan.links
+        if msg.get("dryRun"):
+            return label
+        moved = {new for _, new in plan.moves}
+        for old_path, new_path in plan.moves:
+            txn.move(old_path, new_path, plan.writes.get(new_path))
+        for path, data in plan.writes.items():
+            if path not in moved:
+                txn.write(path, data)
+        txn.prune = True
+        extra["structural"] = True
+        return label
+
+    def _file_list(self, deck: Deck) -> list[dict[str, object]]:
+        """The project's files a deck may use (pictures, videos, data, PDFs,
+        diagrams, drawings, Markdown), each with how many references name it."""
+        counts = reference_counts(self.project_dir, self.deck_path, deck)
+        out: list[dict[str, object]] = []
+        for path in project_files(self.project_dir, self.deck_path):
+            rel = path.relative_to(self.project_dir).as_posix()
+            out.append(
+                {"path": rel, "uses": counts.get(rel, 0), "size": path.stat().st_size}
+            )
+        return out
+
+    def _delete_files(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, _extra: dict[str, object]
+    ) -> str:
+        """Delete project files nothing refers to (the Files view's "Delete
+        unused"); a file still in use is refused."""
+        raw = msg.get("paths")
+        if not isinstance(raw, list) or not raw:
+            raise EditError("no files to delete")
+        counts = reference_counts(self.project_dir, self.deck_path, deck)
+        listed = {
+            p.relative_to(self.project_dir).as_posix()
+            for p in project_files(self.project_dir, self.deck_path)
+        }
+        names = [str(p) for p in cast("list[object]", raw)]
+        for rel in names:
+            if rel not in listed:
+                raise EditError(f"{rel} is not a deck file inkflow manages")
+            if counts.get(rel):
+                raise EditError(f"{rel} is in use ({counts[rel]} references)")
+            txn.write(self.project_dir / rel, None)
+        txn.prune = True
+        return f"Delete {names[0]}" if len(names) == 1 else f"Delete {len(names)} files"
 
     # ── Ink ──
 

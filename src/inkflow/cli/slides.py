@@ -22,6 +22,7 @@ import click
 from inkflow.cli._common import deck_option, main
 from inkflow.cli._edits import DeckSlides as _Slides
 from inkflow.cli._edits import apply_edit as _apply
+from inkflow.cli._edits import rename_request
 from inkflow.editor.remote import Applied
 from inkflow.logging import report
 
@@ -384,6 +385,46 @@ def rename(ref: str, new_id: str, deck_path: Path) -> None:
         slides,
         {"action": "slide", "op": "id", "slide": index, "id": new_id},
         f"Rename {slides.name(index)} to {new_id}",
+    )
+
+
+@slide.command("rename-files")
+@click.argument("ref", metavar="SLIDE")
+@click.argument("stem", metavar="NEW_NAME")
+@click.option(
+    "--keep-id",
+    is_flag=True,
+    help="Keep the slide's current id (written as id=) instead of the new name.",
+)
+@click.option(
+    "--dry-run",
+    "-n",
+    is_flag=True,
+    help="Print the moves and reference edits; change nothing.",
+)
+@deck_option
+def rename_files(
+    ref: str, stem: str, keep_id: bool, dry_run: bool, deck_path: Path
+) -> None:
+    """Rename a slide's own files to NEW_NAME: its drawing, Markdown, notes
+    and named ink file, each in its folder with its extension.
+
+    Every reference follows (as with `inkflow mv`). The slide's id is
+    inferred from those names, so it becomes NEW_NAME too, and its saved ink
+    and `slide:` links follow, unless the slide has an explicit id= (kept;
+    dropped when it equals NEW_NAME) or --keep-id. Files other slides use
+    as well (a layout, a shared drawing or Markdown file) stay as they are.
+    """
+    slides = _Slides.load(deck_path)
+    index = slides.index(ref)
+    request: dict[str, object] = {
+        "action": "rename",
+        "slide": index,
+        "stem": stem,
+        "keepId": keep_id,
+    }
+    rename_request(
+        slides, request, f"Rename the files of {slides.name(index)} to {stem}", dry_run
     )
 
 

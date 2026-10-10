@@ -19,6 +19,7 @@ for _submodule in (
     "authoring",
     "compare",
     "color",
+    "files",
     "present",
     "project",
     "shapes",

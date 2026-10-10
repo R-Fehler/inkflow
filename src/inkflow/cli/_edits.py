@@ -164,3 +164,52 @@ def apply_edit(slides: DeckSlides, request: dict[str, object], summary: str) -> 
     elif not applied.built:
         report("Build", "the server has not rebuilt yet", style="yellow")
     return applied
+
+
+def report_rename(result: dict[str, object], dry_run: bool) -> None:
+    """Print what a rename changes (``rename`` in a session result): the
+    files that move and every reference rewritten, file by file."""
+    plan = cast("dict[str, object]", result.get("rename") or {})
+    moves = cast("list[dict[str, str]]", plan.get("moves") or [])
+    edits = cast("list[dict[str, str]]", plan.get("edits") or [])
+    if dry_run:
+        for move in moves:
+            report("Would move", f"{move['from']} -> {move['to']}", style="yellow")
+    for edit in edits:
+        report(
+            "Would edit" if dry_run else "Reference",
+            f"{edit['file']}: {edit['kind']} {edit['old']!r} -> {edit['new']!r}",
+            style="yellow" if dry_run else "dim",
+        )
+    ids = cast("dict[str, str]", plan.get("ids") or {})
+    for old, new in ids.items():
+        report("Slide id", f"{old} -> {new} (its ink and slide: links follow)")
+    for shared in cast("list[str]", plan.get("shared") or []):
+        report("Kept", f"{shared}: not this slide's alone", style="dim")
+    count, files = plan.get("references", 0), plan.get("files", 0)
+    report(
+        "References",
+        f"{count} in {files} file{'' if files == 1 else 's'}"
+        + (" would be updated" if dry_run else " updated"),
+        style="yellow" if dry_run else "green",
+    )
+    for warning in cast("list[str]", plan.get("warnings") or []):
+        report("Warning", warning, style="yellow")
+
+
+def rename_request(
+    slides: DeckSlides, request: dict[str, object], summary: str, dry_run: bool
+) -> None:
+    """Run a ``rename`` session action (``inkflow mv``, ``inkflow slide
+    rename-files``): with ``dry_run`` only print what it would change."""
+    if not dry_run:
+        applied = apply_edit(slides, request, summary)
+        report_rename(applied.result, dry_run=False)
+        return
+    try:
+        applied = apply_request(
+            slides.path, slides.deck, slides.hash, {**request, "dryRun": True}
+        )
+    except RemoteEditError as exc:
+        raise click.ClickException(str(exc)) from exc
+    report_rename(applied.result, dry_run=True)
