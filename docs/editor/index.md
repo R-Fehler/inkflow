@@ -407,6 +407,11 @@ Select a picture and the panel offers:
   in or picked from the PDF's pages with **Pages…**. A new page keeps the picture's
   width and takes the page's shape.
 - **Fit**: fit inside its box, fill it (cropping the edges), or stretch.
+- **Background**: a figure drawn for paper (a PDF from LaTeX, a plot exported as
+  SVG, a transparent PNG) has black lines on nothing, and disappears on a dark
+  slide. **Paper (white)** paints white behind it with a small margin, whatever
+  the deck's mode; **Theme surface** or a **Colour…** paint others. Image zones
+  and draw.io diagrams have the same setting.
 - **Alt text**, for screen readers (any object has it, see below).
 
 ## Diagrams (draw.io)

@@ -13,6 +13,7 @@ from typing import NamedTuple, NotRequired, TypedDict, cast
 from inkflow import ns
 from inkflow.animations import Animation, Cue, PlayVideo
 from inkflow.assets import AssetRoots, AssetSource, read_resolved_svg
+from inkflow.backgrounds import picture_backgrounds
 from inkflow.content import (
     inject_style,
     remove_unreferenced_zones,
@@ -574,6 +575,9 @@ class SlideSvg:
                 ],
             )
 
+    def picture_backgrounds(self) -> None:
+        self.root = picture_backgrounds(self.root)
+
     def inline_diagrams(self, roots: AssetRoots) -> None:
         register = self.sources.key if self.sources is not None else None
         self.root = inline_diagrams(self.root, roots, register)
@@ -732,6 +736,7 @@ def process_slide(
     doc.compose_overlays(overlay_chains, ctx.assets)
     # Before annotation, so animations can target a diagram's shapes.
     doc.inline_diagrams(ctx.assets)
+    doc.picture_backgrounds()
     for zone_id in doc.duplicate_zone_ids():
         logger.warning(
             f"{slide_id}: {zone_id} is declared more than once after composition — "

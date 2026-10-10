@@ -6818,6 +6818,15 @@
         );
         continue;
       }
+      if (f.name === "background") {
+        rows.push(
+          backgroundRow(
+            values.background ?? null,
+            (v) => commit("background", v)
+          )
+        );
+        continue;
+      }
       if (f.name === "muted") {
         const opts2 = [
           { value: "auto", label: "When autoplaying" },
@@ -8101,6 +8110,10 @@
             "Picture fit"
           )
         )
+      ),
+      backgroundRow(
+        image.getAttribute("inkflow:background"),
+        (v) => imageOps({ "inkflow:background": v }, "Picture background")
       )
     );
   }
@@ -8219,6 +8232,24 @@
             "Diagram fit"
           )
         )
+      ),
+      backgroundRow(
+        svg.getAttribute("inkflow:background"),
+        (v) => void sendSvgOps(
+          [
+            {
+              sel,
+              ops: [
+                {
+                  kind: "attrs",
+                  loc: sel.loc,
+                  set: { "inkflow:background": v }
+                }
+              ]
+            }
+          ],
+          "Diagram background"
+        )
       )
     );
   }
@@ -8319,6 +8350,47 @@
         "Animate the diagram's shapes one by one. To change a shape, edit the diagram in draw.io."
       ),
       list3
+    );
+  }
+  function backgroundRow(current2, commit) {
+    const value = typeof current2 === "string" ? current2 : "";
+    const named = ["", "paper", "surface"];
+    const choice = named.includes(value) ? value : "custom";
+    const colour = h("input", {
+      type: "color",
+      title: "Background colour",
+      value: /^#[0-9a-f]{6}$/i.test(value) ? value : "#ffffff"
+    });
+    colour.hidden = choice !== "custom";
+    colour.addEventListener("change", () => commit(colour.value));
+    const select2 = selectInput(
+      [
+        { value: "", label: "None" },
+        { value: "paper", label: "Paper (white)" },
+        { value: "surface", label: "Theme surface" },
+        { value: "custom", label: "Colour\u2026" }
+      ],
+      choice,
+      (v) => {
+        if (v === "custom") {
+          colour.hidden = false;
+          commit(colour.value);
+        } else commit(v || null);
+      }
+    );
+    return h(
+      "div",
+      { class: "prop-row" },
+      h(
+        "span",
+        {
+          class: "prop-label",
+          title: "Painted behind the picture, so a figure with a transparent background stays visible on a dark slide"
+        },
+        "Background"
+      ),
+      select2,
+      colour
     );
   }
   function linkOf(el2) {

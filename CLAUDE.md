@@ -194,6 +194,12 @@ src/
                                ref in `data-inkflow-pdf`, or draws a placeholder (one
                                warning per build, `install_hint`); `page_count` for
                                the editor's page picker and `verify`
+    backgrounds.py    a background behind a picture (`Image(background=...)`,
+                               `inkflow:background` on an `<image>` or a drawn-in diagram):
+                               `background_paint` (paper = white in any mode, surface,
+                               a theme colour, #hex); a zone `<img>` gets CSS, a slide's
+                               own picture a pipeline-only `<rect>` behind it (margin 4%
+                               of its shorter side, `pointer-events: none`)
     clean.py          SVG Inkscape metadata stripping (used by cli and pre-commit hook)
     label2id.py       `inkflow label2id`: promote each element's inkscape:label to its
                                SVG id (Inkscape convenience for Morph/animation targets).

@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from lxml import etree
 
 from inkflow import ns
+from inkflow.backgrounds import MARGIN, background_paint
 from inkflow.editor.provenance import copy_provenance
 from inkflow.enums import Muted
 from inkflow.logging import logger
-from inkflow.manifest import Media, TextBox, Video
+from inkflow.manifest import Image, Media, TextBox, Video
 from inkflow.markdown import html_fragment_to_xml
 from inkflow.svg import ensure_defs
 from inkflow.svgio import SvgElement
@@ -521,6 +522,13 @@ def _replace_with_media(
         f"object-fit:{item.fit};"
         f"object-position:{_fmt_pos(base_x, x_pct)} {_fmt_pos(base_y, y_pct)};"
     )
+
+    if isinstance(item, Image) and item.background is not None:
+        # Behind the picture, inside the zone: the margin is the padding.
+        base_style += (
+            f"background:{background_paint(item.background)};"
+            + f"padding:{MARGIN * 100:g}%;box-sizing:border-box;border-radius:8px;"
+        )
 
     def make(src: str, style: str) -> SvgElement:
         if isinstance(item, Video):

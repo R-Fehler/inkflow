@@ -88,7 +88,9 @@ picture goes: `<image href="../figures/plot.pdf#page=2" .../>` in an SVG,
 No fragment means page 1. Always write the PDF's own path: the build converts
 the page to SVG in `.inkflow/cache/pdf/` and the served slide shows it under
 `_pdf/…` (with `data-inkflow-pdf` naming the PDF), but that cache is never a
-source to reference or edit. A dashed placeholder box means no converter is
+source to reference or edit. A figure drawn for paper (black on transparent)
+vanishes on a dark deck: give it `background="paper"` (`Image(...)`) or
+`inkflow:background="paper"` (an SVG `<image>`) for a white card behind it. A dashed placeholder box means no converter is
 installed (`pip install "inkflow[pdf]"`, or poppler's `pdftocairo`).
 
 A **draw.io diagram** is `diagrams/<name>.drawio.svg` (draw.io's editable SVG:

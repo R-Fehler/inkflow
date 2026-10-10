@@ -5,6 +5,7 @@ from dataclasses import InitVar, dataclass, field
 from typing import TypeAlias
 
 from inkflow.animations import Cue
+from inkflow.backgrounds import background_paint
 from inkflow.enums import (
     Align,
     ColorMode,
@@ -114,8 +115,15 @@ class Image(_MediaBase):
 
     page: InitVar[int | None] = None
     """For a PDF, the page to show; stored in ``src`` as ``#page=N``."""
+    background: str | None = None
+    """Painted behind the picture, with a small margin, so a figure with a
+    transparent background stays legible on any slide: ``"paper"`` (white,
+    whatever the deck's mode: for figures drawn for paper on a dark deck),
+    ``"surface"`` (the theme's), a theme colour name (``"blue"``) or ``#rrggbb``."""
 
     def __post_init__(self, page: int | None) -> None:
+        if self.background is not None:
+            background_paint(self.background)  # a clear error for a bad value
         if page is None:
             return
         if page < 1:

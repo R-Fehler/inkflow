@@ -328,6 +328,14 @@ function mediaSection(
             );
             continue;
         }
+        if (f.name === "background") {
+            rows.push(
+                backgroundRow(values.background ?? null, (v) =>
+                    commit("background", v),
+                ),
+            );
+            continue;
+        }
         if (f.name === "muted") {
             // Muted.AUTO mutes exactly when the video autoplays.
             const opts = [
@@ -1817,6 +1825,9 @@ function pictureSection(sel: Selected): HTMLElement {
                     ),
             ),
         ),
+        backgroundRow(image.getAttribute("inkflow:background"), (v) =>
+            imageOps({ "inkflow:background": v }, "Picture background"),
+        ),
     );
 }
 
@@ -1956,6 +1967,25 @@ function diagramSection(sel: Selected): HTMLElement {
                     ),
             ),
         ),
+        backgroundRow(
+            svg.getAttribute("inkflow:background"),
+            (v) =>
+                void sendSvgOps(
+                    [
+                        {
+                            sel,
+                            ops: [
+                                {
+                                    kind: "attrs",
+                                    loc: sel.loc,
+                                    set: { "inkflow:background": v },
+                                },
+                            ],
+                        },
+                    ],
+                    "Diagram background",
+                ),
+        ),
     );
 }
 
@@ -2071,6 +2101,54 @@ function diagramShapesSection(sel: Selected): HTMLElement | null {
             "Animate the diagram's shapes one by one. To change a shape, edit the diagram in draw.io.",
         ),
         list,
+    );
+}
+
+// What a picture shows through: figures made for paper (a PDF from LaTeX, a
+// plot as SVG or a transparent PNG) draw dark lines on nothing, invisible on a
+// dark deck. A background behind them (backgrounds.py) fixes that.
+function backgroundRow(
+    current: FieldValue,
+    commit: (v: string | null) => void,
+): HTMLElement {
+    const value = typeof current === "string" ? current : "";
+    const named = ["", "paper", "surface"];
+    const choice = named.includes(value) ? value : "custom";
+    const colour = h("input", {
+        type: "color",
+        title: "Background colour",
+        value: /^#[0-9a-f]{6}$/i.test(value) ? value : "#ffffff",
+    }) as HTMLInputElement;
+    colour.hidden = choice !== "custom";
+    colour.addEventListener("change", () => commit(colour.value));
+    const select = selectInput(
+        [
+            { value: "", label: "None" },
+            { value: "paper", label: "Paper (white)" },
+            { value: "surface", label: "Theme surface" },
+            { value: "custom", label: "Colour…" },
+        ],
+        choice,
+        (v) => {
+            if (v === "custom") {
+                colour.hidden = false;
+                commit(colour.value);
+            } else commit(v || null);
+        },
+    );
+    return h(
+        "div",
+        { class: "prop-row" },
+        h(
+            "span",
+            {
+                class: "prop-label",
+                title: "Painted behind the picture, so a figure with a transparent background stays visible on a dark slide",
+            },
+            "Background",
+        ),
+        select,
+        colour,
     );
 }
 

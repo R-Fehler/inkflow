@@ -35,7 +35,17 @@ In the editor, [**Crop**](../editor/index.md#pictures) trims a figure further.
 
 Most PDF figures have no background of their own: the slide shows through,
 as it does with a transparent PNG. On a dark deck, black axes and labels
-need a light shape behind the picture (or a light theme for that slide).
+disappear. Give the picture a **background**: `"paper"` paints white behind
+it, with a small margin and rounded corners, whatever the deck's mode:
+
+```python
+zones={"media": Image("figures/plot.pdf", background="paper")}
+```
+
+In a slide's SVG it is `inkflow:background="paper"` on the `<image>` (the
+editor's **Background** setting writes it). `"surface"` uses the theme's
+surface colour instead, and a theme colour name (`"blue"`) or `#rrggbb` any
+other. It works for any picture: an SVG or a transparent PNG, too.
 
 ## Installing a converter
 

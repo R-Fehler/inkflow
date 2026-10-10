@@ -125,7 +125,10 @@ Slide(
 Both share the same placement fields:
 `fit`, `align`, `x`, `y`, and `alt_src` (a different file for the other color mode).
 An `Image` can be a page of a PDF, `Image("figures/plot.pdf", page=2)`:
-see [PDF figures](pdf-figures.md).
+see [PDF figures](pdf-figures.md). `background="paper"` paints white behind a
+picture whose own background is transparent (a figure made for paper, a plot,
+a transparent PNG), so it stays legible on a dark deck; `"surface"`, a theme
+colour name or `#rrggbb` paint other colours.
 The [manifest reference](../reference/manifest.md#inkflow.manifest.Image) lists them all.
 
 ### Video playback
