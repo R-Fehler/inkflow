@@ -39,7 +39,8 @@
 .inkflow-fill-pink { fill: #f5c2e7; }
 .inkflow-stroke-pink { stroke: #f5c2e7; }
 .inkflow-fill-grey { fill: #6c7086; }
-.inkflow-stroke-grey { stroke: #6c7086; }</style></defs>
+.inkflow-stroke-grey { stroke: #6c7086; }
+#zone-title, #zone-media, #zone-content { fill: #808080; fill-opacity: 0.08; stroke: #808080; stroke-opacity: 0.7; stroke-width: 2; stroke-dasharray: 12 8; }</style></defs>
   <rect id="zone-title" x="1000" y="60" width="840" height="120" style="stroke-width:0.690434"/>
   <rect id="zone-media" x="0" y="0" width="920" height="1080" style="stroke-width:1.22586"/>
   <rect id="zone-content" x="1000" y="220" width="840" height="740"/>

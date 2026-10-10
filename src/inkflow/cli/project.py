@@ -42,12 +42,18 @@ def _sync_layout_previews(target: Path) -> None:
     help="Skip git hook setup even when inside a git repository.",
 )
 @click.option(
+    "--no-lfs",
+    "no_lfs",
+    is_flag=True,
+    help="Git only: keep videos and images in git itself, without Git LFS rules.",
+)
+@click.option(
     "--force",
     "force",
     is_flag=True,
     help="Scaffold even into a non-empty directory.",
 )
-def init_cmd(directory: Path, no_git: bool, force: bool) -> None:
+def init_cmd(directory: Path, no_git: bool, no_lfs: bool, force: bool) -> None:
     """Scaffold a new presentation project in DIRECTORY (default: current).
 
     Writes a starter `deck.py`, slides, and a `pyproject.toml` declaring inkflow.
@@ -55,6 +61,10 @@ def init_cmd(directory: Path, no_git: bool, force: bool) -> None:
     writes a `.gitignore`, and configures the SVG git hooks. Inside an existing
     repository it leaves git alone and points you at `setup-git`. Skip all git steps
     with `--no-git`.
+
+    The deck's `.gitattributes` sends videos, audio, images, fonts and documents
+    through Git LFS (and a new repository gets `git lfs install --local`); with
+    `--no-lfs` it records a "git only" choice instead, for a minimal repository.
 
     Refuses to scaffold into a non-empty directory (dotfiles like `.git` are ignored)
     unless `--force` is given.
@@ -76,7 +86,7 @@ def init_cmd(directory: Path, no_git: bool, force: bool) -> None:
     report("Created", "pyproject.toml")
     _sync_layout_previews(target)
     if not no_git:
-        git_setup.init_project_git(target, verbose=False)
+        git_setup.init_project_git(target, verbose=False, lfs=not no_lfs)
     rel = str(directory) if str(directory) not in (".", "./") else None
     suffix = f"cd {rel} && inkflow serve" if rel else "inkflow serve"
     console.print(f"\nrun:  {suffix}", markup=False)
@@ -102,6 +112,52 @@ def completion_cmd(shell: str) -> None:
     env = {**os.environ, "_INKFLOW_COMPLETE": f"{shell}_source"}
     result = subprocess.run([sys.argv[0]], env=env, capture_output=True, text=True)
     click.echo(result.stdout, nl=False)
+
+
+@main.command("setup-desktop")
+@click.option(
+    "--remove",
+    "remove",
+    is_flag=True,
+    help="Remove the launcher instead.",
+)
+@click.option(
+    "--terminal",
+    "terminal",
+    is_flag=True,
+    help="Run the server in a terminal window (its status; closing it stops it).",
+)
+def setup_desktop(remove: bool, terminal: bool) -> None:
+    """Add Inkflow to the desktop's application menu.
+
+    The launcher runs `inkflow edit --start`: the editor comes up in the
+    browser on its start page (a new deck, open a deck, recent decks). The
+    server runs hidden and stops a minute after its last tab closes, or at
+    "Quit Inkflow" in the deck menu; with `--terminal` it runs in a terminal
+    window instead. Each launch is its own server, but a deck already open in
+    one is never opened in a second: you are taken to the first. It starts
+    this installation of inkflow (for example the one `uv tool install
+    inkflow` made).
+
+    Linux: a `.desktop` entry and icon under `~/.local/share`. macOS:
+    `~/Applications/Inkflow.app`. Windows: a Start menu shortcut.
+    """
+    from inkflow import launcher
+
+    if remove:
+        removed = launcher.uninstall()
+        for path in removed:
+            report("Removed", str(path))
+        if not removed:
+            report("Nothing", "no launcher was installed", style="yellow")
+        return
+    try:
+        written = launcher.install(terminal)
+    except launcher.LauncherError as exc:
+        raise click.ClickException(str(exc)) from exc
+    for path in written:
+        report("Wrote", str(path))
+    report("Runs", " ".join(launcher.command(terminal)))
 
 
 @main.command("setup-git")

@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 from pathlib import Path
 
 import click
 
+from inkflow import instances
 from inkflow.cli._common import deck_option, main, resolve_deck_path
+from inkflow.editor.session import Exporters
 from inkflow.export import build_pdf, build_static_html
 from inkflow.logging import Levels, report
+from inkflow.server import open_browser, pick_ports
 from inkflow.server import serve as _serve
+
+# The editor's Export dialog runs the same builds as the commands below.
+EXPORTERS = Exporters(html=build_static_html, pdf=build_pdf)
 
 
 @main.command()
@@ -20,10 +27,22 @@ from inkflow.server import serve as _serve
     show_default=True,
     help="Bind address",
 )
-@click.option("--port", default=7777, show_default=True, help="HTTP port")
-@click.option("--ws-port", default=7778, show_default=True, help="WebSocket port")
+@click.option(
+    "--port",
+    type=int,
+    default=None,
+    help="HTTP port [default: 7777, or the next free one]",
+)
+@click.option(
+    "--ws-port",
+    type=int,
+    default=None,
+    help="WebSocket port [default: the HTTP port + 1, or the next free one]",
+)
 @click.pass_obj
-def serve(levels: Levels, deck_path: Path, host: str, port: int, ws_port: int) -> None:
+def serve(
+    levels: Levels, deck_path: Path, host: str, port: int | None, ws_port: int | None
+) -> None:
     """Start the presentation server with live reload.
 
     Serves the deck at `http://{host}:{port}` and pushes slide updates over a
@@ -38,8 +57,124 @@ def serve(levels: Levels, deck_path: Path, host: str, port: int, ws_port: int) -
     - `q`: quit (Ctrl-D and Ctrl-C also work)
     """
     resolved = resolve_deck_path(deck_path)
+    if _already_served(resolved, "/", open_it=False):
+        return
+    port, ws_port = pick_ports(host, port, ws_port)
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(_serve(resolved, host, port, ws_port, levels))
+        asyncio.run(_serve(resolved, host, port, ws_port, levels, exporters=EXPORTERS))
+
+
+def _already_served(deck_py: Path, path: str, *, open_it: bool) -> bool:
+    """One server per deck: when another inkflow already serves ``deck_py``,
+    say where (and open it) instead of starting a second one that would write
+    the same files."""
+    other = instances.serving(deck_py)
+    if other is None:
+        return False
+    report("Already open", f"{other.url(path)} (process {other.pid})")
+    if open_it:
+        open_browser(other.url(path))
+    return True
+
+
+@main.command()
+@deck_option
+@click.option(
+    "--host",
+    default="localhost",
+    show_default=True,
+    help="Bind address",
+)
+@click.option(
+    "--port",
+    type=int,
+    default=None,
+    help="HTTP port [default: 7777, or the next free one]",
+)
+@click.option(
+    "--ws-port",
+    type=int,
+    default=None,
+    help="WebSocket port [default: the HTTP port + 1, or the next free one]",
+)
+@click.option(
+    "--no-open",
+    "no_open",
+    is_flag=True,
+    help="Do not open the editor in a browser on start.",
+)
+@click.option(
+    "--start",
+    "start",
+    is_flag=True,
+    help="Open the start page (new deck, open a deck, recent decks) instead of a deck.",
+)
+@click.option(
+    "--quit-when-idle",
+    "quit_when_idle",
+    type=float,
+    is_flag=False,
+    flag_value=60.0,
+    default=None,
+    metavar="SECONDS",
+    help="Stop once no editor or presenter page has been open this long "
+    + "[default when given: 60]. For a server without a terminal.",
+)
+@click.pass_obj
+def edit(
+    levels: Levels,
+    deck_path: Path,
+    host: str,
+    port: int | None,
+    ws_port: int | None,
+    no_open: bool,
+    start: bool,
+    quit_when_idle: float | None,
+) -> None:
+    """Open the visual editor: click, drag and type on your slides.
+
+    Runs the same server as `serve` and opens `http://{host}:{port}/edit`. Every
+    change is written straight back to the deck's own files (slide SVGs, Markdown,
+    `deck.py`), so the editor, Inkscape, your text editor and an agent such as
+    Claude Code can all work on the deck at once; each sees the others' edits live.
+    The presenter stays at `/`. Run it once per deck to edit several side by
+    side: each picks the next free ports, and slides copied in one editor paste
+    into another.
+
+    Without a deck (`--start`, or no `deck.py` here and no `--deck`), the
+    editor opens on its start page: create a new deck, open one from a folder,
+    or pick a recent one. `inkflow setup-desktop` adds a launcher for that to
+    the desktop's application menu.
+
+    One server per deck: if another inkflow already has the deck open, this
+    opens its editor instead of starting a second server for the same files.
+
+    Keyboard shortcuts in the terminal are those of `serve`, plus `e` to open the
+    editor again.
+    """
+    resolved: Path | None
+    if start or (deck_path == Path("deck.py") and not deck_path.exists()):
+        resolved = None
+        report("Starting", "no deck here: the editor opens on its start page")
+    else:
+        resolved = resolve_deck_path(deck_path)
+        if _already_served(resolved, "/edit", open_it=not no_open):
+            return
+    open_path = None if no_open else "/edit"
+    port, ws_port = pick_ports(host, port, ws_port)
+    with contextlib.suppress(KeyboardInterrupt):
+        asyncio.run(
+            _serve(
+                resolved,
+                host,
+                port,
+                ws_port,
+                levels,
+                open_path,
+                exporters=EXPORTERS,
+                quit_when_idle=quit_when_idle,
+            )
+        )
 
 
 @main.command("build")
@@ -131,7 +266,13 @@ def export_cmd(
                 f"--size must be WxH (e.g. 1920x1080), got: {size!r}"
             ) from None
     try:
-        build_pdf(resolved, out, chromium, no_sandbox, size=parsed_size)
+        build_pdf(
+            resolved,
+            out,
+            chromium,
+            no_sandbox or (hasattr(os, "geteuid") and os.geteuid() == 0),
+            size=parsed_size,
+        )
     except (RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     report("Exported", str(out))

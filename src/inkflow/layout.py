@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.resources
+import re
 from collections.abc import Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -324,6 +325,46 @@ def _layers_match(
     return True
 
 
+_ZONE_SHAPES = {"rect", "ellipse", "circle", "path", "polygon"}
+_CSS_ID = re.compile(r"^[A-Za-z_][\w-]*$")
+
+
+def zone_placeholder_css(root: SvgElement) -> str:
+    """Paint the file's unstyled zone shapes as faint dashed outlines.
+
+    A zone shape is a placeholder the pipeline fills with content, so it
+    carries no fill of its own, and an SVG shape without a fill is painted
+    black: in Inkscape a layout's title and content zones would cover the
+    slide. Zone shapes that are styled (a drawn text box) keep their look.
+    """
+    ids: list[str] = []
+    for el in root.iter(*(f"{{{ns.SVG}}}{tag}" for tag in _ZONE_SHAPES)):
+        zone_id = el.get("id") or ""
+        if not zone_id.startswith("zone-") or not _CSS_ID.match(zone_id):
+            continue
+        styled = (
+            el.get("fill") is not None
+            or "fill:" in (el.get("style") or "").replace(" ", "")
+            or "inkflow-fill-" in (el.get("class") or "")
+        )
+        if not styled and zone_id not in ids:
+            ids.append(zone_id)
+    if not ids:
+        return ""
+    selector = ", ".join(f"#{i}" for i in ids)
+    return (
+        f"{selector} {{ fill: #808080; fill-opacity: 0.08; stroke: #808080; "
+        + "stroke-opacity: 0.7; stroke-width: 2; stroke-dasharray: 12 8; }"
+    )
+
+
+def _preview_css(root: SvgElement, layers: PreviewLayers) -> str:
+    """The theme's colours plus the zone placeholders (none without a theme)."""
+    if not layers.preview_css:
+        return ""
+    return "\n".join(filter(None, [layers.preview_css, zone_placeholder_css(root)]))
+
+
 def are_preview_layers_current(svg_path: Path, layers: PreviewLayers) -> bool:
     """Return True if svg_path already carries exactly these layers and style."""
     root = parse_svg_file(svg_path)
@@ -332,11 +373,9 @@ def are_preview_layers_current(svg_path: Path, layers: PreviewLayers) -> bool:
     if not _layers_match(root, layers.flat_overlays(), _OVERLAY):
         return False
     if layers.preview_css:
+        css = _preview_css(root, layers)
         style_el = root.find(f'.//{{{ns.SVG}}}style[@id="inkflow-preview"]')
-        if (
-            style_el is None
-            or (style_el.text or "").strip() != layers.preview_css.strip()
-        ):
+        if style_el is None or (style_el.text or "").strip() != css.strip():
             return False
     return True
 
@@ -441,17 +480,17 @@ def _update_preview_style(
     style_el.text = preview_css
 
 
-def inject_preview_layers(svg_path: Path, layers: PreviewLayers) -> bool:
-    """Inject preview layers as locked Inkscape layers into svg_path in place.
+def preview_layers_text(svg_path: Path, layers: PreviewLayers) -> str | None:
+    """svg_path with its preview layers injected as locked Inkscape layers.
 
     Ancestors are inserted below the file's own content and overlays appended
     above it, so the Inkscape layer stack matches runtime paint order. Also writes
     a ``<style id="inkflow-preview">`` block when ``preview_css`` is provided, so
     Inkscape renders semantic classes with the correct colors.
-    Returns True if the file was modified, False if already up to date.
+    Returns the file's new text, or None when it is already up to date.
     """
     if are_preview_layers_current(svg_path, layers):
-        return False
+        return None
 
     root = parse_svg_file(svg_path)
     overlay_layers = layers.flat_overlays()
@@ -465,7 +504,7 @@ def inject_preview_layers(svg_path: Path, layers: PreviewLayers) -> bool:
     for layer in overlay_layers:
         root.append(_build_layer_group(layer, hashes, _OVERLAY))
 
-    _update_preview_style(root, layers.preview_css)
+    _update_preview_style(root, _preview_css(root, layers))
 
     # inkflow among them: the marker attributes are the first use of that namespace
     # in a file with no inkflow:parent (an overlay), and without the declaration they
@@ -474,10 +513,18 @@ def inject_preview_layers(svg_path: Path, layers: PreviewLayers) -> bool:
         root,
         {"inkflow": ns.INKFLOW, "inkscape": ns.INKSCAPE, "sodipodi": ns.SODIPODI},
     )
-    svg_path.write_text(
-        etree.tostring(out, encoding="unicode", xml_declaration=False),
-        encoding="utf-8",
-    )
+    return etree.tostring(out, encoding="unicode", xml_declaration=False) + "\n"
+
+
+def inject_preview_layers(svg_path: Path, layers: PreviewLayers) -> bool:
+    """Inject preview layers into svg_path in place (see ``preview_layers_text``).
+
+    Returns True if the file was modified, False if already up to date.
+    """
+    text = preview_layers_text(svg_path, layers)
+    if text is None:
+        return False
+    svg_path.write_text(text, encoding="utf-8")
     return True
 
 

@@ -39,6 +39,7 @@
 .inkflow-fill-pink { fill: #f5c2e7; }
 .inkflow-stroke-pink { stroke: #f5c2e7; }
 .inkflow-fill-grey { fill: #6c7086; }
-.inkflow-stroke-grey { stroke: #6c7086; }</style></defs>
+.inkflow-stroke-grey { stroke: #6c7086; }
+#zone-title { fill: #808080; fill-opacity: 0.08; stroke: #808080; stroke-opacity: 0.7; stroke-width: 2; stroke-dasharray: 12 8; }</style></defs>
   <rect id="zone-title" x="80" y="60" width="1760" height="120"/>
 </svg>

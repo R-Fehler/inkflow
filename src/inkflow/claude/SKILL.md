@@ -1,0 +1,131 @@
+---
+name: inkflow
+description: Edit this inkflow presentation (slides drawn as SVG, content in Markdown, order/animations/transitions in deck.py). Use for any request about the slides, the deck, a slide's layout, text, images, animations, transitions or speaker notes, and whenever the author refers to "this", "these" or "the selected" thing in the inkflow editor.
+---
+
+# Editing an inkflow deck
+
+The deck is plain files, edited by the author in the visual editor
+(`inkflow edit`, served at `http://localhost:7777/edit`) and by you, at the
+same time. The server watches every file: whatever you write shows up in the
+author's editor within a moment, and whatever they change there is already on
+disk when you read it. Re-read a file before editing it, since the author may
+have just changed it.
+
+## What the author is looking at
+
+`inkflow context` prints the editor's current slide, build step and
+selection: each selected object's id, tag, source file and position. A prompt
+hook adds the same text to each message while the editor is open, so "align
+these", "make this blue" or "animate the selected boxes" refer to that
+selection. Run it again whenever you need the current state.
+
+Point the author at something with `inkflow goto N` (1-based slide number)
+and `inkflow select ID [ID…]` (selects elements on the current slide).
+
+## Files
+
+- `deck.py`: `main()` returns `Deck(slides=[Slide(...), ...])`. Slide order,
+  each slide's source, its `md=` content, `zones={...}`, `animations=[...]`,
+  `transition=`, `notes=`, `title=`, `visible=`.
+- `slides/*.svg`: one-off slide drawings. `inkflow:parent="<layout>"` on the root
+  builds the slide on a layout. Elements need an `id` to be animated or morphed.
+- `layouts/*.svg`, `overlays/*.svg`: shared backgrounds and chrome. A change
+  here changes every slide that uses it; say so before doing it.
+- `slides/*.md`: Markdown routed into a layout's zones (`::zone::` markers;
+  a leading `# Title` fills the title zone; `::step::` reveals on click).
+- `notes/*.md`: speaker notes.
+
+Colours: prefer the theme's classes over hex values so slides follow dark and
+light mode: `class="inkflow-fill-accent"`, `inkflow-stroke-text`, and so on
+for `bg surface border text text-muted accent accent-fg code-bg code-text red
+orange yellow green teal blue purple pink grey`.
+
+## Animations and transitions (deck.py)
+
+```python
+from inkflow import Direction, Slide, Trigger, animations, transitions
+
+Slide(
+    "diagram.svg",
+    animations=[
+        animations.FadeIn("box-a"),  # next click
+        animations.SlideIn("box-b", Trigger.WITH_PREVIOUS, direction=Direction.UP),
+        animations.ScaleIn("arrow", Trigger.AFTER_PREVIOUS, scale=0.6),
+        animations.Highlight("box-a"),  # emphasis
+        animations.FadeOut("box-b"),
+    ],
+    transition=transitions.Morph(),  # Cut, Crossfade, Fade, Push, Cover, Wipe, Zoom
+)
+```
+
+Steps are inferred from triggers; never number them by hand unless pinning
+with `Trigger.at(n)`. Morph pairs elements by `id` across consecutive slides.
+
+## Images and video (deck.py)
+
+A zone is a `<rect id="zone-NAME">` in an SVG; `zones={"NAME": ...}` fills it.
+To place a video anywhere, add such a rect to the slide's own SVG and fill it:
+
+```python
+from inkflow import Image, MediaFit, Muted, Slide, Video, animations
+
+Slide(
+    "demo.svg",  # contains <rect id="zone-video" x="200" y="200" width="960" height="540"/>
+    zones={
+        "video": Video("assets/clip.mp4", autoplay=True, loop=True, muted=Muted.ON),
+        "media": Image("assets/photo.jpg", fit=MediaFit.COVER),
+    },
+    animations=[animations.PlayVideo("video")],  # or: start it on a click
+)
+```
+
+Paths are relative to `deck.py`; keep media files in `assets/`.
+
+A **draw.io diagram** is `diagrams/<name>.drawio.svg` (draw.io's editable SVG:
+a picture with the diagram's `<mxfile>` source in the root's `content`
+attribute, stored uncompressed), shown on a slide as an `<image href>`. To
+change one, edit the `<mxGraphModel>` inside `content` *and* the drawing, or
+better ask the author to open it in draw.io (double-click it in the editor).
+`inkflow clean --stdout FILE` prints its source readably.
+
+## Text boxes, colours and links
+
+- A free text box is a zone too: a `<rect id="zone-text">` (or `zone-text-2`, …) in
+  the slide's own SVG, filled by a `::text::` section in the slide's `.md` (or
+  `zones={"text": "..."}`). Its text wraps; SVG `<text>` does not.
+- Slide text belongs in the slide's `.md` file, not in `deck.py`: give a slide
+  without one `md="<slide-id>.md"` in `slides/` (the editor does the same on the
+  first text typed into it); keep `zones={...}` for images, videos and `TextBox`.
+- Text inside a drawn shape: give the zone rect (or ellipse) its own fill/stroke and
+  `inkflow:show-shape="true"`; the shape is then painted as the text box's
+  background and border (otherwise a zone shape is only a placeholder). Padding and
+  alignment are `--inkflow-padding` / `--inkflow-align` / `--inkflow-valign` in its
+  `style`.
+- Colour a few words with the theme palette:
+  `<span class="inkflow-color-accent">words</span>` (any colour token).
+- Link to another slide with `[label](slide:<id>)` in Markdown, or wrap an SVG
+  object in `<a href="slide:<id>">`; web links open in a new tab.
+- Deck-wide colours and fonts: override `--inkflow-*` tokens in the project's
+  `styles.css` (the editor's Theme dialog keeps them in one marked
+  `/* inkflow:theme */` block; leave that block's markers intact).
+- `inkflow:locked="true"` on an object keeps the visual editor from selecting it.
+- An arrow attached to shapes is a `<path inkflow:connector="straight|elbow|curved"
+  inkflow:connect-start="<id>:right" inkflow:connect-end="<id>:left" d="…">` (sides:
+  top, right, bottom, left, or a point along a side: `top@0.25`, clockwise from the
+  side's first corner; a shape's `inkflow:sites="3"` offers three per side). An
+  elbow's moved middle segment is `inkflow:bend="x:640"` (or `y:`) in slide units.
+  Keep its `d` roughly right; the author's "Re-route all"
+  in the editor snaps it to the shapes. Rename an id and update `connect-*` too.
+
+## Check your work
+
+1. `inkflow verify` for authoring mistakes (missing ids, zones, layouts).
+2. `inkflow render` writes PNGs of slides (the editor's current slide by
+   default; `--slide N`, `--all`, `--step S`) to `.inkflow/render/`. Read the
+   image to see the result before you report back. Overlapping text, content
+   running out of its zone and low contrast are only visible there.
+
+Keep edits small and in the author's style: the files are diffed and committed
+like code. SVGs are XML; keep existing ids and structure, and change only what
+was asked.

@@ -7,13 +7,18 @@ import errno
 import functools
 import importlib.resources
 import importlib.util
+import io
+import ipaddress
 import json
 import os
+import re
+import socket
 import sys
 import time
 import traceback
 import webbrowser
-from collections.abc import Awaitable, Callable
+import zipfile
+from collections.abc import Awaitable, Callable, Sequence
 from html import escape as escape_html
 from pathlib import Path
 from typing import Literal, TypedDict, cast
@@ -22,18 +27,28 @@ from urllib.parse import unquote
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
-from watchfiles import awatch  # pyright: ignore[reportUnknownVariableType]
+from watchfiles import (
+    DefaultFilter,
+    awatch,  # pyright: ignore[reportUnknownVariableType]
+)
 from websockets.asyncio.server import ServerConnection
 from websockets.asyncio.server import serve as ws_serve
 
-from inkflow.assets import MIME_TYPES, AssetRoots
+from inkflow import instances
+from inkflow.assets import MIME_TYPES, AssetRoots, is_local_ref, rewrite_references
 from inkflow.edit import (
     NO_EDIT_COMMANDS,
     EditCommands,
     command_for,
+    configured_suffixes,
     open_in_editor,
     resolve_edit_commands,
 )
+from inkflow.editor import projects
+from inkflow.editor.context import write_context
+from inkflow.editor.model import build_model
+from inkflow.editor.session import EditError, EditorSession, Exporters
+from inkflow.editor.svgops import file_hash
 from inkflow.enums import ColorMode
 from inkflow.fonts import embed_fonts_css
 from inkflow.loaders import load_deck_scripts, load_deck_styles
@@ -79,6 +94,31 @@ _state: State = {
 }
 
 
+class EditorState(TypedDict):
+    deck: Deck | None
+    """The last deck that built, which editor requests are validated against."""
+    model: dict[str, object] | None
+    """The visual editor's model for the last build (see ``editor.model``)."""
+    clients: set[ServerConnection]
+    """Connections that identified as an editor page."""
+    session: EditorSession | None
+    """Undo history and file writes for the editor (one per open deck)."""
+    switch: asyncio.Event | None
+    """Set when the editor asked to open another deck (see ``serve``)."""
+    shutdown: asyncio.Event | None
+    """Set to stop the server (the editor's "Quit Inkflow", or idle)."""
+
+
+_editor: EditorState = {
+    "deck": None,
+    "model": None,
+    "clients": set(),
+    "session": None,
+    "switch": None,
+    "shutdown": None,
+}
+
+
 # ── Deck loader ───────────────────────────────────────────────────────────────
 
 
@@ -94,7 +134,12 @@ def load_deck(deck_path: Path) -> Deck:
     # the class *name*, so nothing else keeps the class from being collected).
     # A live-reload re-load replaces this entry with the fresh module.
     sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
+    # Compiled from source every time rather than through the loader: the
+    # bytecode cache validates by mtime (whole seconds) and size, so an edit
+    # that keeps the size (the editor reordering slides) within the same second
+    # would load the stale cached code.
+    code = compile(deck_path.read_bytes(), str(deck_path), "exec")
+    exec(code, mod.__dict__)
     if not hasattr(mod, "main"):
         raise AttributeError(f"{deck_path} must define a main() -> Deck function")
     return cast(Callable[[], Deck], mod.main)()
@@ -117,14 +162,28 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         # Collected, not printed, so records reach the TUI/browser without racing the
         # Live display. Floored at the lower surface level, then filtered per surface.
         with collect_logs(min(levels.console, levels.browser)) as entries:
+            deck_hash = file_hash(deck_path.read_bytes())
             deck = await asyncio.to_thread(load_deck, deck_path)
             project_dir = deck_path.parent
-            slides = await asyncio.to_thread(process_deck, deck, project_dir, deck_path)
+            # The editor build stamps source locators on every element; the
+            # presenter ignores them, so one build serves both pages.
+            edit_slides = await asyncio.to_thread(
+                functools.partial(process_deck, editor=True),
+                deck,
+                project_dir,
+                deck_path,
+            )
+            model = await asyncio.to_thread(build_model, deck, deck_path, edit_slides)
+            roots = AssetRoots(project_dir, deck.theme.asset_dir())
+            slides = [_versioned(_without_edit(s), roots) for s in edit_slides]
             transitions = resolve_transitions(deck)
             styles_css = await asyncio.to_thread(load_deck_styles, deck, project_dir)
             if deck.embed_fonts:
                 font_css = await asyncio.to_thread(
-                    embed_fonts_css, slides, project_dir, deck.theme.fonts_dir
+                    functools.partial(embed_fonts_css, styles_css=styles_css),
+                    slides,
+                    project_dir,
+                    deck.theme.fonts_dir,
                 )
             else:
                 font_css = ""
@@ -137,6 +196,13 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
             for e in entries
             if e.levelno >= levels.browser
         ]
+        # Styles and colour mode change rarely (a theme edit) and can be large
+        # (embedded fonts): they ride along only when they changed.
+        changed: dict[str, object] = {}
+        if styles_css != _state["styles_css"]:
+            changed["styles"] = styles_css
+        if deck.effective_mode != _state["mode"]:
+            changed["mode"] = "" if deck.effective_mode == ColorMode.DARK else "light"
         _state["slides"] = slides
         _state["transitions"] = transitions
         _state["styles_css"] = styles_css
@@ -144,6 +210,10 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         _state["mode"] = deck.effective_mode
         _state["title"] = resolve_deck_title(deck, project_dir)
         _state["theme_dir"] = deck.theme.asset_dir()
+        _editor["deck"] = deck
+        _editor["model"] = model
+        if _editor["session"] is not None:
+            _editor["session"].built_hash = deck_hash
         _state["error"] = None
         _state["logs"] = browser_logs
         if slides:
@@ -160,9 +230,11 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
                     "slides": slides,
                     "transitions": transitions,
                     "logs": browser_logs,
+                    **changed,
                 }
             )
         )
+        await _send_editors(_model_message())
     except Exception:
         # Outside collect_logs, so a fatal error reaches only the file sink. The overlay
         # and TUI error phase show it instead, never the banner.
@@ -178,7 +250,35 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         ui.refresh()
 
 
+def _model_message() -> dict[str, object]:
+    session = _editor["session"]
+    return {
+        "type": "editor-model",
+        "model": _editor["model"],
+        "history": {
+            "canUndo": bool(session and session.history.done),
+            "canRedo": bool(session and session.history.undone),
+        },
+    }
+
+
+def _without_edit(slide: SlideData) -> SlideData:
+    """The presenter's copy of a slide: the editor facts travel in its model."""
+    data = slide.copy()
+    data.pop("edit", None)
+    return data
+
+
 # ── WebSocket broadcast ───────────────────────────────────────────────────────
+
+
+async def _send_editors(payload: dict[str, object]) -> None:
+    msg = json.dumps(payload)
+    for ws in list(_editor["clients"]):
+        try:
+            await ws.send(msg)
+        except Exception:
+            _editor["clients"].discard(ws)
 
 
 async def broadcast(msg: str, sender: ServerConnection | None = None) -> None:
@@ -259,8 +359,47 @@ def _resolve_edit_request(
     return Path(path_str), template
 
 
+def _is_loopback(websocket: ServerConnection) -> bool:
+    address = cast("object", websocket.remote_address)
+    host = (
+        cast("tuple[object, ...]", address)[0]
+        if isinstance(address, tuple)
+        else address
+    )
+    try:
+        return ipaddress.ip_address(str(host)).is_loopback
+    except ValueError:
+        return False
+
+
+async def _handle_edit_op(
+    websocket: ServerConnection, msg: dict[str, object], session: EditorSession
+) -> None:
+    """Apply one editor request and answer the sender with its result."""
+    request_id = msg.get("id")
+    # Whether the request comes from this machine (opening a program is only
+    # for a local page); decided here, overriding anything the client sent.
+    msg["_local"] = _is_loopback(websocket)
+    try:
+        result = await asyncio.to_thread(session.apply, msg, _editor["deck"])
+    except EditError as exc:
+        result = {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        logger.exception("editor request failed")
+        result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    await websocket.send(
+        json.dumps({"type": "edit-result", "id": request_id, **result})
+    )
+    if session.switch_to is not None and _editor["switch"] is not None:
+        _editor["switch"].set()
+    if session.quit_requested and _editor["shutdown"] is not None:
+        _editor["shutdown"].set()
+
+
 def make_ws_handler(
-    ui: LiveUI, edit_commands: EditCommands
+    ui: LiveUI,
+    edit_commands: EditCommands,
+    session: EditorSession | None = None,
 ) -> Callable[[ServerConnection], Awaitable[None]]:
     async def handler(websocket: ServerConnection) -> None:
         _state["ws_clients"].add(websocket)
@@ -315,6 +454,26 @@ def make_ws_handler(
                     if msg.get("snap"):
                         position_msg["snap"] = True
                     await broadcast(json.dumps(position_msg), sender=websocket)
+                elif msg_type == "hello" and msg.get("role") == "editor":
+                    _editor["clients"].add(websocket)
+                    if _editor["model"] is not None:
+                        await websocket.send(json.dumps(_model_message()))
+                elif msg_type == "edit-op" and session is not None:
+                    await _handle_edit_op(websocket, msg, session)
+                elif msg_type == "editor-context" and session is not None:
+                    raw_context: object = msg.get("context")
+                    context: object = raw_context
+                    if isinstance(raw_context, dict):
+                        # Which server this editor talks to: `inkflow goto`
+                        # and `select` find it here when several are running.
+                        context = {
+                            **cast("dict[str, object]", raw_context),
+                            "server": session.server,
+                        }
+                    await asyncio.to_thread(write_context, session.project_dir, context)
+                elif msg_type == "editor-command":
+                    # From `inkflow goto/select`: steer every open editor.
+                    await _send_editors(msg)
                 elif msg_type == "edit":
                     request = _resolve_edit_request(
                         msg, _state["slides"], edit_commands
@@ -325,6 +484,7 @@ def make_ws_handler(
                             await notify(websocket, error, style="red")
         finally:
             _state["ws_clients"].discard(websocket)
+            _editor["clients"].discard(websocket)
             logger.debug(f"client disconnected ({len(_state['ws_clients'])} total)")
             ui.refresh()
 
@@ -360,6 +520,7 @@ def build_html(
         {
             "default": edit_commands.default is not None,
             "svg": edit_commands.svg is not None,
+            "suffixes": configured_suffixes(edit_commands),
         }
     )
     html = (
@@ -380,7 +541,61 @@ def build_html(
     return html.encode("utf-8")
 
 
+def build_editor_html(state: State, editor: EditorState, ws_port: int) -> bytes:
+    """The visual editor page: its own shell and bundle, the deck's styles."""
+    pkg = importlib.resources.files("inkflow")
+    template = pkg.joinpath("editor.html").read_text(encoding="utf-8")
+    css = pkg.joinpath("bundles", "editor.css").read_text(encoding="utf-8")
+    js = pkg.joinpath("bundles", "editor.js").read_text(encoding="utf-8")
+    data_theme = "" if state["mode"] == ColorMode.DARK else "light"
+    html = (
+        template.replace("/* __CSS__ */", css)
+        .replace("/* __JS__ */", js)
+        .replace("/* __STYLES__ */", state["styles_css"])
+        .replace("__DATA_THEME__", data_theme)
+        .replace("__SLIDES_JSON__", json.dumps(state["slides"]))
+        .replace("__MODEL_JSON__", json.dumps(editor["model"]))
+        .replace("__WS_PORT__", str(ws_port))
+        .replace("__ERROR_JSON__", json.dumps(state["error"]))
+        .replace("__FAVICON__", favicon_data_uri())
+        .replace("__TITLE__", escape_html(f"Edit · {state['title']}"))
+    )
+    return html.encode("utf-8")
+
+
+def _is_editor_path(request_path: str) -> bool:
+    path = request_path.split("?", 1)[0].split("#", 1)[0]
+    return path == "/edit" or path.startswith("/edit/")
+
+
 _SERVED_SUFFIXES = set(MIME_TYPES)
+
+
+def _versioned(slide: SlideData, roots: AssetRoots) -> SlideData:
+    """The slide with each local asset reference stamped with its file's
+    modification time (``assets/x.png?v=…``), for serving only.
+
+    A page keeps the pictures it has loaded by URL, so a diagram or picture
+    changed on disk (draw.io, Inkscape, GIMP) would stay as it was on screen:
+    with the stamp, the changed file is a changed slide (pushed as usual) at a
+    new URL. ``_resolve_asset`` ignores the query; build and export never
+    stamp, and the editor strips it before anything is written back.
+    """
+
+    def stamp(ref: str) -> str | None:
+        if not is_local_ref(ref) or "?" in ref:
+            return None
+        located = roots.locate(unquote(ref))
+        try:
+            mtime = located.stat().st_mtime_ns if located is not None else None
+        except OSError:
+            return None
+        return f"{ref}?v={mtime:x}" if mtime else None
+
+    out = slide.copy()
+    out["svg"] = rewrite_references(slide["svg"], stamp)
+    out["notes"] = rewrite_references(slide["notes"], stamp)
+    return out
 
 
 def _resolve_asset(roots: AssetRoots, request_path: str) -> Path | None:
@@ -388,9 +603,10 @@ def _resolve_asset(roots: AssetRoots, request_path: str) -> Path | None:
 
     The request path is a canonical asset reference: the pipeline wrote it into
     the slide SVG, so ``AssetRoots.locate`` is the same answer ``build`` copies
-    to, and containment against the allowed roots is enforced there.
+    to, and containment against the allowed roots is enforced there. A query
+    (the version stamp ``_versioned`` adds) is not part of the name.
     """
-    decoded = unquote(request_path).lstrip("/")
+    decoded = unquote(request_path.split("?", 1)[0]).lstrip("/")
     located = roots.locate(decoded)
     if located is None:
         return None
@@ -400,6 +616,120 @@ def _resolve_asset(roots: AssetRoots, request_path: str) -> Path | None:
     if not resolved.is_file():
         return None
     return resolved
+
+
+_RANGE = re.compile(rb"^range:\s*bytes=(\d*)-(\d*)\s*$", re.I | re.M)
+_CHUNK = 1024 * 1024
+
+
+def _range_header(raw: bytes) -> tuple[int | None, int | None] | None:
+    """The single byte range a request asks for (``Range: bytes=a-b``)."""
+    m = _RANGE.search(raw.split(b"\r\n\r\n", 1)[0])
+    if m is None or (not m.group(1) and not m.group(2)):
+        return None
+    return (
+        int(m.group(1)) if m.group(1) else None,
+        int(m.group(2)) if m.group(2) else None,
+    )
+
+
+def byte_range(
+    size: int, wanted: tuple[int | None, int | None] | None
+) -> tuple[int, int] | None:
+    """The inclusive span to send for a ``Range`` request, or None for all of
+    it. ``(None, n)`` is the last n bytes. Raises ValueError when the range
+    lies outside the file."""
+    if wanted is None:
+        return None
+    start, end = wanted
+    if start is None:
+        if not end:
+            raise ValueError("empty suffix range")
+        start, end = max(0, size - end), size - 1
+    else:
+        end = size - 1 if end is None else min(end, size - 1)
+    if start >= size or start > end:
+        raise ValueError("range outside the file")
+    return start, end
+
+
+async def _send_file(
+    writer: asyncio.StreamWriter,
+    path: Path,
+    wanted: tuple[int | None, int | None] | None,
+) -> None:
+    """Stream a file, or the byte range asked for (206): a video seeks and
+    plays in every browser (Safari asks for ranges), and a large file is never
+    read into memory whole."""
+    mime = MIME_TYPES[path.suffix.lower()]
+    size = path.stat().st_size
+    try:
+        span = byte_range(size, wanted)
+    except ValueError:
+        writer.write(
+            b"HTTP/1.1 416 Range Not Satisfiable\r\n"
+            + f"Content-Range: bytes */{size}\r\n".encode()
+            + b"Connection: close\r\nContent-Length: 0\r\n\r\n"
+        )
+        await writer.drain()
+        return
+    start, end = span if span else (0, size - 1)
+    length = max(0, end - start + 1)
+    status = b"206 Partial Content" if span else b"200 OK"
+    header = (
+        b"HTTP/1.1 "
+        + status
+        + b"\r\n"
+        + f"Content-Type: {mime}\r\n".encode()
+        + b"Accept-Ranges: bytes\r\n"
+        + (f"Content-Range: bytes {start}-{end}/{size}\r\n".encode() if span else b"")
+        + b"Cache-Control: no-store\r\n"
+        + b"Connection: close\r\n"
+        + f"Content-Length: {length}\r\n\r\n".encode()
+    )
+    writer.write(header)
+    with path.open("rb") as f:
+        _ = f.seek(start)
+        left = length
+        while left > 0:
+            chunk = f.read(min(_CHUNK, left))
+            if not chunk:
+                break
+            writer.write(chunk)
+            await writer.drain()
+            left -= len(chunk)
+
+
+def _read_export(path: Path) -> tuple[str, str, bytes]:
+    """An exported file, or an exported folder as a zip, for download."""
+    if path.is_dir():
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for f in sorted(path.rglob("*")):
+                if f.is_file():
+                    zf.write(f, f"{path.name}/{f.relative_to(path).as_posix()}")
+        return f"{path.name}.zip", "application/zip", buf.getvalue()
+    mime = {".pdf": "application/pdf", ".html": "text/html; charset=utf-8"}.get(
+        path.suffix.lower(), "application/octet-stream"
+    )
+    return path.name, mime, path.read_bytes()
+
+
+def _export_download(
+    request_path: str,
+) -> tuple[Callable[[Path], tuple[str, str, bytes]], Path] | None:
+    """``/_export/<token>/<name>``: a file the editor exported in this session.
+
+    Only paths the session recorded under a random token are served, so this
+    route cannot reach any other file."""
+    parts = request_path.split("?", 1)[0].split("/")
+    if len(parts) < 3 or parts[1] != "_export":
+        return None
+    session = _editor["session"]
+    path = session.exports.get(parts[2]) if session is not None else None
+    if path is None or not path.exists():
+        return None
+    return _read_export, path
 
 
 def make_http_handler(
@@ -416,26 +746,60 @@ def make_http_handler(
             parts = request_line.split(" ", 2)
             request_path = parts[1] if len(parts) >= 2 else "/"
 
+            if request_path == instances.PROBE_PATH:
+                # Who is serving here (see instances.py): another inkflow
+                # opening a deck asks before starting a second server for it.
+                session = _editor["session"]
+                body = json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "deck": str(session.deck_path)
+                        if session is not None and session.has_deck
+                        else None,
+                    }
+                ).encode()
+                writer.write(
+                    b"HTTP/1.1 200 OK\r\n"
+                    + b"Content-Type: application/json\r\n"
+                    + b"Cache-Control: no-store\r\n"
+                    + b"Connection: close\r\n"
+                    + f"Content-Length: {len(body)}\r\n\r\n".encode()
+                    + body
+                )
+                await writer.drain()
+                return
+
+            download = _export_download(request_path)
+            if download is not None:
+                name, mime, body = await asyncio.to_thread(*download)
+                header = (
+                    b"HTTP/1.1 200 OK\r\n"
+                    + f"Content-Type: {mime}\r\n".encode()
+                    + f'Content-Disposition: attachment; filename="{name}"\r\n'.encode()
+                    + b"Cache-Control: no-store\r\n"
+                    + b"Connection: close\r\n"
+                    + b"Content-Length: "
+                    + str(len(body)).encode()
+                    + b"\r\n\r\n"
+                )
+                writer.write(header + body)
+                await writer.drain()
+                return
+
             if project_dir is not None and request_path != "/":
                 roots = AssetRoots(project_dir, _state["theme_dir"])
                 asset_path = _resolve_asset(roots, request_path)
                 if asset_path is not None:
-                    mime = MIME_TYPES[asset_path.suffix.lower()]
-                    body = asset_path.read_bytes()
-                    header = (
-                        b"HTTP/1.1 200 OK\r\n"
-                        + f"Content-Type: {mime}\r\n".encode()
-                        + b"Cache-Control: no-store\r\n"
-                        + b"Connection: close\r\n"
-                        + b"Content-Length: "
-                        + str(len(body)).encode()
-                        + b"\r\n\r\n"
-                    )
-                    writer.write(header + body)
-                    await writer.drain()
+                    await _send_file(writer, asset_path, _range_header(raw))
                     return
 
-            body = build_html(_state, ws_port, edit_commands)
+            session = _editor["session"]
+            starting = session is not None and not session.has_deck
+            # The start page (no deck yet) is the editor's, at any path.
+            if _is_editor_path(request_path) or starting:
+                body = build_editor_html(_state, _editor, ws_port)
+            else:
+                body = build_html(_state, ws_port, edit_commands)
             header = (
                 b"HTTP/1.1 200 OK\r\n"
                 + b"Content-Type: text/html; charset=utf-8\r\n"
@@ -477,10 +841,17 @@ def make_http_handler(
 # ── File watcher ──────────────────────────────────────────────────────────────
 
 
+class _WatchFilter(DefaultFilter):
+    """The default ignores, plus ``.inkflow/`` (editor context the server writes)."""
+
+    # build/ is where `inkflow build` and the editor's export write: never input.
+    ignore_dirs: Sequence[str] = (*DefaultFilter.ignore_dirs, ".inkflow", "build")
+
+
 async def _watch(
     deck_path: Path, ui: LiveUI, lock: asyncio.Lock, levels: Levels
 ) -> None:
-    async for changes in awatch(str(deck_path.parent)):
+    async for changes in awatch(str(deck_path.parent), watch_filter=_WatchFilter()):
         logger.debug(f"change detected in {len(changes)} file(s), rebuilding")
         async with lock:
             await rebuild(deck_path, ui, levels)
@@ -489,12 +860,21 @@ async def _watch(
 # ── Keyboard handler ──────────────────────────────────────────────────────────
 
 
+def open_browser(url: str) -> None:
+    _open_browser(url)
+
+
 def _open_browser(url: str) -> None:
     # Redirect fd 1/2 to /dev/null so the browser process can't write startup
     # noise to the terminal and corrupt the Rich Live cursor tracking.
+    try:
+        saved_out = os.dup(1)
+        saved_err = os.dup(2)
+    except OSError:
+        # No console at all (pythonw on Windows): nothing to protect.
+        webbrowser.open(url)
+        return
     devnull = os.open(os.devnull, os.O_WRONLY)
-    saved_out = os.dup(1)
-    saved_err = os.dup(2)
     try:
         os.dup2(devnull, 1)
         os.dup2(devnull, 2)
@@ -508,7 +888,7 @@ def _open_browser(url: str) -> None:
 
 
 async def _read_keys(
-    deck_path: Path,
+    deck_path: Path | None,
     host: str,
     http_port: int,
     ui: LiveUI,
@@ -528,29 +908,152 @@ async def _read_keys(
                 return
             elif ch == "o":
                 _open_browser(f"http://{host}:{http_port}")
-            elif ch == "r":
+            elif ch == "e":
+                _open_browser(f"http://{host}:{http_port}/edit")
+            elif ch == "r" and deck_path is not None:
                 async with lock:
                     await rebuild(deck_path, ui, levels)
             elif ch == "t":
                 ui.toggle_trace()
 
 
+# ── Ports ─────────────────────────────────────────────────────────────────────
+
+DEFAULT_PORT = 7777
+
+
+def _port_free(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def pick_ports(host: str, port: int | None, ws_port: int | None) -> tuple[int, int]:
+    """The HTTP and WebSocket ports to serve on.
+
+    Explicit ports are used as given (a clash is then reported as before).
+    Unset ones take the first free pair from 7777 up, so a second
+    ``inkflow edit`` for another deck simply comes up next to the first.
+    """
+    if port is not None and ws_port is not None:
+        return port, ws_port
+    if port is not None:
+        ws = port + 1
+        while not _port_free(host, ws):
+            ws += 1
+        return port, ws
+    candidate = DEFAULT_PORT
+    for _ in range(200):
+        ws = ws_port if ws_port is not None else candidate + 1
+        if (
+            candidate != ws
+            and _port_free(host, candidate)
+            and (ws_port is not None or _port_free(host, ws))
+        ):
+            return candidate, ws
+        candidate += 2 if ws_port is None else 1
+    return DEFAULT_PORT, ws_port if ws_port is not None else DEFAULT_PORT + 1
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 
 async def serve(
-    deck_path: Path, host: str, http_port: int, ws_port: int, levels: Levels
+    deck_path: Path | None,
+    host: str,
+    http_port: int,
+    ws_port: int,
+    levels: Levels,
+    open_path: str | None = None,
+    exporters: Exporters | None = None,
+    quit_when_idle: float | None = None,
 ) -> None:
+    """Run the server until quit. ``open_path`` (e.g. ``"/edit"``) opens a
+    browser on that page once the first build is done; ``exporters`` enable
+    the editor's Export dialog. Without a deck (``None``) the editor shows its
+    start page: a new deck, another one, or a recent one. With
+    ``quit_when_idle`` (seconds) it stops once no page has been connected for
+    that long (a server started without a terminal to stop it from).
+
+    When the editor opens another deck (or creates one), the servers close and
+    start again on the same ports for that deck; open pages reconnect to it."""
+    while True:
+        next_deck = await _serve_deck(
+            deck_path,
+            host,
+            http_port,
+            ws_port,
+            levels,
+            open_path,
+            exporters,
+            quit_when_idle,
+        )
+        if next_deck is None:
+            return
+        report("Opening", str(next_deck))
+        deck_path, open_path = next_deck, None
+        _state["slides"] = []
+        _state["position"] = {"slideIndex": 0, "step": 0}
+        _state["error"] = None
+        _editor["deck"] = None
+        _editor["model"] = None
+
+
+async def _quit_when_idle(shutdown: asyncio.Event, delay: float) -> None:
+    """Stop once no page has been connected for ``delay`` seconds.
+
+    The delay covers a reload, and the moment a deck switch restarts the
+    servers, so only closing the last tab (or never opening one) stops it.
+    """
+    idle = 0.0
+    while True:
+        await asyncio.sleep(1)
+        idle = 0.0 if _state["ws_clients"] else idle + 1
+        if idle >= delay:
+            report("Stopping", f"no page open for {delay:g} seconds")
+            shutdown.set()
+            return
+
+
+async def _serve_deck(
+    deck_path: Path | None,
+    host: str,
+    http_port: int,
+    ws_port: int,
+    levels: Levels,
+    open_path: str | None,
+    exporters: Exporters | None,
+    quit_when_idle: float | None = None,
+) -> Path | None:
+    """Serve one deck until quit (None) or until the editor opens another
+    (its deck.py). Without a deck, only the editor's start page is served:
+    nothing is built or watched, and no files are served."""
     console = Console()
     rebuild_lock = asyncio.Lock()
     shutdown = asyncio.Event()
+    switch = asyncio.Event()
+    _editor["switch"] = switch
+    _editor["shutdown"] = shutdown
 
     loop = asyncio.get_running_loop()
     uninstall_shutdown_handler = install_shutdown_handler(loop, shutdown)
 
     try:
         edit_commands = resolve_edit_commands()
-        http_handler = make_http_handler(ws_port, deck_path.parent, edit_commands)
+        session = EditorSession(deck_path, exporters)
+        session.edit_commands = edit_commands
+        session.server = {"host": host, "port": http_port, "wsPort": ws_port}
+        _editor["session"] = session
+        project_dir = deck_path.parent if deck_path else None
+        if deck_path is not None:
+            projects.remember(deck_path)
+        else:
+            _state["title"] = "Inkflow"
+        http_handler = make_http_handler(ws_port, project_dir, edit_commands)
         # Bind before the Live UI so port conflicts fail fast with a clean message
         try:
             http_server = await asyncio.start_server(http_handler, host, http_port)
@@ -563,25 +1066,59 @@ async def serve(
                 )
                 return
             raise
+        # Other inkflow processes find this server (and its deck) here.
+        instances.register(
+            instances.Instance(
+                pid=os.getpid(),
+                host=host,
+                port=http_port,
+                ws_port=ws_port,
+                deck=str(deck_path.resolve()) if deck_path else None,
+            )
+        )
 
         with Live(Text(""), console=console, auto_refresh=False) as live:
             ui = LiveUI(
                 live,
                 host,
                 http_port,
-                deck_path.parent,
+                project_dir or Path.home(),
                 get_clients=lambda: len(_state["ws_clients"]),
             )
             try:
                 async with (
                     http_server,
-                    ws_serve(make_ws_handler(ui, edit_commands), host, ws_port),
+                    ws_serve(
+                        make_ws_handler(ui, edit_commands, session),
+                        host,
+                        ws_port,
+                        # Image uploads from the editor arrive as base64 frames.
+                        max_size=80 * 1024 * 1024,
+                    ),
                 ):
-                    await rebuild(deck_path, ui, levels)
+                    if deck_path is not None:
+                        await rebuild(deck_path, ui, levels)
+                    if open_path is not None:
+                        _open_browser(f"http://{host}:{http_port}{open_path}")
                     tasks = [
                         asyncio.create_task(http_server.serve_forever()),
-                        asyncio.create_task(
-                            _watch(deck_path, ui, rebuild_lock, levels)
+                        *(
+                            [
+                                asyncio.create_task(
+                                    _watch(deck_path, ui, rebuild_lock, levels)
+                                )
+                            ]
+                            if deck_path is not None
+                            else []
+                        ),
+                        *(
+                            [
+                                asyncio.create_task(
+                                    _quit_when_idle(shutdown, quit_when_idle)
+                                )
+                            ]
+                            if quit_when_idle is not None
+                            else []
                         ),
                         asyncio.create_task(
                             _read_keys(
@@ -595,8 +1132,12 @@ async def serve(
                             )
                         ),
                     ]
-                    await shutdown.wait()
-                    for t in tasks:
+                    waits = [
+                        asyncio.create_task(shutdown.wait()),
+                        asyncio.create_task(switch.wait()),
+                    ]
+                    _ = await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+                    for t in [*tasks, *waits]:
                         t.cancel()
                     await asyncio.gather(*tasks, return_exceptions=True)
             except OSError as e:
@@ -610,3 +1151,9 @@ async def serve(
                     raise
     finally:
         uninstall_shutdown_handler()
+        _editor["switch"] = None
+        _editor["shutdown"] = None
+        instances.unregister(os.getpid())
+    if switch.is_set() and not shutdown.is_set():
+        return _editor["session"].switch_to if _editor["session"] else None
+    return None

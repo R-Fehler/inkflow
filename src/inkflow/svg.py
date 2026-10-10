@@ -176,3 +176,25 @@ def compose_overlays(
 
     slide_root.extend(all_groups)
     return slide_root
+
+
+_XLINK_HREF = f"{{{ns.XLINK}}}href"
+
+
+def resolve_links(root: SvgElement) -> SvgElement:
+    """Make the slide's SVG links work in the presentation.
+
+    ``slide:<id>`` (the Markdown link scheme) becomes ``data-inkflow-slide``, which
+    the presenter follows; a web link opens in a new tab, so following it never
+    navigates the presentation itself away.
+    """
+    for a in root.iter(f"{{{ns.SVG}}}a"):
+        href = a.get("href") or a.get(_XLINK_HREF) or ""
+        if href.startswith("slide:"):
+            a.set("data-inkflow-slide", href[len("slide:") :])
+            for name in ("href", _XLINK_HREF):
+                if name in a.attrib:
+                    del a.attrib[name]
+        elif href.startswith(("http:", "https:", "mailto:")) and not a.get("target"):
+            a.set("target", "_blank")
+    return root

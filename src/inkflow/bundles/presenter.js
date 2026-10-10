@@ -282,9 +282,9 @@
     Deck: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 4 2 8l3.5 4"/><path d="M10.5 4 14 8l-3.5 4"/></svg>`
   };
   function isConfigured(file) {
-    if (file.path.toLowerCase().endsWith(".svg")) {
-      return config.svg || config.default;
-    }
+    const suffix = file.path.split(".").pop()?.toLowerCase() ?? "";
+    if (config.suffixes) return config.suffixes.includes(suffix);
+    if (suffix === "svg") return config.svg || config.default;
     return config.default;
   }
   function actOn(file) {
@@ -1037,6 +1037,16 @@
     pvResizeHandle.addEventListener("pointermove", _onPvResizeMove);
     pvResizeHandle.addEventListener("pointerup", _onPvResizeUp);
   });
+
+  // src/ts/shared/deck-styles.ts
+  function applyDeckStyles(msg) {
+    if (msg.styles !== void 0) {
+      const el = document.getElementById("deck-styles");
+      if (el) el.textContent = msg.styles;
+    }
+    if (msg.mode !== void 0)
+      document.documentElement.dataset.theme = msg.mode;
+  }
 
   // src/ts/shared/easing.ts
   var NAMED_CURVES = {
@@ -3034,6 +3044,7 @@
         return;
       }
       if (msg.type === "update") {
+        applyDeckStyles(msg);
         state.slides = msg.slides;
         state.transitions = msg.transitions;
         hideError();
@@ -3140,6 +3151,34 @@
         () => setSyncMode(row.dataset.mode)
       );
     renderSyncButton();
+  }
+
+  // src/ts/presenter/toeditor.ts
+  var served = false;
+  function backToEditor() {
+    if (!served) return;
+    const hash = `#slide=${state.slideIndex + 1}`;
+    const opener = window.opener;
+    try {
+      if (opener && !opener.closed && opener.location.origin === location.origin && opener.location.pathname.startsWith("/edit")) {
+        opener.location.hash = hash;
+        opener.focus();
+        window.close();
+        if (window.closed) return;
+      }
+    } catch {
+    }
+    location.href = `/edit${hash}`;
+  }
+  function initToEditor(wsPort) {
+    const button = document.getElementById("btn-to-editor");
+    served = wsPort != null;
+    if (!button) return;
+    if (!served) {
+      button.style.display = "none";
+      return;
+    }
+    button.addEventListener("click", backToEditor);
   }
 
   // src/ts/presenter/windowsync.ts
@@ -3778,6 +3817,7 @@
     g: { action: openPicker, preventDefault: true },
     o: { action: toggleOverview, preventDefault: true },
     e: { action: toggleMenu },
+    E: { action: backToEditor },
     f: { action: toggleFullscreen },
     b: { action: () => toggleCurtain("black") },
     ".": { action: toggleLaser },
@@ -3915,6 +3955,7 @@
   initSyncMenu();
   initWindowSync(WS_PORT);
   initEditMenu(EDIT_COMMANDS, WS_PORT);
+  initToEditor(WS_PORT);
   var deepLinked = readURL();
   loadSlide();
   renderPv();

@@ -3,6 +3,7 @@ import { renderPv, updatePvClock } from "./pv";
 import { state } from "./state";
 import { readURL } from "./status";
 import { initSyncMenu, setSyncMode } from "./syncmenu";
+import { initToEditor } from "./toeditor";
 import {
     CUT,
     loadSlide,
@@ -43,6 +44,7 @@ loadSyncMode();
 initSyncMenu();
 initWindowSync(WS_PORT);
 initEditMenu(EDIT_COMMANDS, WS_PORT);
+initToEditor(WS_PORT);
 // Capture deep-link authority before loadSlide()/syncURL() rewrites the URL.
 const deepLinked = readURL();
 loadSlide();

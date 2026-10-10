@@ -2,13 +2,22 @@ from __future__ import annotations
 
 import base64
 import importlib.resources
+import json
+import os
 import re
 import shutil
 import subprocess
 import tempfile
+import threading
+from collections.abc import Generator
+from contextlib import contextmanager
+from functools import partial
 from html import escape as escape_html
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import cast
+
+from typing_extensions import override
 
 from inkflow.assets import (
     MIME_TYPES,
@@ -42,7 +51,9 @@ def build_static_html(
     transitions = resolve_transitions(deck)
     styles_css = load_deck_styles(deck, project_dir)
     if deck.embed_fonts:
-        font_css = embed_fonts_css_subsetted(slides, project_dir, deck.theme.fonts_dir)
+        font_css = embed_fonts_css_subsetted(
+            slides, project_dir, deck.theme.fonts_dir, styles_css=styles_css
+        )
         if font_css:
             styles_css = (font_css + "\n" + styles_css).strip()
     scripts_js = load_deck_scripts(deck, project_dir)
@@ -204,7 +215,7 @@ def build_pdf(
     no_sandbox: bool = False,
     size: tuple[int, int] | None = None,
 ) -> None:
-    exe = chromium or _find_chromium()
+    exe = chromium or find_chromium()
     if exe is None:
         raise RuntimeError(
             "Chromium not found. Install chromium or google-chrome,"
@@ -218,7 +229,9 @@ def build_pdf(
         raise RuntimeError("Cannot export a PDF: the deck has no visible slides.")
     styles_css = load_deck_styles(deck, project_dir)
     if deck.embed_fonts:
-        font_css = embed_fonts_css_subsetted(slides, project_dir, deck.theme.fonts_dir)
+        font_css = embed_fonts_css_subsetted(
+            slides, project_dir, deck.theme.fonts_dir, styles_css=styles_css
+        )
         if font_css:
             styles_css = (font_css + "\n" + styles_css).strip()
 
@@ -243,22 +256,163 @@ def build_pdf(
             .replace("__SLIDES__", slides_html)
             .replace("__TITLE__", escape_html(title))
         )
-        html_path = Path(tmp) / "slides.html"
-        html_path.write_text(html, encoding="utf-8")
-        cmd = [
-            exe,
-            "--headless",
-            "--disable-gpu",
-            "--print-to-pdf-no-header",
-            f"--print-to-pdf={output.resolve()}",
-            html_path.as_uri(),
-        ]
-        if no_sandbox:
-            cmd.insert(1, "--no-sandbox")
-        subprocess.run(cmd, check=True)
+        (Path(tmp) / "slides.html").write_text(html, encoding="utf-8")
+        target = output.resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # A file left from an earlier export must not pass for this one.
+        target.unlink(missing_ok=True)
+        with _served(Path(tmp)) as url:
+            cmd = [
+                exe,
+                "--headless",
+                "--disable-gpu",
+                "--print-to-pdf-no-header",
+                f"--print-to-pdf={target}",
+                f"{url}/slides.html",
+            ]
+            if no_sandbox:
+                cmd.insert(1, "--no-sandbox")
+            _run_chromium(cmd, target, b"%PDF")
 
 
-def _find_chromium() -> str | None:
+@contextmanager
+def _served(directory: Path) -> Generator[str]:
+    """Serve ``directory`` on a loopback port for the length of the block.
+
+    The page is handed to Chromium over HTTP rather than as a ``file://`` URL:
+    a Chromium installed as a snap (Ubuntu's ``chromium``) or a Flatpak has its
+    own private ``/tmp`` and cannot see the temporary directory the page is
+    written to, so it would print its "file not found" page instead of the
+    deck. Every confined browser can still reach localhost.
+    """
+    handler = partial(_QuietHandler, directory=str(directory))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+class _QuietHandler(SimpleHTTPRequestHandler):
+    @override
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+def _run_chromium(cmd: list[str], target: Path, magic: bytes) -> None:
+    """Run Chromium to write ``target`` and check that it did.
+
+    Chromium reports most failures only on stderr, and a confined one (snap,
+    Flatpak) that may not write where it was asked exits 0 without a file, so
+    both the exit status and the file itself are checked, and either failure
+    is raised with what Chromium said.
+    """
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        raise RuntimeError(f"could not start {cmd[0]}: {exc}") from exc
+    said = _chromium_said(result.stderr)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"{Path(cmd[0]).name} failed (exit status {result.returncode})" + said
+        )
+    try:
+        with target.open("rb") as f:
+            ok = f.read(len(magic)) == magic
+    except OSError:
+        ok = False
+    if not ok:
+        raise RuntimeError(
+            f"{Path(cmd[0]).name} did not write {target}. A Chromium installed as"
+            + " a snap or Flatpak may only write inside your home folder (not in"
+            + " /tmp or a hidden folder): pick an output there, or pass"
+            + " --chromium with another Chromium-based browser."
+            + said
+        )
+
+
+def _chromium_said(stderr: str) -> str:
+    """The last lines of Chromium's stderr that are not routine noise."""
+    noise = ("dbus", "Fontconfig", "GPU", "gpu_", "Gtk-", "libva", "vaapi")
+    lines = [
+        line.strip()
+        for line in stderr.splitlines()
+        if line.strip() and not any(word in line for word in noise)
+    ]
+    return ("\n" + "\n".join(lines[-5:])) if lines else ""
+
+
+def _hidden_window_height(base: list[str], tmp: Path, url: str) -> int:
+    """How much shorter headless Chrome's viewport is than the window it shoots.
+
+    New-style headless reserves room for browser UI it never draws, so a
+    screenshot of a WxH window shows a viewport less than H tall, and nothing is
+    painted below it. Measured once per run rather than assumed.
+    """
+    (tmp / "probe.html").write_text(
+        "<html><body><script>document.body.textContent="
+        + "'@'+innerHeight+'@'</script></body></html>",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [*base, "--window-size=800,800", "--dump-dom", f"{url}/probe.html"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    match = re.search(r"@(\d+)@", result.stdout)
+    return max(0, 800 - int(match.group(1))) if match else 0
+
+
+def crop_png_height(data: bytes, height: int) -> bytes:
+    """Keep the top ``height`` rows of a non-interlaced 8-bit PNG.
+
+    Every filter type refers only to the row above, so the kept rows are still
+    valid as they are: no pixel decoding is needed, just fewer of them.
+    """
+    import struct
+    import zlib
+
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not a PNG")
+    pos = 8
+    chunks: list[tuple[bytes, bytes]] = []
+    while pos < len(data):
+        (length,) = struct.unpack(">I", data[pos : pos + 4])
+        kind = data[pos + 4 : pos + 8]
+        chunks.append((kind, data[pos + 8 : pos + 8 + length]))
+        pos += 12 + length
+    ihdr = chunks[0][1]
+    width, old_height, depth, color, _, _, interlace = struct.unpack(">IIBBBBB", ihdr)
+    if depth != 8 or interlace or height >= old_height:
+        return data
+    channels = {0: 1, 2: 3, 4: 2, 6: 4}.get(color)
+    if channels is None:
+        return data
+    raw = zlib.decompress(b"".join(body for kind, body in chunks if kind == b"IDAT"))
+    stride = 1 + width * channels
+    kept = zlib.compress(raw[: stride * height])
+    new_ihdr = struct.pack(">II", width, height) + ihdr[8:]
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        crc = zlib.crc32(kind + body) & 0xFFFFFFFF
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", crc)
+
+    out = [data[:8], chunk(b"IHDR", new_ihdr)]
+    for kind, body in chunks[1:]:
+        if kind == b"IDAT":
+            continue
+        if kind == b"IEND":
+            out.append(chunk(b"IDAT", kept))
+        out.append(chunk(kind, body))
+    return b"".join(out)
+
+
+def find_chromium() -> str | None:
     for name in (
         "chrome",
         "chromium",
@@ -269,4 +423,121 @@ def _find_chromium() -> str | None:
     ):
         if found := shutil.which(name):
             return found
+    return _playwright_chromium()
+
+
+def _playwright_chromium() -> str | None:
+    """A Chromium that Playwright downloaded, common on CI and agent machines."""
+    roots = [
+        os.environ.get("PLAYWRIGHT_BROWSERS_PATH"),
+        str(Path.home() / ".cache" / "ms-playwright"),
+        str(Path.home() / "Library" / "Caches" / "ms-playwright"),
+    ]
+    patterns = (
+        "chromium-*/chrome-linux*/chrome",
+        "chromium-*/chrome-mac*/Chromium.app/Contents/MacOS/Chromium",
+        "chromium-*/chrome-win*/chrome.exe",
+    )
+    for root in filter(None, roots):
+        base = Path(root)
+        for pattern in patterns:
+            found = sorted(base.glob(pattern), reverse=True)
+            if found:
+                return str(found[0])
     return None
+
+
+# ── render (PNG) ──────────────────────────────────────────────────────────────
+
+
+def render_png(
+    deck_path: Path,
+    slide_numbers: list[int],
+    output: Path,
+    *,
+    step: int | None = None,
+    scale: float = 1.0,
+    chromium: str | None = None,
+    no_sandbox: bool = False,
+) -> list[Path]:
+    """Screenshot slides (1-based, as the presenter numbers them) to PNG files.
+
+    Each slide is shown at ``step`` (its final build state when ``None``) on a
+    page with nothing else on it, so the image is exactly the slide. ``output`` is
+    the file for a single slide, or a directory for several (``slide-N.png``).
+    Returns the files written.
+    """
+    exe = chromium or find_chromium()
+    if exe is None:
+        raise RuntimeError(
+            "Chromium not found. Install chromium or google-chrome,"
+            + " or pass --chromium PATH."
+        )
+    deck = load_deck(deck_path)
+    project_dir = deck_path.parent
+    slides = process_deck(deck, project_dir, deck_path)
+    if not slides:
+        raise RuntimeError("Cannot render: the deck has no visible slides.")
+    for n in slide_numbers:
+        if not 1 <= n <= len(slides):
+            raise ValueError(f"no slide {n}: the deck has {len(slides)} slides")
+    styles_css = load_deck_styles(deck, project_dir)
+    if deck.embed_fonts:
+        font_css = embed_fonts_css_subsetted(
+            slides, project_dir, deck.theme.fonts_dir, styles_css=styles_css
+        )
+        if font_css:
+            styles_css = (font_css + "\n" + styles_css).strip()
+
+    pkg = importlib.resources.files("inkflow")
+    template = pkg.joinpath("render.html").read_text(encoding="utf-8")
+    css = pkg.joinpath("bundles", "presenter.css").read_text(encoding="utf-8")
+    js = pkg.joinpath("bundles", "render.js").read_text(encoding="utf-8")
+    data_theme = "" if deck.effective_mode == ColorMode.DARK else "light"
+    title = escape_html(resolve_deck_title(deck, project_dir))
+
+    single = len(slide_numbers) == 1 and output.suffix.lower() == ".png"
+    if not single:
+        output.mkdir(parents=True, exist_ok=True)
+    base = [exe, "--headless", "--disable-gpu", "--hide-scrollbars"]
+    if no_sandbox:
+        base.append("--no-sandbox")
+    written: list[Path] = []
+    with tempfile.TemporaryDirectory() as tmp, _served(Path(tmp)) as url:
+        _copy_assets(slides, _asset_roots(deck, project_dir), Path(tmp))
+        lost = _hidden_window_height(base, Path(tmp), url)
+        for n in slide_numbers:
+            svg = slides[n - 1]["svg"]
+            w, h = _slide_dimensions(svg)
+            html = (
+                template.replace("/* __CSS__ */", css)
+                .replace("/* __STYLES__ */", styles_css)
+                .replace("/* __JS__ */", js)
+                .replace("__RENDER_SVG__", json.dumps(svg).replace("</", "<\\/"))
+                .replace("__RENDER_STEP__", json.dumps(step))
+                .replace("__DATA_THEME__", data_theme)
+                .replace("__TITLE__", title)
+                .replace("__W__", str(w))
+                .replace("__H__", str(h))
+            )
+            (Path(tmp) / f"slide-{n}.html").write_text(html, encoding="utf-8")
+            target = (output if single else output / f"slide-{n}.png").resolve()
+            target.unlink(missing_ok=True)
+            # The window is grown by what the browser keeps from the viewport, so
+            # the whole slide is painted; the strip that adds is cropped off.
+            cmd = [
+                *base,
+                f"--window-size={w},{h + lost}",
+                f"--force-device-scale-factor={scale:g}",
+                "--virtual-time-budget=3000",
+                f"--screenshot={target}",
+                f"{url}/slide-{n}.html",
+            ]
+            _run_chromium(cmd, target, b"\x89PNG")
+            if lost:
+                data = target.read_bytes()
+                # Chrome clamps the scale factor, so take it from the image.
+                actual = int.from_bytes(data[16:20], "big") / w
+                target.write_bytes(crop_png_height(data, round(h * actual)))
+            written.append(target)
+    return written

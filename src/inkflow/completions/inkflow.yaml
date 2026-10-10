@@ -22,6 +22,7 @@ commands:
     description: Scaffold a new presentation project.
     flags:
       --no-git: Skip git hook setup
+      --no-lfs: Git only, no Git LFS rules for media
       --force: Scaffold even into a non-empty directory
     completion:
       positional:
@@ -34,6 +35,71 @@ commands:
       --host=: Bind address
       --port=: HTTP port
       --ws-port=: WebSocket port
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+
+  - name: edit
+    description: Open the visual editor.
+    flags:
+      -d, --deck=: Path to deck.py
+      --host=: Bind address
+      --port=: HTTP port
+      --ws-port=: WebSocket port
+      --no-open: Do not open the editor in a browser on start
+      --start: Open the start page (new deck, open, recent) instead of a deck
+      --quit-when-idle=: Stop once no page has been open this many seconds
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+
+  - name: context
+    description: Show what is selected in the visual editor.
+    flags:
+      -d, --deck=: Path to deck.py
+      --json: Print the raw JSON
+      --hook: Prompt-hook mode (quiet when stale, never fails)
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+
+  - name: render
+    description: Render slides to PNG images.
+    flags:
+      -d, --deck=: Path to deck.py
+      -s, --slide=: Slide number (1-based); repeatable
+      --all: Render every slide
+      --step=: Build step to show
+      -o, --output=: PNG file or directory
+      --scale=: Image scale
+      --chromium=: Path to a Chromium/Chrome binary
+      --no-sandbox: Pass --no-sandbox to Chromium
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+        output: ["$files"]
+        chromium: ["$files"]
+
+  - name: goto
+    description: Show a slide in every open editor.
+    flags:
+      -d, --deck=: Path to deck.py
+      --ws-port=: The server's WebSocket port
+      --host=: Server host
+
+  - name: select
+    description: Select elements by id in every open editor.
+    flags:
+      --slide=: Go to this slide first
+      -d, --deck=: Path to deck.py
+      --ws-port=: The server's WebSocket port
+      --host=: Server host
+
+  - name: setup-claude
+    description: Install the Claude Code prompt hook and inkflow skill.
+    flags:
+      -d, --deck=: Path to deck.py
+      --command=: Command the prompt hook runs
     completion:
       flag:
         deck: ["$files([\".py\"])"]
@@ -69,6 +135,12 @@ commands:
     completion:
       positional:
         - ["bash", "zsh", "fish", "carapace"]
+
+  - name: setup-desktop
+    description: Add Inkflow to the desktop's application menu.
+    flags:
+      --remove: Remove the launcher instead
+      --terminal: Run the server in a terminal window
 
   - name: setup-git
     description: Configure git hooks and SVG diff driver.

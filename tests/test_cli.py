@@ -479,6 +479,20 @@ class TestInitGit:
         assert "*.pdf" in gitignore
         assert (root / ".githooks" / "pre-commit").exists()
 
+    def test_gitattributes_send_media_to_lfs_unless_git_only(
+        self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(main, ["init", "with-lfs"])
+        assert result.exit_code == 0, result.output
+        attrs = Path("with-lfs", ".gitattributes").read_text(encoding="utf-8")
+        assert "*.svg diff=inkscape-svg" in attrs
+        assert "*.mp4 filter=lfs diff=lfs merge=lfs -text" in attrs
+        result = runner.invoke(main, ["init", "git-only", "--no-lfs"])
+        assert result.exit_code == 0, result.output
+        attrs = Path("git-only", ".gitattributes").read_text(encoding="utf-8")
+        assert "inkflow: lfs off" in attrs and "filter=lfs" not in attrs
+
     def test_no_git_skips_bootstrap(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

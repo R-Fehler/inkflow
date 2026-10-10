@@ -93,7 +93,11 @@ def scaffold(target: Path) -> None:
         (notes_dir / name).write_text(content, encoding="utf-8")
 
     (target / "deck.py").write_text(_DECK_PY, encoding="utf-8")
+    write_pyproject(target)
 
+
+def write_pyproject(target: Path) -> None:
+    """A bare ``pyproject.toml`` declaring the deck's inkflow dependency."""
     (target / "pyproject.toml").write_text(
         _PYPROJECT.format(
             name=_project_name(target), requirement=_inkflow_requirement()

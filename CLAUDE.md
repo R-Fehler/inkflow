@@ -4,6 +4,7 @@
 
 ```bash
 uv run inkflow serve --deck demo/deck.py   # start server at localhost:7777
+uv run inkflow edit --deck demo/deck.py    # same server, opens the visual editor at /edit
 mise run check                      # lint + format + typecheck + test (Python and JS)
 mise run bundle                     # rebuild JS/CSS bundles from src/ts/ and src/css/
 ```
@@ -72,7 +73,10 @@ src/
                                `PreviewLayer(path, ref)` — refs come from the caller since
                                a backdrop or an overlay is not named by an inkflow:parent.
                                Layer digests are canonical (c14n, whitespace-stripped), so a
-                               synced ancestor does not read as stale forever
+                               synced ancestor does not read as stale forever.
+                               The preview `<style>` also paints unstyled zone shapes as
+                               dashed outlines (`zone_placeholder_css`): unfilled, Inkscape
+                               would paint them black over the slide
     overlay.py        the `Overlay` DSL type (src only). Its own module because both
                                `themes` and `manifest` reference it, same as `Transition`
     markdown.py       markdown-it-py rendering only: code-fence highlighting, LaTeX math,
@@ -83,18 +87,85 @@ src/
     zones.py          ::zone:: / ::step:: marker grammar, zone param extraction, and slide
                                assembly (parsed markdown -> per-zone TextBox/Media)
     server.py         HTTP server, WebSocket server, file watcher, build pipeline
-    export.py         static HTML export (inkflow build) and PDF export (inkflow export)
+    edit.py           launching external programs on source files: INKFLOW_EDIT_CMD*
+                               resolution (extension > kind > default) for the presenter's
+                               edit menu, and the editor's "Open" catalog (`open_choices`)
+    export.py         static HTML export (inkflow build) and PDF export (inkflow export);
+                               PDF/PNG pages reach Chromium over a loopback HTTP server
+                               (`_served`), never file:// (a snap/Flatpak Chromium has a
+                               private /tmp), and `_run_chromium` checks the written file
+                               and reports Chromium's stderr
     assets.py         asset reference resolution. `AssetRoots` holds the allowed roots
                                (project dir, theme asset dir) and converts between an
                                absolute path and a canonical ref both ways; `AssetSource`
                                resolves the refs written in one file; `svg_reader` is the
                                composition reader that canonicalises each SVG as it is read
+    editor/           visual editor backend (see "The visual editor" below):
+                               provenance.py (data-ink locators stamped on the composed
+                               SVG + `locate`), svgops.py (write-back ops on one SVG:
+                               attrs/style/paint/text/insert/delete/duplicate/order/group),
+                               deckedit.py (libcst edits of deck.py: slide list, Slide(...)
+                               args, animations=[...], zones={...}, imports; keeps comments),
+                               codegen.py (DSL object -> shortest constructor source; field
+                               schemas for the property panels), session.py (one request ->
+                               one undoable whole-file step; EditorSession/History; a video
+                               inserted anywhere is a new zone-video rect + a Video(...)
+                               zones= entry in one step),
+                               model.py (build_model: per-slide sources, zones, cues for the
+                               editor), context.py (.inkflow/context.json for agents),
+                               transfer.py (clipboard bundles: copy slides/objects with their
+                               files, paste into any project; pasted Slide(...) must pass the
+                               `check_slide_code` allowlist, never arbitrary Python),
+                               previews.py (layout gallery renders), themeedit.py (Theme
+                               dialog: token overrides as one marked block in the project's
+                               styles.css, values validated, never raw CSS), findreplace.py
+                               (find/replace over SVG text, Markdown and deck.py author-text
+                               literals only), gitops.py (the Git menu: status, commit,
+                               push/pull, discard, undo commit, branches, deck-scoped log,
+                               view/revert/restore a commit, `lfs_status` = media
+                               no LFS rule covers or committed as full copies, `lfs_track`
+                               / `lfs_off`; shells out to git with GIT_TERMINAL_PROMPT=0), projects.py (new deck in one of four
+                               looks, folder browsing, recent decks), places.py (favourite
+                               folders + the default deck location, user config dir),
+                               nativedialog.py (the OS folder/file chooser shown by the
+                               server: zenity/kdialog, osascript, PowerShell; `system-pick`,
+                               local only), media.py (files of any
+                               size: by path (`import_path`, local only) or in chunks
+                               (`Uploads`), staged in .inkflow/incoming/ and moved into
+                               assets/ in one rename; both return an `Arrival`, which
+                               says `convert=True` for a video browsers cannot play but
+                               ffmpeg can read (by path: converted from where it is;
+                               uploaded: kept in incoming/<id>/ until converted, then
+                               `discard_source`); `probe` (ffprobe), `issues`, `plan`
+                               (ffmpeg MP4/WebM command + rough size, or `fmt="copy"`:
+                               remux via `remux_target`, sound re-encoded only if it
+                               does not fit), `Conversions` (background ffmpeg jobs,
+                               also staged))
     cli/              CLI package (entry point inkflow.cli:main). _common.py holds the
                                `main` group, shared options, and the Project/Target helpers;
                                commands are grouped by area: project.py (init, setup-git,
-                               completion), present.py (serve, build, export), authoring.py
+                               completion), present.py (serve, edit, build, export), agent.py
+                               (context, render, goto, select, setup-claude), authoring.py
                                (clean, label2id, add, parent group, sync, layouts), color.py (colorize,
                                palette), verify.py. Submodules register on `main` by import.
+    launcher.py       `inkflow setup-desktop`: an application-menu launcher (Linux
+                               .desktop + icon, macOS ~/Applications/Inkflow.app, Windows
+                               Start menu .lnk) running `<this python> -m inkflow edit
+                               --start --quit-when-idle=60` hidden (pythonw on Windows;
+                               `__main__.py` gives a console-less process devnull
+                               streams), or in a terminal with `--terminal`
+    instances.py      one server per deck: each server records {pid, host, ports, deck}
+                               in the user state dir (`register`/`unregister`, by
+                               `_serve_deck`); `serving(deck)` finds the live one, trusting
+                               a record only when `/_inkflow/instance` answers with its
+                               pid (stale ones are deleted). Used by `inkflow edit/serve`
+                               (open that server instead) and the session's open-deck
+                               (returns `redirect`, the page goes there)
+    drawio.py         draw.io editable SVGs (*.drawio.svg): the `<mxfile>` source in the
+                               root's `content` attribute; `source`/`normalize` store it
+                               uncompressed (inflate + unquote per page), `size`,
+                               `textconv` (what `inkflow clean --stdout`, git's SVG diff
+                               driver, prints for one; `clean` never rewrites one)
     clean.py          SVG Inkscape metadata stripping (used by cli and pre-commit hook)
     label2id.py       `inkflow label2id`: promote each element's inkscape:label to its
                                SVG id (Inkscape convenience for Morph/animation targets).
@@ -103,7 +174,12 @@ src/
     colors.py         CSS color token extraction, hex→class mapping, SVG colorization, GPL palette
     git_setup.py      git hook + SVG diff driver setup; `init_project_git`
                                bootstraps a fresh project (git init + .gitignore +
-                               hooks), and steps aside when already inside a repo
+                               hooks), and steps aside when already inside a repo;
+                               either way `setup_lfs` writes the deck's LFS section
+    lfs.py            Git LFS for decks: media extensions (PATTERNS), the
+                               .gitattributes section (rules, or the committed
+                               `# inkflow: lfs off` git-only opt-out), `mode` (on/off/none
+                               from the deck's .gitattributes up to the repo root)
     init.py           project scaffolding (inkflow init): copies templates/ into
                                slides/ + notes/, writes a 3-slide deck.py and a bare
                                pyproject.toml pinning inkflow (`~=` compatible release);
@@ -139,15 +215,22 @@ src/
     ns.py             XML namespace constants
     tui.py            terminal UI (Rich)
     presenter.html    shell template — inlined with CSS/JS at serve time
+    editor.html       visual editor shell, served at /edit (editor bundle + deck styles)
+    render.html       single-slide page `inkflow render` screenshots (render bundle)
+    claude/SKILL.md   the inkflow skill `inkflow setup-claude` installs into a project
     pdf.html          PDF export template
     bundles/          pre-built JS/CSS output (committed; no Node needed at install time)
       presenter.js    navigation, transitions, WebSocket, presenter panel
       presenter.css   all presenter styles including the sidebar panel
+      editor.js/.css  the visual editor (src/ts/editor, src/css/editor)
+      render.js       step-at-a-time single-slide renderer (src/ts/render)
     theme/            built-in theme: layouts/*.svg, icon.svg, showcase/, and
                                styles.css (per-layout zone styling for those layouts,
                                loaded for every deck — keep its rules `.layout-*`-scoped)
     templates/        inkflow init starter files (title.svg, diagram.svg, guide.md,
-                               diagram.md, notes/*.md) copied verbatim into new projects
+                               diagram.md, notes/*.md) copied verbatim into new projects;
+                               example/ is the demo deck's look (footer overlay + styles)
+                               for the editor's "Inkflow example" new deck
   ts/                 TypeScript source
     globals.d.ts      ambient declarations for Python-injected globals (__SLIDES_JSON__ etc.)
     shared/           types, step engine (step.ts: WAAPI cue driver + elementActions),
@@ -157,9 +240,44 @@ src/
                       via progress-driver.ts), overview, picker, websocket, status bar,
                       keyboard, syncmenu.ts (sync-mode status-bar control),
                       pv.ts (presenter panel sidebar), video.ts (step-driven
-                      <video> playback, wired in via status.ts), and deck-url.ts
+                      <video> playback, wired in via status.ts), toeditor.ts (back to
+                      /edit at this slide: the opener editor tab when there is one;
+                      hidden in a static build), and deck-url.ts
                       (pure position<->fragment codec behind syncURL/readURL; the
                       only module reading location.pathname/search/hash)
+    editor/           visual editor: canvas.ts (render, hit-testing, handles, drag ->
+                      attribute plans), geom.ts (pure matrices + move/resize/rotate plans),
+                      snap.ts (smart guides), textedit.ts, insert.ts (tools, images,
+                      paste), sorter.ts, props.ts, notes.ts, toolbar.ts (shortcuts),
+                      context.ts (agent context + goto/select), net.ts (edit-op requests),
+                      clipboard.ts (system-clipboard copy/paste of slides and objects),
+                      richtext.ts (zone HTML <-> Markdown for in-place rich editing; throws
+                      Unsupported rather than drop content), crop.ts, objects.ts (Objects
+                      tab: hide/lock), gallery.ts, grid.ts (grid view of all slides;
+                      shares sorter.ts's Thumbs cache class and slide menu), theme.ts,
+                      find.ts, exportdlg.ts, openwith.ts ("Open ▾" in other programs),
+                      decks.ts ("deck ▾": new/open/recent decks, start page),
+                      folderpicker.ts (the folder picker those and the video picker
+                      share: Tab completion, type-to-filter, keyboard list, places,
+                      Browse… = system dialog; its pure path maths in pathtext.ts),
+                      git.ts (Git menu),
+                      canvasmenu.ts (right-click menu on the canvas; text fields and
+                      Shift+right-click keep the browser's), videopreview.ts (canvas
+                      videos lose controls + pointer events so they select and drag;
+                      "Play preview" plays one in place; the presenter is unaffected),
+                      videocheck.ts (Video check after insert: browser decode test +
+                      ffprobe issues; Convert dialog with remux/presets/quality/
+                      estimate; `convertForInsert` makes it mandatory for formats
+                      only ffmpeg reads),
+                      drawio.ts (draw.io embed mode in a full-screen iframe, JSON
+                      postMessage protocol checked by source + origin: configure
+                      → load → save → export xmlsvg → `drawio-save`; a new diagram's
+                      picture is placed on first save via insert.insertDiagramImage),
+                      stylecopy.ts (format painter: Copy/Paste style, Ctrl+Alt+C/V;
+                      theme colours go through the server's `paint` op),
+                      dialog.ts (the one modal), connectors.ts (connection sites
+                      and straight/elbow/curved routes, pure + tested)
+    render/           the single-slide page behind `inkflow render`
   css/                CSS source
     shared/           theme variables, animation keyframes
     presenter/        presenter partials including pv.css (sidebar panel)
@@ -308,9 +426,21 @@ Overlays become part of the slide SVG, so they travel with it during a transitio
 
 Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop + ancestor chain), `inkflow:overlay-src`/`-hash` what goes on top. `clean.strip_preview_layers` removes both, which is what keeps a synced slide from painting its chrome twice (once from the preview, once from runtime composition) and keeps an ancestor's own overlay layers from leaking into every child. `verify` shares `plan_preview` (so it cannot disagree about staleness) and skips files outside the project dir, which `sync` would never write.
 
+**The visual editor writes the deck's own files; it has no document model of its own.**
+`inkflow edit` (or `/edit` on any `serve`) is a second page on the same server. The server builds with `process_deck(editor=True)`, which stamps every element read from a source file with `data-ink="<source index>:<child path>"` — the child path counted on the tree *as parsed from disk*, before cleaning (`clean_inkscape_tree(before_clean=...)`), so `provenance.locate` finds the same node when an edit is written back. `SlideData.edit` carries the source list, the pruned empty zones and where each zone's content was written; the presenter copy drops it (`_without_edit`), the editor gets it inside `build_model`'s model (`editor-model` message, sent after each `update` to clients that said `hello` as editors).
+The browser never writes a file: it sends `{"type":"edit-op", "action": ...}` and `editor.session.EditorSession` turns that into new bytes for SVGs (lxml, only touched nodes change), Markdown (`zones.zone_spans` mirrors the parser to replace one zone's section) or `deck.py` (libcst via `deckedit`, values generated by `codegen` from the real DSL object so the dataclass validates them). Each request is one `History` step of whole-file before/after snapshots; undo refuses if a file changed outside the editor. An SVG request carries the file hash the client rendered from and is refused when stale; results return new hashes so quick consecutive edits chain. Writes go through the normal watcher → rebuild → push, which is also how the editor, Inkscape and an agent see each other's changes. `load_deck` compiles deck.py from source each time (the bytecode cache's whole-second mtime check loads stale code after a same-size edit such as a slide reorder).
+The client previews a drag by setting attributes on the live DOM and sends the same plan (`geom.ts`: x/y/width/height for rects/images/rect-backed zones, cx/cy for ellipses, endpoints for lines, a merged leading translate for everything else, a matrix for resize/rotate of transformed elements). Objects from layouts/overlays and slides drawn straight from a shared layout are not selectable outside "Edit layout"; drawing on such a slide first gives it its own `slides/<id>.svg` built on that layout (never named like a layout, which would shadow it). `.inkflow/` (editor context, renders) ignores itself in git and is excluded from the watcher.
+Everything the editor adds is plain deck source, so Inkscape, an agent and the presenter need no editor knowledge: a **text box** or a **video placed anywhere** is a `zone-text`/`zone-video` rect in the slide's own SVG filled through the slide's Markdown or `zones={...}` (deleting or duplicating such a rect takes its content along — `_svg` with `zoneSlide`); **rich text** is edited as the zone's rendered HTML and written back by `richtext.ts`, only when serializing the zone as rendered gives back its source (`sameMarkdown`), otherwise the Markdown pane opens; a **crop** is a nested `<svg x y width height viewBox>` frame around the `<image>` (the canvas measures it by its viewport, not getBBox); a **connector** (line/arrow; four tools: line, arrow, elbow, curve) is a `<path>` with `inkflow:connector="straight|elbow|curved"` and `inkflow:connect-start/-end="<id>:<site>"`, a site being a side (`top`, its middle) or `side@fraction` (`top@0.25`, clockwise from the side's first corner) — a shape's `inkflow:sites="N"` only decides how many points per side are *offered* (copied onto a zone's foreignObject by `content.py`), a named site is always computable, so fewer points later never detaches an arrow; an elbow's adjustable segment is `inkflow:bend="x:640"` (axis and slide-unit coordinate, ignored when the route's axis changes) with a drag handle; `connectors.ts` holds the pure site/route maths, `canvas.withConnectors` re-routes attached connectors inside every `sendSvgOps` (so drags, nudges and geometry fields all carry them in the same step), connector moves detach ends whose shapes do not move along (`movingTogether`), and an id rename rewrites `connect-*` references (`svgops._rename_connections`); routing is editor-side only, so a shape moved elsewhere leaves its arrow until "Re-route all"; a **link** is an `<a href>` wrapper that provenance treats as transparent (`is_link_wrapper`: the object inside stays the selectable one), and `pipeline.resolve_links` turns `slide:<id>` into `data-inkflow-slide` and gives web links `target="_blank"`; **slide text goes to Markdown**: a zone write on a slide with no `.md` (`_slide_markdown`) creates `slides/<slide-id>.md` named after the slide's *current* id (ids are inferred from the md stem, so `slide:` links survive; `id=` is written when the name is taken), sets `md=`, and moves the slide's plain-string `zones={...}` into it in the same step; `TextBox` and `md=Inline` stay in deck.py (the `to-markdown` action converts those on request); **text in a shape** is that shape renamed to a `zone-text*` zone plus `inkflow:show-shape="true"` (centred both ways via `--inkflow-align/-valign` in its style unless already set), which makes `content.zone_shape_css` paint the shape's own fill/stroke/rx as the text box's CSS (without it a zone shape stays an unpainted placeholder; `--inkflow-padding/-align/-valign` in its style carry over either way); a **formula** in rich text is a chip around the rendered `<math data-latex>` (`markdown._math_to_mathml` stamps the source), edited through the `math` session action, which renders exactly as the build does; **lock** is `inkflow:locked` (survives the pre-commit cleaner, unlike `sodipodi:insensitive`), **hide** is `display:none`; **theme** edits are one marked block in `styles.css`. A rebuild pushes the deck stylesheet and colour mode on `update` only when they changed (`styles`/`mode` keys, `shared/deck-styles.ts`), so theme edits restyle open pages without a reload. **Open ▾** (`openwith.ts`) asks the session for `open-apps` (`edit.open_choices`: the configured `INKFLOW_EDIT_CMD*` command, installed programs for the file's kind, the system opener) and launches with `open-file`, which only takes project files of a known kind and only from a loopback peer (`server._is_loopback` sets `_local` on every edit-op, overwriting the client's); for an SVG it first brings the Inkscape preview (layout layers + theme CSS, what `sync` writes) up to date as one History step, and `_new_slide_file` writes it on creation, since Inkscape draws only what is in the file. **Ctrl+drag** copies: `canvas.ts` previews by moving the originals with stand-in clones (`showGhosts`) left in place, and drops `duplicate` ops whose `set`/`kids` carry the move's attributes for the copy (resolved before any op runs); `apply_ops` re-attaches connectors copied together with their shapes. **draw.io diagrams**: `drawio-load` (source + `INKFLOW_DRAWIO_URL`, default embed.diagrams.net) / `drawio-save` (normalized SVG; no path = new `diagrams/diagram-N.drawio.svg`; `image` = the slide's picture keeps its width and takes the new height, same History step); without internet (`navigator.onLine` false, or no `configure`/`init` from the frame within 15 s) `drawio.ts` offers draw.io desktop: `drawio-new` writes `drawio.blank()` (an empty source behind a placeholder picture), the picture is placed, and `open-file` launches the app (`edit` kind DIAGRAM; Open ▾ never writes Inkscape preview layers into a `.drawio.svg`). **Quitting**: the `quit` action (local only, "Quit Inkflow") sets `_editor["shutdown"]`; `serve(quit_when_idle=…)` adds `_quit_when_idle`, which stops the server once `ws_clients` has been empty that long. **Start mode**: `serve(None)` / `EditorSession(None)` (`has_deck=False`) serves only the editor's start page at any path (`decks.showStart`), allowing just the project actions; opening a deck switches the server as usual and the page goes to `/edit`. An empty zone's **+** label writes the zone's name as its text and opens it for rich editing with that text selected (`afterRender.placeholder`); finishing with it untouched or empty, or Escape, undoes that write. **Decks and git**: `serve()` loops over `_serve_deck`, which returns the deck.py the editor asked for (`EditorSession.switch_to`, set by `open-deck`/`new-deck` and signalled through `_editor["switch"]`) and starts again on the same ports; an editor page reloads when a model for a different `deckPath` arrives. Git operations, folder browsing and deck creation go through the same session (`git`, `browse`, `new-deck`, …); push/pull, `git init` and anything touching paths outside the deck are refused unless the request is local, and operations that rewrite files reset the editor's History (the result carries `historyCleared`; `git.ts` warns once per session before the first one). Exports run through `Exporters` the CLI hands to `serve()` (export.py imports server.py, so the session cannot import it) and are downloadable at `/_export/<token>/…`, which serves only what the session exported.
+
 ## Server
 
-- HTTP on port 7777 (asyncio streams, custom handler)
+- HTTP on port 7777 (asyncio streams, custom handler); assets are streamed in
+  chunks with byte-range support (`_send_file`, 206/416), which Safari needs for video.
+  Served slides stamp each local asset reference with its file's mtime
+  (`_versioned`: `assets/x.png?v=…`; `_resolve_asset` drops the query), because a
+  page keeps pictures it loaded by URL: a diagram or picture changed on disk is
+  then a changed slide at a new URL. build/export never stamp; the editor drops
+  the stamp before writing anything back (`pathtext.assetRef`, `cleanForPaste`)
 - WebSocket on port 7778 (websockets 16.0 — uses `websockets.asyncio.server.serve`, not the legacy `websockets.serve`)
 - File watcher: `watchfiles.awatch` (async generator)
 - Both run inside an `asyncio.TaskGroup`
@@ -321,7 +451,7 @@ Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop +
 1. `clean_inkscape_tree(src)` — parse with the hardened lxml parser, remove elements/attrs in `http://www.inkscape.org/namespaces/inkscape` and `http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd`, call `etree.cleanup_namespaces()`. (`clean_inkscape_svg` wraps this and serializes to a pretty-printed string for the CLI/pre-commit hook.)
 2. `annotate_svg(root, cues)` — `cues` are `(Cue, step)` pairs already resolved to concrete step numbers (see below). Finds elements by plain id (no leading `#`); `Animation` cues are **grouped per target element** (an element may carry several) and written as one `data-cues` JSON array (sorted by step) via `_cue_entry` — each entry is `{step, kind, name, opts, vars}`, where `opts` are the base `Animation` fields as element.animate() options (`duration`/`delay`/`easing`/`iterations`) and `vars` are ready strings (slide direction+distance → `from-x`/`from-y`, `scale`/`color`/custom fields) substituted for `var(--anim-<key>)` in the keyframes. Enter-first elements also get an `anim-pending` class (initial-hidden guard); two same-kind cues with no opposing kind between them warn. A `PlayVideo` cue still sets `data-play-on-step` on the target zone's `<video>`.
 
-**Steps are inferred from triggers, never written by hand.** Every `Animation`/`PlayVideo` cue carries a `Trigger` (`ON_CLICK`, `WITH_PREVIOUS`, or a `Trigger.at(n)` pin). `steps.py`'s `StepResolver` walks a cue sequence in order and assigns concrete step numbers — `pipeline.resolve_steps` for the deck's `animations=[...]` list, the reveal counter in `zones.py` for markdown `::step::`/`::steps::` reveals. A slide's markdown reveals number first, then the `animations=[...]` list continues the count, so both form one timeline.
+**Steps are inferred from triggers, never written by hand.** Every `Animation`/`PlayVideo` cue carries a `Trigger` (`ON_CLICK`, `WITH_PREVIOUS`, or a `Trigger.at(n)` pin). `steps.py`'s `StepResolver` walks a cue sequence in order and assigns concrete step numbers — `pipeline.resolve_steps` for the deck's `animations=[...]` list, the reveal counter in `zones.py` for markdown `::step::`/`::steps::` reveals. A slide's markdown reveals number first (the `.md` file, then `zones={...}` Markdown strings, which go through the same `_split_steps`/`chunks_to_html`), then the `animations=[...]` list continues the count, so all form one timeline.
 
 **Autoplay vs. a `PlayVideo` cue.** If a `Video` sets `autoplay=True` and is also targeted by a `PlayVideo` cue, the cue wins: `process_slide` suppresses `autoplay` before content injection (so `Muted.AUTO` resolves to unmuted) and logs a warning.
 
@@ -353,4 +483,5 @@ platformdirs>=4.0    per-user log + font directories (inkflow.logging, fonts.py)
 rich>=15.0           terminal UI
 watchfiles>=0.21     inotify-based file watcher
 websockets>=12.0     WebSocket server (uses 16.x asyncio API)
+libcst>=1.9          deck.py edits from the visual editor (formatting-preserving)
 ```

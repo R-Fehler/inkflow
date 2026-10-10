@@ -16,10 +16,13 @@ export interface SlideData {
 }
 
 // Whether the server has a configured edit command for each file kind (env vars
-// INKFLOW_EDIT_CMD_SVG / INKFLOW_EDIT_CMD_MD), baked in at page load — see edit.ts.
+// INKFLOW_EDIT_CMD, _SVG, _<EXT>, _IMAGE / _TEXT / _VIDEO), baked in at page
+// load — see edit.ts.
 export interface EditCommandsConfig {
     default: boolean;
     svg: boolean;
+    // Extensions (lower-case, no dot) a command is configured for.
+    suffixes?: string[];
 }
 
 // Per-client position-sync mode. Never sent to the server: it only decides,
@@ -73,6 +76,10 @@ export type WsMessage =
           slides: SlideData[];
           transitions: TransitionData[];
           logs: LogEntry[];
+          // Sent only when they changed (a theme edit): the deck's stylesheet
+          // and its colour mode ("" dark, "light").
+          styles?: string;
+          mode?: string;
       }
     | { type: "error"; message: string }
     | { type: "notify"; message: string; style: NotifyStyle }

@@ -50,7 +50,8 @@
 .inkflow-fill-pink { fill: #f5c2e7; }
 .inkflow-stroke-pink { stroke: #f5c2e7; }
 .inkflow-fill-grey { fill: #6c7086; }
-.inkflow-stroke-grey { stroke: #6c7086; }</style></defs>
+.inkflow-stroke-grey { stroke: #6c7086; }
+#zone-title, #zone-content { fill: #808080; fill-opacity: 0.08; stroke: #808080; stroke-opacity: 0.7; stroke-width: 2; stroke-dasharray: 12 8; }</style></defs>
   <!-- Authoring flow, revealed step by step from deck.py (see animations).
        Spine: Draw SVG -> deck.py -> Browser. Markdown + media inject into deck.py's
        layout zones from below. The pipeline work rides the deck.py -> browser arrow.

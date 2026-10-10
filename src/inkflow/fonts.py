@@ -177,6 +177,13 @@ def _build_index(
     return index
 
 
+def font_index(
+    project_dir: Path, theme_fonts_dir: Path | None = None
+) -> list[list[_FontRecord]]:
+    """Every font family that can be embedded, each as its font files."""
+    return list(_build_index(project_dir, theme_fonts_dir).values())
+
+
 def _best_match(
     records: list[_FontRecord], weight_class: int, is_italic: bool
 ) -> _FontRecord:
@@ -291,6 +298,26 @@ def _collect_codepoints(root: SvgElement, codepoints: set[int]) -> None:
             codepoints.update(ord(c) for c in el.tail)
 
 
+_TOKEN_FONT_RE = re.compile(
+    r"--inkflow-(?:body|heading|mono)-font\s*:\s*([^;}\n]+)", re.IGNORECASE
+)
+
+
+def _specs_from_tokens(styles_css: str, add: Callable[[_FontSpec], None]) -> None:
+    """The theme's font tokens (``--inkflow-body-font: Inter, sans-serif``).
+
+    Zone text reaches its font through ``var(--inkflow-body-font)``, which the
+    slide scan cannot resolve, so the families named by the deck's token
+    declarations are embedded too: regular and bold, the weights body text and
+    headings use.
+    """
+    for m in _TOKEN_FONT_RE.finditer(styles_css):
+        family = _first_named_family(m.group(1))
+        if family:
+            for weight in (400, 700):
+                add(_FontSpec(family=family, weight_class=weight, is_italic=False))
+
+
 def extract_font_specs(slides: list[SlideData]) -> list[_FontSpec]:
     result, add = _spec_collector()
     for slide in slides:
@@ -398,14 +425,21 @@ def _embed_common(
 
 
 def embed_fonts_css(
-    slides: list[SlideData], project_dir: Path, theme_fonts_dir: Path | None = None
+    slides: list[SlideData],
+    project_dir: Path,
+    theme_fonts_dir: Path | None = None,
+    *,
+    styles_css: str = "",
 ) -> str:
     """Embed full (unsubsetted) fonts — for ``inkflow serve``.
 
     Font index is cached in-process; subsequent rebuilds pay only the file-read cost.
     Unresolvable fonts are reported via ``inkflow.logging``.
     """
-    specs = extract_font_specs(slides)
+    specs, add = _spec_collector()
+    for spec in extract_font_specs(slides):
+        add(spec)
+    _specs_from_tokens(styles_css, add)
     if not specs:
         return ""
     index = _build_index(project_dir, theme_fonts_dir)
@@ -422,7 +456,11 @@ def embed_fonts_css(
 
 
 def embed_fonts_css_subsetted(
-    slides: list[SlideData], project_dir: Path, theme_fonts_dir: Path | None = None
+    slides: list[SlideData],
+    project_dir: Path,
+    theme_fonts_dir: Path | None = None,
+    *,
+    styles_css: str = "",
 ) -> str:
     """Embed subsetted fonts — for ``inkflow build`` and PDF export.
 
@@ -430,7 +468,11 @@ def embed_fonts_css_subsetted(
     as WOFF2. Falls back to the full font file if subsetting fails. Unresolvable
     fonts and subsetting fallbacks are reported via ``inkflow.logging``.
     """
-    specs, codepoint_set = extract_font_specs_and_codepoints(slides)
+    found, codepoint_set = extract_font_specs_and_codepoints(slides)
+    specs, add = _spec_collector()
+    for spec in found:
+        add(spec)
+    _specs_from_tokens(styles_css, add)
     if not specs:
         return ""
     codepoints = frozenset(codepoint_set)
