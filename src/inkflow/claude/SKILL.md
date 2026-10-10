@@ -264,6 +264,10 @@ a branch", don't touch their deck:
    editor's current slide by default; `--slide N`, `--all`, `--step S`) and
    prints the same findings. Overlapping objects and low contrast are only
    visible in the images: look before you report back.
+4. On a branch or in a worktree, `inkflow compare main .` lists the slides
+   your work changed compared with main (`~` changed, with the files; `+`
+   added; `-` removed; `↕` moved); `--sheet` writes them side by side
+   (`.inkflow/render/compare.png`). Check it lists only what you meant to change.
 
 Keep edits small and in the author's style: the files are diffed and committed
 like code. SVGs are XML; keep existing ids and structure, and change only what

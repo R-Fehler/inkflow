@@ -131,10 +131,10 @@
     } catch {
     }
   }
-  function restingActions(cues, step) {
+  function restingActions(cues, step2) {
     let gov = -1;
     cues.forEach((c2, i2) => {
-      if (c2.kind !== "emphasis" && c2.step <= step) gov = i2;
+      if (c2.kind !== "emphasis" && c2.step <= step2) gov = i2;
     });
     return cues.map((_2, i2) => i2 === gov ? "hold" : "cancel");
   }
@@ -169,13 +169,13 @@
       );
     }
   }
-  function applyCodeHighlights(root2, step) {
+  function applyCodeHighlights(root2, step2) {
     root2.querySelectorAll(
       ".inkflow-codeblock[data-hl-spec][data-base-step]"
     ).forEach((block) => {
       const spec = JSON.parse(block.dataset.hlSpec);
       const baseStep = +(block.dataset.baseStep ?? "0");
-      const specIdx = Math.min(Math.max(step - baseStep, 0), spec.length - 1);
+      const specIdx = Math.min(Math.max(step2 - baseStep, 0), spec.length - 1);
       const active3 = spec[specIdx];
       const hasHL = active3 !== null;
       block.querySelectorAll(".code-line").forEach((line) => {
@@ -205,20 +205,20 @@
     });
     return m2;
   }
-  function applyStepInstant(root2, step) {
+  function applyStepInstant(root2, step2) {
     root2.querySelectorAll("[data-cues]").forEach((el2) => {
       const states = cueStates(el2);
       const actions = restingActions(
         states.map((s2) => s2.cue),
-        step
+        step2
       );
       states.forEach((st, i2) => {
         if (actions[i2] === "hold") holdAtEnd(ensureAnim(el2, st));
         else st.anim?.cancel();
       });
     });
-    applyCodeHighlights(root2, step);
-    rootStep.set(root2, step);
+    applyCodeHighlights(root2, step2);
+    rootStep.set(root2, step2);
   }
 
   // src/ts/shared/viewbox.ts
@@ -1112,6 +1112,14 @@
   function onCommand(fn) {
     commandHandler = fn;
   }
+  var handlers = /* @__PURE__ */ new Map();
+  var connectHooks = [];
+  function onMessage(type, fn) {
+    handlers.set(type, fn);
+  }
+  function onConnect(fn) {
+    connectHooks.push(fn);
+  }
   function connected() {
     return ws !== null && ws.readyState === WebSocket.OPEN;
   }
@@ -1133,6 +1141,7 @@
       document.body.classList.remove("offline");
       for (const resolve of waiting) resolve();
       waiting = [];
+      for (const fn of connectHooks) fn();
     };
     sock.onclose = () => {
       document.body.classList.add("offline");
@@ -1191,6 +1200,8 @@
         case "notify":
           toast(String(msg.message ?? ""));
           break;
+        default:
+          handlers.get(String(msg.type))?.(msg);
       }
     };
   }
@@ -1204,13 +1215,13 @@
   function agentEdit(msg) {
     setHistory(msg);
     const label4 = String(msg.label ?? "Agent: changed the deck");
-    const step = msg.step;
+    const step2 = msg.step;
     toast(label4, "info", {
       label: "Undo",
       run: () => {
         void edit({
           action: "undo",
-          ...typeof step === "number" ? { step } : {}
+          ...typeof step2 === "number" ? { step: step2 } : {}
         });
       }
     });
@@ -3202,7 +3213,7 @@
     const body2 = text.replace(/\r\n?/g, "\n").replace(/\n$/, "");
     const sep2 = body2.includes("	") ? "	" : body2.includes(",") ? "," : "	";
     const rows = [];
-    let row3 = [];
+    let row4 = [];
     let cell = "";
     let quoted = false;
     let i2 = 0;
@@ -3221,18 +3232,18 @@
       }
       if (ch === '"' && cell === "") quoted = true;
       else if (ch === sep2) {
-        row3.push(cell);
+        row4.push(cell);
         cell = "";
       } else if (ch === "\n") {
-        row3.push(cell);
-        rows.push(row3);
-        row3 = [];
+        row4.push(cell);
+        rows.push(row4);
+        row4 = [];
         cell = "";
       } else cell += ch;
       i2++;
     }
-    row3.push(cell);
-    rows.push(row3);
+    row4.push(cell);
+    rows.push(row4);
     return rows;
   }
   function isMultiCell(text) {
@@ -3248,11 +3259,11 @@
     while (columns2.includes(name2)) name2 = `${base2} ${n3++}`;
     return name2;
   }
-  function pasteCells(grid, row3, col, cells) {
+  function pasteCells(grid, row4, col, cells) {
     const columns2 = [...grid.columns];
     const rows = grid.rows.map((r2) => [...r2]);
     let body2 = cells;
-    if (row3 < 0) {
+    if (row4 < 0) {
       const head = cells[0] ?? [];
       head.forEach((name2, j2) => {
         const c2 = col + j2;
@@ -3264,7 +3275,7 @@
         columns2[c2] = name2.trim() || columns2[c2];
       });
       body2 = cells.slice(1);
-      row3 = 0;
+      row4 = 0;
     }
     const width = Math.max(
       columns2.length,
@@ -3275,9 +3286,9 @@
     }
     for (const r2 of rows) while (r2.length < width) r2.push("");
     body2.forEach((line, i2) => {
-      while (rows.length <= row3 + i2) rows.push(blankRow(width));
+      while (rows.length <= row4 + i2) rows.push(blankRow(width));
       line.forEach((value, j2) => {
-        rows[row3 + i2][col + j2] = value;
+        rows[row4 + i2][col + j2] = value;
       });
     });
     return { columns: columns2, rows };
@@ -4152,22 +4163,22 @@
     return String(res.url);
   }
   async function choosePage(path, current2 = 1) {
-    const info3 = await request({ action: "pdf-pages", path });
-    if (!info3.ok) {
-      toast(info3.error ?? "cannot read the PDF", "error");
+    const info4 = await request({ action: "pdf-pages", path });
+    if (!info4.ok) {
+      toast(info4.error ?? "cannot read the PDF", "error");
       return null;
     }
     const name2 = fileName(path);
-    if (info3.ignored) {
+    if (info4.ignored) {
       toast(
         `${name2} is ignored by git (see .gitignore): add it to the repository with "git add -f" to keep it`
       );
     }
-    if (!info3.converter) {
-      toast(`${name2} shows as a placeholder: ${String(info3.hint)}`, "error");
+    if (!info4.converter) {
+      toast(`${name2} shows as a placeholder: ${String(info4.hint)}`, "error");
       return { page: current2, url: null };
     }
-    const pages = typeof info3.pages === "number" ? info3.pages : null;
+    const pages = typeof info4.pages === "number" ? info4.pages : null;
     if (pages === 1) {
       const url = await pageUrl(path, 1);
       return url ? { page: 1, url } : null;
@@ -4320,7 +4331,7 @@
       system.hidden = !folder.systemPicker;
       path.value = withSep(folder.path);
       filter = "";
-      renderList();
+      renderList2();
       renderPlaces();
       where.textContent = folder.repo ? `In the git repository at ${folder.repo}` : "Not in a git repository";
       onChange(folder);
@@ -4342,7 +4353,7 @@
       );
       return b2;
     }
-    function renderList() {
+    function renderList2() {
       clear(list3);
       const f2 = folder;
       if (!f2) return;
@@ -4462,7 +4473,7 @@
       const { dir, prefix } = splitTyped(path.value);
       if (folder && samePath(dir, folder.path)) {
         filter = prefix;
-        renderList();
+        renderList2();
       } else if (dir && !prefix) {
         typing = window.setTimeout(
           () => void go(dir, { quiet: true }),
@@ -4485,7 +4496,7 @@
       const common = commonPrefix(matches);
       filter = common.length > prefix.length ? common : prefix;
       path.value = withSep(f2.path) + filter;
-      renderList();
+      renderList2();
     }
     path.addEventListener("keydown", (e2) => {
       if (e2.key === "Tab" && !e2.shiftKey && !e2.ctrlKey && !e2.altKey) {
@@ -4514,7 +4525,7 @@
         e2.preventDefault();
         path.value = withSep(folder.path);
         filter = "";
-        renderList();
+        renderList2();
       }
     });
     list3.addEventListener("keydown", (e2) => {
@@ -4670,13 +4681,13 @@
     const s2 = Math.round(seconds % 60);
     return `${m2}:${String(s2).padStart(2, "0")}`;
   }
-  function describe(info3) {
+  function describe(info4) {
     return [
-      info3.vcodec ? `${info3.vcodec.toUpperCase()} in .${info3.container}` : `.${info3.container}`,
-      info3.width && info3.height ? `${info3.width}\xD7${info3.height}` : "",
-      info3.fps ? `${Math.round(info3.fps)} fps` : "",
-      info3.duration ? minutes(info3.duration) : "",
-      megabytes(info3.size)
+      info4.vcodec ? `${info4.vcodec.toUpperCase()} in .${info4.container}` : `.${info4.container}`,
+      info4.width && info4.height ? `${info4.width}\xD7${info4.height}` : "",
+      info4.fps ? `${Math.round(info4.fps)} fps` : "",
+      info4.duration ? minutes(info4.duration) : "",
+      megabytes(info4.size)
     ].filter(Boolean).join(" \xB7 ");
   }
   async function checkVideo(ctx) {
@@ -4798,11 +4809,11 @@
     );
   }
   function convertDialog(path, data, purpose) {
-    const info3 = data.info;
+    const info4 = data.info;
     let format = data.remux ? "copy" : "mp4";
     let height = null;
     let quality = 2;
-    let audio = !!info3.acodec;
+    let audio = !!info4.acodec;
     const inserting = purpose.kind === "insert";
     const choices = [
       ["mp4", "MP4 (H.264)", "Plays in every browser. The safe choice."],
@@ -4816,7 +4827,7 @@
       choices.unshift([
         "copy",
         `Keep the video as it is (.${data.remux})`,
-        `Its ${info3.vcodec?.toUpperCase() ?? "video"} already plays in browsers: repackaged without re-encoding, in seconds and with no quality lost.`
+        `Its ${info4.vcodec?.toUpperCase() ?? "video"} already plays in browsers: repackaged without re-encoding, in seconds and with no quality lost.`
       ]);
     }
     const formats = h(
@@ -4848,11 +4859,11 @@
     );
     const size3 = h("select", {});
     for (const p2 of PRESETS) {
-      const bigger = p2.height && info3.height && p2.height > info3.height;
+      const bigger = p2.height && info4.height && p2.height > info4.height;
       const option2 = h(
         "option",
         { value: String(p2.height ?? "") },
-        p2.height ? `${p2.label}${bigger ? " (no larger than the source)" : ""}` : `${p2.label}${info3.width && info3.height ? ` (${info3.width}\xD7${info3.height})` : ""}`
+        p2.height ? `${p2.label}${bigger ? " (no larger than the source)" : ""}` : `${p2.label}${info4.width && info4.height ? ` (${info4.width}\xD7${info4.height})` : ""}`
       );
       option2.selected = p2.height === height;
       size3.append(option2);
@@ -4876,7 +4887,7 @@
     });
     const sound = h("input", { type: "checkbox" });
     sound.checked = audio;
-    sound.disabled = !info3.acodec && data.tools.ffprobe;
+    sound.disabled = !info4.acodec && data.tools.ffprobe;
     sound.addEventListener("change", () => {
       audio = sound.checked;
       void update();
@@ -4934,7 +4945,7 @@
       }
       command.value = String(res.command);
       const bytes = res.estimate;
-      estimate.textContent = bytes ? `Roughly ${megabytes(bytes)}, from ${megabytes(info3.size)} now (a guess: it depends on the footage).` : "No size estimate without the video's length and resolution (install ffmpeg).";
+      estimate.textContent = bytes ? `Roughly ${megabytes(bytes)}, from ${megabytes(info4.size)} now (a guess: it depends on the footage).` : "No size estimate without the video's length and resolution (install ffmpeg).";
       estimate.append(
         h("br"),
         h("span", { class: "hint" }, `Saved as ${res.out}`)
@@ -4998,7 +5009,7 @@
       h(
         "div",
         { class: "deck-form" },
-        h("p", { class: "hint" }, `${name(path)}: ${describe(info3)}`),
+        h("p", { class: "hint" }, `${name(path)}: ${describe(info4)}`),
         inserting && h(
           "p",
           { class: "hint warn" },
@@ -5948,15 +5959,15 @@
       status2.textContent = "";
       preview.innerHTML = String(res.svg ?? "");
     }
-    function cellInput(row3, col, value) {
+    function cellInput(row4, col, value) {
       const input = h("input", {
         type: "text",
         value,
-        "data-row": row3,
+        "data-row": row4,
         "data-col": col,
         spellcheck: "false"
       });
-      if (row3 < 0) {
+      if (row4 < 0) {
         input.classList.add("chart-head");
         input.addEventListener("change", () => {
           const r2 = renameColumn(grid, col, input.value, settings2);
@@ -5966,7 +5977,7 @@
         });
       } else {
         input.addEventListener("input", () => {
-          grid.rows[row3][col] = input.value;
+          grid.rows[row4][col] = input.value;
           schedule2();
         });
         input.addEventListener("change", renderFields);
@@ -5975,7 +5986,7 @@
         if (e2.key === "Enter" || e2.key === "ArrowDown" || e2.key === "ArrowUp") {
           e2.preventDefault();
           const down = e2.key !== "ArrowUp";
-          let next = row3 + (down ? 1 : -1);
+          let next = row4 + (down ? 1 : -1);
           if (down && next >= grid.rows.length && e2.key === "Enter") {
             grid = addRow(grid);
             renderGrid2();
@@ -5986,9 +5997,9 @@
       });
       return input;
     }
-    function focusCell2(row3, col) {
+    function focusCell2(row4, col) {
       const input = table.querySelector(
-        `input[data-row="${row3}"][data-col="${col}"]`
+        `input[data-row="${row4}"][data-col="${col}"]`
       );
       input?.focus();
       input?.select();
@@ -6461,8 +6472,8 @@
     { value: "themed", label: "In the deck's theme" }
   ];
   function diagramMode(el2) {
-    const mode = drawnDiagram(el2)?.getAttribute("data-drawio-mode");
-    return mode === "inline" || mode === "themed" ? mode : "picture";
+    const mode2 = drawnDiagram(el2)?.getAttribute("data-drawio-mode");
+    return mode2 === "inline" || mode2 === "themed" ? mode2 : "picture";
   }
   var open2 = null;
   function editDiagram(sel) {
@@ -6574,21 +6585,21 @@
     const post = (msg) => frame.contentWindow?.postMessage(JSON.stringify(msg), origin);
     const close2 = () => {
       window.clearTimeout(slow);
-      window.removeEventListener("message", onMessage);
+      window.removeEventListener("message", onMessage2);
       wrap2.remove();
       open2 = null;
     };
     const save4 = async (svg) => {
       const first = path === null;
-      const step = `drawio-save-${Date.now()}`;
+      const step2 = `drawio-save-${Date.now()}`;
       const result = await edit({
         action: "drawio-save",
         path,
         svg,
         image: first ? void 0 : target.image,
-        coalesce: step
+        coalesce: step2
       });
-      if (result.ok && !first && target.id) followArrows(target.id, step);
+      if (result.ok && !first && target.id) followArrows(target.id, step2);
       saving = false;
       if (!result.ok) {
         post({ action: "status", message: "Not saved", modified: true });
@@ -6605,7 +6616,7 @@
       if (exitAfterSave) close2();
       else post({ action: "status", message: "Saved", modified: false });
     };
-    const onMessage = (e2) => {
+    const onMessage2 = (e2) => {
       if (e2.source !== frame.contentWindow || e2.origin !== origin) return;
       let msg;
       try {
@@ -6649,22 +6660,22 @@
           break;
       }
     };
-    window.addEventListener("message", onMessage);
+    window.addEventListener("message", onMessage2);
   }
-  function followArrows(id, step) {
+  function followArrows(id, step2) {
     const rendered2 = () => {
       off("render", rendered2);
       window.clearTimeout(give);
       const stale = connectorsTo(id).filter(isStale);
       if (stale.length)
-        void rerouteConnectors(stale, "Re-route arrows", step);
+        void rerouteConnectors(stale, "Re-route arrows", step2);
     };
     const give = window.setTimeout(() => off("render", rendered2), 1e4);
     on("render", rendered2);
   }
   var redraws = /* @__PURE__ */ new Map();
   var redrawCount = 0;
-  function diagramEdited(diagram, step) {
+  function diagramEdited(diagram, step2) {
     const id = diagram.getAttribute("id");
     if (!id) return;
     const n3 = ++redrawCount;
@@ -6672,7 +6683,7 @@
     redraws.set(id, n3);
     timers.set(
       id,
-      window.setTimeout(() => void redraw(id, step, n3), 600)
+      window.setTimeout(() => void redraw(id, step2, n3), 600)
     );
   }
   var timers = /* @__PURE__ */ new Map();
@@ -6692,7 +6703,7 @@
       on("render", done);
     });
   }
-  async function redraw(id, step, n3) {
+  async function redraw(id, step2, n3) {
     const latest = () => redraws.get(id) === n3;
     await rendered(1500);
     const diagram = drawnById(id);
@@ -6728,13 +6739,13 @@
           loc: now.getAttribute("data-ink") ?? ""
         },
         box,
-        coalesce: step
+        coalesce: step2
       },
       { retrying: true }
     );
     if (result.ok) {
       redraws.delete(id);
-      followArrows(id, step);
+      followArrows(id, step2);
     }
   }
   function alignedBox(diagram, svgText) {
@@ -6767,13 +6778,13 @@
       const vbOld = diagram.viewBox.baseVal;
       const vbNew = fresh.viewBox.baseVal;
       if (!dx.length || !vbOld?.width || !vbNew?.width) return null;
-      const num2 = (name2) => Number.parseFloat(diagram.getAttribute(name2) ?? "0") || 0;
-      const sx = num2("width") / vbOld.width;
-      const sy = num2("height") / vbOld.height;
+      const num3 = (name2) => Number.parseFloat(diagram.getAttribute(name2) ?? "0") || 0;
+      const sx = num3("width") / vbOld.width;
+      const sy = num3("height") / vbOld.height;
       const r2 = (v2) => Math.round(v2 * 100) / 100;
       return {
-        x: r2(num2("x") + (vbNew.x - vbOld.x - median(dx)) * sx),
-        y: r2(num2("y") + (vbNew.y - vbOld.y - median(dy)) * sy),
+        x: r2(num3("x") + (vbNew.x - vbOld.x - median(dx)) * sx),
+        y: r2(num3("y") + (vbNew.y - vbOld.y - median(dy)) * sy),
         width: r2(vbNew.width * sx),
         height: r2(vbNew.height * sy)
       };
@@ -6811,10 +6822,10 @@
     frame.inert = true;
     const ready = new Promise((resolve, reject) => {
       const give = window.setTimeout(() => {
-        window.removeEventListener("message", onMessage);
+        window.removeEventListener("message", onMessage2);
         reject(new Error("draw.io did not load"));
       }, 2e4);
-      const onMessage = (e2) => {
+      const onMessage2 = (e2) => {
         if (e2.source !== frame.contentWindow || e2.origin !== origin) return;
         const msg = parseMessage(e2.data);
         if (msg?.event === "configure") {
@@ -6827,11 +6838,11 @@
           );
         } else if (msg?.event === "init") {
           window.clearTimeout(give);
-          window.removeEventListener("message", onMessage);
+          window.removeEventListener("message", onMessage2);
           resolve();
         }
       };
-      window.addEventListener("message", onMessage);
+      window.addEventListener("message", onMessage2);
     });
     document.body.append(frame);
     renderer = {
@@ -6871,14 +6882,14 @@
         );
         const finish2 = () => {
           window.clearTimeout(give);
-          window.removeEventListener("message", onMessage);
+          window.removeEventListener("message", onMessage2);
           if (document.activeElement === r2.frame) r2.frame.blur();
         };
         const give = window.setTimeout(() => {
           finish2();
           reject(new Error("draw.io did not draw the diagram"));
         }, 2e4);
-        const onMessage = (e2) => {
+        const onMessage2 = (e2) => {
           if (e2.source !== r2.frame.contentWindow || e2.origin !== r2.origin)
             return;
           const msg = parseMessage(e2.data);
@@ -6891,7 +6902,7 @@
             else reject(new Error("draw.io sent no SVG"));
           }
         };
-        window.addEventListener("message", onMessage);
+        window.addEventListener("message", onMessage2);
         post({ action: "load", xml, autosave: 0 });
       });
     });
@@ -7172,7 +7183,7 @@
     const writable = !!src?.writable && (canTransform(el2) || ed.layoutMode || isOwnObject(el2));
     const kids = children(el2);
     const group2 = kids.length > 0;
-    const open4 = group2 && !collapsed.has(loc);
+    const open5 = group2 && !collapsed.has(loc);
     const selected = ed.selection.some((s2) => s2.el === el2);
     const locked = el2.hasAttribute("data-ink-locked");
     const hidden = isHidden(el2);
@@ -7190,7 +7201,7 @@
         {
           type: "button",
           class: `obj-twisty${group2 ? "" : " none"}`,
-          title: open4 ? "Collapse" : "Expand",
+          title: open5 ? "Collapse" : "Expand",
           onclick: (e2) => {
             e2.stopPropagation();
             if (collapsed.has(loc)) collapsed.delete(loc);
@@ -7198,7 +7209,7 @@
             renderObjects();
           }
         },
-        group2 ? open4 ? "\u25BE" : "\u25B8" : ""
+        group2 ? open5 ? "\u25BE" : "\u25B8" : ""
       ),
       name2,
       writable ? h(
@@ -7233,7 +7244,7 @@
     item.addEventListener("mouseenter", () => setHover(el2));
     item.addEventListener("mouseleave", () => setHover(null));
     out.push(item);
-    if (open4) {
+    if (open5) {
       for (const k2 of [...kids].reverse()) out.push(...row(k2, depth + 1));
     }
     return out;
@@ -7355,15 +7366,15 @@
       requestAnimationFrame(tick);
     });
   }
-  function showStep(step) {
+  function showStep(step2) {
     const sel = document.getElementById("step-select");
-    if (sel) sel.value = step == null ? "" : String(step);
-    for (const row3 of document.querySelectorAll(
+    if (sel) sel.value = step2 == null ? "" : String(step2);
+    for (const row4 of document.querySelectorAll(
       ".anim-row[data-step]"
     )) {
-      row3.classList.toggle(
+      row4.classList.toggle(
         "playing",
-        step != null && row3.dataset.step === String(step)
+        step2 != null && row4.dataset.step === String(step2)
       );
     }
   }
@@ -7888,9 +7899,9 @@
   }
   function renderSlidePanel() {
     const slide = currentSlide();
-    const model = ed.model;
-    if (!slide || !model) return;
-    const editable = model.deckEditable;
+    const model2 = ed.model;
+    if (!slide || !model2) return;
+    const editable = model2.deckEditable;
     const di = slide.deckIndex;
     const root2 = slideRoot();
     const parent = root2?.getAttribute("inkflow:parent") ?? null;
@@ -8024,11 +8035,11 @@
     }
   }
   function transitionSection(current2, di) {
-    const model = ed.model;
-    const types = model.transitionTypes;
+    const model2 = ed.model;
+    const types = model2.transitionTypes;
     const value = current2?.type ?? "";
     const opts2 = [
-      { value: "", label: `Deck default (${model.defaultTransition.type})` },
+      { value: "", label: `Deck default (${model2.defaultTransition.type})` },
       ...types.map((t2) => ({ value: t2.type, label: t2.type }))
     ];
     const send = (spec) => void edit({ action: "slide", op: "transition", slide: di, spec });
@@ -8042,11 +8053,11 @@
       )
     ];
     if (current2) {
-      const info3 = typeInfo(types, current2.type);
-      if (info3) {
+      const info4 = typeInfo(types, current2.type);
+      if (info4) {
         body2.push(
           fieldsEditor(
-            info3.fields,
+            info4.fields,
             current2.fields,
             (fields) => send({ type: current2.type, fields })
           )
@@ -8062,7 +8073,7 @@
     return `step ${t2}`;
   }
   function animationList(cues, editable, di) {
-    const model = ed.model;
+    const model2 = ed.model;
     const list3 = h("div", { class: "anim-list" });
     if (!cues.length)
       list3.append(h("p", { class: "hint" }, "No animations on this slide."));
@@ -8075,15 +8086,15 @@
       spec: { type, element: cues[i2].element, fields }
     });
     cues.forEach((cue, i2) => {
-      const step = steps[i2];
-      const info3 = typeInfo(model.animationTypes, cue.type);
+      const step2 = steps[i2];
+      const info4 = typeInfo(model2.animationTypes, cue.type);
       const trigger = cue.fields.trigger ?? "on-click";
       const typeSelect = selectInput(
-        model.animationTypes.filter((t2) => t2.kind === "video" === (cue.kind === "video")).map((t2) => ({ value: t2.type, label: t2.type })),
+        model2.animationTypes.filter((t2) => t2.kind === "video" === (cue.kind === "video")).map((t2) => ({ value: t2.type, label: t2.type })),
         cue.type,
         (v2) => {
           const names = new Set(
-            typeInfo(model.animationTypes, v2)?.fields.map(
+            typeInfo(model2.animationTypes, v2)?.fields.map(
               (f2) => f2.name
             )
           );
@@ -8093,7 +8104,7 @@
           replace2(i2, v2, { ...kept, trigger });
         }
       );
-      const triggerField = info3?.fields.find((f2) => f2.kind === "trigger");
+      const triggerField = info4?.fields.find((f2) => f2.kind === "trigger");
       const triggerSelect = triggerField ? fieldControl(
         triggerField,
         trigger,
@@ -8103,7 +8114,7 @@
         "div",
         {
           class: "anim-row",
-          "data-step": step == null ? null : String(step)
+          "data-step": step2 == null ? null : String(step2)
         },
         h(
           "div",
@@ -8116,9 +8127,9 @@
             "span",
             {
               class: "anim-step",
-              title: step == null ? "Not on the slide" : `Plays on click ${step}`
+              title: step2 == null ? "Not on the slide" : `Plays on click ${step2}`
             },
-            step == null ? "\u2013" : String(step)
+            step2 == null ? "\u2013" : String(step2)
           ),
           h(
             "button",
@@ -8130,10 +8141,10 @@
             },
             `#${cue.element}`
           ),
-          step != null && button(
+          step2 != null && button(
             icon("play", 12),
             "Preview from this animation",
-            () => void playAnimations(step),
+            () => void playAnimations(step2),
             "anim-preview-ctl"
           ),
           editable && button(icon("up", 12), "Earlier", () => {
@@ -8221,17 +8232,17 @@
   }
   function elementAnimations(sel) {
     const slide = currentSlide();
-    const model = ed.model;
+    const model2 = ed.model;
     const id = sel.el.getAttribute("id");
     const di = slide.deckIndex;
-    const editable = slide.animationsEditable && model.deckEditable;
+    const editable = slide.animationsEditable && model2.deckEditable;
     const body2 = h("div", { class: "anim-list" });
     const elementName = isZone(sel.el) ? zoneName(sel.el) : id;
     const steps = cueSteps(slide.animations, slideRoot());
     slide.animations.forEach((cue, index) => {
       if (!elementName || cue.element !== (cue.kind === "video" ? zoneName(sel.el) : id))
         return;
-      const info3 = typeInfo(model.animationTypes, cue.type);
+      const info4 = typeInfo(model2.animationTypes, cue.type);
       const send = (type, fields) => void edit({
         action: "anim",
         slide: di,
@@ -8244,7 +8255,7 @@
         { class: "anim-head" },
         h("span", { class: `anim-kind k-${cue.kind}` }),
         editable ? selectInput(
-          model.animationTypes.map((t2) => ({
+          model2.animationTypes.map((t2) => ({
             value: t2.type,
             label: t2.type
           })),
@@ -8273,8 +8284,8 @@
           "div",
           { class: "anim-card" },
           header,
-          info3 && editable ? fieldsEditor(
-            info3.fields,
+          info4 && editable ? fieldsEditor(
+            info4.fields,
             cue.fields,
             (f2) => send(cue.type, f2)
           ) : null
@@ -8283,14 +8294,14 @@
     });
     if (editable) {
       const add = animationPicker(
-        model.animationTypes,
+        model2.animationTypes,
         isZone(sel.el),
         "+ Add animation\u2026"
       );
       add.addEventListener("change", () => {
         const type = add.value;
         if (!type) return;
-        const video = typeInfo(model.animationTypes, type)?.kind === "video";
+        const video = typeInfo(model2.animationTypes, type)?.kind === "video";
         const element = video ? zoneName(sel.el) : id;
         const src = sourceOf(sel.key);
         void edit({
@@ -9145,12 +9156,12 @@
       })
     );
   }
-  function showAsRow(sel, mode) {
+  function showAsRow(sel, mode2) {
     return row2(
       "Show as",
       selectInput(
         DIAGRAM_MODES.map((m2) => ({ value: m2.value, label: m2.label })),
-        mode,
+        mode2,
         (v2) => void sendSvgOps(
           [
             {
@@ -9283,12 +9294,12 @@
   }
   function diagramShapesSection(sel) {
     const slide = currentSlide();
-    const model = ed.model;
+    const model2 = ed.model;
     const svg = drawnDiagram(sel.el);
-    if (!slide || !model || !svg) return null;
+    if (!slide || !model2 || !svg) return null;
     const shapes2 = diagramShapes(svg);
     if (!shapes2.length) return null;
-    const editable = slide.animationsEditable && model.deckEditable;
+    const editable = slide.animationsEditable && model2.deckEditable;
     const list3 = h("div", { class: "diagram-shapes" });
     const flash = (el2, on2) => setHover(on2 ? el2 : null);
     for (const shape of shapes2) {
@@ -9317,7 +9328,7 @@
       item.addEventListener("mouseleave", () => flash(shape.el, false));
       if (editable) {
         const add = animationPicker(
-          model.animationTypes,
+          model2.animationTypes,
           false,
           "Animate\u2026"
         );
@@ -9966,12 +9977,12 @@
     const root2 = ed.model?.projectDir ?? "";
     return path.startsWith(root2) ? path.slice(root2.length + 1) : path;
   }
-  function renderResults(error) {
+  function renderResults(error2) {
     const list3 = el(".find-results");
     const status2 = el(".find-status");
     clear(list3);
-    if (error) {
-      status2.textContent = error;
+    if (error2) {
+      status2.textContent = error2;
       return;
     }
     if (!query()) {
@@ -9991,7 +10002,7 @@
         lastGroup = group2;
       }
       const where = hit.kind === "deck" ? "deck.py" : `${fileLabel(hit.file)}${on2.length > 1 ? ` \xB7 ${on2.length} slides` : ""}`;
-      const row3 = h(
+      const row4 = h(
         "button",
         {
           type: "button",
@@ -10008,7 +10019,7 @@
         ),
         h("span", { class: "find-where" }, where)
       );
-      list3.append(row3);
+      list3.append(row4);
     });
   }
   function goTo(i2) {
@@ -11234,37 +11245,37 @@ ${area2.value.slice(pos)}`;
     return cell;
   }
   function addRow2(cell) {
-    const row3 = cell.parentElement;
-    const table = row3.closest("table");
+    const row4 = cell.parentElement;
+    const table = row4.closest("table");
     let body2 = table.tBodies[0];
     if (!body2) {
       body2 = document.createElement("tbody");
       table.append(body2);
     }
     const tr = document.createElement("tr");
-    for (const c2 of row3.children) tr.append(newCell("td", c2));
-    if (row3.parentElement?.localName === "thead") body2.prepend(tr);
-    else row3.after(tr);
+    for (const c2 of row4.children) tr.append(newCell("td", c2));
+    if (row4.parentElement?.localName === "thead") body2.prepend(tr);
+    else row4.after(tr);
   }
   function addColumn2(cell) {
     const table = cell.closest("table");
     const index = cell.cellIndex;
-    for (const row3 of table.rows) {
-      const ref = row3.cells[index];
-      const tag = row3.parentElement?.localName === "thead" ? "th" : "td";
+    for (const row4 of table.rows) {
+      const ref = row4.cells[index];
+      const tag = row4.parentElement?.localName === "thead" ? "th" : "td";
       const c2 = newCell(tag, ref);
       if (ref) ref.after(c2);
-      else row3.append(c2);
+      else row4.append(c2);
     }
   }
   function deleteRow(cell) {
-    const row3 = cell.parentElement;
-    const table = row3.closest("table");
+    const row4 = cell.parentElement;
+    const table = row4.closest("table");
     if (table.rows.length <= 1) {
       table.remove();
       return;
     }
-    if (row3.parentElement?.localName === "thead") {
+    if (row4.parentElement?.localName === "thead") {
       const next = table.tBodies[0]?.rows[0];
       if (!next) return;
       const head = document.createElement("tr");
@@ -11273,11 +11284,11 @@ ${area2.value.slice(pos)}`;
         th.replaceChildren(...c2.childNodes);
         head.append(th);
       }
-      row3.replaceWith(head);
+      row4.replaceWith(head);
       next.remove();
       return;
     }
-    row3.remove();
+    row4.remove();
   }
   function deleteColumn(cell) {
     const table = cell.closest("table");
@@ -11286,12 +11297,12 @@ ${area2.value.slice(pos)}`;
       table.remove();
       return;
     }
-    for (const row3 of [...table.rows]) row3.cells[index]?.remove();
+    for (const row4 of [...table.rows]) row4.cells[index]?.remove();
   }
   function alignColumn(cell, align2) {
     const table = cell.closest("table");
-    for (const row3 of table.rows) {
-      const c2 = row3.cells[cell.cellIndex];
+    for (const row4 of table.rows) {
+      const c2 = row4.cells[cell.cellIndex];
       if (c2) c2.style.textAlign = align2;
     }
   }
@@ -11506,11 +11517,11 @@ ${area2.value.slice(pos)}`;
   }
   function insertTable(content2) {
     const head = "<th>Header</th><th>Header</th><th>Header</th>";
-    const row3 = "<td><br></td><td><br></td><td><br></td>";
+    const row4 = "<td><br></td><td><br></td><td><br></td>";
     document.execCommand(
       "insertHTML",
       false,
-      `<table><thead><tr>${head}</tr></thead><tbody><tr>${row3}</tr><tr>${row3}</tr></tbody></table><p><br></p>`
+      `<table><thead><tr>${head}</tr></thead><tbody><tr>${row4}</tr><tr>${row4}</tr></tbody></table><p><br></p>`
     );
     const after = caretElement(content2)?.closest("p");
     const table = after?.previousElementSibling;
@@ -12243,6 +12254,1283 @@ ${area2.value.slice(pos)}`;
     document.getElementById("canvas")?.addEventListener("contextmenu", onContextMenu);
   }
 
+  // src/ts/editor/comparelib.ts
+  function isChange(p2) {
+    return p2.status !== "same" || p2.moved;
+  }
+  function visibleRows(pairs, onlyChanges2) {
+    const rows = [];
+    pairs.forEach((p2, i2) => {
+      if (!onlyChanges2 || isChange(p2)) rows.push(i2);
+    });
+    return rows;
+  }
+  function nextChange(pairs, from, dir) {
+    for (let i2 = from + dir; i2 >= 0 && i2 < pairs.length; i2 += dir) {
+      if (isChange(pairs[i2])) return i2;
+    }
+    return null;
+  }
+  function firstRow(pairs) {
+    const i2 = pairs.findIndex(isChange);
+    return i2 >= 0 ? i2 : 0;
+  }
+  function followRow(before, row4, after) {
+    const old = before?.pairs[row4];
+    if (!before || !old) return firstRow(after.pairs);
+    const lid = old.left != null ? before.left.slides[old.left]?.id : null;
+    const rid = old.right != null ? before.right.slides[old.right]?.id : null;
+    const same = after.pairs.findIndex(
+      (p2) => lid != null && p2.left != null && after.left.slides[p2.left]?.id === lid || rid != null && p2.right != null && after.right.slides[p2.right]?.id === rid
+    );
+    if (same >= 0) return same;
+    return Math.min(row4, Math.max(0, after.pairs.length - 1));
+  }
+  function badge(p2) {
+    if (p2.status === "added")
+      return { symbol: "+", cls: "added", title: "Only on the right" };
+    if (p2.status === "removed")
+      return { symbol: "\u2212", cls: "removed", title: "Only on the left" };
+    if (p2.status === "changed")
+      return {
+        symbol: p2.moved ? "\u2195" : "~",
+        cls: p2.moved ? "changed moved" : "changed",
+        title: p2.moved ? "Changed and moved" : "Changed"
+      };
+    if (p2.moved) return { symbol: "\u2195", cls: "moved", title: "Moved" };
+    return { symbol: "", cls: "same", title: "The same" };
+  }
+  function rowSlide(m2, p2) {
+    if (p2.right != null) return m2.right.slides[p2.right] ?? null;
+    if (p2.left != null) return m2.left.slides[p2.left] ?? null;
+    return null;
+  }
+  function num2(s2) {
+    return s2?.number != null ? String(s2.number) : "\xB7";
+  }
+  function rowNumber(m2, p2) {
+    const l2 = p2.left != null ? m2.left.slides[p2.left] : null;
+    const r2 = p2.right != null ? m2.right.slides[p2.right] : null;
+    if (p2.moved && l2 && r2) return `${num2(l2)} \u2192 ${num2(r2)}`;
+    return num2(r2 ?? l2);
+  }
+  function whatChanged(p2) {
+    const parts = p2.files.filter((f2) => f2.role !== "notes").map((f2) => f2.path);
+    if (p2.notes || p2.files.some((f2) => f2.role === "notes")) parts.push("notes");
+    parts.push(...p2.settings.map((s2) => s2.replace(/_/g, " ")));
+    if (!parts.length && p2.visual) parts.push("look");
+    return parts;
+  }
+  function counts(pairs) {
+    const c2 = { changed: 0, added: 0, removed: 0, moved: 0, same: 0 };
+    for (const p2 of pairs) {
+      if (p2.status === "changed") c2.changed++;
+      else if (p2.status === "added") c2.added++;
+      else if (p2.status === "removed") c2.removed++;
+      else if (!p2.moved) c2.same++;
+      if (p2.moved) c2.moved++;
+    }
+    return c2;
+  }
+  function countText(c2) {
+    const parts = [
+      c2.changed && `${c2.changed} changed`,
+      c2.added && `${c2.added} added`,
+      c2.removed && `${c2.removed} removed`,
+      c2.moved && `${c2.moved} moved`
+    ].filter(Boolean);
+    return parts.length ? parts.join(" \xB7 ") : "No differences";
+  }
+  var MAX_CELLS = 4e6;
+  function tokens(text) {
+    return text.split(/(\s+)/).filter((t2) => t2 !== "");
+  }
+  function merge(parts) {
+    const out = [];
+    for (const p2 of parts) {
+      const last = out[out.length - 1];
+      if (last && last.kind === p2.kind) last.text += p2.text;
+      else out.push({ ...p2 });
+    }
+    return out;
+  }
+  function wordDiff(a2, b2) {
+    if (a2 === b2) return a2 ? [{ kind: "same", text: a2 }] : [];
+    const x2 = tokens(a2);
+    const y2 = tokens(b2);
+    let start = 0;
+    while (start < x2.length && start < y2.length && x2[start] === y2[start])
+      start++;
+    let endX = x2.length;
+    let endY = y2.length;
+    while (endX > start && endY > start && x2[endX - 1] === y2[endY - 1]) {
+      endX--;
+      endY--;
+    }
+    const head = start ? [{ kind: "same", text: x2.slice(0, start).join("") }] : [];
+    const tail = endX < x2.length ? [{ kind: "same", text: x2.slice(endX).join("") }] : [];
+    const xs = x2.slice(start, endX);
+    const ys = y2.slice(start, endY);
+    if (xs.length * ys.length > MAX_CELLS) {
+      return merge([
+        ...head,
+        { kind: "del", text: xs.join("") },
+        { kind: "ins", text: ys.join("") },
+        ...tail
+      ]).filter((p2) => p2.text);
+    }
+    const n3 = xs.length;
+    const m2 = ys.length;
+    const table = [];
+    for (let i3 = 0; i3 <= n3; i3++) table.push(new Uint32Array(m2 + 1));
+    for (let i3 = n3 - 1; i3 >= 0; i3--) {
+      for (let j3 = m2 - 1; j3 >= 0; j3--) {
+        table[i3][j3] = xs[i3] === ys[j3] ? table[i3 + 1][j3 + 1] + 1 : Math.max(table[i3 + 1][j3], table[i3][j3 + 1]);
+      }
+    }
+    const mid = [];
+    let i2 = 0;
+    let j2 = 0;
+    while (i2 < n3 && j2 < m2) {
+      if (xs[i2] === ys[j2]) {
+        mid.push({ kind: "same", text: xs[i2] });
+        i2++;
+        j2++;
+      } else if (table[i2 + 1][j2] >= table[i2][j2 + 1]) {
+        mid.push({ kind: "del", text: xs[i2++] });
+      } else {
+        mid.push({ kind: "ins", text: ys[j2++] });
+      }
+    }
+    while (i2 < n3) mid.push({ kind: "del", text: xs[i2++] });
+    while (j2 < m2) mid.push({ kind: "ins", text: ys[j2++] });
+    return merge([...head, ...mid, ...tail]);
+  }
+  function takeState(m2, row4) {
+    const p2 = m2.pairs[row4];
+    const liveLeft = m2.left.live && !m2.right.live;
+    const liveRight = m2.right.live && !m2.left.live;
+    if (!p2 || !(liveLeft || liveRight)) {
+      return {
+        enabled: false,
+        title: "One side must be the working copy to take a slide into it",
+        replace: false
+      };
+    }
+    const other = liveLeft ? m2.right : m2.left;
+    const theirs = liveLeft ? p2.right : p2.left;
+    const mine = liveLeft ? p2.left : p2.right;
+    if (theirs == null) {
+      return {
+        enabled: false,
+        title: `This slide is not in ${other.label}`,
+        replace: false
+      };
+    }
+    if (p2.status === "same") {
+      return {
+        enabled: false,
+        title: "Both versions are the same",
+        replace: true
+      };
+    }
+    return {
+      enabled: true,
+      title: mine == null ? `Insert ${other.label}'s slide into the working copy` : `Replace the working copy's slide with ${other.label}'s version (Ctrl+Z undoes it)`,
+      replace: mine != null
+    };
+  }
+  function mergeTarget(m2) {
+    if (m2.left.live && !m2.right.live) return m2.right.branch;
+    if (m2.right.live && !m2.left.live) return m2.left.branch;
+    return null;
+  }
+  async function mergeBranch(branch, send) {
+    const res = await send({ action: "worktree", op: "merge", branch });
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: String(res.error ?? `could not merge ${branch}`)
+      };
+    }
+    return {
+      ok: true,
+      historyCleared: res.historyCleared === true,
+      message: typeof res.message === "string" ? res.message : `Merged ${branch} into the working copy`
+    };
+  }
+  function swapSources(m2) {
+    return [m2.right.source, m2.left.source];
+  }
+  function newFontRules(fonts, present2) {
+    const rules = fonts.match(/@font-face\s*\{[^{}]*\}/g) ?? [];
+    return rules.filter((r2) => !present2.includes(r2)).join("\n");
+  }
+  function toSlideBox(r2, slide, vb) {
+    if (!slide.width || !slide.height || !r2.width && !r2.height) return null;
+    const sx = vb.w / slide.width;
+    const sy = vb.h / slide.height;
+    return [
+      vb.x + (r2.left - slide.left) * sx,
+      vb.y + (r2.top - slide.top) * sy,
+      r2.width * sx,
+      r2.height * sy
+    ];
+  }
+
+  // src/ts/editor/compare.ts
+  var view2 = document.getElementById("compare-view");
+  var model = null;
+  var viewId = 0;
+  var open4 = null;
+  var row3 = 0;
+  var onlyChanges = readPref("inkflow-compare-only", "0") === "1";
+  var mode = readPref("inkflow-compare-mode", "side") || "side";
+  var outlines = readPref("inkflow-compare-outlines", "1") === "1";
+  var wipe = 50;
+  var error = null;
+  function readPref(key, fallback) {
+    try {
+      return localStorage.getItem(key) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  function writePref(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+    }
+  }
+  function openCompare(left, right) {
+    viewId += 1;
+    open4 = [left, right];
+    error = null;
+    if (!model) {
+      view2.hidden = false;
+      document.body.classList.add("compare-mode");
+      renderLoading("Building both versions\u2026");
+    } else {
+      view2.classList.add("busy");
+    }
+    view2.focus();
+    void whenConnected().then(
+      () => sendRaw({ type: "compare-open", view: viewId, left, right })
+    );
+  }
+  function closeCompare() {
+    if (view2.hidden) return;
+    sendRaw({ type: "compare-close" });
+    model = null;
+    open4 = null;
+    view2.hidden = true;
+    view2.classList.remove("busy");
+    clear(view2);
+    document.body.classList.remove("compare-mode");
+    document.getElementById("cmp-fonts")?.remove();
+    emit("slide");
+  }
+  function renderLoading(text) {
+    clear(view2);
+    view2.append(
+      h(
+        "div",
+        { class: "cmp-head" },
+        h("strong", { class: "cmp-title" }, "Compare"),
+        h("span", { class: "cmp-spacer" }),
+        closeButton()
+      ),
+      h("div", { class: "cmp-loading" }, text)
+    );
+  }
+  function closeButton() {
+    return h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn",
+        title: "Back to editing (Esc)",
+        onclick: () => closeCompare()
+      },
+      "Close"
+    );
+  }
+  var BASE_CSS = `
+:host { display: block; position: relative; }
+.cmp-root {
+    all: initial;
+    display: block;
+    width: 100%;
+    height: 100%;
+    font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+}
+.cmp-root > svg { display: block; width: 100%; height: 100%; }
+`;
+  var baseSheet = null;
+  var sideSheets = /* @__PURE__ */ new Map();
+  function sheets(side) {
+    if (!baseSheet) {
+      baseSheet = new CSSStyleSheet();
+      baseSheet.replaceSync(BASE_CSS);
+    }
+    let entry = sideSheets.get(side.token);
+    if (!entry || entry.css !== side.css) {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(side.css);
+      entry = { css: side.css, sheet };
+      sideSheets.set(side.token, entry);
+    }
+    return [baseSheet, entry.sheet];
+  }
+  function addFonts(side) {
+    if (!side.fonts) return;
+    let style = document.getElementById("cmp-fonts");
+    if (!style) {
+      style = h("style", { id: "cmp-fonts" });
+      document.head.append(style);
+    }
+    const present2 = (document.getElementById("deck-styles")?.textContent ?? "") + style.textContent;
+    const rules = newFontRules(side.fonts, present2);
+    if (rules) style.textContent += `
+${rules}`;
+  }
+  function slideView(side, slide, cls) {
+    const host4 = h("div", {
+      class: `cmp-slide ${cls}`
+    });
+    if (!slide?.svg) {
+      host4.classList.add("empty");
+      host4.textContent = slide ? "hidden slide" : `not in ${side.label || "this version"}`;
+      return host4;
+    }
+    const root2 = host4.attachShadow({ mode: "open" });
+    root2.adoptedStyleSheets = sheets(side);
+    const wrap2 = document.createElement("div");
+    wrap2.className = "cmp-root";
+    if (document.documentElement.dataset.theme === "light") {
+      wrap2.dataset.theme = "light";
+    }
+    wrap2.innerHTML = slide.svg;
+    const svg = wrap2.querySelector("svg");
+    if (svg) {
+      const vb = parseViewBox(svg.getAttribute("viewBox"));
+      svg.setAttribute("width", "100%");
+      svg.setAttribute("height", "100%");
+      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+      host4.style.aspectRatio = `${vb.w} / ${vb.h}`;
+      svg.querySelectorAll(".anim-pending").forEach((el2) => {
+        el2.classList.remove("anim-pending");
+      });
+      svg.querySelectorAll("video").forEach((v2) => {
+        v2.removeAttribute("autoplay");
+        v2.removeAttribute("controls");
+      });
+      host4.svg = svg;
+    }
+    root2.append(wrap2);
+    return host4;
+  }
+  var thumbs3 = /* @__PURE__ */ new Map();
+  function thumb(side, index) {
+    const slide = index != null ? side.slides[index] ?? null : null;
+    if (!slide) return h("div", { class: "cmp-thumb none" });
+    const key = `${side.token}\0${slide.svg ?? `hidden:${slide.id}`}`;
+    const cached = thumbs3.get(key);
+    if (cached && !cached.isConnected) return cached;
+    const el2 = slideView(side, slide, "cmp-thumb");
+    thumbs3.set(key, el2);
+    return el2;
+  }
+  function onModel(msg) {
+    if (msg.view !== viewId || view2.hidden) return;
+    const next = msg;
+    const before = model;
+    row3 = before ? followRow(before, row3, next) : firstRow(next.pairs);
+    model = next;
+    view2.classList.remove("busy");
+    const tokens2 = /* @__PURE__ */ new Set([next.left.token, next.right.token]);
+    for (const key of [...thumbs3.keys()]) {
+      if (!tokens2.has(key.split("\0")[0])) thumbs3.delete(key);
+    }
+    addFonts(next.left);
+    addFonts(next.right);
+    render2();
+  }
+  function onError(msg) {
+    if (msg.for !== "compare-open" || msg.view !== viewId) return;
+    error = String(msg.message ?? "could not compare");
+    view2.classList.remove("busy");
+    if (!model) {
+      renderLoading(`Cannot compare: ${error}`);
+      view2.querySelector(".cmp-loading")?.classList.add("error");
+    } else {
+      toast(`Cannot compare: ${error}`, "error");
+    }
+  }
+  var listEl = null;
+  var mainEl = null;
+  function render2() {
+    if (!model) return;
+    const m2 = model;
+    clear(view2);
+    const c2 = counts(m2.pairs);
+    const merge2 = mergeTarget(m2);
+    const only = h("input", { type: "checkbox" });
+    only.checked = onlyChanges;
+    only.addEventListener("change", () => {
+      onlyChanges = only.checked;
+      writePref("inkflow-compare-only", onlyChanges ? "1" : "0");
+      renderList();
+    });
+    const head = h(
+      "div",
+      { class: "cmp-head" },
+      h("strong", { class: "cmp-title" }, "Compare"),
+      sideChip(m2.left, "left"),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "tb-btn cmp-swap",
+          title: "Swap the two sides",
+          onclick: () => {
+            const [l2, r2] = swapSources(m2);
+            openCompare(l2, r2);
+          }
+        },
+        "\u21C4"
+      ),
+      sideChip(m2.right, "right"),
+      h("span", { class: "cmp-counts" }, countText(c2)),
+      m2.deck.length ? h(
+        "span",
+        {
+          class: "cmp-deckdiff",
+          title: "Deck-wide settings that differ"
+        },
+        `Deck: ${m2.deck.map((s2) => s2.replace(/_/g, " ")).join(", ")}`
+      ) : null,
+      h("span", { class: "cmp-spacer" }),
+      h("label", { class: "cmp-only" }, only, "Only changes"),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "tb-btn",
+          title: "Previous change (P)",
+          onclick: () => jump(-1)
+        },
+        "\u2191"
+      ),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "tb-btn",
+          title: "Next change (N)",
+          onclick: () => jump(1)
+        },
+        "\u2193"
+      ),
+      merge2 ? h(
+        "button",
+        {
+          type: "button",
+          class: "pbtn",
+          title: `Merge ${merge2} into the working copy's branch`,
+          onclick: () => void merging(merge2)
+        },
+        "Merge branch"
+      ) : null,
+      closeButton()
+    );
+    listEl = h("div", { class: "cmp-list", role: "listbox" });
+    mainEl = h("div", { class: "cmp-main" });
+    view2.append(head, h("div", { class: "cmp-body" }, listEl, mainEl));
+    renderList();
+    renderMain();
+  }
+  function sideChip(side, which) {
+    const kind = side.kind === "live" ? "working copy" : side.kind === "commit" ? "commit" : "folder";
+    const notes = [
+      side.error ? `does not build: ${side.error}` : "",
+      side.missing.length ? `${side.missing.length} Git LFS file(s) missing` : ""
+    ].filter(Boolean);
+    return h(
+      "button",
+      {
+        type: "button",
+        class: `cmp-chip ${which}${side.error ? " error" : ""}`,
+        title: [
+          side.deckPath,
+          ...notes,
+          "Click to show something else on this side"
+        ].join("\n"),
+        onclick: () => void openComparePicker(which)
+      },
+      h("span", { class: "cmp-chip-kind" }, which === "left" ? "L" : "R"),
+      side.label,
+      side.kind !== "live" && side.kind !== "commit" ? h("span", { class: "hint" }, ` (${kind})`) : null,
+      notes.length ? h("span", { class: "cmp-warn" }, " \u26A0") : null
+    );
+  }
+  function renderList() {
+    if (!model || !listEl) return;
+    const m2 = model;
+    clear(listEl);
+    const rows = visibleRows(m2.pairs, onlyChanges);
+    const broken = [m2.left, m2.right].filter((s2) => s2.error);
+    for (const s2 of broken) {
+      listEl.append(
+        h(
+          "div",
+          { class: "cmp-empty error" },
+          `${s2.label} does not build: ${s2.error}`
+        )
+      );
+    }
+    if (!rows.length && !broken.length) {
+      listEl.append(h("div", { class: "cmp-empty" }, "No differences"));
+    }
+    for (const i2 of rows) {
+      const p2 = m2.pairs[i2];
+      const b2 = badge(p2);
+      const slide = rowSlide(m2, p2);
+      listEl.append(
+        h(
+          "div",
+          {
+            class: `cmp-row s-${b2.cls.replace(/ /g, " s-")}${i2 === row3 ? " active" : ""}`,
+            role: "option",
+            "data-row": i2,
+            title: `${b2.title}${p2.status === "changed" ? `: ${whatChanged(p2).join(", ")}` : ""}`,
+            onclick: () => selectRow(i2)
+          },
+          h(
+            "div",
+            { class: "cmp-row-head" },
+            h("span", { class: "cmp-num" }, rowNumber(m2, p2)),
+            h("span", { class: "cmp-id" }, slide?.id ?? ""),
+            b2.symbol ? h("span", { class: `cmp-badge ${b2.cls}` }, b2.symbol) : null
+          ),
+          h(
+            "div",
+            { class: "cmp-row-thumbs" },
+            thumb(m2.left, p2.left),
+            thumb(m2.right, p2.right)
+          )
+        )
+      );
+    }
+    revealRow();
+  }
+  function revealRow() {
+    const el2 = listEl?.querySelector(".cmp-row.active");
+    if (!listEl || !el2) return;
+    const top = el2.offsetTop;
+    if (top < listEl.scrollTop) listEl.scrollTop = top - 8;
+    else if (top + el2.offsetHeight > listEl.scrollTop + listEl.clientHeight) {
+      listEl.scrollTop = top + el2.offsetHeight - listEl.clientHeight + 8;
+    }
+  }
+  function selectRow(i2) {
+    if (!model || i2 < 0 || i2 >= model.pairs.length) return;
+    row3 = i2;
+    listEl?.querySelectorAll(".cmp-row").forEach((el2) => {
+      el2.classList.toggle(
+        "active",
+        Number(el2.getAttribute("data-row")) === i2
+      );
+    });
+    revealRow();
+    renderMain();
+  }
+  function jump(dir) {
+    if (!model) return;
+    const next = nextChange(model.pairs, row3, dir);
+    if (next == null) {
+      toast(dir > 0 ? "No more changes below" : "No more changes above");
+      return;
+    }
+    if (onlyChanges || isChange(model.pairs[next])) selectRow(next);
+  }
+  function step(dir) {
+    if (!model) return;
+    const rows = visibleRows(model.pairs, onlyChanges);
+    const at2 = rows.indexOf(row3);
+    const next = rows[at2 < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, at2 + dir))];
+    if (next != null) selectRow(next);
+  }
+  function renderMain() {
+    if (!model || !mainEl) return;
+    const m2 = model;
+    clear(mainEl);
+    const p2 = m2.pairs[row3];
+    if (!p2) {
+      mainEl.append(h("div", { class: "cmp-empty" }, "Nothing to compare"));
+      return;
+    }
+    const left = p2.left != null ? m2.left.slides[p2.left] ?? null : null;
+    const right = p2.right != null ? m2.right.slides[p2.right] ?? null : null;
+    const modes = h(
+      "div",
+      { class: "cmp-modes", role: "tablist" },
+      ...[
+        ["side", "Side by side", "1"],
+        ["slider", "Slider", "2"],
+        ["diff", "Difference", "3"]
+      ].map(
+        ([id, label4, key]) => h(
+          "button",
+          {
+            type: "button",
+            class: `seg${mode === id ? " on" : ""}`,
+            title: `${label4} (${key})`,
+            onclick: () => setMode(id)
+          },
+          label4
+        )
+      )
+    );
+    const outlineBox = h("input", { type: "checkbox" });
+    outlineBox.checked = outlines;
+    outlineBox.addEventListener("change", () => {
+      outlines = outlineBox.checked;
+      writePref("inkflow-compare-outlines", outlines ? "1" : "0");
+      renderMain();
+    });
+    const bar = h(
+      "div",
+      { class: "cmp-stagebar" },
+      modes,
+      h(
+        "label",
+        { class: "cmp-only", title: "Outline what changed (O)" },
+        outlineBox,
+        "Outline changes"
+      ),
+      h("span", { class: "cmp-spacer" }),
+      h(
+        "span",
+        { class: "cmp-legend" },
+        h("i", { class: "lg changed" }),
+        "changed ",
+        h("i", { class: "lg added" }),
+        "added ",
+        h("i", { class: "lg removed" }),
+        "removed"
+      )
+    );
+    const stage = h("div", { class: `cmp-stage mode-${mode}` });
+    const both = left?.svg && right?.svg;
+    if (mode === "side" || !both) {
+      stage.classList.add("mode-side");
+      stage.append(
+        pane(m2.left, left, p2, "left", rowNumberOf(left)),
+        pane(m2.right, right, p2, "right", rowNumberOf(right))
+      );
+    } else {
+      stage.append(stacked(m2, left, right, p2));
+    }
+    mainEl.append(bar, stage, info(m2, p2, left, right));
+  }
+  function rowNumberOf(s2) {
+    if (!s2) return "";
+    return `${s2.number != null ? `${s2.number} \xB7 ` : "hidden \xB7 "}${s2.id}`;
+  }
+  function setMode(next) {
+    mode = next;
+    writePref("inkflow-compare-mode", mode);
+    renderMain();
+  }
+  function pane(side, slide, p2, which, caption) {
+    const frame = h("div", { class: "cmp-frame" });
+    const sv = slideView(side, slide, "cmp-big");
+    frame.append(sv);
+    if (outlines && sv.svg) {
+      const marks = p2.elements.filter(
+        (e2) => which === "left" ? e2.left : e2.right
+      );
+      afterLayout(() => drawOutlines(frame, sv.svg, marks, which));
+    }
+    return h(
+      "div",
+      { class: `cmp-pane ${which}` },
+      h(
+        "div",
+        { class: "cmp-pane-label" },
+        h("span", { class: "cmp-chip-kind" }, which === "left" ? "L" : "R"),
+        side.label,
+        caption ? h("span", { class: "hint" }, `  ${caption}`) : null
+      ),
+      frame
+    );
+  }
+  function stacked(m2, left, right, p2) {
+    const frame = h("div", { class: "cmp-frame stacked" });
+    const a2 = slideView(m2.left, left, "cmp-big under");
+    const b2 = slideView(m2.right, right, "cmp-big over");
+    frame.append(a2, b2);
+    if (mode === "slider") {
+      const handle = h("div", { class: "cmp-handle" });
+      const place = () => {
+        b2.style.clipPath = `inset(0 0 0 ${wipe}%)`;
+        handle.style.left = `${wipe}%`;
+      };
+      place();
+      frame.append(handle);
+      const move = (e2) => {
+        const r2 = frame.getBoundingClientRect();
+        wipe = Math.max(
+          0,
+          Math.min(100, (e2.clientX - r2.left) / r2.width * 100)
+        );
+        place();
+      };
+      frame.addEventListener("pointerdown", (e2) => {
+        frame.setPointerCapture(e2.pointerId);
+        move(e2);
+        frame.addEventListener("pointermove", move);
+      });
+      frame.addEventListener(
+        "pointerup",
+        () => frame.removeEventListener("pointermove", move)
+      );
+    }
+    if (outlines && b2.svg) {
+      const marks = p2.elements;
+      afterLayout(() => {
+        if (b2.svg) drawOutlines(frame, b2.svg, marks, "right", a2.svg);
+      });
+    }
+    const caption = mode === "slider" ? h(
+      "div",
+      { class: "cmp-pane-label" },
+      h("span", { class: "cmp-chip-kind" }, "L"),
+      `${m2.left.label}  \u25C0 drag \u25B6  `,
+      h("span", { class: "cmp-chip-kind" }, "R"),
+      m2.right.label
+    ) : h(
+      "div",
+      { class: "cmp-pane-label" },
+      "Difference: what is the same turns black, what differs lights up"
+    );
+    return h("div", { class: "cmp-pane wide" }, caption, frame);
+  }
+  function afterLayout(fn) {
+    requestAnimationFrame(() => requestAnimationFrame(fn));
+  }
+  function locate(svg, loc) {
+    let el2 = svg;
+    for (const i2 of loc.path) {
+      el2 = el2?.children[i2] ?? null;
+      if (!el2) break;
+    }
+    if (el2 && el2 !== svg && el2.localName.toLowerCase() === loc.tag.toLowerCase()) {
+      const box = toSlideBox(
+        el2.getBoundingClientRect(),
+        svg.getBoundingClientRect(),
+        parseViewBox(svg.getAttribute("viewBox"))
+      );
+      if (box && box[2] > 0 && box[3] > 0) return box;
+    }
+    return loc.box;
+  }
+  var SVG_NS2 = "http://www.w3.org/2000/svg";
+  function drawOutlines(frame, svg, marks, which, leftSvg) {
+    if (!frame.isConnected || !marks.length) return;
+    const vb = parseViewBox(svg.getAttribute("viewBox"));
+    const layer2 = document.createElementNS(SVG_NS2, "svg");
+    layer2.setAttribute("class", "cmp-outlines");
+    layer2.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+    layer2.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    const pad = Math.max(vb.w, vb.h) / 240;
+    const draw = (target, loc, cls, label4) => {
+      const box = loc ? locate(target, loc) : null;
+      if (!box) return;
+      const rect = document.createElementNS(SVG_NS2, "rect");
+      rect.setAttribute("x", String(box[0] - pad));
+      rect.setAttribute("y", String(box[1] - pad));
+      rect.setAttribute("width", String(box[2] + 2 * pad));
+      rect.setAttribute("height", String(box[3] + 2 * pad));
+      rect.setAttribute("rx", String(pad));
+      rect.setAttribute("class", `mark ${cls}`);
+      const title2 = document.createElementNS(SVG_NS2, "title");
+      title2.textContent = label4;
+      rect.append(title2);
+      layer2.append(rect);
+    };
+    for (const mark of marks) {
+      const label4 = `${mark.change}${mark.id ? ` #${mark.id}` : ""}${mark.text ? `: ${mark.text}` : ""}`;
+      if (leftSvg) {
+        if (mark.left && mark.change !== "added") {
+          draw(
+            leftSvg,
+            mark.left,
+            `${mark.change} before`,
+            `${label4} (left)`
+          );
+        }
+        if (mark.right) draw(svg, mark.right, mark.change, label4);
+        continue;
+      }
+      draw(
+        svg,
+        which === "left" ? mark.left : mark.right,
+        mark.change,
+        label4
+      );
+    }
+    frame.append(layer2);
+  }
+  function info(m2, p2, left, right) {
+    const b2 = badge(p2);
+    const take = takeState(m2, row3);
+    const what = p2.status === "changed" ? whatChanged(p2) : [];
+    const summary2 = p2.status === "added" ? `Only in ${m2.right.label}` : p2.status === "removed" ? `Only in ${m2.left.label}` : p2.status === "same" ? p2.moved ? "The same slide, moved" : "No differences" : `${p2.moved ? "Moved, and changed: " : "Changed: "}${what.join(", ")}`;
+    const box = h(
+      "div",
+      { class: "cmp-info" },
+      h(
+        "div",
+        { class: "cmp-info-head" },
+        b2.symbol ? h("span", { class: `cmp-badge ${b2.cls}` }, b2.symbol) : null,
+        h("strong", {}, summary2),
+        h("span", { class: "cmp-spacer" }),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn primary",
+            disabled: !take.enabled,
+            title: take.title,
+            onclick: () => void taking()
+          },
+          "Take this slide"
+        )
+      )
+    );
+    if (p2.files.length) {
+      box.append(
+        h("h4", {}, "Files"),
+        h(
+          "div",
+          { class: "cmp-files" },
+          ...p2.files.map(
+            (f2) => h(
+              "div",
+              { class: "cmp-file" },
+              h("span", { class: `cmp-fstat ${f2.change}` }, f2.change),
+              h("code", {}, f2.path),
+              h("span", { class: "hint" }, f2.role)
+            )
+          )
+        )
+      );
+    }
+    if (p2.settings.length) {
+      box.append(
+        h("h4", {}, "In deck.py"),
+        h(
+          "div",
+          { class: "cmp-settings" },
+          p2.settings.map((s2) => s2.replace(/_/g, " ")).join(", ")
+        )
+      );
+    }
+    if (p2.elements.length) {
+      const n3 = (k2) => p2.elements.filter((e2) => e2.change === k2).length;
+      box.append(
+        h(
+          "div",
+          { class: "hint cmp-elcount" },
+          `Elements: ${n3("changed")} changed, ${n3("added")} added, ${n3("removed")} removed`
+        )
+      );
+    }
+    if (left || right) {
+      const a2 = left?.notes ?? "";
+      const bText = right?.notes ?? "";
+      const parts = wordDiff(a2, bText);
+      box.append(
+        h("h4", {}, p2.notes ? "Speaker notes (changed)" : "Speaker notes"),
+        parts.length ? h(
+          "div",
+          { class: "cmp-notes" },
+          ...parts.map(
+            (part) => part.kind === "same" ? document.createTextNode(part.text) : h(part.kind, {}, part.text)
+          )
+        ) : h("div", { class: "hint" }, "No notes")
+      );
+    }
+    return box;
+  }
+  async function taking() {
+    if (!model) return;
+    const m2 = model;
+    const p2 = m2.pairs[row3];
+    const state = takeState(m2, row3);
+    if (!p2 || !state.enabled) return;
+    const other = m2.left.live ? m2.right : m2.left;
+    const files2 = p2.files.map((f2) => `  ${f2.path}`).join("\n");
+    const question = state.replace ? `Replace this slide in the working copy with ${other.label}'s version?${files2 ? `
+
+Files written:
+${files2}` : ""}
+
+Ctrl+Z takes it back.` : `Insert ${other.label}'s slide into the working copy?`;
+    if (!confirm(question)) return;
+    const res = await edit({
+      action: "compare-take",
+      pair: row3,
+      left: p2.left,
+      right: p2.right
+    });
+    if (res.ok) {
+      const stepNo = res.step;
+      toast(String(res.label ?? "Took the slide"), "ok", {
+        label: "Undo",
+        run: () => void edit({
+          action: "undo",
+          ...typeof stepNo === "number" ? { step: stepNo } : {}
+        })
+      });
+    }
+  }
+  async function merging(branch) {
+    if (!confirm(
+      `Merge ${branch} into the working copy's branch? Commit or discard your own changes first; git refuses a merge that would overwrite them.`
+    )) {
+      return;
+    }
+    view2.classList.add("busy");
+    const res = await mergeBranch(branch, request);
+    view2.classList.remove("busy");
+    if (!res.ok) {
+      toast(res.error ?? `Could not merge ${branch}`, "error");
+      return;
+    }
+    if (res.historyCleared) {
+      ed.canUndo = false;
+      ed.canRedo = false;
+      emit("history");
+    }
+    toast(res.message ?? `Merged ${branch}`, "ok");
+  }
+  var sourcesWaiting = null;
+  function fetchSources() {
+    return new Promise((resolve) => {
+      sourcesWaiting = resolve;
+      sendRaw({ type: "compare-sources" });
+    });
+  }
+  var LIVE = { kind: "live" };
+  async function openComparePicker(side = null) {
+    await whenConnected();
+    const data = await fetchSources();
+    const current2 = model;
+    const pick2 = (chosen) => {
+      closeDialog();
+      if (side && current2) {
+        const [l2, r2] = [current2.left.source, current2.right.source];
+        openCompare(
+          side === "left" ? chosen : l2,
+          side === "right" ? chosen : r2
+        );
+      } else {
+        openCompare(LIVE, chosen);
+      }
+    };
+    const sections = [];
+    if (side) {
+      sections.push(
+        h(
+          "div",
+          { class: "btn-row" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => pick2(LIVE)
+            },
+            "The working copy"
+          )
+        )
+      );
+    }
+    if (data.repo) {
+      const rev = h("input", {
+        type: "text",
+        placeholder: "HEAD~2, a tag, a sha\u2026",
+        spellcheck: "false"
+      });
+      const go = () => {
+        if (rev.value.trim())
+          pick2({ kind: "commit", rev: rev.value.trim() });
+      };
+      rev.addEventListener("keydown", (e2) => {
+        if (e2.key === "Enter") {
+          e2.preventDefault();
+          go();
+        }
+      });
+      const others = (data.worktrees ?? []).filter(
+        (w2) => !w2.current && w2.deck
+      );
+      const inTree = new Set(others.map((w2) => w2.branch));
+      const branches = (data.branches ?? []).filter(
+        (b2) => b2 !== data.branch && !inTree.has(b2)
+      );
+      if (others.length || branches.length) {
+        sections.push(
+          h("h3", {}, "A branch or worktree"),
+          h(
+            "div",
+            { class: "git-list" },
+            ...others.map(
+              (w2) => h(
+                "div",
+                { class: "git-row" },
+                h(
+                  "div",
+                  { class: "git-commit" },
+                  h("strong", {}, w2.branch ?? "(detached)"),
+                  h(
+                    "span",
+                    { class: "hint" },
+                    `worktree \xB7 ${w2.path}`
+                  )
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    onclick: () => pick2({
+                      kind: "path",
+                      deck: w2.deck,
+                      ...w2.branch ? { label: w2.branch } : {}
+                    })
+                  },
+                  "Compare"
+                )
+              )
+            ),
+            ...branches.map(
+              (b2) => h(
+                "div",
+                { class: "git-row" },
+                h(
+                  "div",
+                  { class: "git-commit" },
+                  h("strong", {}, b2),
+                  h("span", { class: "hint" }, "branch")
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    onclick: () => pick2({ kind: "branch", name: b2 })
+                  },
+                  "Compare"
+                )
+              )
+            )
+          )
+        );
+      }
+      sections.push(
+        h("h3", {}, "A commit"),
+        h(
+          "div",
+          { class: "git-list history cmp-commits" },
+          ...(data.commits ?? []).map(
+            (c2) => h(
+              "div",
+              { class: `git-row${c2.head ? " current" : ""}` },
+              h(
+                "div",
+                { class: "git-commit" },
+                h("strong", {}, c2.subject),
+                h(
+                  "span",
+                  { class: "hint" },
+                  `${c2.short} \xB7 ${c2.author} \xB7 ${c2.when}${c2.refs.length ? ` \xB7 ${c2.refs.join(", ")}` : ""}`
+                )
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  class: "pbtn",
+                  onclick: () => pick2({ kind: "commit", rev: c2.sha })
+                },
+                "Compare"
+              )
+            )
+          )
+        ),
+        h(
+          "div",
+          { class: "btn-row" },
+          rev,
+          h(
+            "button",
+            { type: "button", class: "pbtn", onclick: go },
+            "Compare"
+          )
+        )
+      );
+    }
+    const folderBtn = h(
+      "button",
+      { type: "button", class: "pbtn primary", disabled: true },
+      "Compare with this deck"
+    );
+    const start = (ed.model?.projectDir ?? "").replace(/[\\/][^\\/]*$/, "");
+    const picker = folderPicker(start, (f2) => {
+      folderBtn.disabled = !f2.isDeck;
+      folderBtn.textContent = f2.isDeck ? "Compare with this deck" : "No deck.py in this folder";
+    });
+    folderBtn.addEventListener("click", () => {
+      const f2 = picker.current();
+      if (f2?.isDeck)
+        pick2({ kind: "path", deck: joinPath(f2.path, "deck.py") });
+    });
+    sections.push(
+      h("h3", {}, "Another deck folder"),
+      picker.el,
+      h("div", { class: "btn-row end" }, folderBtn)
+    );
+    openDialog(
+      side ? `Show on the ${side}\u2026` : "Compare the working copy with\u2026",
+      h("div", { class: "git-form cmp-picker" }, ...sections),
+      { large: true }
+    );
+  }
+  function onKey3(e2) {
+    if (view2.hidden) return;
+    const target = e2.target;
+    const typing = target.closest(
+      "input:not([type=checkbox]):not([type=radio]), textarea, select, #dialog"
+    );
+    if (dialogOpen() || typing) {
+      return;
+    }
+    const mod = e2.ctrlKey || e2.metaKey;
+    if (mod && ["z", "y"].includes(e2.key.toLowerCase())) return;
+    const handled = () => {
+      e2.preventDefault();
+      e2.stopPropagation();
+    };
+    switch (e2.key) {
+      case "Escape":
+        handled();
+        closeCompare();
+        return;
+      case "ArrowDown":
+        handled();
+        step(1);
+        return;
+      case "ArrowUp":
+        handled();
+        step(-1);
+        return;
+      case "n":
+      case "N":
+        handled();
+        jump(1);
+        return;
+      case "p":
+      case "P":
+        handled();
+        jump(-1);
+        return;
+      case "1":
+        handled();
+        setMode("side");
+        return;
+      case "2":
+        handled();
+        setMode("slider");
+        return;
+      case "3":
+        handled();
+        setMode("diff");
+        return;
+      case "o":
+      case "O":
+        handled();
+        outlines = !outlines;
+        writePref("inkflow-compare-outlines", outlines ? "1" : "0");
+        renderMain();
+        return;
+    }
+    e2.stopPropagation();
+  }
+  function initCompare() {
+    onMessage("compare-model", onModel);
+    onMessage("compare-error", (msg) => {
+      if (msg.for === "compare-sources") {
+        toast(String(msg.message ?? "cannot list versions"), "error");
+        sourcesWaiting?.({ repo: false });
+        sourcesWaiting = null;
+        return;
+      }
+      onError(msg);
+    });
+    onMessage("compare-sources", (msg) => {
+      sourcesWaiting?.(msg);
+      sourcesWaiting = null;
+    });
+    onConnect(() => {
+      if (open4 && !view2.hidden) {
+        viewId += 1;
+        sendRaw({
+          type: "compare-open",
+          view: viewId,
+          left: open4[0],
+          right: open4[1]
+        });
+      }
+    });
+    document.addEventListener("keydown", onKey3, true);
+    new MutationObserver(() => {
+      if (!model || view2.hidden) return;
+      thumbs3.clear();
+      render2();
+    }).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"]
+    });
+    document.addEventListener("inkflow:compare", (e2) => {
+      const detail = e2.detail;
+      if (!detail?.deck) return;
+      openCompare(LIVE, {
+        kind: detail.kind ?? "path",
+        deck: detail.deck,
+        ...detail.label ? { label: detail.label } : {}
+      });
+    });
+    const params = new URLSearchParams(location.search);
+    const spec = params.get("compare");
+    if (spec) {
+      params.delete("compare");
+      const query2 = params.toString();
+      try {
+        history.replaceState(
+          null,
+          "",
+          `${location.pathname}${query2 ? `?${query2}` : ""}${location.hash}`
+        );
+      } catch {
+      }
+      openCompare(LIVE, { kind: "spec", spec });
+    }
+  }
+
   // src/ts/editor/context.ts
   var timer2 = 0;
   function snapshot2() {
@@ -12332,7 +13620,7 @@ ${area2.value.slice(pos)}`;
     button2.title = dir ? `${dir}
 Decks: new, open, recent` : "Decks";
   }
-  async function info() {
+  async function info2() {
     const res = await request({ action: "project-info" });
     if (!res.ok) {
       toast(res.error ?? "Cannot read the deck's folder", "error");
@@ -12341,7 +13629,7 @@ Decks: new, open, recent` : "Decks";
     return res;
   }
   async function openMenu2() {
-    const data = await info();
+    const data = await info2();
     if (!data) return;
     clear(menu4);
     menu4.append(
@@ -12541,7 +13829,7 @@ Decks: new, open, recent` : "Decks";
     title2.select();
   }
   function openDeckDialog(data) {
-    const open4 = h(
+    const open5 = h(
       "button",
       { type: "button", class: "pbtn primary", disabled: true },
       "Open this deck"
@@ -12549,11 +13837,11 @@ Decks: new, open, recent` : "Decks";
     const picker = folderPicker(
       data.places?.default ?? data.current.replace(/[\\/][^\\/]*$/, ""),
       (f2) => {
-        open4.disabled = !f2.isDeck;
-        open4.textContent = f2.isDeck ? `Open ${baseName2(f2.path)}` : "No deck.py in this folder";
+        open5.disabled = !f2.isDeck;
+        open5.textContent = f2.isDeck ? `Open ${baseName2(f2.path)}` : "No deck.py in this folder";
       }
     );
-    open4.addEventListener("click", () => {
+    open5.addEventListener("click", () => {
       const f2 = picker.current();
       if (f2?.isDeck) void openDeck(join(f2.path, "deck.py"));
     });
@@ -12564,7 +13852,7 @@ Decks: new, open, recent` : "Decks";
         { class: "deck-form" },
         h("p", { class: "hint" }, "Go to a folder with a deck.py in it."),
         picker.el,
-        h("div", { class: "btn-row end" }, open4)
+        h("div", { class: "btn-row end" }, open5)
       ),
       { large: true }
     );
@@ -12599,7 +13887,7 @@ Decks: new, open, recent` : "Decks";
   async function showStart() {
     document.body.classList.add("start-mode");
     await whenConnected();
-    const data = await info();
+    const data = await info2();
     const recent = h("div", { class: "start-recent" });
     if (data?.recent.length) {
       recent.append(h("h2", {}, "Recent decks"));
@@ -12647,12 +13935,12 @@ Decks: new, open, recent` : "Decks";
             "New deck\u2026",
             "Start from one of four looks",
             async () => {
-              const fresh = await info();
+              const fresh = await info2();
               if (fresh) newDeckDialog(fresh);
             }
           ),
           action("Open deck\u2026", "A folder with a deck.py", async () => {
-            const fresh = await info();
+            const fresh = await info2();
             if (fresh) openDeckDialog(fresh);
           })
         ),
@@ -12801,13 +14089,13 @@ Decks: new, open, recent` : "Decks";
   var menu5 = document.getElementById("context-menu");
   var button3 = document.getElementById("btn-git");
   var label2 = button3.querySelector(".git-label");
-  var badge = button3.querySelector(".git-badge");
+  var badge2 = button3.querySelector(".git-badge");
   var status = { repo: false, git: false };
-  function render2() {
+  function render3() {
     button3.hidden = !status.git;
     if (!status.repo) {
       label2.textContent = "Git";
-      badge.hidden = true;
+      badge2.hidden = true;
       button3.title = "Not versioned: create a git repository for this deck";
       return;
     }
@@ -12815,8 +14103,8 @@ Decks: new, open, recent` : "Decks";
     const n3 = status.changes?.length ?? 0;
     const lfsIssues = lfsFiles().length;
     button3.classList.toggle("warn", lfsIssues > 0);
-    badge.hidden = n3 === 0 && lfsIssues === 0;
-    badge.textContent = n3 ? String(n3) : "!";
+    badge2.hidden = n3 === 0 && lfsIssues === 0;
+    badge2.textContent = n3 ? String(n3) : "!";
     const sync = [
       status.ahead ? `${status.ahead} to push` : "",
       status.behind ? `${status.behind} to pull` : ""
@@ -12832,7 +14120,7 @@ Decks: new, open, recent` : "Decks";
     if (!connected()) return status;
     const res = await request({ action: "git", op: "status" });
     if (res.ok && res.git) status = res.git;
-    render2();
+    render3();
     return status;
   }
   var REWRITES = /* @__PURE__ */ new Set([
@@ -12875,7 +14163,7 @@ Continue?`)) return null;
     button3.classList.remove("busy");
     if (res.git) {
       status = res.git;
-      render2();
+      render3();
     }
     if (!res.ok) {
       toast(res.error ?? `git ${op} failed`, "error");
@@ -12902,7 +14190,12 @@ Continue?`)) return null;
         menuItem("Create a git repository (git only, no LFS)", async () => {
           if (await git("init", { lfs: false }))
             toast("This deck is now versioned with git", "ok");
-        })
+        }),
+        h("div", { class: "menu-sep" }),
+        menuItem(
+          "Compare with another deck\u2026",
+          () => void openComparePicker()
+        )
       );
     } else {
       const n3 = status.changes?.length ?? 0;
@@ -12987,7 +14280,8 @@ Continue?`)) return null;
           "History\u2026",
           () => void historyDialog(),
           !status.hasCommits
-        )
+        ),
+        menuItem("Compare\u2026", () => void openComparePicker())
       );
       if (status.hasCommits) menu5.append(...await worktreeSection());
     }
@@ -13394,6 +14688,25 @@ Continue?`)) return null;
                   {
                     type: "button",
                     class: "pbtn",
+                    title: "Compare with the working copy, slide by slide",
+                    onclick: () => {
+                      closeDialog();
+                      openCompare(
+                        { kind: "live" },
+                        {
+                          kind: "commit",
+                          rev: c2.sha
+                        }
+                      );
+                    }
+                  },
+                  "Compare"
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
                     title: "Show the deck as it was then (switch back with Branches)",
                     onclick: () => void act(
                       "view",
@@ -13462,7 +14775,7 @@ Continue?`)) return null;
     button3.classList.remove("busy");
     if (res.git) {
       status = res.git;
-      render2();
+      render3();
     }
     if (!res.ok) {
       if (!quiet) toast(res.error ?? `worktree ${op} failed`, "error");
@@ -13610,7 +14923,7 @@ Merge, remove, or what to tell the agent`,
   }
   function worktreeDialog(wt, created = false) {
     const into = status.branch;
-    const merge = async () => {
+    const merge2 = async () => {
       const n3 = wt.ahead;
       const question = [
         `Merge ${branchName(wt)} (${n3} commit${n3 === 1 ? "" : "s"}) into ${into}? Its changes land in your deck's files now.`,
@@ -13709,7 +15022,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
               class: "pbtn primary",
               disabled: !wt.branch || !into || wt.ahead === 0,
               title: into ? `Bring its commits into ${into}` : "Switch the deck to a branch first",
-              onclick: () => void merge()
+              onclick: () => void merge2()
             },
             into ? `Merge into ${into}\u2026` : "Merge\u2026"
           )
@@ -14101,7 +15414,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
 
   // src/ts/shared/inkpad.ts
-  var SVG_NS2 = "http://www.w3.org/2000/svg";
+  var SVG_NS3 = "http://www.w3.org/2000/svg";
   var ERASER_RADIUS_PX = 10;
   var PALM_MS = 1500;
   var SWALLOW_MS = 400;
@@ -14124,7 +15437,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function strokeElement(stroke) {
     return paintStroke(
-      document.createElementNS(SVG_NS2, "path"),
+      document.createElementNS(SVG_NS3, "path"),
       stroke
     );
   }
@@ -14242,7 +15555,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       const at2 = new DOMPoint(e2.clientX, e2.clientY).matrixTransform(inv);
       if (tool === "eraser") {
         const cursor = document.createElementNS(
-          SVG_NS2,
+          SVG_NS3,
           "circle"
         );
         cursor.setAttribute("class", "inkflow-eraser-cursor");
@@ -14269,7 +15582,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       const simulate = tool === "pen" && (!pen || e2.pressure === 0 || e2.pressure === 0.5);
       const live = { ...style, id: newInkId(), simulate };
       const path = paintStroke(
-        document.createElementNS(SVG_NS2, "path"),
+        document.createElementNS(SVG_NS3, "path"),
         live
       );
       path.classList.add("inkflow-live-stroke");
@@ -14679,13 +15992,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
 
   // src/ts/editor/ink.ts
   var SETTINGS_KEY = "inkflow-ink-editor";
-  var SVG_NS3 = "http://www.w3.org/2000/svg";
+  var SVG_NS4 = "http://www.w3.org/2000/svg";
   var settings = loadSettings(SETTINGS_KEY, true);
   var pending2 = /* @__PURE__ */ new Map();
   function liveLayer(svg) {
     let layer2 = svg.querySelector(":scope > g.inkflow-live-ink");
     if (!layer2) {
-      layer2 = document.createElementNS(SVG_NS3, "g");
+      layer2 = document.createElementNS(SVG_NS4, "g");
       layer2.setAttribute("class", "inkflow-live-ink");
       svg.appendChild(layer2);
     }
@@ -14869,7 +16182,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     ["heading_font", "Headings", "sans-serif"],
     ["mono_font", "Code", "monospace"]
   ];
-  var info2 = null;
+  var info3 = null;
   var content = null;
   var cssVar = (name2) => `--inkflow-${name2.replace(/_/g, "-")}`;
   function toHex(value) {
@@ -14890,25 +16203,25 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   function setToken(group2, name2, value) {
     void save3({ changes: { [group2]: { [name2]: value } } }, "Theme");
   }
-  function colorCell(mode, name2) {
-    const t2 = info2;
-    const own = t2.overrides[mode][name2];
-    const value = own ?? t2.values[mode][name2] ?? "#000000";
+  function colorCell(mode2, name2) {
+    const t2 = info3;
+    const own = t2.overrides[mode2][name2];
+    const value = own ?? t2.values[mode2][name2] ?? "#000000";
     const input = h("input", {
       type: "color",
       value: toHex(value),
-      title: `${cssVar(name2)} (${mode})${own ? " \xB7 changed" : ""}`
+      title: `${cssVar(name2)} (${mode2})${own ? " \xB7 changed" : ""}`
     });
     input.addEventListener("input", () => {
       const showing = document.documentElement.dataset.theme === "light" ? "light" : "dark";
-      if (showing === mode) {
+      if (showing === mode2) {
         document.documentElement.style.setProperty(
           cssVar(name2),
           input.value
         );
       }
     });
-    input.addEventListener("change", () => setToken(mode, name2, input.value));
+    input.addEventListener("change", () => setToken(mode2, name2, input.value));
     return h(
       "span",
       { class: `theme-color${own ? " changed" : ""}` },
@@ -14919,7 +16232,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           type: "button",
           class: "theme-reset",
           title: "Back to the theme's colour",
-          onclick: () => setToken(mode, name2, null)
+          onclick: () => setToken(mode2, name2, null)
         },
         "\u21BA"
       ) : null
@@ -14950,7 +16263,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return h("div", { class: "theme-colors" }, ...rows);
   }
   function fontRow(name2, label4, generic) {
-    const t2 = info2;
+    const t2 = info3;
     const own = t2.overrides.typography[name2];
     const value = own ?? t2.values.typography[name2] ?? generic;
     const input = h("input", {
@@ -14989,23 +16302,23 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       ) : null
     );
   }
-  function render3() {
-    if (!content || !info2) return;
-    const t2 = info2;
+  function render4() {
+    if (!content || !info3) return;
+    const t2 = info3;
     clear(content);
-    const mode = h("select", {});
+    const mode2 = h("select", {});
     for (const [v2, l2] of [
       ["", `Theme default (${t2.themeMode})`],
       ["dark", "Dark"],
       ["light", "Light"]
     ]) {
-      mode.append(h("option", { value: v2 }, l2));
+      mode2.append(h("option", { value: v2 }, l2));
     }
-    mode.value = t2.deckMode ?? "";
-    mode.disabled = !ed.model?.deckEditable;
-    mode.addEventListener(
+    mode2.value = t2.deckMode ?? "";
+    mode2.disabled = !ed.model?.deckEditable;
+    mode2.addEventListener(
       "change",
-      () => void save3({ mode: mode.value || null }, "Colour mode")
+      () => void save3({ mode: mode2.value || null }, "Colour mode")
     );
     const size3 = h("input", {
       type: "number",
@@ -15027,7 +16340,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       h(
         "div",
         { class: "theme-top" },
-        h("label", {}, h("span", {}, "Colour mode"), mode),
+        h("label", {}, h("span", {}, "Colour mode"), mode2),
         h("label", {}, h("span", {}, "Base font size (px)"), size3)
       ),
       h("h3", {}, "Fonts"),
@@ -15050,8 +16363,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   async function refresh() {
     const result = await request({ action: "theme-get" });
     if (!result.ok) return;
-    info2 = result.theme;
-    render3();
+    info3 = result.theme;
+    render4();
   }
   async function openTheme() {
     content = h(
@@ -15181,6 +16494,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     initDecks();
     initGit();
     initCanvasMenu();
+    initCompare();
     on("slide", () => {
       void finishTextEdit();
       render();

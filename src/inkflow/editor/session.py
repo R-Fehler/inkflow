@@ -92,6 +92,7 @@ from inkflow.editor.transfer import (
     export_slides,
     plan_asset_paste,
     plan_slide_paste,
+    plan_slide_replace,
     retarget_fragment,
 )
 from inkflow.enums import ColorMode, MediaFit
@@ -470,6 +471,7 @@ class EditorSession:
             "anim": self._anim,
             "paste-slides": self._paste_slides,
             "paste-objects": self._paste_objects,
+            "compare-take": self._compare_take,
             "drawio-save": self._drawio_save,
             "drawio-new": self._drawio_new,
             "ink": self._ink,
@@ -2624,6 +2626,65 @@ class EditorSession:
         extra["written"] = sorted(plan.writes)
         n = len(plan.calls)
         return f"Paste {n} slide{'s' if n != 1 else ''}"
+
+    def _compare_take(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """The compare view's "Take this slide": the other side's version of a
+        slide replaces this deck's (its files at their own paths) or, when this
+        deck lacks it, is inserted where it stands there (files placed like a
+        paste). ``_take`` is put on the request by the server, from the
+        compared deck (editor/comparehub.py), never by the page."""
+        take = msg.get("_take")
+        if not isinstance(take, dict):
+            raise EditError("there is no slide to take")
+        data = cast("dict[str, object]", take)
+        source = self._deck_source(txn)
+        if source.slide_calls(expected=len(deck.slides)) is None:
+            raise EditError(
+                "deck.py builds its slide list in code; copy the slide by hand"
+            )
+        replace = data.get("replace")
+        if isinstance(replace, int):
+            if not 0 <= replace < len(deck.slides):
+                raise EditError("no such slide")
+            plan = plan_slide_replace(self.project_dir, data.get("bundle"))
+            at = replace
+            source.remove_slide(at)
+        else:
+            after = data.get("after")
+            at = (after if isinstance(after, int) else -1) + 1
+            plan = (
+                plan_slide_replace(self.project_dir, data.get("bundle"))
+                if data.get("inPlace") is True
+                else plan_slide_paste(self.project_dir, deck, data.get("bundle"))
+            )
+        for rel, payload in plan.writes.items():
+            txn.write(self.project_dir / rel, payload)
+        source.insert_slide(at, plan.calls[0])
+        self._save_deck(txn, source, plan.imports)
+        ink = data.get("ink")
+        mine = data.get("liveInk")
+        if isinstance(ink, dict) and isinstance(replace, int):
+            entry = cast("dict[str, object]", ink)
+            rel = str(entry.get("rel", ""))
+            if rel and not rel.startswith(("/", "..")) and ".." not in rel.split("/"):
+                txn.write(
+                    self.project_dir / rel,
+                    base64.b64decode(str(entry.get("data", ""))),
+                )
+        elif isinstance(mine, str) and isinstance(replace, int):
+            # That version has no ink: neither does this slide now.
+            path = Path(mine)
+            if path.is_file() and path.resolve().is_relative_to(
+                self.project_dir.resolve()
+            ):
+                txn.write(path, None)
+        extra["select"] = at
+        extra["written"] = sorted(plan.writes)
+        name = data.get("id") or "slide"
+        where = data.get("from") or "the other deck"
+        return f"Take {name} from {where}"
 
     def _paste_objects(
         self, msg: dict[str, object], _deck: Deck, txn: _Txn, extra: dict[str, object]

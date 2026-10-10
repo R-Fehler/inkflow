@@ -178,7 +178,8 @@ branch and how many files changed. Its menu covers what a deck needs day to day:
 - **History…** lists the commits that changed this deck. **View** shows the deck
   as it was then (no branch; switch back under Branches), **Restore** makes the
   deck's files what they were then as changes you can commit, and **Revert**
-  undoes one commit with a new commit.
+  undoes one commit with a new commit. **Compare** shows the deck then and now
+  side by side.
 - **Worktrees** lists the deck's other git worktrees: a branch of the deck in a
   folder of its own, typically one a coding agent works in while you keep
   editing (see [Editing with Claude Code](claude-code.md#working-on-a-branch)).
@@ -190,6 +191,9 @@ branch and how many files changed. Its menu covers what a deck needs day to day:
   again before losing uncommitted changes or unmerged commits). **New
   worktree for an agent…** makes one: branch `deck/<name>` from your last
   commit, in `.inkflow/worktrees/<name>`.
+- **Compare…** compares the working copy with a commit, a branch or worktree,
+  or another deck folder, slide by slide: see
+  [Comparing two versions](compare.md).
 
 Discard, pull, switching or creating a branch, merging a worktree, and View, Restore or Revert change
 the deck's files on disk, so the editor's undo and redo history starts over after

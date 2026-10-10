@@ -49,9 +49,11 @@ commands:
       --no-open: Do not open the editor in a browser on start
       --start: Open the start page (new deck, open, recent) instead of a deck
       --quit-when-idle=: Stop once no page has been open this many seconds
+      --compare=: Open the compare view against a revision or deck folder
     completion:
       flag:
         deck: ["$files([\".py\"])"]
+        compare: ["$files"]
 
   - name: context
     description: Show what is selected in the visual editor.
@@ -91,6 +93,24 @@ commands:
         deck: ["$files([\".py\"])"]
         output: ["$files"]
         chromium: ["$files"]
+
+  - name: compare
+    description: Show which slides differ between two versions of the deck.
+    flags:
+      -d, --deck=: Path to deck.py
+      --json: Print the comparison as JSON
+      --sheet: Side-by-side images of the slides that differ
+      -o, --output=: PNG file or directory for --sheet
+      --chromium=: Path to a Chromium/Chrome binary
+      --no-sandbox: Pass --no-sandbox to Chromium
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+        output: ["$files"]
+        chromium: ["$files"]
+      positional:
+        - ["$files"]
+        - ["$files"]
 
   - name: goto
     description: Show a slide in every open editor.

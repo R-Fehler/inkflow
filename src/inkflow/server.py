@@ -47,6 +47,8 @@ from inkflow.edit import (
     resolve_edit_commands,
 )
 from inkflow.editor import projects
+from inkflow.editor.comparehub import CompareHub, side_build_from
+from inkflow.editor.comparesrc import CompareError
 from inkflow.editor.context import write_context
 from inkflow.editor.model import build_model
 from inkflow.editor.session import EditError, EditorSession, Exporters
@@ -112,6 +114,8 @@ class EditorState(TypedDict):
     failed_hash: str | None
     """Hash of the deck.py whose build failed last (None after a good build),
     so an agent waiting for its edit to build learns that it never will."""
+    compare: CompareHub | None
+    """The compare views of the open editor pages (editor/comparehub.py)."""
 
 
 _editor: EditorState = {
@@ -122,6 +126,7 @@ _editor: EditorState = {
     "switch": None,
     "shutdown": None,
     "failed_hash": None,
+    "compare": None,
 }
 
 
@@ -151,18 +156,22 @@ def _deck_failure(deck_path: Path, exc: BaseException) -> str:
     return f"{where}: {type(exc).__name__}: {exc}{detail}"
 
 
-def load_deck(deck_path: Path) -> Deck:
-    """Run deck.py's ``main()``; any failure in it is a ``DeckError``."""
+def load_deck(deck_path: Path, module: str = "_inkflow_deck") -> Deck:
+    """Run deck.py's ``main()``; any failure in it is a ``DeckError``.
+
+    ``module`` names the module it runs as: another deck loaded beside the one
+    being served (a compare view's other side) takes its own name, so the
+    served deck's custom animation classes stay the ones the editor finds."""
     try:
-        return _load_deck(deck_path)
+        return _load_deck(deck_path, module)
     except DeckError:
         raise
     except Exception as exc:
         raise DeckError(_deck_failure(deck_path, exc)) from exc
 
 
-def _load_deck(deck_path: Path) -> Deck:
-    spec = importlib.util.spec_from_file_location("_inkflow_deck", deck_path)
+def _load_deck(deck_path: Path, module: str = "_inkflow_deck") -> Deck:
+    spec = importlib.util.spec_from_file_location(module, deck_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load module from {deck_path}")
     mod = importlib.util.module_from_spec(spec)
@@ -276,6 +285,13 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
             )
         )
         await _send_editors(_model_message())
+        hub = _editor["compare"]
+        if hub is not None:
+            await hub.live_built(
+                await asyncio.to_thread(
+                    side_build_from, deck, deck_path, edit_slides, model
+                )
+            )
     except Exception:
         # Outside collect_logs, so a fatal error reaches only the file sink. The overlay
         # and TUI error phase show it instead, never the banner.
@@ -435,7 +451,18 @@ async def _handle_edit_op(
     # Whether the request comes from this machine (opening a program is only
     # for a local page); decided here, overriding anything the client sent.
     msg["_local"] = _is_loopback(websocket)
+    # What "Take this slide" takes comes from the compare view's other side,
+    # never from the page.
+    msg.pop("_take", None)
+    hub = _editor["compare"]
     try:
+        if msg.get("action") == "compare-take":
+            if hub is None:
+                raise EditError("no comparison is open")
+            try:
+                msg["_take"] = await asyncio.to_thread(hub.take_request, websocket, msg)
+            except CompareError as exc:
+                raise EditError(str(exc)) from exc
         result = await asyncio.to_thread(session.apply, msg, _editor["deck"])
     except EditError as exc:
         result = {"ok": False, "error": str(exc)}
@@ -462,6 +489,33 @@ async def _handle_edit_op(
         _editor["switch"].set()
     if session.quit_requested and _editor["shutdown"] is not None:
         _editor["shutdown"].set()
+
+
+async def _handle_compare(websocket: ServerConnection, msg: dict[str, object]) -> None:
+    """The compare view's messages (see editor/comparehub.py)."""
+    hub = _editor["compare"]
+    kind = msg.get("type")
+    if kind == "compare-close":
+        if hub is not None:
+            hub.close(websocket)
+        return
+    try:
+        if hub is None:
+            raise CompareError("open a deck first")
+        if kind == "compare-sources":
+            reply = await asyncio.to_thread(hub.sources)
+        else:
+            reply = await hub.open(websocket, msg, local=_is_loopback(websocket))
+    except Exception as exc:
+        if not isinstance(exc, CompareError):
+            logger.exception("compare failed")
+        reply = {
+            "type": "compare-error",
+            "view": msg.get("view"),
+            "for": kind,
+            "message": str(exc) or type(exc).__name__,
+        }
+    await websocket.send(json.dumps(reply))
 
 
 def make_ws_handler(
@@ -535,6 +589,8 @@ def make_ws_handler(
                     await _handle_edit_op(websocket, msg, session)
                 elif msg_type == "build-status":
                     await websocket.send(json.dumps(_build_status()))
+                elif msg_type in ("compare-open", "compare-close", "compare-sources"):
+                    await _handle_compare(websocket, msg)
                 elif msg_type == "editor-context" and session is not None:
                     raw_context: object = msg.get("context")
                     context: object = raw_context
@@ -560,6 +616,8 @@ def make_ws_handler(
         finally:
             _state["ws_clients"].discard(websocket)
             _editor["clients"].discard(websocket)
+            if _editor["compare"] is not None:
+                _editor["compare"].close(websocket)
             logger.debug(f"client disconnected ({len(_state['ws_clients'])} total)")
             ui.refresh()
 
@@ -859,6 +917,20 @@ def make_http_handler(
                 )
                 writer.write(header + body)
                 await writer.drain()
+                return
+
+            hub = _editor["compare"]
+            if hub is not None and request_path.startswith("/_cmp/"):
+                # A compared deck's picture, inside that deck's own roots.
+                compared = hub.asset(request_path)
+                if compared is None:
+                    writer.write(
+                        b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n"
+                        + b"Content-Length: 0\r\n\r\n"
+                    )
+                    await writer.drain()
+                else:
+                    await _send_file(writer, compared, _range_header(raw))
                 return
 
             if project_dir is not None and request_path != "/":
@@ -1182,6 +1254,7 @@ async def _serve_deck(
         session.edit_commands = edit_commands
         session.server = {"host": host, "port": http_port, "wsPort": ws_port}
         _editor["session"] = session
+        _editor["compare"] = CompareHub(deck_path, load_deck) if deck_path else None
         project_dir = deck_path.parent if deck_path else None
         if deck_path is not None:
             projects.remember(deck_path)
@@ -1279,6 +1352,9 @@ async def _serve_deck(
                 raise
     finally:
         uninstall_shutdown_handler()
+        if _editor["compare"] is not None:
+            _editor["compare"].close_all()
+            _editor["compare"] = None
         _editor["switch"] = None
         _editor["shutdown"] = None
         instances.unregister(os.getpid())
