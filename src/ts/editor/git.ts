@@ -1051,8 +1051,9 @@ function worktreeDialog(wt: Worktree, created = false): void {
             h(
                 "p",
                 { class: "hint" },
-                created ? "Created. " : "",
-                `${summary(wt)} · `,
+                created
+                    ? `Created from the last commit${into ? ` of ${into}` : ""} · `
+                    : `${summary(wt)} · `,
                 h("code", { class: "git-path" }, wt.path),
             ),
             h(

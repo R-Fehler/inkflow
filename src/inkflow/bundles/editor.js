@@ -13661,8 +13661,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         h(
           "p",
           { class: "hint" },
-          created ? "Created. " : "",
-          `${summary(wt)} \xB7 `,
+          created ? `Created from the last commit${into ? ` of ${into}` : ""} \xB7 ` : `${summary(wt)} \xB7 `,
           h("code", { class: "git-path" }, wt.path)
         ),
         h(
