@@ -9,9 +9,10 @@ In **SSH mode** (a server other people log in to, or reach through their own
 SSH tunnels: ``inkflow edit --ssh``, the default from an SSH login) this
 machine's loopback is everyone's, so it is not enough: the owner is a loopback
 request carrying the **owner token** (the owner link inkflow prints, which
-sets the same cookie; commands read it from their own user's instance
-record). The owner token lasts as long as the server; New links never change
-it. Every
+sets a cookie of its own, ``inkflow-owner-<port>``, so opening a share link in
+the owner's browser leaves the owner signed in; commands read it from their
+own user's instance record). The owner token lasts as long as the server; New
+links never change it. Every
 request is checked twice before anything else: its ``Host`` must be a name
 this machine answers to (no DNS rebinding: a page on ``evil.example`` whose
 name now points at 127.0.0.1 still says ``Host: evil.example``), and a
@@ -277,6 +278,12 @@ class Access:
         _name, port = split_host(host or "")
         return f"{COOKIE_PREFIX}{port or self.port}"
 
+    def owner_cookie_name_for(self, host: str | None) -> str:
+        """The owner's cookie (SSH mode) has a name of its own, so opening a
+        share link in the owner's browser does not replace it."""
+        _name, port = split_host(host or "")
+        return f"{COOKIE_PREFIX}owner-{port or self.port}"
+
     def rotate(self) -> None:
         """New links: the old ones (and the cookies they set) stop working.
         The owner token stays."""
@@ -372,8 +379,12 @@ class Access:
             return None
         return "editor" if editor else "viewer" if viewer else None
 
-    def cookie_token(self, request: Request) -> str | None:
-        wanted = self.cookie_name_for(request.host)
+    def cookie_token(self, request: Request, *, owner: bool = False) -> str | None:
+        wanted = (
+            self.owner_cookie_name_for(request.host)
+            if owner
+            else self.cookie_name_for(request.host)
+        )
         for part in request.headers.get("cookie", "").split(";"):
             name, _, value = part.strip().partition("=")
             if name == wanted:
@@ -383,7 +394,11 @@ class Access:
     def presents_token(self, request: Request) -> bool:
         """Whether the request came with a token at all (a link that stopped
         working, rather than none)."""
-        return bool(request.query.get(TOKEN_PARAM) or self.cookie_token(request))
+        return bool(
+            request.query.get(TOKEN_PARAM)
+            or self.cookie_token(request)
+            or self.cookie_token(request, owner=True)
+        )
 
     def admit(
         self, peer: str | None, request: Request
@@ -394,7 +409,11 @@ class Access:
         local = self.is_local(peer, request)
         if local and not self.ssh:
             return "owner", None
-        for token in (request.query.get(TOKEN_PARAM), self.cookie_token(request)):
+        for token in (
+            request.query.get(TOKEN_PARAM),
+            self.cookie_token(request, owner=True) if local else None,
+            self.cookie_token(request),
+        ):
             role = self.token_role(token, local=local)
             if role is not None:
                 return role, token
@@ -404,7 +423,10 @@ class Access:
         """The ``Set-Cookie`` value for ``token``, named for the request's
         ``host`` (see ``cookie_name_for``)."""
         secure = "; Secure" if self.tls else ""
-        name = self.cookie_name_for(host)
+        is_owner = secrets.compare_digest(token.encode(), self.owner_token.encode())
+        name = (
+            self.owner_cookie_name_for(host) if is_owner else self.cookie_name_for(host)
+        )
         return f"{name}={token}; Path=/; HttpOnly; SameSite=Strict{secure}"
 
     def links(self, addresses: list[str]) -> list[dict[str, str]]:

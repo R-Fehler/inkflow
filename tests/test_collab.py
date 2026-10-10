@@ -1055,6 +1055,23 @@ def test_in_ssh_mode_this_machine_needs_the_owner_token() -> None:
     assert access.owner_path("/edit?compare=x") == f"/edit?compare=x&k={owner}"
 
 
+def test_the_owner_cookie_survives_opening_a_share_link() -> None:
+    access = Access(7777, names=set(), ssh=True, sharing=True)
+    owner, editor = access.owner_token, access.editor_token
+    assert access.set_cookie(owner, "localhost:8000").startswith(
+        f"inkflow-owner-8000={owner};"
+    )
+    assert access.set_cookie(editor, "localhost:8000").startswith(
+        f"inkflow-8000={editor};"
+    )
+    # The owner's browser opened an editor link: both cookies now.
+    both = f"inkflow-owner-8000={owner}; inkflow-8000={editor}"
+    page = _req("/edit", Host="localhost:8000", Cookie=both)
+    assert access.admit("127.0.0.1", page) == ("owner", owner)
+    # The owner cookie counts only from this machine.
+    assert access.admit("192.168.1.9", page)[0] != "owner"
+
+
 def test_without_ssh_mode_this_machine_is_the_owner_as_ever() -> None:
     access = Access(7777, names=set())
     page = _req("/edit", Host="localhost:7777")
@@ -1148,8 +1165,8 @@ def test_ssh_mode_asks_this_machine_for_the_owner_link(
     assert refused.value.response.status_code == 401
     status, headers, body = _get(port, f"/edit?k={owner}")
     assert status == 200 and owner not in body.decode()
-    assert headers["set-cookie"].startswith(f"inkflow-{port}={owner};")
-    signed_in = {"Cookie": f"inkflow-{port}={owner}"}
+    assert headers["set-cookie"].startswith(f"inkflow-owner-{port}={owner};")
+    signed_in = {"Cookie": f"inkflow-owner-{port}={owner}"}
     assert _get(port, "/edit", signed_in)[0] == 200
     with _ws(port, signed_in) as ws:
         assert _until(ws, "welcome")["role"] == "owner"

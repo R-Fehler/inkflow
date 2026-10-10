@@ -80,7 +80,7 @@ class Instance:
         """The ``Cookie`` header carrying the owner token (SSH mode)."""
         if not self.owner_token:
             return None
-        return f"inkflow-{self.port}={self.owner_token}"
+        return f"inkflow-owner-{self.port}={self.owner_token}"
 
 
 def loopback_tls() -> ssl.SSLContext:

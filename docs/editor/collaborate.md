@@ -130,7 +130,8 @@ Owner  http://localhost:7777/edit?k=tb9XiVFCe8LZNRKhInLIWeUl
 ```
 
 Opening the owner link through your tunnel makes you the owner in that browser
-(it sets a cookie, as share links do; the token leaves the address bar). Opening
+(it sets a cookie, as share links do, but one of its own: trying a share link in
+the same browser leaves you the owner; the token leaves the address bar). Opening
 `http://localhost:7777/edit` without it answers *Open the owner link*. The owner
 link stays the same while the server runs (**New links** does not change it);
 starting inkflow again makes a new one.
