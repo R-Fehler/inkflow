@@ -26,6 +26,8 @@ Press <kbd>?</kbd> at any time for the full keybinding list.
 | Key | Action |
 |---|---|
 | <kbd>.</kbd> | Laser pointer |
+| <kbd>i</kbd> | [Ink](ink.md): draw on the slide with a pen |
+| <kbd>Ctrl</kbd>+<kbd>z</kbd> | Undo the last stroke (in ink mode) |
 | <kbd>Ctrl</kbd> + scroll | Zoom toward the pointer |
 | <kbd>Ctrl</kbd> + drag | Pan |
 | <kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> | Zoom in, out, reset |
@@ -46,7 +48,7 @@ Press <kbd>?</kbd> at any time for the full keybinding list.
 | <kbd>?</kbd> | This help |
 
 <kbd>Esc</kbd> closes whatever is open.
-With nothing open it resets the zoom.
+In ink mode it leaves ink mode; with nothing open it resets the zoom.
 
 ## Moving around
 
@@ -71,6 +73,12 @@ and <kbd>o</kbd> or <kbd>Esc</kbd> returns without moving.
 Drag and it leaves a trail that fades on its own,
 so you can circle a term or underline a line of code without leaving anything behind.
 Press <kbd>.</kbd> again to go back to the normal cursor.
+
+**Ink** (<kbd>i</kbd>) is for marks that should stay: write or draw on the
+slide with a pen, with a highlighter, colours and widths, and an eraser.
+Ink lasts for the talk and shows in every window of the presentation, or, with
+*Keep*, is saved with the deck. By default only a pen draws, so the mouse and
+swipes keep navigating. It has [its own page](ink.md).
 
 **Zoom** magnifies part of a slide.
 Hold <kbd>Ctrl</kbd> and scroll to zoom toward the pointer, or drag to pan.

@@ -33,6 +33,7 @@ the file watcher shows each one the others' changes within a moment.
 | A new text box | A `zone-text` rect in the slide's SVG; its Markdown in the slide's `.md` file |
 | A crop | The picture's SVG: the `<image>` goes into a nested `<svg>` frame |
 | A draw.io diagram | `diagrams/<name>.drawio.svg` (draw.io's editable SVG, its source stored uncompressed), shown on the slide as an `<image>` |
+| Ink drawn with the pen | `ink/<slide id>.svg`, one `<path>` per stroke (see [Ink](#ink)) |
 | A line or arrow attached to shapes | A `<path>` with `inkflow:connector` and `inkflow:connect-start` / `-end`; re-routed in the same edit whenever an attached shape moves |
 | An elbow's moved middle segment, a shape's extra connection points | `inkflow:bend` on the arrow, `inkflow:sites` on the shape |
 | A link, alt text, hiding, locking | The object in the SVG: an `<a href>` around it, a `<title>`, `display:none`, `inkflow:locked` |
@@ -349,6 +350,26 @@ Many slides are drawn directly by a shared layout (`Slide("content", md=...)`).
 The first time you draw on one, the editor gives it its own SVG in `slides/`, built
 on that same layout, and points the slide at it. Nothing changes visually, and the
 layout itself is left alone.
+
+## Ink
+
+The **pen** tool (<kbd>P</kbd>) draws on the slide by hand, the way the
+presenter's [ink mode](../presenting/ink.md) does, and the floating palette is
+the same: pen, highlighter and eraser, the theme's colours plus black, white and
+any colour, three widths, undo and clear. A pen's pressure shapes the line; a
+mouse or a finger draws too unless you turn the hand button off, in which case
+only a pen draws and the mouse keeps selecting.
+
+Each stroke is saved as you lift the pen, into the slide's ink file
+(`ink/<slide id>.svg`), never into the slide's own SVG, so ink on a slide that is
+drawn by a shared layout stays on that slide alone. Every stroke is one undo
+step; so is one sweep of the eraser, and **Clear** (which removes the file).
+With the select tool, a stroke is an object like any other: click it to select
+it, drag to move it, <kbd>Delete</kbd> to remove it.
+
+Moving, duplicating, deleting or re-laying-out a slide takes its ink along (a
+slide's ink file is named after its id, which those can change); see
+[how ink is saved](../presenting/ink.md#how-ink-is-saved).
 
 ## Lines, arrows and connectors
 
@@ -668,7 +689,7 @@ Each result can also be downloaded straight from the dialog (the web page as a
 
 | Key | Action |
 |---|---|
-| <kbd>V</kbd> <kbd>T</kbd> <kbd>R</kbd> <kbd>O</kbd> <kbd>L</kbd> <kbd>A</kbd> <kbd>E</kbd> <kbd>C</kbd> <kbd>I</kbd> | Select, text, rectangle, ellipse, line, arrow, elbow arrow, curved arrow, image |
+| <kbd>V</kbd> <kbd>T</kbd> <kbd>R</kbd> <kbd>O</kbd> <kbd>L</kbd> <kbd>A</kbd> <kbd>E</kbd> <kbd>C</kbd> <kbd>P</kbd> <kbd>I</kbd> | Select, text, rectangle, ellipse, line, arrow, elbow arrow, curved arrow, pen, image |
 | <kbd>Shift</kbd>+<kbd>I</kbd> | Insert a video |
 | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> | Undo / redo |
 | <kbd>Ctrl</kbd>+<kbd>C</kbd> <kbd>X</kbd> <kbd>V</kbd> <kbd>D</kbd> | Copy, cut, paste, duplicate (objects, or slides in the slide list) |

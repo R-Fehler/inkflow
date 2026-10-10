@@ -35,6 +35,13 @@ and `inkflow select ID [ID…]` (selects elements on the current slide).
 - `slides/*.md`: Markdown routed into a layout's zones (`::zone::` markers;
   a leading `# Title` fills the title zone; `::step::` reveals on click).
 - `notes/*.md`: speaker notes.
+- `ink/<slide id>.svg`: what the author drew on that slide with a pen (the
+  editor's pen tool, or the presenter's ink mode with "Keep"), painted on top
+  of the slide. One filled `<path id="ink-…">` per stroke, directly under the
+  root; `Slide(ink="…")` names another file. Leave the strokes' outlines alone
+  (they are hand-drawn shapes, not something to tidy); deleting a stroke, or
+  the whole file to clear the slide, is fine. If you rename a slide's `.md` or
+  SVG file (which changes its id), rename its ink file to match.
 
 Colours: prefer the theme's classes over hex values so slides follow dark and
 light mode: `class="inkflow-fill-accent"`, `inkflow-stroke-text`, and so on
