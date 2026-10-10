@@ -35,7 +35,7 @@ from websockets.asyncio.server import ServerConnection
 from websockets.asyncio.server import serve as ws_serve
 
 from inkflow import instances
-from inkflow.assets import MIME_TYPES, AssetRoots
+from inkflow.assets import MIME_TYPES, AssetRoots, is_local_ref, rewrite_references
 from inkflow.edit import (
     NO_EDIT_COMMANDS,
     EditCommands,
@@ -174,7 +174,8 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
                 deck_path,
             )
             model = await asyncio.to_thread(build_model, deck, deck_path, edit_slides)
-            slides = [_without_edit(s) for s in edit_slides]
+            roots = AssetRoots(project_dir, deck.theme.asset_dir())
+            slides = [_versioned(_without_edit(s), roots) for s in edit_slides]
             transitions = resolve_transitions(deck)
             styles_css = await asyncio.to_thread(load_deck_styles, deck, project_dir)
             if deck.embed_fonts:
@@ -570,14 +571,42 @@ def _is_editor_path(request_path: str) -> bool:
 _SERVED_SUFFIXES = set(MIME_TYPES)
 
 
+def _versioned(slide: SlideData, roots: AssetRoots) -> SlideData:
+    """The slide with each local asset reference stamped with its file's
+    modification time (``assets/x.png?v=…``), for serving only.
+
+    A page keeps the pictures it has loaded by URL, so a diagram or picture
+    changed on disk (draw.io, Inkscape, GIMP) would stay as it was on screen:
+    with the stamp, the changed file is a changed slide (pushed as usual) at a
+    new URL. ``_resolve_asset`` ignores the query; build and export never
+    stamp, and the editor strips it before anything is written back.
+    """
+
+    def stamp(ref: str) -> str | None:
+        if not is_local_ref(ref) or "?" in ref:
+            return None
+        located = roots.locate(unquote(ref))
+        try:
+            mtime = located.stat().st_mtime_ns if located is not None else None
+        except OSError:
+            return None
+        return f"{ref}?v={mtime:x}" if mtime else None
+
+    out = slide.copy()
+    out["svg"] = rewrite_references(slide["svg"], stamp)
+    out["notes"] = rewrite_references(slide["notes"], stamp)
+    return out
+
+
 def _resolve_asset(roots: AssetRoots, request_path: str) -> Path | None:
     """Map a request path to a file, or ``None`` if it names nothing servable.
 
     The request path is a canonical asset reference: the pipeline wrote it into
     the slide SVG, so ``AssetRoots.locate`` is the same answer ``build`` copies
-    to, and containment against the allowed roots is enforced there.
+    to, and containment against the allowed roots is enforced there. A query
+    (the version stamp ``_versioned`` adds) is not part of the name.
     """
-    decoded = unquote(request_path).lstrip("/")
+    decoded = unquote(request_path.split("?", 1)[0]).lstrip("/")
     located = roots.locate(decoded)
     if located is None:
         return None

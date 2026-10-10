@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+    assetRef,
     commonPrefix,
     joinPath,
     samePath,
@@ -40,5 +41,14 @@ describe("typed paths", () => {
         expect(commonPrefix(startingWith(dirs, "ta"))).toBe("Talk");
         expect(commonPrefix(["music"])).toBe("music");
         expect(commonPrefix([])).toBe("");
+    });
+});
+
+describe("asset references", () => {
+    it("drop the version the server stamps", () => {
+        expect(assetRef("diagrams/a.drawio.svg?v=17f3a2b")).toBe(
+            "diagrams/a.drawio.svg",
+        );
+        expect(assetRef("assets/pic.png")).toBe("assets/pic.png");
     });
 });

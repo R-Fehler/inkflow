@@ -57,3 +57,9 @@ export function splitTyped(value: string): { dir: string; prefix: string } {
     if (i < 0) return { dir: "", prefix: value };
     return { dir: value.slice(0, i + 1), prefix: value.slice(i + 1) };
 }
+
+/** An asset reference as written in the deck: the server stamps served
+ * slides with the file's version (``?v=…``) so a changed file reloads. */
+export function assetRef(href: string): string {
+    return href.replace(/\?v=[0-9a-f]+$/, "");
+}

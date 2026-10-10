@@ -45,6 +45,7 @@ import {
 import { pickFile, upload, zoneMedia } from "./insert";
 import { edit } from "./net";
 import { fileName, openButton } from "./openwith";
+import { assetRef } from "./pathtext";
 import { distribute } from "./snap";
 import { currentSlide, ed, emit, on, sourceOf } from "./state";
 import type {
@@ -1414,8 +1415,9 @@ function pictureSection(sel: Selected): HTMLElement {
     const image = pictureOf(sel.el)!;
     const loc = image.getAttribute("data-ink") ?? sel.loc;
     const src = sourceOf(sel.key);
-    const href =
-        image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? "";
+    const href = assetRef(
+        image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? "",
+    );
     const par = image.getAttribute("preserveAspectRatio") ?? "xMidYMid meet";
     const fit = FITS.find((f) => f.par === par)?.value ?? "contain";
     const imageOps = (set: Record<string, string | null>, label: string) =>

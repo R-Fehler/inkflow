@@ -433,7 +433,12 @@ Everything the editor adds is plain deck source, so Inkscape, an agent and the p
 ## Server
 
 - HTTP on port 7777 (asyncio streams, custom handler); assets are streamed in
-  chunks with byte-range support (`_send_file`, 206/416), which Safari needs for video
+  chunks with byte-range support (`_send_file`, 206/416), which Safari needs for video.
+  Served slides stamp each local asset reference with its file's mtime
+  (`_versioned`: `assets/x.png?v=…`; `_resolve_asset` drops the query), because a
+  page keeps pictures it loaded by URL: a diagram or picture changed on disk is
+  then a changed slide at a new URL. build/export never stamp; the editor drops
+  the stamp before writing anything back (`pathtext.assetRef`, `cleanForPaste`)
 - WebSocket on port 7778 (websockets 16.0 — uses `websockets.asyncio.server.serve`, not the legacy `websockets.serve`)
 - File watcher: `watchfiles.awatch` (async generator)
 - Both run inside an `asyncio.TaskGroup`

@@ -2779,6 +2779,49 @@
     emit("zoom");
   }
 
+  // src/ts/editor/pathtext.ts
+  function sepOf(path) {
+    return path.includes("\\") && !path.includes("/") ? "\\" : "/";
+  }
+  function withSep(dir) {
+    const sep2 = sepOf(dir);
+    return dir.endsWith(sep2) ? dir : dir + sep2;
+  }
+  function joinPath(dir, name2) {
+    return withSep(dir) + name2;
+  }
+  function baseName(path) {
+    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+  }
+  function samePath(a, b) {
+    const norm = (p) => p.replace(/(.)[\\/]+$/, "$1");
+    return norm(a) === norm(b);
+  }
+  function commonPrefix(names) {
+    if (!names.length) return "";
+    let prefix = names[0];
+    for (const name2 of names.slice(1)) {
+      let i = 0;
+      while (i < prefix.length && i < name2.length && prefix[i].toLowerCase() === name2[i].toLowerCase()) {
+        i++;
+      }
+      prefix = prefix.slice(0, i);
+    }
+    return prefix;
+  }
+  function startingWith(names, typed) {
+    const t = typed.toLowerCase();
+    return names.filter((n2) => n2.toLowerCase().startsWith(t));
+  }
+  function splitTyped(value) {
+    const i = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+    if (i < 0) return { dir: "", prefix: value };
+    return { dir: value.slice(0, i + 1), prefix: value.slice(i + 1) };
+  }
+  function assetRef(href) {
+    return href.replace(/\?v=[0-9a-f]+$/, "");
+  }
+
   // src/ts/editor/dialog.ts
   var host2 = document.getElementById("dialog");
   var onClose = null;
@@ -2845,46 +2888,6 @@
     host2.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") e.stopPropagation();
     });
-  }
-
-  // src/ts/editor/pathtext.ts
-  function sepOf(path) {
-    return path.includes("\\") && !path.includes("/") ? "\\" : "/";
-  }
-  function withSep(dir) {
-    const sep2 = sepOf(dir);
-    return dir.endsWith(sep2) ? dir : dir + sep2;
-  }
-  function joinPath(dir, name2) {
-    return withSep(dir) + name2;
-  }
-  function baseName(path) {
-    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
-  }
-  function samePath(a, b) {
-    const norm = (p) => p.replace(/(.)[\\/]+$/, "$1");
-    return norm(a) === norm(b);
-  }
-  function commonPrefix(names) {
-    if (!names.length) return "";
-    let prefix = names[0];
-    for (const name2 of names.slice(1)) {
-      let i = 0;
-      while (i < prefix.length && i < name2.length && prefix[i].toLowerCase() === name2[i].toLowerCase()) {
-        i++;
-      }
-      prefix = prefix.slice(0, i);
-    }
-    return prefix;
-  }
-  function startingWith(names, typed) {
-    const t = typed.toLowerCase();
-    return names.filter((n2) => n2.toLowerCase().startsWith(t));
-  }
-  function splitTyped(value) {
-    const i = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
-    if (i < 0) return { dir: "", prefix: value };
-    return { dir: value.slice(0, i + 1), prefix: value.slice(i + 1) };
   }
 
   // src/ts/editor/folderpicker.ts
@@ -4901,8 +4904,10 @@
         const name2 = attr.name;
         if (name2.startsWith("data-")) node.removeAttribute(name2);
         else if (name2 === "xlink:href") {
-          node.setAttribute("href", attr.value);
+          node.setAttribute("href", assetRef(attr.value));
           node.removeAttribute(name2);
+        } else if (["href", "src", "poster"].includes(name2)) {
+          node.setAttribute(name2, assetRef(attr.value));
         } else if (name2.includes(":") && !name2.startsWith("xml:")) {
           node.removeAttribute(name2);
         } else if (name2 === "class") {
@@ -6778,7 +6783,9 @@
     const image = pictureOf(sel.el);
     const loc = image.getAttribute("data-ink") ?? sel.loc;
     const src = sourceOf(sel.key);
-    const href = image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? "";
+    const href = assetRef(
+      image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? ""
+    );
     const par = image.getAttribute("preserveAspectRatio") ?? "xMidYMid meet";
     const fit = FITS.find((f) => f.par === par)?.value ?? "contain";
     const imageOps = (set, label4) => void sendSvgOps([{ sel, ops: [{ kind: "attrs", loc, set }] }], label4);

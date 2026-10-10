@@ -18,6 +18,7 @@ from inkflow.server import (
     _is_loopback,  # pyright: ignore[reportPrivateUsage]
     _resolve_asset,  # pyright: ignore[reportPrivateUsage]
     _resolve_edit_request,  # pyright: ignore[reportPrivateUsage]
+    _versioned,  # pyright: ignore[reportPrivateUsage]
     build_html,
 )
 
@@ -141,6 +142,36 @@ def test_build_html_logs_json_embedded() -> None:
 
 
 # ── _resolve_asset ────────────────────────────────────────────────────────────
+
+
+def test_served_slides_name_each_asset_with_its_version(tmp_path: Path) -> None:
+    import os
+
+    (tmp_path / "diagrams").mkdir()
+    diagram = tmp_path / "diagrams" / "flow.drawio.svg"
+    diagram.write_text("<svg/>", encoding="utf-8")
+    roots = AssetRoots(tmp_path)
+    slide: SlideData = {
+        "id": "s",
+        "svg": '<svg><image href="diagrams/flow.drawio.svg"/>'
+        + '<image href="missing.png"/><image href="https://x.org/a.png"/></svg>',
+        "title": "",
+        "notes": '<img src="diagrams/flow.drawio.svg">',
+        "editableFiles": [],
+    }
+    first = _versioned(slide, roots)
+    assert 'href="diagrams/flow.drawio.svg?v=' in first["svg"]
+    assert 'href="missing.png"' in first["svg"]  # nothing to version
+    assert 'href="https://x.org/a.png"' in first["svg"]
+    assert 'src="diagrams/flow.drawio.svg?v=' in first["notes"]
+    assert _versioned(slide, roots) == first  # same file, same slide
+    # The file changes (draw.io, Inkscape): the slide changes with it.
+    stat = diagram.stat()
+    os.utime(diagram, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    assert _versioned(slide, roots)["svg"] != first["svg"]
+    # The version is not part of the file's name when it is served.
+    stamped = first["svg"].split('href="')[1].split('"')[0]
+    assert _resolve_asset(roots, "/" + stamped) == diagram.resolve()
 
 
 def test_resolve_asset_path_traversal(tmp_path: Path) -> None:

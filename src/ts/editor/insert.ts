@@ -25,6 +25,7 @@ import { type End, pathData, route, type Site } from "./connectors";
 import { svgEl, toast } from "./dom";
 import { fmt, invert, mat, multiply, relativePath, transformBox } from "./geom";
 import { edit, request } from "./net";
+import { assetRef } from "./pathtext";
 import {
     CONNECTOR_TOOLS,
     currentSlide,
@@ -882,8 +883,11 @@ export function cleanForPaste(el: Element): string {
             const name = attr.name;
             if (name.startsWith("data-")) node.removeAttribute(name);
             else if (name === "xlink:href") {
-                node.setAttribute("href", attr.value);
+                node.setAttribute("href", assetRef(attr.value));
                 node.removeAttribute(name);
+            } else if (["href", "src", "poster"].includes(name)) {
+                // Never the version the server stamps on served slides.
+                node.setAttribute(name, assetRef(attr.value));
             } else if (name.includes(":") && !name.startsWith("xml:")) {
                 node.removeAttribute(name);
             } else if (name === "class") {
