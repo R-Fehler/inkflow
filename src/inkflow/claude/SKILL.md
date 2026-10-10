@@ -237,10 +237,17 @@ picture alone: draw.io redraws the picture from the source.
 ## Check your work
 
 1. `inkflow verify` for authoring mistakes (missing ids, zones, layouts).
-2. `inkflow render` writes PNGs of slides (the editor's current slide by
-   default; `--slide N`, `--all`, `--step S`) to `.inkflow/render/`. Read the
-   image to see the result before you report back. Overlapping text, content
-   running out of its zone and low contrast are only visible there.
+2. `inkflow render --check` measures every slide in a browser, without images,
+   and prints one line per layout problem (`slide 3 (intro): #zone-content:
+   text overflows its zone by 120px (bottom)`; also code blocks cut off,
+   objects outside the slide, text too small to read), exit 1 on a problem.
+   Fix what it reports: shorten text, enlarge the zone, or move the object.
+3. `inkflow render --sheet` writes one contact-sheet PNG of all slides
+   (labelled with number and id) to `.inkflow/render/sheet.png`: read it to
+   check flow and consistency. `inkflow render` writes one PNG per slide (the
+   editor's current slide by default; `--slide N`, `--all`, `--step S`) and
+   prints the same findings. Overlapping objects and low contrast are only
+   visible in the images: look before you report back.
 
 Keep edits small and in the author's style: the files are diffed and committed
 like code. SVGs are XML; keep existing ids and structure, and change only what

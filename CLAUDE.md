@@ -105,9 +105,23 @@ src/
                                edit menu, and the editor's "Open" catalog (`open_choices`)
     export.py         static HTML export (inkflow build) and PDF export (inkflow export);
                                PDF/PNG pages reach Chromium over a loopback HTTP server
-                               (`_served`), never file:// (a snap/Flatpak Chromium has a
+                               (`served`), never file:// (a snap/Flatpak Chromium has a
                                private /tmp), and `_run_chromium` checks the written file
-                               and reports Chromium's stderr
+                               and reports Chromium's stderr (`cdp.chromium_said`)
+    render.py         `inkflow render`: one headless Chromium for every slide (cdp.py),
+                               viewport set to the slide's exact size; each slide page
+                               resolves `window.inkflowRendered` to its layout findings
+                               (src/ts/render/measure.ts), parsed into `Finding`s
+                               (`message()`, `is_problem`: small text is a hint);
+                               `--check` = no output path; the contact sheet
+                               (`sheet_layout`/`sheet_pages`/`sheet_html`: ≤1600 px wide,
+                               ≤16 slides per image) is one more page screenshot of the
+                               slide shots, each taken at its cell's size
+    cdp.py            minimal DevTools client over `websockets`: `Browser.launch`
+                               (--remote-debugging-port=0, port read from the profile's
+                               DevToolsActivePort, socket opened directly so no proxy
+                               applies), `Page` (navigate → load event, evaluate awaiting
+                               promises, viewport, screenshot)
     assets.py         asset reference resolution. `AssetRoots` holds the allowed roots
                                (project dir, theme asset dir, and the PDF page cache
                                `.inkflow/cache/pdf/` as `_pdf/`) and converts between an
@@ -295,14 +309,14 @@ src/
     tui.py            terminal UI (Rich)
     presenter.html    shell template — inlined with CSS/JS at serve time
     editor.html       visual editor shell, served at /edit (editor bundle + deck styles)
-    render.html       single-slide page `inkflow render` screenshots (render bundle)
+    render.html       single-slide page `inkflow render` measures and screenshots
     claude/SKILL.md   the inkflow skill `inkflow setup-claude` installs into a project
     pdf.html          PDF export template
     bundles/          pre-built JS/CSS output (committed; no Node needed at install time)
       presenter.js    navigation, transitions, WebSocket, presenter panel
       presenter.css   all presenter styles including the sidebar panel
       editor.js/.css  the visual editor (src/ts/editor, src/css/editor)
-      render.js       step-at-a-time single-slide renderer (src/ts/render)
+      render.js       single-slide renderer + layout measurement (src/ts/render)
     theme/            built-in theme: layouts/*.svg, icon.svg, showcase/, and
                                styles.css (per-layout zone styling for those layouts,
                                loaded for every deck — keep its rules `.layout-*`-scoped)
@@ -381,7 +395,12 @@ src/
                       (pure: TSV paste, grid edits, series settings; tested),
                       ink.ts (the pen tool: one session `ink` step per stroke /
                       erase / clear)
-    render/           the single-slide page behind `inkflow render`
+    render/           the single-slide page behind `inkflow render`: main.ts (step,
+                      waits for load/fonts/first video frames), measure.ts (zone
+                      text vs its foreignObject box, code blocks cut off, drawn
+                      objects vs the viewBox — skipping clipped/masked content,
+                      unpainted shapes and anything spanning the slide — and text
+                      below 1/80 of the slide height; all in slide units)
   css/                CSS source
     shared/           theme variables, animation keyframes, ink.css (the ink palette)
     presenter/        presenter partials including pv.css (sidebar panel)

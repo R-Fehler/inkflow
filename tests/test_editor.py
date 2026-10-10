@@ -1871,60 +1871,6 @@ class TestAgentCommands:
         assert "inkflow edit" in result.output
 
 
-def _png(width: int, height: int) -> bytes:
-    import struct
-    import zlib
-
-    rows = b"".join(
-        b"\x02" + bytes((x * 7 + y) % 256 for x in range(width * 3))
-        for y in range(height)
-    )
-
-    def chunk(kind: bytes, body: bytes) -> bytes:
-        crc = zlib.crc32(kind + body) & 0xFFFFFFFF
-        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", crc)
-
-    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", ihdr)
-        + chunk(b"IDAT", zlib.compress(rows))
-        + chunk(b"IEND", b"")
-    )
-
-
-def test_crop_png_keeps_the_top_rows() -> None:
-    import struct
-    import zlib
-
-    from inkflow.export import crop_png_height
-
-    cropped = crop_png_height(_png(4, 10), 6)
-    assert struct.unpack(">II", cropped[16:24]) == (4, 6)
-    original = _png(4, 6)
-
-    def idat(data: bytes) -> bytes:
-        return zlib.decompress(data[data.index(b"IDAT") + 4 :][:-12])
-
-    assert idat(cropped) == idat(original)
-    assert crop_png_height(_png(4, 4), 6) == _png(4, 4)
-
-
-def test_render_writes_a_png(
-    project: Path, tmp_path_factory: pytest.TempPathFactory
-) -> None:
-    from inkflow.export import find_chromium, render_png
-
-    if find_chromium() is None:
-        pytest.skip("no Chromium available")
-    out = tmp_path_factory.mktemp("render") / "one.png"
-    written = render_png(project / "deck.py", [1], out, scale=0.5, no_sandbox=True)
-    assert written == [out]
-    import struct
-
-    assert struct.unpack(">II", out.read_bytes()[16:24]) == (960, 540)
-
-
 # ── Copy and paste between decks ──────────────────────────────────────────────
 
 
