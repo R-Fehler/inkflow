@@ -1072,8 +1072,13 @@ function renderCellPanel(sel: Selected): void {
     area.addEventListener("change", () =>
         send({ kind: "cell-label", cell, text: area.value }, "Shape label"),
     );
+    // Enter keeps the label (Shift+Enter: a new line); Esc keeps it too and
+    // leaves the diagram (see initProps).
     area.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) area.blur();
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            area.blur();
+        }
     });
     panel.append(
         section(
@@ -1095,7 +1100,7 @@ function renderCellPanel(sel: Selected): void {
             h(
                 "p",
                 { class: "hint" },
-                `Changes go into the diagram's draw.io source, and draw.io redraws it (its arrows follow).${themed ? " In the deck's theme, colours show as the nearest theme colour." : ""} Copying, grouping, rotating and stacking shapes stay in draw.io. Esc leaves the diagram.`,
+                `Changes go into the diagram's draw.io source, and draw.io redraws it (its arrows follow).${themed ? " In the deck's theme, colours show as the nearest theme colour." : ""} Copying, grouping, rotating and stacking shapes stay in draw.io. Enter keeps a label; Esc leaves the diagram.`,
             ),
             h(
                 "div",
@@ -2389,6 +2394,16 @@ export function initProps(): void {
     on("selection", renderProps);
     on("render", renderProps);
     on("preview", renderProps);
+    // Esc in a field of the panel keeps what was typed (leaving the field
+    // commits it) and gives the keys back to the slide; inside a diagram's
+    // shapes it also leaves the diagram, as Esc does from the slide.
+    panel.addEventListener("keydown", (e) => {
+        const field = e.target as HTMLElement;
+        if (e.key !== "Escape" || !typingIn(field)) return;
+        e.preventDefault();
+        field.blur();
+        if (ed.scope?.closest("svg[data-drawio]")) enterGroup(null);
+    });
     panel.addEventListener("focusout", () => {
         window.setTimeout(() => {
             if (refreshOnBlur && !panel.contains(document.activeElement)) {
