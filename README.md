@@ -71,13 +71,8 @@ open formats, plain text, not tied to any software or service—fully compatible
 3. **Run `inkflow serve`.** A browser tab opens with your presentation. Save a change
    in your editor and it appears instantly, without losing your place.
 
-Prefer to click and drag? **`inkflow edit`** opens a visual editor in the browser,
-in the spirit of Google Slides: a slide sorter, a canvas to select, move, resize and type on,
-and a properties panel for colours, animations and transitions.
-It writes every change straight back to the same SVG, Markdown and `deck.py` files,
-so it works alongside Inkscape, your text editor and
-[Claude Code](https://ll-nick.github.io/inkflow/editor/claude-code/):
-select something in the editor and ask Claude to change it.
+Prefer to click and drag? **`inkflow edit`** opens a [visual editor](#the-visual-editor)
+in the browser that writes every change straight back to the same files.
 
 That's the core loop—the rest is there once you need it:
 reusable layouts that inherit from each other like master slides,
@@ -155,6 +150,39 @@ It will inject the Markdown and media files into the SVGs,
 apply the transitions and animations,
 and serve the result to your browser.
 
+## The visual editor
+
+<p align="center">
+  <img src="docs/assets/editor.png" alt="The inkflow editor: the slide list, a diagram slide with a selected box and the arrows attached to it, the properties panel with its animation, and the speaker notes" width="100%">
+</p>
+
+`inkflow edit` opens a slide editor in the browser, in the spirit of PowerPoint and Google Slides.
+There is no project format of its own: every change goes straight back into the deck's
+SVG, Markdown and `deck.py` files, so Inkscape, your text editor and
+[Claude Code](https://ll-nick.github.io/inkflow/editor/claude-code/) work on the same deck
+at the same time and see each other's changes live.
+
+- **Draw and arrange.** Shapes, text boxes that wrap, lines and arrows that stay attached to
+  their shapes (straight, elbow or curved), smart guides, groups, copy-by-dragging and a
+  format painter. Pictures with crop; videos of any size and, with ffmpeg, any format.
+  Bigger diagrams open in [draw.io](https://www.drawio.com), kept as editable SVG.
+- **Type on the slide.** Rich text with lists, tables, links and LaTeX formulas, saved as Markdown.
+- **Layouts and theme.** Start slides from a layout gallery, edit the shared layouts, and set
+  the deck's colours and fonts in a theme dialog.
+- **Animations, transitions and notes** from the properties panel; preview each build step,
+  then present from the current slide (and come back with <kbd>Shift</kbd>+<kbd>E</kbd>).
+- **Decks and git.** A start page for new and recent decks, commit/push/pull with Git LFS
+  for media, export to HTML or PDF, copy slides between decks, find and replace, and undo
+  for every change.
+
+```bash
+inkflow edit             # the deck in this folder (or: --deck path/to/deck.py)
+inkflow edit --start     # no deck yet: create one, open one, or pick a recent one
+inkflow setup-desktop    # add Inkflow to your application menu
+```
+
+See the [editor guide](https://ll-nick.github.io/inkflow/editor/) for everything it does.
+
 ## Quick start
 
 ```bash
@@ -163,6 +191,7 @@ cd my-deck
 uv run inkflow serve # or, without uv: inkflow serve
 # press "o" in the tui to open http://localhost:7777 in your browser,
 # press ? in the presenter for keyboard shortcuts
+uv run inkflow edit  # or open the visual editor instead
 ```
 
 To try the bundled demo:

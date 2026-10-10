@@ -9,6 +9,8 @@ and every change is written straight back into the deck's own files.
 inkflow edit            # opens http://localhost:7777/edit
 ```
 
+![The inkflow editor: the slide list, a diagram slide with a selected box and the arrows attached to it, the properties panel with its animation, and the speaker notes](../assets/editor.png)
+
 It is the same server as `inkflow serve`: the presenter stays at `/`, and
 <kbd>e</kbd> in the terminal opens the editor again. There is no separate project
 format and nothing to import. The editor, Inkscape, your text editor and an
