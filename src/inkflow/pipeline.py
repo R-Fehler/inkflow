@@ -35,9 +35,7 @@ from inkflow.logging import logger
 from inkflow.manifest import (
     Deck,
     Inline,
-    Media,
     Slide,
-    TextBox,
     Video,
 )
 from inkflow.overlay import Overlay
@@ -52,7 +50,12 @@ from inkflow.svgio import SvgElement, serialize_svg
 from inkflow.themes import Theme
 from inkflow.titles import humanize
 from inkflow.transitions import Transition
-from inkflow.zones import ParsedMarkdown, build_slide_content, parse_markdown_zones
+from inkflow.zones import (
+    ParsedMarkdown,
+    ZoneFill,
+    build_slide_content,
+    parse_markdown_zones,
+)
 
 # ── Slide wire format ────────────────────────────────────────────────────────
 
@@ -611,7 +614,7 @@ class SlideSvg:
         return duplicate_zone_ids(self.root)
 
     def inject_content(
-        self, content: dict[str, TextBox | Media], font_size: int, dark_mode: bool
+        self, content: dict[str, ZoneFill], font_size: int, dark_mode: bool
     ) -> None:
         self.root = substitute_content(self.root, content, font_size, dark_mode)
 
@@ -651,8 +654,8 @@ class DeckContext:
 
 
 def _resolve_autoplay_conflicts(
-    content: dict[str, TextBox | Media], cues: list[Cue]
-) -> dict[str, TextBox | Media]:
+    content: dict[str, ZoneFill], cues: list[Cue]
+) -> dict[str, ZoneFill]:
     """Drop ``autoplay`` from a video that a ``PlayVideo`` cue also targets.
 
     Autoplay and a step cue are contradictory playback triggers; the cue wins.

@@ -24,6 +24,7 @@ from inkflow import animations as animations_module
 from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
 from inkflow.enums import Easing, Trigger
+from inkflow.manifest import Chart
 
 _EASING_PRESETS = {
     "ease": "EASE",
@@ -94,6 +95,12 @@ class Code:
         if isinstance(value, list):
             items = cast("list[object]", value)
             return "[" + ", ".join(self.literal(v) for v in items) + "]"
+        if isinstance(value, dict):
+            entries = cast("dict[object, object]", value).items()
+            body = ", ".join(
+                f"{self.literal(k)}: {self.literal(v)}" for k, v in entries
+            )
+            return "{" + body + "}"
         if dataclasses.is_dataclass(value) and not isinstance(value, type):
             return self.call(value)
         return repr(value)
@@ -121,6 +128,8 @@ class Code:
                 continue
             value = cast("object", getattr(obj, f.name))
             positional = isinstance(obj, Cue) and f.name in ("element", "trigger")
+            # A chart's file reads like a picture's: ``Chart("data/sales.csv")``.
+            positional = positional or (isinstance(obj, Chart) and f.name == "src")
             if f.name == "element" and positional:
                 args.append(self.literal(value))
                 continue
