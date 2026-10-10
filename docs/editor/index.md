@@ -475,25 +475,6 @@ diagram's source and shown on the slide, but draw.io's own arrows keep their
 old route until draw.io next draws the diagram (open it in draw.io, desktop
 included, and save).
 
-**Converting to slide shapes (one way).** **Convert to slide shapes…** (in
-the draw.io panel, or the right-click menu) turns the diagram into ordinary
-shapes of the slide: a group you can ungroup, restyle and edit like anything
-drawn in the editor or Inkscape. It asks first, because it cannot be redone
-in draw.io: draw.io no longer edits these shapes, and its arrows become plain
-lines that do not follow them. What converts: each draw.io shape keeps its
-name (`flow-client`), so animations and arrows attached to it carry over;
-short labels become SVG text you edit in place; labels draw.io lays out as
-HTML (wrapped, formatted, or with a background) stay HTML. Undo takes the
-whole conversion back.
-
-By default the dialog keeps the draw.io file as a **backup** in
-`assets/drawio/` (moved there, or copied when another slide still shows it),
-linked from the converted group (`inkflow:drawio-backup`). Its panel then has
-**Restore draw.io diagram…**, which puts the diagram's picture back in place
-from the backup, back in `diagrams/`; changes made to the shapes since the
-conversion are lost (it asks first; undo brings them back). Without a backup
-the draw.io file is deleted, unless another slide still shows it.
-
 In the slide's SVG the choice is one attribute on the picture,
 `inkflow:drawio="inline"` or `"themed"` (and `inkflow:drawio-edit="shapes"`
 for editing its shapes here); the file keeps the `<image>`, so Inkscape and

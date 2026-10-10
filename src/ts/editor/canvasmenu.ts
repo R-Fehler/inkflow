@@ -18,13 +18,7 @@ import {
 import { copy, cut, pasteFromClipboard } from "./clipboard";
 import { pictureOf, startCrop } from "./crop";
 import { clear, h } from "./dom";
-import {
-    convertDiagram,
-    diagramOf,
-    editDiagram,
-    newDiagram,
-    restoreDiagram,
-} from "./drawio";
+import { diagramOf, editDiagram, newDiagram } from "./drawio";
 import { openGallery } from "./gallery";
 import { insertVideoFile, typeInto } from "./insert";
 import { edit } from "./net";
@@ -103,18 +97,6 @@ function objectMenu(): HTMLElement[] {
         }
         if (diagramOf(el)) {
             items.push(menuItem("Edit diagram", () => editDiagram(one!)));
-            items.push(
-                menuItem("Convert to slide shapes…", () =>
-                    convertDiagram(one!),
-                ),
-            );
-        }
-        if (el.hasAttribute("inkflow:drawio-backup")) {
-            items.push(
-                menuItem("Restore draw.io diagram…", () =>
-                    restoreDiagram(one!),
-                ),
-            );
         }
         if (pictureOf(el)) {
             items.push(menuItem("Crop", () => void startCrop(one!)));
