@@ -715,6 +715,11 @@ def test_pictures_and_video_ranges_come_through_the_channel(online: Shared) -> N
     assert headers["content-range"] == f"bytes 0-{4 * 1024 * 1024 - 1}/{len(clip)}"
     status, _, body = guest.get("/assets/clip.mp4", "bytes=100-199")
     assert status == 206 and body == clip[100:200]
+    # A request line or header smuggled into the path or range gets nowhere.
+    guest.send({"t": "get", "id": 99, "path": "/ HTTP/1.1\r\nX: y"})
+    guest.send({"t": "get", "id": 100, "path": "/x", "range": "bytes=0-\r\nX: y"})
+    status, headers, body = guest.get("/assets/clip.mp4", "bytes=0-1")
+    assert status == 206 and body == clip[:2]
     guest.close()
 
 

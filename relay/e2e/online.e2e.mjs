@@ -257,10 +257,13 @@ try {
     check("the editor link opens the editor", Boolean(edFrame));
     await editorReady(edFrame);
     const onlineBoot = Date.now() - t0;
+    const bootBytes = await ed.evaluate(
+        () => window.__inkflowRelay.channel.receivedBytes,
+    );
     check(
         "editor boots through the relay",
         true,
-        `${onlineBoot} ms (this machine: ${lanBoot} ms)`,
+        `${onlineBoot} ms, ${(bootBytes / 1e6).toFixed(2)} MB through the channel (this machine: ${lanBoot} ms)`,
     );
     check("the key left the address bar", !ed.url().includes("k="), ed.url());
     // Its name, as a guest is asked.

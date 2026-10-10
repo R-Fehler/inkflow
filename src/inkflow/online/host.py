@@ -62,6 +62,10 @@ BODY_CHUNK = 1024 * 1024
 VIEWER_MESSAGE_LIMIT = 1024 * 1024
 """A viewer sends small messages only (presence, a slide request)."""
 _OPEN_RANGE = re.compile(r"^bytes=(\d+)-$")
+_PATH = re.compile(r"^/[\x21-\x7e]{0,4000}$")
+"""A request target as a page asks for one: printable, no spaces or line
+breaks (it becomes a request line for the server's routing)."""
+_RANGE = re.compile(r"^bytes=\d{0,20}-\d{0,20}$")
 _RESPONSE_HEADERS = (
     "content-type",
     "content-length",
@@ -282,18 +286,17 @@ class Guest:
             rid = header.get("id")
             path = header.get("path")
             range_ = header.get("range")
+            if not isinstance(range_, str) or not _RANGE.match(range_):
+                range_ = None
             if (
                 isinstance(rid, int)
                 and rid >= 0
                 and isinstance(path, str)
-                and path.startswith("/")
+                and _PATH.match(path)
                 and rid not in self.tasks
                 and len(self.tasks) < 64
             ):
-                self._spawn(
-                    rid,
-                    self._fetch(rid, path, range_ if isinstance(range_, str) else None),
-                )
+                self._spawn(rid, self._fetch(rid, path, range_))
         elif kind == "cancel":
             rid = header.get("id")
             task = self.tasks.get(rid) if isinstance(rid, int) else None
