@@ -2,9 +2,12 @@
 
 A *message* is an envelope: a 4-byte big-endian length, that many bytes of
 JSON header, then the body (raw bytes: a WebSocket message's text, a file's
-bytes). A message larger than one frame is split into chunks, each sealed
-on its own; a chunk's first byte says whether it is the last one. Chunks of
-one message are sent one after another, never interleaved with another's.
+bytes). On the wire it is *wrapped*: one byte naming its coding (0 as is,
+1 raw DEFLATE, which only the host sends: a rebuild's slides and model
+shrink several times), then the data. A wrapped message larger than one
+frame is split into chunks, each sealed on its own; a chunk's first byte
+says whether it is the last one. Chunks of one message are sent one after
+another, never interleaved with another's.
 
 Message headers (``t``), guest → host:
 
@@ -27,6 +30,7 @@ from __future__ import annotations
 
 import json
 import struct
+import zlib
 from typing import cast
 
 from inkflow.online.crypto import MAX_PLAINTEXT
@@ -60,6 +64,41 @@ def unpack(message: bytes) -> tuple[dict[str, object], bytes]:
     if not isinstance(header, dict):
         raise FrameError("header is not an object")
     return cast("dict[str, object]", header), message[4 + n :]
+
+
+RAW = 0
+DEFLATE = 1
+_WORTH_DEFLATING = 1024
+
+
+def wrap(message: bytes, *, deflate: bool = False) -> bytes:
+    """A message as it is chunked: its coding byte, then the data (raw
+    DEFLATE when asked for and smaller)."""
+    if deflate and len(message) >= _WORTH_DEFLATING:
+        packer = zlib.compressobj(6, zlib.DEFLATED, -15)
+        packed = packer.compress(message) + packer.flush()
+        if len(packed) < len(message):
+            return bytes([DEFLATE]) + packed
+    return bytes([RAW]) + message
+
+
+def unwrap(data: bytes, *, deflate: bool = False, limit: int = MAX_MESSAGE) -> bytes:
+    """The message a wrapped one carries; ``deflate``: whether this side
+    takes compressed ones (the host does not take them from guests)."""
+    if not data:
+        raise FrameError("empty message")
+    if data[0] == RAW:
+        return data[1:]
+    if data[0] == DEFLATE and deflate:
+        unpacker = zlib.decompressobj(-15)
+        try:
+            message = unpacker.decompress(data[1:], limit + 1)
+        except zlib.error as exc:
+            raise FrameError("bad compressed message") from exc
+        if len(message) > limit or unpacker.unconsumed_tail:
+            raise FrameError("message too large")
+        return message
+    raise FrameError("unknown message coding")
 
 
 def chunks(message: bytes, size: int = CHUNK) -> list[bytes]:

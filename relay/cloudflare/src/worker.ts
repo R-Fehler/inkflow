@@ -122,6 +122,8 @@ function refuse(code: number, reason: string): Response {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     server.accept();
+    // The client's side of the close may come after the socket is gone.
+    server.addEventListener("error", () => {});
     server.close(code, reason);
     return new Response(null, { status: 101, webSocket: client });
 }

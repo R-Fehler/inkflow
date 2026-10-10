@@ -226,3 +226,34 @@ body.guest .open-with {
         align-items: stretch;
     }
 }
+
+.share-dialog h3.share-section {
+    margin-top: 18px;
+    padding-top: 10px;
+    border-top: 1px solid var(--ui-line);
+    font-size: 14px;
+}
+
+.share-dialog h3.share-section:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+}
+
+.share-relay-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.share-relay-fields input {
+    flex: 1 1 14em;
+    min-width: 0;
+}
+
+.share-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}

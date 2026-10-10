@@ -40,7 +40,7 @@ import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import BinaryIO, cast
 from urllib.parse import parse_qsl, urlsplit
 
 from websockets.asyncio.server import Server, ServerConnection, serve
@@ -151,12 +151,17 @@ class Stats:
     bytes: int = 0
     seen: list[bytes] | None = None
     """Every frame forwarded, when recording (tests assert no plaintext)."""
+    dump: BinaryIO | None = None
+    """Every frame forwarded, appended to a file (``inkflow relay --dump``)."""
 
     def note(self, frame: bytes) -> None:
         self.frames += 1
         self.bytes += len(frame)
         if self.seen is not None:
             self.seen.append(frame)
+        if self.dump is not None:
+            _ = self.dump.write(struct.pack(">I", len(frame)) + frame)
+            self.dump.flush()
 
 
 class Relay:
@@ -169,12 +174,13 @@ class Relay:
         max_guests: int = MAX_GUESTS,
         static: Path | None = None,
         record: bool = False,
+        dump: BinaryIO | None = None,
     ) -> None:
         self.access_token: str | None = access_token or None
         self.max_guests: int = max_guests
         self.static: Path = static or guest_dir()
         self.rooms: dict[str, Room] = {}
-        self.stats: Stats = Stats(seen=[] if record else None)
+        self.stats: Stats = Stats(seen=[] if record else None, dump=dump)
         self.guest_bucket: Callable[[], Bucket] = guest_bucket
         self.host_bucket: Callable[[], Bucket] = host_bucket
         self._tasks: set[asyncio.Task[None]] = set()
@@ -373,6 +379,9 @@ class Relay:
             max_size=MAX_WIRE,
             # Pings keep idle connections alive through proxies.
             ping_interval=20,
+            # A connection sent away with frames still queued (a flood) is not
+            # read any more: do not wait long for its side of the close.
+            close_timeout=3,
             compression=None,
         )
 

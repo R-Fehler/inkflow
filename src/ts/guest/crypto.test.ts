@@ -19,7 +19,7 @@ import {
     unb64u,
     unseal,
 } from "./crypto";
-import { chunks, pack, Reassembler, unpack } from "./frames";
+import { chunks, pack, Reassembler, unpack, unwrap, wrap } from "./frames";
 
 const hex = (h: string) =>
     new Uint8Array((h.match(/../g) ?? []).map((b) => Number.parseInt(b, 16)));
@@ -133,7 +133,25 @@ describe("frames", () => {
         expect(Array.from(again.push(parts[2]) ?? [])).toEqual([
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
         ]);
+        expect(toHex(wrap(hex(vectors.message)))).toBe(vectors.wrapped);
         // A message over the limit is refused, not buffered.
         expect(() => new Reassembler(2).push(parts[0])).toThrow();
+    });
+});
+
+describe("message coding", () => {
+    test("what the host deflates, the guest inflates", async () => {
+        const text = new TextDecoder().decode(
+            await unwrap(hex(vectors.deflated)),
+        );
+        expect(text).toBe(vectors.deflatable);
+        expect(toHex(await unwrap(hex(vectors.wrapped)))).toBe(vectors.message);
+    });
+
+    test("a coding it does not know, or a bomb, is refused", async () => {
+        await expect(unwrap(new Uint8Array([7, 1]))).rejects.toThrow();
+        await expect(unwrap(hex(vectors.deflated), 100)).rejects.toThrow(
+            "too large",
+        );
     });
 });

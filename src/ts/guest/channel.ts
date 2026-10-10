@@ -10,7 +10,15 @@
 // to a restarting server.
 
 import { finish, hello, type Session } from "./crypto";
-import { chunks, type Header, pack, Reassembler, unpack } from "./frames";
+import {
+    chunks,
+    type Header,
+    pack,
+    Reassembler,
+    unpack,
+    unwrap,
+    wrap,
+} from "./frames";
 
 export interface Link {
     room: string;
@@ -201,7 +209,7 @@ export class Channel {
         }
         const waiting =
             code === NO_ROOM || code === HOST_GONE
-                ? "Waiting for the person sharing the deck…"
+                ? "Waiting for the person sharing the deck… (if they made new links since, this one no longer works)"
                 : code === ROOM_FULL
                   ? "The room is full: trying again shortly…"
                   : "Reconnecting…";
@@ -237,7 +245,7 @@ export class Channel {
         }
         const message = this.again.push(await this.session.open(frame));
         if (!message) return;
-        const [header, body] = unpack(message);
+        const [header, body] = unpack(await unwrap(message));
         this.dispatch(header, body);
     }
 
@@ -282,7 +290,7 @@ export class Channel {
     send(header: Header, body?: Uint8Array): void {
         const session = this.session;
         if (!session || this.state !== "open") return;
-        const parts = chunks(pack(header, body));
+        const parts = chunks(wrap(pack(header, body)));
         // Seal every chunk now (sequence numbers in call order), send them in
         // that order.
         const sealed = parts.map((p) => session.seal(p));

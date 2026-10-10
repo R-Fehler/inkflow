@@ -69,6 +69,8 @@ function refuse(code, reason) {
   const pair = new WebSocketPair();
   const [client, server] = Object.values(pair);
   server.accept();
+  server.addEventListener("error", () => {
+  });
   server.close(code, reason);
   return new Response(null, { status: 101, webSocket: client });
 }

@@ -61,6 +61,9 @@ def test_hkdf_is_rfc_5869() -> None:
     )
 
 
+DEFLATABLE = ("<svg>" + "<rect/>" * 400 + "</svg>").encode()
+
+
 def _vectors() -> dict[str, object]:
     """What the browser's Web Crypto must agree with (src/ts/guest)."""
     room_secret = bytes(range(32))
@@ -91,6 +94,9 @@ def _vectors() -> dict[str, object]:
         "seq": 5,
         "sealed": sealed.hex(),
         "chunks": [c.hex() for c in frames.chunks(bytes(range(10)), 4)],
+        "wrapped": frames.wrap(message).hex(),
+        "deflated": frames.wrap(DEFLATABLE, deflate=True).hex(),
+        "deflatable": DEFLATABLE.decode(),
     }
 
 
@@ -221,6 +227,23 @@ def test_messages_are_chunked_and_put_back_together() -> None:
             frames.unpack(bad)
 
 
+def test_the_host_compresses_and_guests_may_not() -> None:
+    big = frames.pack({"t": "ws", "c": 1}, DEFLATABLE)
+    wrapped = frames.wrap(big, deflate=True)
+    assert wrapped[0] == frames.DEFLATE and len(wrapped) < len(big) // 5
+    assert frames.unwrap(wrapped, deflate=True) == big
+    with pytest.raises(frames.FrameError):
+        frames.unwrap(wrapped)  # what the host takes from a guest
+    small = frames.wrap(b"x", deflate=True)
+    assert small == b"\x00x" and frames.unwrap(small) == b"x"
+    bomb = frames.wrap(bytes(10_000), deflate=True)
+    with pytest.raises(frames.FrameError):
+        frames.unwrap(bomb, deflate=True, limit=1000)
+    for bad in (b"", b"\x07x", b"\x01not deflate"):
+        with pytest.raises(frames.FrameError):
+            frames.unwrap(bad, deflate=True)
+
+
 def test_a_sealed_frame_never_exceeds_the_limit() -> None:
     guest, _, _, _ = _pair()
     for part in frames.chunks(os.urandom(frames.CHUNK * 2)):
@@ -291,7 +314,9 @@ def _guest_ws(port: int, room: str) -> ClientConnection:
 def _closed_with(ws: ClientConnection) -> int | None:
     with pytest.raises(ConnectionClosed) as closed:
         while True:
-            ws.recv(timeout=5)
+            # Long enough for a relay that leaves the TCP close to the client
+            # (workerd: the client's 10 s close timeout).
+            ws.recv(timeout=15)
     rcvd = closed.value.rcvd
     return rcvd.code if rcvd else None
 
@@ -365,7 +390,7 @@ def test_a_flood_of_frames_is_cut_off(relay: Running) -> None:
                 for _ in range(50):
                     guest.send(b"\x03x")
                 for _ in range(50):
-                    guest.recv(timeout=5)
+                    guest.recv(timeout=10)
             assert closed.value.rcvd is not None
             assert closed.value.rcvd.code == RATE_LIMITED
 
@@ -393,6 +418,92 @@ def test_the_relay_serves_the_guest_page(relay: Running) -> None:
     assert status == 200 and json.loads(body)["ok"] is True
 
 
+# ── Any relay, by the same rules (the Worker under `wrangler dev`) ────────────
+
+EXTERNAL = os.environ.get("INKFLOW_TEST_RELAY_PORT")
+"""A relay already running on this port, with access token ``s3cret`` and
+one guest per room: ``cd relay/cloudflare && pnpm exec wrangler dev --port
+8002 --var RELAY_ACCESS_TOKEN:s3cret --var MAX_GUESTS:1``, or
+``inkflow relay --port 8002 --access-token s3cret --max-guests 1``."""
+
+
+@pytest.mark.skipif(not EXTERNAL, reason="INKFLOW_TEST_RELAY_PORT not set")
+class TestAnyRelay:
+    port: int = int(EXTERNAL or 0)
+
+    def test_hosts_need_the_token_and_the_room_secret(self) -> None:
+        secret = crypto.new_secret()
+        for token in (None, "wrong"):
+            with _host_ws(self.port, secret, token) as host:
+                assert _closed_with(host) == UNAUTHORIZED
+        with connect(
+            f"ws://127.0.0.1:{self.port}/_relay/host?room={crypto.room_id(secret)}",
+            proxy=None,
+            additional_headers={
+                SECRET_HEADER: b64u(crypto.new_secret()),
+                "Authorization": "Bearer s3cret",
+            },
+        ) as impostor:
+            assert _closed_with(impostor) == UNAUTHORIZED
+
+    def test_a_room_lives_while_its_host_is_there(self) -> None:
+        secret = crypto.new_secret()
+        room = crypto.room_id(secret)
+        with _guest_ws(self.port, room) as early:
+            assert _closed_with(early) == NO_ROOM
+        with _host_ws(self.port, secret, "s3cret") as host:
+            assert _control(host)["type"] == "ready"
+            with _guest_ws(self.port, room) as guest:
+                peer = cast("int", _control(host)["peer"])
+                guest.send(b"\x01hello")
+                assert host.recv(timeout=5) == struct.pack(">I", peer) + b"\x01hello"
+                host.send(struct.pack(">I", peer) + b"\x03frame")
+                assert guest.recv(timeout=5) == b"\x03frame"
+                with _guest_ws(self.port, room) as second:
+                    assert _closed_with(second) == ROOM_FULL
+                host.close()
+                assert _closed_with(guest) == HOST_GONE
+
+    def test_the_host_sends_a_guest_away(self) -> None:
+        secret = crypto.new_secret()
+        with _host_ws(self.port, secret, "s3cret") as host:
+            _control(host)
+            with _guest_ws(self.port, crypto.room_id(secret)) as guest:
+                peer = _control(host)["peer"]
+                host.send(json.dumps({"type": "kick", "peer": peer}))
+                assert _closed_with(guest) == KICKED
+
+    def test_a_flood_is_cut_off(self) -> None:
+        secret = crypto.new_secret()
+        with _host_ws(self.port, secret, "s3cret") as host:
+            _control(host)
+            with _guest_ws(self.port, crypto.room_id(secret)) as guest:
+                with pytest.raises(ConnectionClosed) as closed:
+                    for _ in range(1000):
+                        guest.send(b"\x03x")
+                    while True:
+                        guest.recv(timeout=10)
+                assert closed.value.rcvd is not None
+                assert closed.value.rcvd.code == RATE_LIMITED
+
+    def test_it_serves_the_guest_page(self) -> None:
+        import http.client
+
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        conn.request("GET", "/_guest/sw.js")
+        res = conn.getresponse()
+        _ = res.read()
+        assert res.status == 200
+        assert res.getheader("Service-Worker-Allowed") == "/"
+        conn.request("GET", "/edit", headers={"Sec-Fetch-Mode": "navigate"})
+        res = conn.getresponse()
+        assert b"_guest/boot.js" in res.read()
+        conn.request("GET", "/_relay/health")
+        res = conn.getresponse()
+        assert json.loads(res.read())["ok"] is True
+        conn.close()
+
+
 # ── A deck shared online ──────────────────────────────────────────────────────
 
 
@@ -417,7 +528,7 @@ class Guest:
         self.rid: int = 0
 
     def send(self, header: dict[str, object], body: bytes = b"") -> None:
-        for chunk in frames.chunks(frames.pack(header, body)):
+        for chunk in frames.chunks(frames.wrap(frames.pack(header, body))):
             self.ws.send(self.session.seal(chunk))
 
     def next(self, timeout: float = 10) -> tuple[dict[str, object], bytes]:
@@ -426,7 +537,7 @@ class Guest:
             assert isinstance(frame, bytes)
             message = self.again.push(self.session.open(frame))
             if message is not None:
-                return frames.unpack(message)
+                return frames.unpack(frames.unwrap(message, deflate=True))
 
     def page(self, cid: int = 1) -> None:
         self.send({"t": "open", "c": cid})
@@ -688,3 +799,97 @@ def test_share_status_has_the_online_links(online: Shared) -> None:
     assert links["editor"] != links["view"]
     lines = server.online_lines()
     assert any("(online)" in line for line in lines)
+
+
+# ── Setting up: the relay's address, deploying to Cloudflare ──────────────────
+
+
+def test_the_relay_is_kept_in_the_user_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from inkflow.online import config
+
+    monkeypatch.delenv("INKFLOW_RELAY_URL", raising=False)
+    monkeypatch.setattr(config, "_file", lambda: tmp_path / "relay.json")
+    assert config.load() is None
+    saved = config.save("relay.example.org/whatever", "tok")
+    assert saved == config.RelayConfig("https://relay.example.org", "tok")
+    assert config.load() == saved
+    assert (tmp_path / "relay.json").stat().st_mode & 0o077 == 0
+    with pytest.raises(ValueError):
+        config.save("ftp://x", None)
+    monkeypatch.setenv("INKFLOW_RELAY_URL", "http://localhost:8001")
+    assert config.load() == config.RelayConfig("http://localhost:8001", None)
+    monkeypatch.delenv("INKFLOW_RELAY_URL")
+    config.forget()
+    assert config.load() is None
+
+
+def test_deploying_to_cloudflare_stages_the_worker_and_its_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    from inkflow.online import deploy
+
+    seen: dict[str, object] = {}
+
+    def fake_run(
+        command: list[str], cwd: Path, env: dict[str, str], check: bool
+    ) -> subprocess.CompletedProcess[bytes]:
+        assert not check
+        folder = Path(cwd)
+        seen["command"] = command
+        seen["toml"] = (folder / "wrangler.toml").read_text()
+        seen["files"] = sorted(
+            p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file()
+        )
+        secrets_file = Path(command[command.index("--secrets-file") + 1])
+        seen["secret"] = secrets_file.read_text()
+        targets = ["https://inkflow-relay.ada.workers.dev"]
+        Path(env["WRANGLER_OUTPUT_FILE_PATH"]).write_text(
+            json.dumps({"type": "wrangler-session"})
+            + "\n"
+            + json.dumps({"type": "deploy", "targets": targets})
+            + "\n"
+        )
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(deploy, "npx", lambda: "/usr/bin/npx")
+    result = deploy.deploy_cloudflare(token="tok123", run=fake_run)
+    assert result == deploy.Deployed("https://inkflow-relay.ada.workers.dev", "tok123")
+    command = cast("list[str]", seen["command"])
+    assert command[:4] == ["/usr/bin/npx", "--yes", deploy.WRANGLER, "deploy"]
+    assert seen["secret"] == "RELAY_ACCESS_TOKEN=tok123\n"
+    toml = cast("str", seen["toml"])
+    assert 'new_sqlite_classes = ["Room"]' in toml
+    assert 'REQUIRE_ACCESS_TOKEN = "1"' in toml
+    assert 'run_worker_first = ["/_relay/*"]' in toml
+    files = cast("list[str]", seen["files"])
+    for name in (
+        "worker.js",
+        "guest/index.html",
+        "guest/_headers",
+        "guest/_guest/sw.js",
+    ):
+        assert name in files
+    with pytest.raises(deploy.DeployError):
+        deploy.deploy_cloudflare("Not A Name", run=fake_run)
+    monkeypatch.setattr(deploy, "npx", lambda: None)
+    with pytest.raises(deploy.DeployError, match=r"Node\.js"):
+        deploy.deploy_cloudflare(run=fake_run)
+
+
+def test_a_failed_deploy_says_what_to_do(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    from inkflow.online import deploy
+
+    def failing(
+        command: list[str], **_kw: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(command, 1)
+
+    monkeypatch.setattr(deploy, "npx", lambda: "/usr/bin/npx")
+    with pytest.raises(deploy.DeployError, match="wrangler login"):
+        deploy.deploy_cloudflare(run=failing)

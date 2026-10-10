@@ -14,6 +14,7 @@ import json
 import os
 import urllib.request
 from http.client import HTTPResponse
+from pathlib import Path
 from typing import cast
 
 import click
@@ -62,6 +63,13 @@ def check_relay(url: str, timeout: float = 10) -> str | None:
     type=int,
     help="Guests per room.",
 )
+@click.option(
+    "--dump",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    hidden=True,
+    help="Append every frame forwarded to this file (to check what a relay sees).",
+)
 @click.pass_context
 def relay(
     ctx: click.Context,
@@ -69,6 +77,7 @@ def relay(
     port: int,
     access_token: str | None,
     max_guests: int,
+    dump: Path | None,
 ) -> None:
     """Run the relay for sharing online, or set one up.
 
@@ -87,7 +96,8 @@ def relay(
     """
     if ctx.invoked_subcommand is not None:
         return
-    server = Relay(access_token=access_token, max_guests=max_guests)
+    dump_file = dump.open("ab") if dump is not None else None
+    server = Relay(access_token=access_token, max_guests=max_guests, dump=dump_file)
 
     async def run() -> None:
         listening = await server.serve(host, port)
@@ -100,8 +110,12 @@ def relay(
             )
         await listening.serve_forever()
 
-    with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run())
+    try:
+        with contextlib.suppress(KeyboardInterrupt):
+            asyncio.run(run())
+    finally:
+        if dump_file is not None:
+            dump_file.close()
 
 
 @relay.command("set")

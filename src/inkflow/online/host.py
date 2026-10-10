@@ -35,7 +35,15 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 from inkflow.logging import logger
 from inkflow.online import crypto
 from inkflow.online.crypto import CryptoError, Role, Session, b64u, new_secret
-from inkflow.online.frames import FrameError, Reassembler, chunks, pack, unpack
+from inkflow.online.frames import (
+    FrameError,
+    Reassembler,
+    chunks,
+    pack,
+    unpack,
+    unwrap,
+    wrap,
+)
 from inkflow.online.relay import (
     HOST_GONE,
     HOST_PATH,
@@ -221,7 +229,7 @@ class Guest:
         if session is None or self.gone:
             raise VirtualClosed
         async with self.lock:
-            for chunk in chunks(pack(header, body)):
+            for chunk in chunks(wrap(pack(header, body), deflate=True)):
                 frame = session.seal(chunk)
                 self.sent_bytes += len(frame)
                 await self.host.send_frame(self.peer, frame)
@@ -245,7 +253,7 @@ class Guest:
             message = self.reassembler.push(self.session.open(frame))
             if message is None:
                 return
-            header, body = unpack(message)
+            header, body = unpack(unwrap(message))
         except (CryptoError, FrameError) as exc:
             logger.warning(f"online: dropped a guest: {exc}")
             await self.host.kick(self.peer)

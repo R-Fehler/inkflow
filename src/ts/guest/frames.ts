@@ -35,6 +35,41 @@ export function unpack(message: Uint8Array): [Header, Uint8Array] {
     return [header as Header, message.subarray(4 + n)];
 }
 
+// A message on the wire: one byte for its coding (0 as is, 1 raw DEFLATE,
+// which only the host sends), then the data. Guests send theirs as is.
+export const RAW = 0;
+export const DEFLATE = 1;
+
+export function wrap(message: Uint8Array): Uint8Array {
+    return concat(new Uint8Array([RAW]), message);
+}
+
+export async function unwrap(
+    data: Uint8Array,
+    limit = MAX_MESSAGE,
+): Promise<Uint8Array> {
+    if (!data.length) throw new Error("empty message");
+    if (data[0] === RAW) return data.subarray(1);
+    if (data[0] !== DEFLATE) throw new Error("unknown message coding");
+    const stream = new Blob([data.slice(1)])
+        .stream()
+        .pipeThrough(new DecompressionStream("deflate-raw"));
+    const reader = stream.getReader();
+    const parts: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > limit) {
+            await reader.cancel();
+            throw new Error("message too large");
+        }
+        parts.push(value);
+    }
+    return concat(...parts);
+}
+
 export function chunks(message: Uint8Array, size = CHUNK): Uint8Array[] {
     if (!message.length) return [new Uint8Array([LAST])];
     const out: Uint8Array[] = [];

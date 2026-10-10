@@ -704,6 +704,7 @@ commands:
       --port=: Listen here
       --access-token=: Hosts must present this to open rooms
       --max-guests=: Guests per room
+      --dump=: Append every frame forwarded to this file
     commands:
       - name: deploy
         description: Put the relay on a hosting platform.

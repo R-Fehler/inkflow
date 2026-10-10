@@ -221,6 +221,31 @@
     }
     return [header2, message.subarray(4 + n)];
   }
+  var RAW = 0;
+  var DEFLATE = 1;
+  function wrap(message) {
+    return concat(new Uint8Array([RAW]), message);
+  }
+  async function unwrap(data, limit = MAX_MESSAGE) {
+    if (!data.length) throw new Error("empty message");
+    if (data[0] === RAW) return data.subarray(1);
+    if (data[0] !== DEFLATE) throw new Error("unknown message coding");
+    const stream = new Blob([data.slice(1)]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+    const reader = stream.getReader();
+    const parts = [];
+    let size = 0;
+    for (; ; ) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > limit) {
+        await reader.cancel();
+        throw new Error("message too large");
+      }
+      parts.push(value);
+    }
+    return concat(...parts);
+  }
   function chunks(message, size = CHUNK) {
     if (!message.length) return [new Uint8Array([LAST])];
     const out = [];
@@ -399,7 +424,7 @@
         this.setState("ended", why);
         return;
       }
-      const waiting = code === NO_ROOM || code === HOST_GONE ? "Waiting for the person sharing the deck\u2026" : code === ROOM_FULL ? "The room is full: trying again shortly\u2026" : "Reconnecting\u2026";
+      const waiting = code === NO_ROOM || code === HOST_GONE ? "Waiting for the person sharing the deck\u2026 (if they made new links since, this one no longer works)" : code === ROOM_FULL ? "The room is full: trying again shortly\u2026" : "Reconnecting\u2026";
       this.setState("waiting", waiting);
       const delay = code === ROOM_FULL ? 1e4 : this.retry;
       this.retry = Math.min(this.retry * 2, 15e3);
@@ -429,7 +454,7 @@
       }
       const message = this.again.push(await this.session.open(frame));
       if (!message) return;
-      const [header2, body] = unpack(message);
+      const [header2, body] = unpack(await unwrap(message));
       this.dispatch(header2, body);
     }
     dispatch(header2, body) {
@@ -466,7 +491,7 @@
     send(header2, body) {
       const session = this.session;
       if (!session || this.state !== "open") return;
-      const parts = chunks(pack(header2, body));
+      const parts = chunks(wrap(pack(header2, body)));
       const sealed = parts.map((p) => session.seal(p));
       this.sending = this.sending.then(async () => {
         for (const frame of sealed) {
