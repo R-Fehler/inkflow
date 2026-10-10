@@ -59,7 +59,9 @@ you, read-only.
 Every edit is one undo step (<kbd>Ctrl</kbd>+<kbd>Z</kbd>). A burst of typing is
 one step, not one per keystroke. Undo restores the exact bytes it replaced, and it
 refuses rather than overwrite a file that was changed outside the editor since.
-The Undo and Redo buttons name the step they would take back.
+The Undo and Redo buttons name the step they would take back. With several
+people editing, each undoes their own changes (see
+[Editing together](collaborate.md#undo-is-yours)).
 
 Slide-list changes an agent makes with
 [`inkflow slide`](claude-code.md#changing-the-slide-list), and the shapes,
@@ -151,12 +153,14 @@ shortcut. `inkflow setup-desktop --remove` takes it away again.
 ### One server per deck
 
 Every launch (and every `inkflow edit` or `inkflow serve`) is a server of its
-own, on the next free ports, so several decks can be open side by side, each in
+own, on the next free port, so several decks can be open side by side, each in
 its own tab or window. A deck is only ever open in one server, though, so two
 editors never write the same files: opening a deck that another server already
 has (from the start page, the deck menu or the command line) takes you to that
 server's editor instead. Open more tabs or windows on the same address to work
-on one deck in several places; they all stay in sync.
+on one deck in several places; they all stay in sync. Other people, on the
+network or over SSH, join the same server: see
+[Editing together](collaborate.md).
 
 ## Version control
 
