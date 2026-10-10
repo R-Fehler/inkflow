@@ -41,6 +41,7 @@ from inkflow.manifest import (
     Video,
 )
 from inkflow.overlay import Overlay
+from inkflow.pdf import PdfPages
 from inkflow.steps import StepResolver
 from inkflow.svg import (
     compose_overlays,
@@ -615,6 +616,9 @@ class SlideSvg:
     ) -> None:
         self.root = substitute_content(self.root, content, font_size, dark_mode)
 
+    def convert_pdfs(self, pages: PdfPages) -> None:
+        self.root = pages.apply(self.root)
+
     def annotate(self, cues: list[tuple[Cue, int]]) -> None:
         self.root = annotate_svg(self.root, cues)
 
@@ -646,6 +650,8 @@ class DeckContext:
     overlays: Sequence[Overlay]  # deck default, already resolved against the theme
     mode: ColorMode
     total_slides: int
+    pdf_pages: PdfPages
+    """Converts the PDF pictures (and reports a missing converter once)."""
     editor: bool = False
     """Stamp provenance and collect ``SlideEditInfo`` for the visual editor."""
 
@@ -761,6 +767,8 @@ def process_slide(
             )
             content = _resolve_autoplay_conflicts(result.content, slide.animations)
             doc.inject_content(content, font_size, ctx.mode == ColorMode.DARK)
+    # After injection, so a PDF in a zone or in Markdown is converted as well.
+    doc.convert_pdfs(ctx.pdf_pages)
 
     # The deck animations=[...] list continues the timeline after the markdown
     # reveals (steps 1..reveal_max), so the two form one continuous count.
@@ -862,15 +870,17 @@ def deck_context(
     deck: Deck, project_dir: Path, total_slides: int, *, editor: bool = False
 ) -> DeckContext:
     """The per-build parameters every slide of ``deck`` is processed with."""
+    assets = AssetRoots(project_dir, deck.theme.asset_dir())
     return DeckContext(
         project_dir=project_dir,
         theme=deck.theme,
-        assets=AssetRoots(project_dir, deck.theme.asset_dir()),
+        assets=assets,
         deck_style=load_style(deck.style, project_dir),
         font_size=deck.effective_font_size,
         overlays=deck.effective_overlays,
         mode=deck.effective_mode,
         total_slides=total_slides,
+        pdf_pages=PdfPages(assets),
         editor=editor,
     )
 

@@ -197,12 +197,18 @@ class _Packer:
     def _add_refs(self, path: Path, text: str) -> None:
         def note(ref: str) -> None:
             if is_local_ref(ref) and not ref.startswith(("#", "/", "_theme/")):
-                target = path.parent / ref.split("#", 1)[0].split("?", 1)[0]
-                self.add(target, "asset")
+                self.add(path.parent / _file_part(ref)[0], "asset")
 
         rewrite_references(text, lambda ref: note(ref))
         for match in _MD_IMAGE_RE.finditer(text):
             note(match.group(2))
+
+
+def _file_part(ref: str) -> tuple[str, str]:
+    """A reference as its file and what follows it (``plot.pdf#page=2``: a
+    page of a PDF), which stays on the reference wherever the file moves."""
+    cut = min((i for i in (ref.find("#"), ref.find("?")) if i > 0), default=len(ref))
+    return ref[:cut], ref[cut:]
 
 
 def _keep(
@@ -291,7 +297,7 @@ def export_slides(deck: Deck, deck_path: Path, indices: list[int]) -> dict[str, 
                 for attr in ("src", "alt_src", "poster"):
                     ref = cast("str | None", getattr(value, attr, None))
                     if ref and is_local_ref(ref):
-                        rel = packer.add(project_dir / ref, "asset")
+                        rel = packer.add(project_dir / _file_part(ref)[0], "asset")
                         if rel is not None:
                             entry[ref] = rel
                 if entry:
@@ -325,7 +331,7 @@ def export_assets(project_dir: Path, refs: list[str]) -> dict[str, dict[str, str
     packer = _Packer(project_dir)
     for ref in refs:
         if is_local_ref(ref) and not ref.startswith(("#", "/", "_theme/")):
-            packer.add(project_dir / ref, "asset")
+            packer.add(project_dir / _file_part(ref)[0], "asset")
     return packer.files
 
 
@@ -434,11 +440,12 @@ def _rewrite_file(
     def ref(raw: str) -> str | None:
         if not is_local_ref(raw) or raw.startswith(("#", "/", "_theme/")):
             return None
-        source = posixpath.normpath(posixpath.join(posixpath.dirname(old_rel), raw))
+        file, rest = _file_part(raw)
+        source = posixpath.normpath(posixpath.join(posixpath.dirname(old_rel), file))
         target = targets.get(source)
         if target is None or (target == source and old_rel == new_rel):
             return None
-        return _relative(new_rel, target)
+        return _relative(new_rel, target) + rest
 
     text = rewrite_references(text, ref)
     text = _MD_IMAGE_RE.sub(
@@ -544,7 +551,8 @@ def _rewrite_media(
             for entries in media.values():
                 rel = entries.get(raw)
                 if rel and targets.get(rel, rel) != rel:
-                    out = _set_string(out, out.args[i], targets[rel])
+                    page = _file_part(raw)[1]
+                    out = _set_string(out, out.args[i], targets[rel] + page)
         return out
 
     elements = [
@@ -632,7 +640,8 @@ def retarget_fragment(xml: str, target_file_rel: str, targets: dict[str, str]) -
     def ref(raw: str) -> str | None:
         if not is_local_ref(raw) or raw.startswith(("#", "/", "_theme/")):
             return None
-        target = targets.get(raw, raw)
-        return _relative(target_file_rel, target)
+        file, rest = _file_part(raw)
+        target = targets.get(file, file)
+        return _relative(target_file_rel, target) + rest
 
     return rewrite_references(xml, ref)

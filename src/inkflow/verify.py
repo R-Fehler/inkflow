@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from inkflow import ns, pdf
 from inkflow.animations import Animation, PlayVideo
 from inkflow.assets import AssetRoots, AssetSource
 from inkflow.clean import clean_inkscape_tree
@@ -73,13 +74,40 @@ def _check_media(slide: Slide, project_dir: Path) -> list[Issue]:
             for src_field in filter(None, refs):
                 if src_field.startswith(("http://", "https://", "//")):
                     continue
-                media_p = (
-                    Path(src_field)
-                    if Path(src_field).is_absolute()
-                    else project_dir / src_field
-                )
+                file = pdf.split_ref(src_field)[0]  # a PDF names its page after #
+                media_p = Path(file) if Path(file).is_absolute() else project_dir / file
                 if not media_p.exists():
                     issues.append(("error", f"media not found: {src_field}"))
+    return issues
+
+
+_HREFS = ("href", f"{{{ns.XLINK}}}href")
+
+
+def _check_pdfs(slide: Slide, project_dir: Path, src: Path) -> list[Issue]:
+    """PDF pictures that will not show: a page the PDF does not have, or no
+    converter installed. Those in the slide's own SVG and in its zones; a
+    missing file is the media check's."""
+    refs: list[tuple[Path, str]] = []
+    for content in slide.zones.values():
+        if isinstance(content, Media):
+            refs += [(project_dir, r) for r in (content.src, content.alt_src) if r]
+    for image in clean_inkscape_tree(src).iter(f"{{{ns.SVG}}}image"):
+        refs += [(src.parent, r) for a in _HREFS if (r := image.get(a))]
+    issues: list[Issue] = []
+    for base, ref in refs:
+        if not pdf.is_pdf_ref(ref):
+            continue
+        file = base / pdf.split_ref(ref)[0]
+        if not file.is_file():
+            continue
+        page = pdf.page_of(ref)
+        if page is None:
+            issues.append(("error", f"not a page number: {ref} (write #page=2)"))
+        elif page > (count := pdf.page_count(file) or page):
+            issues.append(("error", f"{file.name} has {count} pages, not {page}"))
+        elif pdf.converter() is None:
+            issues.append(("warn", f"{file.name} cannot show: {pdf.INSTALL_HINT}"))
     return issues
 
 
@@ -270,6 +298,7 @@ def verify_slide(
     default_zone = resolve_default_zone(root, zone_ids)
 
     issues += _check_media(slide, project_dir)
+    issues += _check_pdfs(slide, project_dir, src)
     issues += _check_zones(slide, project_dir, zone_ids)
     issues += _check_animations(slide, all_ids)
     issues += _check_default_zone(slide, project_dir, zone_ids, default_zone)

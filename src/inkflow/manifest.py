@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from typing import TypeAlias
 
 from inkflow.animations import Cue
@@ -106,7 +106,24 @@ class Image(_MediaBase):
     ```python
     Slide("content", md="bullets", zones={"media": Image("photo.jpg")})
     ```
+
+    A PDF (a figure from a paper) shows as vector graphics: its first page, or
+    the page its fragment names, ``Image("figures/plot.pdf#page=2")``.
+    ``page=2`` says the same and is kept as that fragment.
     """
+
+    page: InitVar[int | None] = None
+    """For a PDF, the page to show; stored in ``src`` as ``#page=N``."""
+
+    def __post_init__(self, page: int | None) -> None:
+        if page is None:
+            return
+        if page < 1:
+            raise ValueError(f"Image page must be 1 or more, not {page}")
+        if "#" in self.src:
+            raise ValueError(f"Image {self.src!r}: give the page in src or page=")
+        if page > 1:
+            self.src: str = f"{self.src}#page={page}"
 
 
 @dataclass

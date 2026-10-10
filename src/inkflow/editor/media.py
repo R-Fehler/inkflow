@@ -38,7 +38,8 @@ from typing import cast
 from inkflow.editor.context import CONTEXT_DIR
 
 VIDEO_SUFFIXES = frozenset({".mp4", ".webm", ".ogg", ".mov"})
-IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"})
+# A PDF is a picture too: the build shows a page of it (inkflow/pdf.py).
+IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".pdf"})
 MEDIA_SUFFIXES = VIDEO_SUFFIXES | IMAGE_SUFFIXES
 OTHER_VIDEO_SUFFIXES = frozenset(
     {

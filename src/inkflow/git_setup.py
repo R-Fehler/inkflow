@@ -21,9 +21,9 @@ __pycache__/
 venv/
 env/
 
-# Inkflow output
+# Inkflow output (an exported deck; a PDF figure elsewhere is a source)
 /build/
-*.pdf
+/*.pdf
 
 # OS
 .DS_Store

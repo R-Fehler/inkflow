@@ -23,6 +23,16 @@ def context_path(project_dir: Path) -> Path:
     return project_dir / CONTEXT_DIR / CONTEXT_FILE
 
 
+def context_dir(project_dir: Path) -> Path:
+    """The project's ``.inkflow/``, created ignoring itself in git."""
+    directory = project_dir / CONTEXT_DIR
+    directory.mkdir(exist_ok=True)
+    ignore = directory / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text("*\n", encoding="utf-8")
+    return directory
+
+
 def write_context(project_dir: Path, context: object) -> None:
     """Persist the editor's focus. Malformed input is dropped, not trusted."""
     if not isinstance(context, dict):
@@ -32,11 +42,7 @@ def write_context(project_dir: Path, context: object) -> None:
     if isinstance(selection, list):
         data["selection"] = cast("list[object]", selection)[:_MAX_SELECTION]
     data["updatedAt"] = time.time()
-    directory = project_dir / CONTEXT_DIR
-    directory.mkdir(exist_ok=True)
-    ignore = directory / ".gitignore"
-    if not ignore.exists():
-        ignore.write_text("*\n", encoding="utf-8")
+    directory = context_dir(project_dir)
     tmp = directory / f"{CONTEXT_FILE}.tmp"
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
     tmp.replace(context_path(project_dir))

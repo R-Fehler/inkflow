@@ -83,6 +83,17 @@ def repo_root(directory: Path) -> Path | None:
     return Path(root) if root else None
 
 
+def is_ignored(directory: Path, path: Path) -> bool:
+    """Whether git ignores ``path`` (never, outside a repository)."""
+    if not available():
+        return False
+    try:
+        _ = run(directory, "check-ignore", "--quiet", str(path))
+    except GitError:  # exit status 1: not ignored; 128: no repository
+        return False
+    return True
+
+
 @dataclass
 class Repo:
     root: Path

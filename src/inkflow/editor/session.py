@@ -25,9 +25,10 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from inkflow import animations as animations_module
-from inkflow import drawio, instances
+from inkflow import drawio, instances, pdf
 from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
+from inkflow.assets import AssetRoots
 from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, open_with
 from inkflow.editor import gitops, media, nativedialog, places, projects
 from inkflow.editor.codegen import Code, coerce_fields
@@ -375,6 +376,8 @@ class EditorSession:
             return {"ok": True, "hits": self._find(msg)}
         if action == "drawio-load":
             return self._drawio_load(msg)
+        if action in ("pdf-pages", "pdf-page"):
+            return self._pdf_pages(msg)
         if deck is None:
             raise EditError("the deck has not built yet")
         if action == "theme-get":
@@ -664,8 +667,11 @@ class EditorSession:
             source.set_zone(index, zone, None)
             self._save_deck(txn, source, set())
             return f"Clear {zone}"
-        rel = self._deck_rel(Path(str(src)))
+        rel = self._deck_rel(Path(pdf.split_ref(str(src))[0]))
         cls = Video if Path(rel).suffix.lower() in media.VIDEO_SUFFIXES else Image
+        page = msg.get("page")
+        if isinstance(page, int) and pdf.is_pdf_ref(rel):
+            rel = pdf.with_page(rel, max(page, 1))
         current = slide.zones.get(zone)
         fit = msg.get("fit")
         if type(current) is cls:
@@ -1267,6 +1273,37 @@ class EditorSession:
         if not drawio.is_drawio_path(path):
             raise EditError("not a draw.io diagram (a .drawio.svg file)")
         return path
+
+    def _pdf_pages(self, msg: dict[str, object]) -> dict[str, object]:
+        """A PDF's pages for the editor's page picker: ``pdf-pages`` says how
+        many there are and whether they can be shown, ``pdf-page`` converts one
+        (the thumbnail, also the size a picture of it takes)."""
+        raw = msg.get("path")
+        if not isinstance(raw, str) or not raw.strip():
+            raise EditError("which PDF?")
+        path = Path(urllib.parse.unquote(pdf.split_ref(raw.strip())[0]))
+        path = (path if path.is_absolute() else self.project_dir / path).resolve()
+        if not path.is_relative_to(self.project_dir.resolve()):
+            raise EditError("that PDF is outside the deck's folder")
+        if path.suffix.lower() != ".pdf" or not path.is_file():
+            raise EditError(f"no PDF at {raw}")
+        tool = pdf.converter()
+        if msg.get("action") == "pdf-pages":
+            return {
+                "ok": True,
+                "pages": pdf.page_count(path),
+                "converter": tool,
+                "hint": None if tool else pdf.INSTALL_HINT,
+                "ignored": gitops.is_ignored(self.project_dir, path),
+            }
+        page = msg.get("page")
+        if not isinstance(page, int) or page < 1:
+            raise EditError("which page?")
+        try:
+            converted = pdf.convert(path, page, self.project_dir, tool)
+        except (pdf.PdfError, OSError) as exc:
+            raise EditError(str(exc)) from exc
+        return {"ok": True, "url": AssetRoots(self.project_dir).canonicalize(converted)}
 
     def _drawio_load(self, msg: dict[str, object]) -> dict[str, object]:
         """The diagram's source for the draw.io editor, and where draw.io is

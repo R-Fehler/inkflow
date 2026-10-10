@@ -9,8 +9,8 @@ editor- and machine-specific.
 
 The visual editor's "Open in…" menu offers more: the configured command, then
 the programs found installed for the file's kind (Inkscape for SVG; GIMP,
-Krita… for images; text editors for Markdown and deck.py), then the system's
-default app for the file.
+Krita… for images; PDF viewers for a PDF figure; text editors for Markdown and
+deck.py), then the system's default app for the file.
 """
 
 from __future__ import annotations
@@ -51,6 +51,7 @@ KINDS: dict[str, str] = {
     ),
     **dict.fromkeys(("md", "py", "css", "js", "txt", "toml", "json", "yaml"), "TEXT"),
     **dict.fromkeys(("mp4", "webm", "mov", "ogg"), "VIDEO"),
+    "pdf": "PDF",
 }
 """File extension → the kind an ``INKFLOW_EDIT_CMD_<KIND>`` var covers."""
 
@@ -116,6 +117,14 @@ _CANDIDATES: dict[str, list[tuple[str, str]]] = {
     # A draw.io diagram (*.drawio.svg): draw.io desktop edits its source.
     "DIAGRAM": [("drawio", "draw.io"), ("inkscape", "Inkscape"), *_TEXT_EDITORS],
     "IMAGE": [("gimp", "GIMP"), ("krita", "Krita"), ("pinta", "Pinta")],
+    # A figure: read in a viewer; Inkscape opens a page of it as a drawing.
+    "PDF": [
+        ("okular", "Okular"),
+        ("evince", "Document Viewer"),
+        ("zathura", "Zathura"),
+        ("xreader", "Xreader"),
+        ("inkscape", "Inkscape"),
+    ],
     "TEXT": _TEXT_EDITORS,
     "VIDEO": [
         ("losslesscut", "LosslessCut (trim, no re-encoding)"),
@@ -143,6 +152,8 @@ _FLATPAKS = {
     "gimp": "org.gimp.GIMP",
     "krita": "org.kde.krita",
     "drawio": "com.jgraph.drawio.desktop",
+    "okular": "org.kde.okular",
+    "evince": "org.gnome.Evince",
 }
 # macOS apps live in /Applications rather than on PATH.
 _MAC_APPS = {
