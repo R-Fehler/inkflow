@@ -267,6 +267,11 @@ src/
                       snap.ts (smart guides), textedit.ts, insert.ts (tools, images,
                       paste), sorter.ts, props.ts, notes.ts, toolbar.ts (shortcuts),
                       context.ts (agent context + goto/select), net.ts (edit-op requests),
+                      animpreview.ts (▶ Play in the Animation order list and an
+                      animation's panel: shared/step.ts runs played on the canvas
+                      click by click, in preview mode; Esc/a click/a re-render
+                      stops it), animsteps.ts (`cueSteps`: each listed
+                      animation's click, read off the built slide's data-cues),
                       clipboard.ts (system-clipboard copy/paste of slides and objects),
                       richtext.ts (zone HTML <-> Markdown for in-place rich editing; throws
                       Unsupported rather than drop content), crop.ts, objects.ts (Objects

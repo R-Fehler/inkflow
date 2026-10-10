@@ -104,6 +104,10 @@
     }
     return states;
   }
+  function effectEndMs(cue) {
+    const { duration, delay, iterations } = cue.opts;
+    return Math.max(0, delay) * 1e3 + Math.max(0, duration) * (iterations ?? 1) * 1e3;
+  }
   function ensureAnim(el2, st) {
     if (!st.anim) {
       const { name: name2, vars, opts: opts2 } = st.cue;
@@ -133,6 +137,37 @@
       if (c.kind !== "emphasis" && c.step <= step) gov = i;
     });
     return cues.map((_, i) => i === gov ? "hold" : "cancel");
+  }
+  function buildStepRun(root2, fromStep, toStep) {
+    const forward = toStep >= fromStep;
+    const runStep = Math.max(fromStep, toStep);
+    const items = [];
+    root2.querySelectorAll("[data-cues]").forEach((el2) => {
+      for (const st of cueStates(el2)) {
+        if (st.cue.step !== runStep) continue;
+        const anim = ensureAnim(el2, st);
+        anim.pause();
+        items.push({
+          anim,
+          offsetMs: Math.max(0, st.cue.offset) * 1e3,
+          spanMs: effectEndMs(st.cue)
+        });
+      }
+    });
+    const totalMs = items.reduce(
+      (m, it) => Math.max(m, it.offsetMs + it.spanMs),
+      0
+    );
+    return { items, totalMs, forward, toStep };
+  }
+  function seekStepRun(run, value) {
+    const runTimeMs = value * run.totalMs;
+    for (const it of run.items) {
+      it.anim.currentTime = Math.min(
+        Math.max(runTimeMs - it.offsetMs, 0),
+        it.spanMs
+      );
+    }
   }
   function applyCodeHighlights(root2, step) {
     root2.querySelectorAll(
@@ -1683,9 +1718,9 @@
       clearSelection();
       return;
     }
-    const current = ed.selection.length === 1 ? ed.selection[0].el : null;
+    const current2 = ed.selection.length === 1 ? ed.selection[0].el : null;
     let index = near && cycle ? cycle.index + 1 : 0;
-    if (!near && current && all[0] === current) index = 1;
+    if (!near && current2 && all[0] === current2) index = 1;
     index %= all.length;
     cycle = { x: e.clientX, y: e.clientY, index };
     select([all[index]]);
@@ -2313,11 +2348,11 @@
   function bendPlans(drag, p) {
     const sel = drag.snaps[0].sel;
     const conn = sel.el;
-    const current = connectorRoute(conn)?.bend;
-    if (!current) return [];
+    const current2 = connectorRoute(conn)?.bend;
+    if (!current2) return [];
     const bend = {
-      axis: current.axis,
-      at: Math.round(current.axis === "x" ? p.x : p.y)
+      axis: current2.axis,
+      at: Math.round(current2.axis === "x" ? p.x : p.y)
     };
     const d = connectorPath(conn, {}, "elbow", bend);
     if (!d) return [];
@@ -3611,12 +3646,12 @@
     for (const p of layouts) {
       const [label4, description] = LABELS[p.name] ?? [p.name, ""];
       const lost = opts2.mode === "change" ? lostZones(p) : [];
-      const current = opts2.mode === "change" && p.name === opts2.current;
+      const current2 = opts2.mode === "change" && p.name === opts2.current;
       const card = h(
         "button",
         {
           type: "button",
-          class: `gallery-card${current ? " current" : ""}`,
+          class: `gallery-card${current2 ? " current" : ""}`,
           title: p.name,
           onclick: () => void choose(p, opts2, lost)
         },
@@ -4841,14 +4876,14 @@
     }
     if (!await ensureOwnDrawing()) return;
     const src = ownSource();
-    const current = currentSlide();
-    if (!src || !current) return;
+    const current2 = currentSlide();
+    if (!src || !current2) return;
     const parent = insertParent();
     const p0 = toParent(parent.el, box.x, box.y);
     const p1 = toParent(parent.el, box.x + box.width, box.y + box.height);
     const result = await edit({
       action: "insert-textbox",
-      slide: current.deckIndex,
+      slide: current2.deckIndex,
       file: src.path,
       hash: src.hash,
       parent: parent.loc,
@@ -6414,6 +6449,126 @@
     on("selection", renderObjects);
   }
 
+  // src/ts/editor/animsteps.ts
+  function cueSteps(cues, svg) {
+    const seen = /* @__PURE__ */ new Map();
+    return cues.map((cue) => {
+      if (!svg) return null;
+      const byId2 = (id) => svg.querySelector(`[id="${CSS.escape(id)}"]`);
+      if (cue.kind === "video") {
+        const zone = byId2(`zone-${cue.element}`) ?? byId2(cue.element);
+        const v = zone?.querySelector("[data-play-on-step]");
+        const s = Number(v?.getAttribute("data-play-on-step"));
+        return Number.isFinite(s) && s > 0 ? s : null;
+      }
+      const el2 = byId2(cue.element) ?? byId2(`zone-${cue.element}`);
+      const n2 = seen.get(cue.element) ?? 0;
+      seen.set(cue.element, n2 + 1);
+      try {
+        const list3 = JSON.parse(el2?.getAttribute("data-cues") ?? "[]");
+        const steps = list3.map((c) => c.step).sort((a, b) => a - b);
+        return steps[n2] ?? null;
+      } catch {
+        return null;
+      }
+    });
+  }
+
+  // src/ts/editor/animpreview.ts
+  var current = null;
+  function previewPlaying() {
+    return current !== null;
+  }
+  function stopPreview() {
+    current?.cancel();
+  }
+  function wait(ms, cancelled) {
+    return new Promise((resolve) => {
+      const t0 = performance.now();
+      const tick = (now) => {
+        if (cancelled() || now - t0 >= ms) resolve();
+        else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+  }
+  function playRun(root2, from, to, cancelled) {
+    const run = buildStepRun(root2, from, to);
+    if (!run.totalMs) return Promise.resolve();
+    return new Promise((resolve) => {
+      const t0 = performance.now();
+      const tick = (now) => {
+        if (cancelled()) {
+          resolve();
+          return;
+        }
+        const v = Math.min(1, (now - t0) / run.totalMs);
+        seekStepRun(run, v);
+        if (v < 1) requestAnimationFrame(tick);
+        else resolve();
+      };
+      requestAnimationFrame(tick);
+    });
+  }
+  function showStep(step) {
+    const sel = document.getElementById("step-select");
+    if (sel) sel.value = step == null ? "" : String(step);
+    for (const row3 of document.querySelectorAll(
+      ".anim-row[data-step]"
+    )) {
+      row3.classList.toggle(
+        "playing",
+        step != null && row3.dataset.step === String(step)
+      );
+    }
+  }
+  async function playAnimations(from = 1) {
+    stopPreview();
+    const first = slideRoot();
+    const last = first ? maxStep(first) : 0;
+    if (!first || last === 0) {
+      toast("Nothing on this slide is animated yet");
+      return;
+    }
+    const before = ed.step;
+    let cancelled = false;
+    const run = { cancel: () => cancelled = true };
+    current = run;
+    const stopOnClick = (e) => {
+      if (!e.target.closest?.(".anim-preview-ctl")) run.cancel();
+    };
+    const stopOnKey = (e) => {
+      if (e.key === "Escape") run.cancel();
+    };
+    document.addEventListener("pointerdown", stopOnClick, true);
+    document.addEventListener("keydown", stopOnKey, true);
+    document.body.classList.add("previewing", "anim-playing");
+    emit("preview");
+    ed.step = Math.max(0, Math.min(from, last) - 1);
+    render();
+    const root2 = slideRoot();
+    const gone = () => cancelled || slideRoot() !== root2;
+    if (root2) {
+      for (let s = ed.step + 1; s <= last && !gone(); s++) {
+        showStep(s);
+        await playRun(root2, s - 1, s, gone);
+        if (gone()) break;
+        applyStepInstant(root2, s);
+        ed.step = s;
+        await wait(s < last ? 450 : 900, gone);
+      }
+    }
+    document.removeEventListener("pointerdown", stopOnClick, true);
+    document.removeEventListener("keydown", stopOnKey, true);
+    if (current === run) current = null;
+    document.body.classList.remove("anim-playing");
+    document.body.classList.toggle("previewing", before != null);
+    ed.step = before;
+    showStep(null);
+    render();
+    emit("preview");
+  }
+
   // src/ts/editor/videopreview.ts
   function videoOf(el2) {
     if (!el2) return null;
@@ -6839,10 +6994,10 @@
       );
     }
   }
-  function transitionSection(current, di) {
+  function transitionSection(current2, di) {
     const model = ed.model;
     const types = model.transitionTypes;
-    const value = current?.type ?? "";
+    const value = current2?.type ?? "";
     const opts2 = [
       { value: "", label: `Deck default (${model.defaultTransition.type})` },
       ...types.map((t) => ({ value: t.type, label: t.type }))
@@ -6857,14 +7012,14 @@
         })
       )
     ];
-    if (current) {
-      const info3 = typeInfo(types, current.type);
+    if (current2) {
+      const info3 = typeInfo(types, current2.type);
       if (info3) {
         body2.push(
           fieldsEditor(
             info3.fields,
-            current.fields,
-            (fields) => send({ type: current.type, fields })
+            current2.fields,
+            (fields) => send({ type: current2.type, fields })
           )
         );
       }
@@ -6878,59 +7033,120 @@
     return `step ${t}`;
   }
   function animationList(cues, editable, di) {
+    const model = ed.model;
     const list3 = h("div", { class: "anim-list" });
     if (!cues.length)
       list3.append(h("p", { class: "hint" }, "No animations on this slide."));
+    const steps = cueSteps(cues, slideRoot());
+    const replace2 = (i, type, fields) => void edit({
+      action: "anim",
+      slide: di,
+      op: "replace",
+      index: i,
+      spec: { type, element: cues[i].element, fields }
+    });
     cues.forEach((cue, i) => {
+      const step = steps[i];
+      const info3 = typeInfo(model.animationTypes, cue.type);
+      const trigger = cue.fields.trigger ?? "on-click";
+      const typeSelect = selectInput(
+        model.animationTypes.filter((t) => t.kind === "video" === (cue.kind === "video")).map((t) => ({ value: t.type, label: t.type })),
+        cue.type,
+        (v) => {
+          const names = new Set(
+            typeInfo(model.animationTypes, v)?.fields.map(
+              (f) => f.name
+            )
+          );
+          const kept = Object.fromEntries(
+            Object.entries(cue.fields).filter(([k]) => names.has(k))
+          );
+          replace2(i, v, { ...kept, trigger });
+        }
+      );
+      const triggerField = info3?.fields.find((f) => f.kind === "trigger");
+      const triggerSelect = triggerField ? fieldControl(
+        triggerField,
+        trigger,
+        (v) => replace2(i, cue.type, { ...cue.fields, trigger: v })
+      ) : null;
       const item = h(
         "div",
-        { class: "anim-item" },
-        h("span", { class: `anim-kind k-${cue.kind}` }),
+        {
+          class: "anim-row",
+          "data-step": step == null ? null : String(step)
+        },
         h(
-          "button",
-          {
-            type: "button",
-            class: "anim-target",
-            title: "Select this element",
-            onclick: () => selectById(cue.element)
-          },
-          `#${cue.element}`
-        ),
-        h("span", { class: "anim-type" }, cue.type),
-        h(
-          "span",
-          { class: "anim-trigger" },
-          triggerLabel(cue.fields.trigger ?? null)
-        ),
-        editable && button(icon("up", 12), "Earlier", () => {
-          if (i > 0)
+          "div",
+          { class: "anim-item" },
+          h("span", {
+            class: `anim-kind k-${cue.kind}`,
+            title: cue.kind
+          }),
+          h(
+            "span",
+            {
+              class: "anim-step",
+              title: step == null ? "Not on the slide" : `Plays on click ${step}`
+            },
+            step == null ? "\u2013" : String(step)
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "anim-target",
+              title: "Select this element",
+              onclick: () => selectById(cue.element)
+            },
+            `#${cue.element}`
+          ),
+          step != null && button(
+            icon("play", 12),
+            "Preview from this animation",
+            () => void playAnimations(step),
+            "anim-preview-ctl"
+          ),
+          editable && button(icon("up", 12), "Earlier", () => {
+            if (i > 0)
+              void edit({
+                action: "anim",
+                slide: di,
+                op: "move",
+                index: i,
+                to: i - 1
+              });
+          }),
+          editable && button(icon("down", 12), "Later", () => {
+            if (i < cues.length - 1) {
+              void edit({
+                action: "anim",
+                slide: di,
+                op: "move",
+                index: i,
+                to: i + 1
+              });
+            }
+          }),
+          editable && button(icon("trash", 12), "Remove", () => {
             void edit({
               action: "anim",
               slide: di,
-              op: "move",
-              index: i,
-              to: i - 1
+              op: "remove",
+              index: i
             });
-        }),
-        editable && button(icon("down", 12), "Later", () => {
-          if (i < cues.length - 1) {
-            void edit({
-              action: "anim",
-              slide: di,
-              op: "move",
-              index: i,
-              to: i + 1
-            });
-          }
-        }),
-        editable && button(icon("trash", 12), "Remove", () => {
-          void edit({
-            action: "anim",
-            slide: di,
-            op: "remove",
-            index: i
-          });
-        })
+          })
+        ),
+        editable ? h("div", { class: "anim-edit" }, typeSelect, triggerSelect) : h(
+          "div",
+          { class: "anim-edit" },
+          h("span", { class: "anim-type" }, cue.type),
+          h(
+            "span",
+            { class: "anim-trigger" },
+            triggerLabel(cue.fields.trigger ?? null)
+          )
+        )
       );
       list3.append(item);
     });
@@ -6943,7 +7159,27 @@
         )
       );
     }
-    return section("Animation order", list3);
+    const svg = slideRoot();
+    const animated = !!svg && maxStep(svg) > 0;
+    const playing = previewPlaying();
+    const controls = h(
+      "div",
+      { class: "btn-row anim-preview" },
+      playing ? button(
+        "\u25A0 Stop",
+        "Stop the preview (Esc)",
+        () => stopPreview(),
+        "anim-preview-ctl"
+      ) : button(
+        "\u25B6 Play",
+        "Play this slide's animations here, click by click",
+        () => void playAnimations(1),
+        "anim-preview-ctl"
+      )
+    );
+    if (!animated && !playing)
+      controls.firstChild.disabled = true;
+    return section("Animation order", controls, list3);
   }
   function selectById(id) {
     const svg = slideRoot();
@@ -6962,6 +7198,7 @@
     const editable = slide.animationsEditable && model.deckEditable;
     const body2 = h("div", { class: "anim-list" });
     const elementName = isZone(sel.el) ? zoneName(sel.el) : id;
+    const steps = cueSteps(slide.animations, slideRoot());
     slide.animations.forEach((cue, index) => {
       if (!elementName || cue.element !== (cue.kind === "video" ? zoneName(sel.el) : id))
         return;
@@ -6987,6 +7224,12 @@
             trigger: cue.fields.trigger ?? "on-click"
           })
         ) : h("span", {}, cue.type),
+        steps[index] != null && button(
+          icon("play", 12),
+          `Preview (click ${steps[index]})`,
+          () => void playAnimations(steps[index] ?? 1),
+          "anim-preview-ctl"
+        ),
         editable && button(icon("trash", 12), "Remove", () => {
           void edit({
             action: "anim",
@@ -7156,7 +7399,7 @@
     probe.remove();
     return hex;
   }
-  function cellColorRow(label4, current, pick2) {
+  function cellColorRow(label4, current2, pick2) {
     const swatches = h("div", { class: "swatches" });
     for (const t of ed.model?.colorTokens ?? []) {
       swatches.append(
@@ -7171,7 +7414,7 @@
     }
     const custom = h("input", {
       type: "color",
-      value: current,
+      value: current2,
       title: "Custom colour"
     });
     custom.addEventListener("change", () => pick2(custom.value));
@@ -8404,6 +8647,7 @@
   function initProps() {
     on("selection", renderProps);
     on("render", renderProps);
+    on("preview", renderProps);
     panel.addEventListener("focusout", () => {
       window.setTimeout(() => {
         if (refreshOnBlur && !panel.contains(document.activeElement)) {
@@ -9807,10 +10051,10 @@ ${area2.value.slice(pos)}`;
   function editLink(content2) {
     const a = caretElement(content2)?.closest("a");
     const range = selectionRange(content2);
-    const current = a?.getAttribute("href") ?? "";
+    const current2 = a?.getAttribute("href") ?? "";
     const url = window.prompt(
       a ? "Link address: https://\u2026 or slide:<id> (empty removes the link)" : "Link address: https://\u2026 or slide:<id>",
-      current || "https://"
+      current2 || "https://"
     );
     if (url == null) return;
     const sel = window.getSelection();

@@ -3,6 +3,13 @@
 // selected, that object (position, colours, text, arrangement, animations);
 // with several, alignment and distribution.
 
+import { maxStep } from "../shared/step";
+import {
+    cueSteps,
+    playAnimations,
+    previewPlaying,
+    stopPreview,
+} from "./animpreview";
 import {
     canTransform,
     connectorPath,
@@ -582,62 +589,137 @@ function animationList(
     editable: boolean,
     di: number,
 ): HTMLElement {
+    const model = ed.model!;
     const list = h("div", { class: "anim-list" });
     if (!cues.length)
         list.append(h("p", { class: "hint" }, "No animations on this slide."));
+    const steps = cueSteps(cues, slideRoot());
+    const replace = (
+        i: number,
+        type: string,
+        fields: Record<string, FieldValue>,
+    ) =>
+        void edit({
+            action: "anim",
+            slide: di,
+            op: "replace",
+            index: i,
+            spec: { type, element: cues[i].element, fields },
+        });
     cues.forEach((cue, i) => {
+        const step = steps[i];
+        const info = typeInfo(model.animationTypes, cue.type);
+        const trigger = cue.fields.trigger ?? "on-click";
+        const typeSelect = selectInput(
+            model.animationTypes
+                .filter((t) => (t.kind === "video") === (cue.kind === "video"))
+                .map((t) => ({ value: t.type, label: t.type })),
+            cue.type,
+            (v) => {
+                // Keep what the new type also has (its trigger, timing…).
+                const names = new Set(
+                    typeInfo(model.animationTypes, v)?.fields.map(
+                        (f) => f.name,
+                    ),
+                );
+                const kept = Object.fromEntries(
+                    Object.entries(cue.fields).filter(([k]) => names.has(k)),
+                );
+                replace(i, v, { ...kept, trigger });
+            },
+        );
+        const triggerField = info?.fields.find((f) => f.kind === "trigger");
+        const triggerSelect = triggerField
+            ? fieldControl(triggerField, trigger, (v) =>
+                  replace(i, cue.type, { ...cue.fields, trigger: v }),
+              )
+            : null;
         const item = h(
             "div",
-            { class: "anim-item" },
-            h("span", { class: `anim-kind k-${cue.kind}` }),
+            {
+                class: "anim-row",
+                "data-step": step == null ? null : String(step),
+            },
             h(
-                "button",
-                {
-                    type: "button",
-                    class: "anim-target",
-                    title: "Select this element",
-                    onclick: () => selectById(cue.element),
-                },
-                `#${cue.element}`,
-            ),
-            h("span", { class: "anim-type" }, cue.type),
-            h(
-                "span",
-                { class: "anim-trigger" },
-                triggerLabel(cue.fields.trigger ?? null),
-            ),
-            editable &&
-                button(icon("up", 12), "Earlier", () => {
-                    if (i > 0)
+                "div",
+                { class: "anim-item" },
+                h("span", {
+                    class: `anim-kind k-${cue.kind}`,
+                    title: cue.kind,
+                }),
+                h(
+                    "span",
+                    {
+                        class: "anim-step",
+                        title:
+                            step == null
+                                ? "Not on the slide"
+                                : `Plays on click ${step}`,
+                    },
+                    step == null ? "–" : String(step),
+                ),
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "anim-target",
+                        title: "Select this element",
+                        onclick: () => selectById(cue.element),
+                    },
+                    `#${cue.element}`,
+                ),
+                step != null &&
+                    button(
+                        icon("play", 12),
+                        "Preview from this animation",
+                        () => void playAnimations(step),
+                        "anim-preview-ctl",
+                    ),
+                editable &&
+                    button(icon("up", 12), "Earlier", () => {
+                        if (i > 0)
+                            void edit({
+                                action: "anim",
+                                slide: di,
+                                op: "move",
+                                index: i,
+                                to: i - 1,
+                            });
+                    }),
+                editable &&
+                    button(icon("down", 12), "Later", () => {
+                        if (i < cues.length - 1) {
+                            void edit({
+                                action: "anim",
+                                slide: di,
+                                op: "move",
+                                index: i,
+                                to: i + 1,
+                            });
+                        }
+                    }),
+                editable &&
+                    button(icon("trash", 12), "Remove", () => {
                         void edit({
                             action: "anim",
                             slide: di,
-                            op: "move",
+                            op: "remove",
                             index: i,
-                            to: i - 1,
                         });
-                }),
-            editable &&
-                button(icon("down", 12), "Later", () => {
-                    if (i < cues.length - 1) {
-                        void edit({
-                            action: "anim",
-                            slide: di,
-                            op: "move",
-                            index: i,
-                            to: i + 1,
-                        });
-                    }
-                }),
-            editable &&
-                button(icon("trash", 12), "Remove", () => {
-                    void edit({
-                        action: "anim",
-                        slide: di,
-                        op: "remove",
-                        index: i,
-                    });
-                }),
+                    }),
+            ),
+            editable
+                ? h("div", { class: "anim-edit" }, typeSelect, triggerSelect)
+                : h(
+                      "div",
+                      { class: "anim-edit" },
+                      h("span", { class: "anim-type" }, cue.type),
+                      h(
+                          "span",
+                          { class: "anim-trigger" },
+                          triggerLabel(cue.fields.trigger ?? null),
+                      ),
+                  ),
         );
         list.append(item);
     });
@@ -650,7 +732,29 @@ function animationList(
             ),
         );
     }
-    return section("Animation order", list);
+    const svg = slideRoot();
+    const animated = !!svg && maxStep(svg) > 0;
+    const playing = previewPlaying();
+    const controls = h(
+        "div",
+        { class: "btn-row anim-preview" },
+        playing
+            ? button(
+                  "■ Stop",
+                  "Stop the preview (Esc)",
+                  () => stopPreview(),
+                  "anim-preview-ctl",
+              )
+            : button(
+                  "▶ Play",
+                  "Play this slide's animations here, click by click",
+                  () => void playAnimations(1),
+                  "anim-preview-ctl",
+              ),
+    );
+    if (!animated && !playing)
+        (controls.firstChild as HTMLButtonElement).disabled = true;
+    return section("Animation order", controls, list);
 }
 
 function selectById(id: string): void {
@@ -672,6 +776,7 @@ function elementAnimations(sel: Selected): HTMLElement {
     const editable = slide.animationsEditable && model.deckEditable;
     const body = h("div", { class: "anim-list" });
     const elementName = isZone(sel.el) ? zoneName(sel.el) : id;
+    const steps = cueSteps(slide.animations, slideRoot());
     slide.animations.forEach((cue, index) => {
         if (
             !elementName ||
@@ -704,6 +809,13 @@ function elementAnimations(sel: Selected): HTMLElement {
                           }),
                   )
                 : h("span", {}, cue.type),
+            steps[index] != null &&
+                button(
+                    icon("play", 12),
+                    `Preview (click ${steps[index]})`,
+                    () => void playAnimations(steps[index] ?? 1),
+                    "anim-preview-ctl",
+                ),
             editable &&
                 button(icon("trash", 12), "Remove", () => {
                     void edit({
@@ -2323,6 +2435,7 @@ function typingIn(el: Element): boolean {
 export function initProps(): void {
     on("selection", renderProps);
     on("render", renderProps);
+    on("preview", renderProps);
     panel.addEventListener("focusout", () => {
         window.setTimeout(() => {
             if (refreshOnBlur && !panel.contains(document.activeElement)) {

@@ -268,6 +268,17 @@ slider sets how large the thumbnails are.
 The editor shows every object by default. To see what the audience sees at a given
 click, pick a build step in the toolbar; editing pauses while you preview.
 
+**Animations at a glance.** With nothing selected, the slide panel's
+**Animation order** lists every animation of the slide with the click it plays
+on, and each one's **type** and **trigger** (on click, with previous, after
+previous) can be changed right there, without selecting the animated object
+first; ↑ / ↓ reorder them. A new type keeps the settings both types share.
+**▶ Play** plays the slide's animations on the canvas, click by click, the way
+the presenter plays them (the playing click is highlighted in the list);
+the ▶ on a row, or on an animation in an object's own panel, plays from that
+animation's click. A click on the slide or <kbd>Esc</kbd> stops it, and the
+editor goes back to showing every object.
+
 ## Text boxes and Markdown zones
 
 Text in a layout's zones, and in text boxes, is Markdown: double-click it and you

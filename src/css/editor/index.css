@@ -937,13 +937,63 @@ body.previewing #canvas::after {
     font:
         12px ui-monospace,
         monospace;
-    max-width: 90px;
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
 }
 
 .anim-type {
     flex: 1;
+}
+
+.anim-row {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+}
+
+.anim-row.playing {
+    border-color: var(--sel);
+    background: var(--sel-soft);
+}
+
+.anim-step {
+    min-width: 16px;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--subtext);
+    text-align: center;
+}
+
+.anim-edit {
+    display: flex;
+    gap: 6px;
+    padding-left: 30px;
+}
+
+.anim-edit select {
+    flex: 1;
+    min-width: 0;
+    height: 26px;
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-line);
+    border-radius: 5px;
+    padding: 0 4px;
+}
+
+.anim-preview {
+    margin-bottom: 4px;
+}
+
+/* While the preview plays, the slide is for watching. */
+body.anim-playing #overlay {
+    visibility: hidden;
 }
 
 .anim-trigger {
