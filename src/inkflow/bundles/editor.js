@@ -5646,6 +5646,142 @@
     const give = window.setTimeout(() => off("render", rendered2), 1e4);
     on("render", rendered2);
   }
+  function convertDiagram(sel) {
+    const image = diagramOf(sel.el);
+    const src = sourceOf(sel.key);
+    if (!image || !src?.writable) return;
+    const name2 = hrefOf(image).split("/").pop() ?? "the diagram";
+    const keep = h("input", { type: "checkbox", checked: true });
+    openDialog(
+      "Convert to slide shapes?",
+      h(
+        "div",
+        { class: "deck-form" },
+        h(
+          "p",
+          {},
+          "The diagram's shapes become ordinary shapes of this slide: you can ungroup, restyle and edit each one like anything else drawn here."
+        ),
+        h(
+          "p",
+          { class: "warn" },
+          "This is one way: draw.io can no longer edit them, and draw.io's arrows become plain lines that no longer follow the shapes. Undo (Ctrl+Z) takes it back."
+        ),
+        h(
+          "label",
+          { class: "check-row" },
+          keep,
+          ` Keep ${name2} as a backup in assets/drawio/`
+        ),
+        h(
+          "p",
+          { class: "hint" },
+          "The converted shapes link to the backup, and \u201CRestore draw.io diagram\u201D in their panel brings the diagram back (losing changes made to the shapes since). Without a backup the file is deleted, unless another slide still shows it."
+        ),
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => closeDialog()
+            },
+            "Cancel"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary danger",
+              onclick: () => {
+                closeDialog();
+                void runConvert(
+                  sel,
+                  image,
+                  keep.checked
+                );
+              }
+            },
+            "Convert"
+          )
+        )
+      )
+    );
+  }
+  async function runConvert(sel, image, backup) {
+    const src = sourceOf(sel.key);
+    if (!src) return;
+    const id = image.getAttribute("id");
+    const step = `drawio-convert-${Date.now()}`;
+    const result = await edit({
+      action: "drawio-convert",
+      file: src.path,
+      hash: src.hash,
+      loc: image.getAttribute("data-ink") ?? sel.loc,
+      backup,
+      coalesce: step
+    });
+    if (!result.ok) return;
+    toast(
+      backup ? "Converted; the draw.io diagram is kept in assets/drawio/" : "Converted to slide shapes",
+      "ok"
+    );
+    if (id) followArrows(id, step);
+  }
+  function restoreDiagram(sel) {
+    const src = sourceOf(sel.key);
+    const backup = sel.el.getAttribute("inkflow:drawio-backup");
+    if (!src?.writable || !backup) return;
+    openDialog(
+      "Restore the draw.io diagram?",
+      h(
+        "div",
+        { class: "deck-form" },
+        h(
+          "p",
+          {},
+          `These shapes become the draw.io diagram again (${backup.split("/").pop()}), back in diagrams/ and editable in draw.io.`
+        ),
+        h(
+          "p",
+          { class: "warn" },
+          "Changes made to the shapes since they were converted are lost. Undo (Ctrl+Z) takes the restore back."
+        ),
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => closeDialog()
+            },
+            "Cancel"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              onclick: () => {
+                closeDialog();
+                void edit({
+                  action: "drawio-restore",
+                  file: src.path,
+                  hash: src.hash,
+                  loc: sel.loc
+                });
+              }
+            },
+            "Restore"
+          )
+        )
+      )
+    );
+  }
   var redraws = /* @__PURE__ */ new Map();
   var redrawCount = 0;
   function diagramEdited(diagram, step) {
@@ -7321,6 +7457,9 @@
     if (!zone && src?.writable && pictureOf(el2)) {
       panel.append(pictureSection(sel));
     }
+    if (!zone && src?.writable && el2.hasAttribute("inkflow:drawio-backup")) {
+      panel.append(backupSection(sel));
+    }
     if (!zone && src?.writable && drawnDiagram(el2)) {
       panel.append(diagramSection(sel));
       const shapes = diagramShapesSection(sel);
@@ -7615,6 +7754,7 @@
         )
       ) : null,
       isDiagramHref(href) && !cropped ? showAsRow(sel, "picture") : null,
+      isDiagramHref(href) && !cropped ? convertRow(sel) : null,
       h(
         "div",
         { class: "btn-row" },
@@ -7723,6 +7863,7 @@
       ),
       showAsRow(sel, diagramMode(svg)),
       editShapesRow(sel, svg),
+      convertRow(sel),
       row2(
         "Fit",
         selectInput(
@@ -7745,6 +7886,42 @@
             ],
             "Diagram fit"
           )
+        )
+      )
+    );
+  }
+  function convertRow(sel) {
+    return h(
+      "div",
+      { class: "btn-row" },
+      button(
+        "Convert to slide shapes\u2026",
+        "Make the diagram's shapes ordinary shapes of this slide (one way; asks first)",
+        () => convertDiagram(sel)
+      )
+    );
+  }
+  function backupSection(sel) {
+    const backup = sel.el.getAttribute("inkflow:drawio-backup") ?? "";
+    return section(
+      "draw.io backup",
+      h(
+        "p",
+        { class: "hint" },
+        "Converted from a draw.io diagram, kept as a backup:"
+      ),
+      h(
+        "div",
+        { class: "source-hint" },
+        h("p", { class: "hint media-src" }, backup.split("/").pop() ?? "")
+      ),
+      h(
+        "div",
+        { class: "btn-row" },
+        button(
+          "Restore draw.io diagram\u2026",
+          "Back to the diagram (changes to these shapes since are lost; asks first)",
+          () => restoreDiagram(sel)
         )
       )
     );
@@ -10533,6 +10710,20 @@ ${area2.value.slice(pos)}`;
       }
       if (diagramOf(el2)) {
         items.push(menuItem("Edit diagram", () => editDiagram(one)));
+        items.push(
+          menuItem(
+            "Convert to slide shapes\u2026",
+            () => convertDiagram(one)
+          )
+        );
+      }
+      if (el2.hasAttribute("inkflow:drawio-backup")) {
+        items.push(
+          menuItem(
+            "Restore draw.io diagram\u2026",
+            () => restoreDiagram(one)
+          )
+        );
       }
       if (pictureOf(el2)) {
         items.push(menuItem("Crop", () => void startCrop(one)));

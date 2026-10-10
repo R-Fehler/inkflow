@@ -94,7 +94,9 @@ each draw.io cell is then an element named `<image id>-<cell id>` that
 `animations=[...]` can target (`FadeIn("flow-client")`) and a connector can
 attach to (`inkflow:connect-end="flow-client:left"`). Change a diagram's
 shapes in its `<mxGraphModel>` (geometry, `value`, `style`), never in the
-picture alone: draw.io redraws the picture from the source.
+picture alone: draw.io redraws the picture from the source. A `<g>` with
+`inkflow:drawio-backup` is a diagram converted into plain slide shapes (edit
+those directly); the attribute names the draw.io file kept as its backup.
 
 ## Text boxes, colours and links
 

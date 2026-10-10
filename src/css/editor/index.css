@@ -2272,7 +2272,8 @@ foreignObject.rich-editing .math-chip.editing {
     margin: 0;
 }
 
-.hint.warn {
+.hint.warn,
+.deck-form p.warn {
     color: var(--yellow);
 }
 
