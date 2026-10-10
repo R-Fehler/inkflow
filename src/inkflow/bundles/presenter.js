@@ -1092,7 +1092,7 @@
       const g2 = this.gesture;
       if (!g2 || e2.pointerId !== g2.pointerId) return;
       this.swallow(e2);
-      if (cancelled && g2.kind === "draw") {
+      if (cancelled) {
         this.cancel();
         return;
       }
@@ -1241,6 +1241,7 @@
       const customLabel = document.createElement("label");
       customLabel.className = "ink-btn ink-custom";
       customLabel.title = "Another colour";
+      customLabel.dataset.inkCustom = "";
       this.custom = document.createElement("input");
       this.custom.type = "color";
       this.custom.setAttribute("aria-label", "Another colour");
@@ -1315,6 +1316,10 @@
       } else if (data.inkSize !== void 0) {
         const tool = this.penTool();
         s2[tool] = { ...s2[tool], size: Number(data.inkSize) };
+        if (s2.tool === "eraser") s2.tool = tool;
+      } else if (data.inkCustom !== void 0) {
+        const tool = this.penTool();
+        s2[tool] = { ...s2[tool], swatch: null };
         if (s2.tool === "eraser") s2.tool = tool;
       } else if (data.inkToggle === "fingers") {
         s2.fingers = !s2.fingers;

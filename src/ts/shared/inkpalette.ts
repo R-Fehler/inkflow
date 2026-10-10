@@ -100,6 +100,7 @@ export class InkPalette {
         const customLabel = document.createElement("label");
         customLabel.className = "ink-btn ink-custom";
         customLabel.title = "Another colour";
+        customLabel.dataset.inkCustom = "";
         this.custom = document.createElement("input");
         this.custom.type = "color";
         this.custom.setAttribute("aria-label", "Another colour");
@@ -182,6 +183,12 @@ export class InkPalette {
         } else if (data.inkSize !== undefined) {
             const tool = this.penTool();
             s[tool] = { ...s[tool], size: Number(data.inkSize) };
+            if (s.tool === "eraser") s.tool = tool;
+        } else if (data.inkCustom !== undefined) {
+            // The well itself picks the custom colour; the native picker it
+            // opens changes it (the input event below).
+            const tool = this.penTool();
+            s[tool] = { ...s[tool], swatch: null };
             if (s.tool === "eraser") s.tool = tool;
         } else if (data.inkToggle === "fingers") {
             s.fingers = !s.fingers;

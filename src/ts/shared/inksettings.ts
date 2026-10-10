@@ -98,11 +98,6 @@ export function sizesOf(tool: PenTool): number[] {
     return tool === "highlighter" ? HIGHLIGHTER_SIZES : PEN_SIZES;
 }
 
-// The pen tool the eraser hands back to: the last one drawn with.
-export function drawingTool(s: InkSettings, last: PenTool): PenTool {
-    return s.tool === "eraser" ? last : s.tool;
-}
-
 // The style a new stroke gets. `width` is the width of the slide area on
 // screen in slide units (the viewBox, which the zoom camera narrows), so a
 // stroke has the same width on screen however far in it is drawn.

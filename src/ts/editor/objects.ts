@@ -280,7 +280,10 @@ function row(el: Element, depth: number): HTMLElement[] {
 
 function isOwnObject(el: Element): boolean {
     const src = sourceOf(keyOf(el));
-    return !!src && src.role === "slide" && src.writable;
+    // The slide's own drawing, or its ink (a file of this slide alone).
+    return (
+        !!src && (src.role === "slide" || src.role === "ink") && src.writable
+    );
 }
 
 export function renderObjects(): void {

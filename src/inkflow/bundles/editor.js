@@ -6261,7 +6261,7 @@
   }
   function isOwnObject(el2) {
     const src = sourceOf(keyOf(el2));
-    return !!src && src.role === "slide" && src.writable;
+    return !!src && (src.role === "slide" || src.role === "ink") && src.writable;
   }
   function renderObjects() {
     if (host3.hidden) return;
@@ -7395,7 +7395,7 @@
           h(
             "p",
             { class: "hint" },
-            `In ${src.rel}${src.role !== "slide" || currentSlide()?.srcShared ? ` \xB7 shared by ${src.usedBy.length} slide${src.usedBy.length === 1 ? "" : "s"}` : ""}`
+            `In ${src.rel}${src.role !== "slide" && src.role !== "ink" || currentSlide()?.srcShared ? ` \xB7 shared by ${src.usedBy.length} slide${src.usedBy.length === 1 ? "" : "s"}` : ""}`
           ),
           openButton(src.path)
         )
@@ -12752,7 +12752,7 @@ Continue?`)) return null;
       const g2 = this.gesture;
       if (!g2 || e2.pointerId !== g2.pointerId) return;
       this.swallow(e2);
-      if (cancelled && g2.kind === "draw") {
+      if (cancelled) {
         this.cancel();
         return;
       }
@@ -12901,6 +12901,7 @@ Continue?`)) return null;
       const customLabel = document.createElement("label");
       customLabel.className = "ink-btn ink-custom";
       customLabel.title = "Another colour";
+      customLabel.dataset.inkCustom = "";
       this.custom = document.createElement("input");
       this.custom.type = "color";
       this.custom.setAttribute("aria-label", "Another colour");
@@ -12975,6 +12976,10 @@ Continue?`)) return null;
       } else if (data.inkSize !== void 0) {
         const tool = this.penTool();
         s2[tool] = { ...s2[tool], size: Number(data.inkSize) };
+        if (s2.tool === "eraser") s2.tool = tool;
+      } else if (data.inkCustom !== void 0) {
+        const tool = this.penTool();
+        s2[tool] = { ...s2[tool], swatch: null };
         if (s2.tool === "eraser") s2.tool = tool;
       } else if (data.inkToggle === "fingers") {
         s2.fingers = !s2.fingers;

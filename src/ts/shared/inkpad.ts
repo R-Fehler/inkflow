@@ -422,7 +422,9 @@ export class InkPad {
         const g = this.gesture;
         if (!g || e.pointerId !== g.pointerId) return;
         this.swallow(e);
-        if (cancelled && g.kind === "draw") {
+        // The browser took the pointer back (a system gesture): nothing was
+        // meant, so a stroke is dropped and what the eraser hid comes back.
+        if (cancelled) {
             this.cancel();
             return;
         }

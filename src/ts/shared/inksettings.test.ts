@@ -2,7 +2,6 @@ import { describe, expect, test } from "vitest";
 import { PEN_SIZES, SWATCHES } from "./ink";
 import {
     defaultSettings,
-    drawingTool,
     normalizeHex,
     settingsFrom,
     styleFor,
@@ -86,13 +85,6 @@ describe("styleFor", () => {
             full,
         );
     });
-});
-
-test("the eraser hands back to the last pen tool", () => {
-    const s = defaultSettings(false);
-    expect(drawingTool(s, "highlighter")).toBe("pen");
-    s.tool = "eraser";
-    expect(drawingTool(s, "highlighter")).toBe("highlighter");
 });
 
 test.each([
