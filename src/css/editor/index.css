@@ -2556,3 +2556,37 @@ body.start-mode #workspace {
     color: var(--text);
     border-color: var(--yellow);
 }
+
+/* ── A drawn-in draw.io diagram's shapes (the Shapes section) ── */
+
+.diagram-shapes {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.diagram-shape {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px;
+    border-radius: 4px;
+}
+
+.diagram-shape:hover {
+    background: var(--sel-soft);
+}
+
+.diagram-shape-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.diagram-shape .add-anim {
+    max-width: 110px;
+}

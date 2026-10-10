@@ -830,7 +830,11 @@ export function drawOverlay(): void {
         });
         rh.dataset.handle = "rot";
         // A cropped picture's frame is kept unrotated (see planCrop).
-        const frames = ed.selection.some((s) => s.el.localName === "svg");
+        // (A drawn-in draw.io diagram is a nested <svg> too, but rotates.)
+        const frames = ed.selection.some(
+            (s) =>
+                s.el.localName === "svg" && !s.el.hasAttribute("data-drawio"),
+        );
         if (!ed.cropMode && !frames) overlay.append(rh);
         for (const h of HANDLES) {
             const p = handlePoint(h, pb);

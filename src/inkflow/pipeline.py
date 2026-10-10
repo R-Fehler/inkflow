@@ -21,6 +21,7 @@ from inkflow.content import (
     unreferenced_zones,
     zone_box,
 )
+from inkflow.drawio_inline import inline_diagrams
 from inkflow.editor.provenance import INK, stamper
 from inkflow.enums import AnimationKind, ColorMode, Direction, Trigger
 from inkflow.layout import (
@@ -572,6 +573,9 @@ class SlideSvg:
                 ],
             )
 
+    def inline_diagrams(self, roots: AssetRoots) -> None:
+        self.root = inline_diagrams(self.root, roots)
+
     def empty_zones(self) -> list[EmptyZone]:
         zones: list[EmptyZone] = []
         for el in unreferenced_zones(self.root):
@@ -719,6 +723,8 @@ def process_slide(
     doc = SlideSvg.read(src, ctx.assets, sources)
     doc.compose_ancestors(chain, ctx.assets)
     doc.compose_overlays(overlay_chains, ctx.assets)
+    # Before annotation, so animations can target a diagram's shapes.
+    doc.inline_diagrams(ctx.assets)
     for zone_id in doc.duplicate_zone_ids():
         logger.warning(
             f"{slide_id}: {zone_id} is declared more than once after composition — "

@@ -581,3 +581,13 @@
 .code-line.hl-active {
     opacity: 1;
 }
+
+/* A draw.io diagram drawn into its slide (drawio_inline.py): draw.io's own
+   light-dark() colours follow the deck's mode, not the viewer's system. */
+.inkflow-diagram {
+    color-scheme: dark;
+}
+
+[data-theme="light"] .inkflow-diagram {
+    color-scheme: light;
+}

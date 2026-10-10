@@ -1756,7 +1756,9 @@
         class: "handle rot"
       });
       rh.dataset.handle = "rot";
-      const frames = ed.selection.some((s) => s.el.localName === "svg");
+      const frames = ed.selection.some(
+        (s) => s.el.localName === "svg" && !s.el.hasAttribute("data-drawio")
+      );
       if (!ed.cropMode && !frames) overlay.append(rh);
       for (const h2 of HANDLES) {
         const p = handlePoint(h2, pb);
@@ -5162,15 +5164,28 @@
 
   // src/ts/editor/drawio.ts
   function diagramOf(el2) {
+    const drawn = drawnDiagram(el2);
+    if (drawn) return drawn;
     const image = pictureOf(el2);
-    const href = image?.getAttribute("href") ?? image?.getAttribute("xlink:href") ?? "";
-    return isDiagramHref(href) ? image : null;
+    return image && isDiagramHref(hrefOf(image)) ? image : null;
+  }
+  function drawnDiagram(el2) {
+    return el2.localName === "svg" && el2.hasAttribute("data-drawio") ? el2 : null;
   }
   function isDiagramHref(href) {
     return /\.drawio\.svg$/i.test(href.split(/[?#]/)[0]);
   }
-  function hrefOf(image) {
-    return (image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? "").split(/[?#]/)[0];
+  function hrefOf(el2) {
+    return (el2.getAttribute("data-drawio") ?? el2.getAttribute("href") ?? el2.getAttribute("xlink:href") ?? "").split(/[?#]/)[0];
+  }
+  var DIAGRAM_MODES = [
+    { value: "picture", label: "Picture" },
+    { value: "inline", label: "Drawn on the slide" },
+    { value: "themed", label: "In the deck's theme" }
+  ];
+  function diagramMode(el2) {
+    const mode = drawnDiagram(el2)?.getAttribute("data-drawio-mode");
+    return mode === "inline" || mode === "themed" ? mode : "picture";
   }
   var open2 = null;
   function editDiagram(sel) {
@@ -5751,6 +5766,28 @@
     on("selection", renderObjects);
   }
 
+  // src/ts/editor/drawioshapes.ts
+  function diagramShapes(svg) {
+    const shapes = [];
+    for (const g of svg.querySelectorAll("g[data-cell-id]")) {
+      const parent = g.parentElement?.closest("g[data-cell-id]");
+      if (!parent?.parentElement?.closest("g[data-cell-id]")) continue;
+      const id = g.getAttribute("id");
+      if (id) shapes.push({ id, label: cellLabel(g), el: g });
+    }
+    return shapes;
+  }
+  function cellLabel(g) {
+    const own = (sel) => [...g.querySelectorAll(sel)].filter(
+      (el2) => el2.closest("g[data-cell-id]") === g
+    );
+    for (const el2 of [...own("foreignObject"), ...own("text")]) {
+      const text = (el2.textContent ?? "").replace(/\s+/g, " ").trim();
+      if (text) return text;
+    }
+    return "";
+  }
+
   // src/ts/editor/videopreview.ts
   function videoOf(el2) {
     if (!el2) return null;
@@ -6278,7 +6315,8 @@
   }
   function selectById(id) {
     const svg = slideRoot();
-    const el2 = svg?.querySelector(`[id="${CSS.escape(id)}"]`);
+    const found = svg?.querySelector(`[id="${CSS.escape(id)}"]`);
+    const el2 = found?.closest("[data-ink]") ?? null;
     if (el2) {
       enterGroup(null);
       select([el2]);
@@ -6340,20 +6378,11 @@
       );
     });
     if (editable) {
-      const groups = {};
-      for (const t of model.animationTypes) {
-        if (t.kind === "video" && !isZone(sel.el)) continue;
-        const kind = t.kind ?? "other";
-        groups[kind] = [...groups[kind] ?? [], t];
-      }
-      const add = h("select", { class: "add-anim" });
-      add.append(h("option", { value: "" }, "+ Add animation\u2026"));
-      for (const [kind, types] of Object.entries(groups)) {
-        const og = h("optgroup", { label: kind });
-        for (const t of types)
-          og.append(h("option", { value: t.type }, t.type));
-        add.append(og);
-      }
+      const add = animationPicker(
+        model.animationTypes,
+        isZone(sel.el),
+        "+ Add animation\u2026"
+      );
       add.addEventListener("change", () => {
         const type = add.value;
         if (!type) return;
@@ -6384,6 +6413,23 @@
       );
     }
     return section("Animations", body2);
+  }
+  function animationPicker(all, video, prompt) {
+    const groups = {};
+    for (const t of all) {
+      if (t.kind === "video" && !video) continue;
+      const kind = t.kind ?? "other";
+      groups[kind] = [...groups[kind] ?? [], t];
+    }
+    const add = h("select", { class: "add-anim" });
+    add.append(h("option", { value: "" }, prompt));
+    for (const [kind, types] of Object.entries(groups)) {
+      const og = h("optgroup", { label: kind });
+      for (const t of types)
+        og.append(h("option", { value: t.type }, t.type));
+      add.append(og);
+    }
+    return add;
   }
   var TAG_NAMES = {
     g: "Group",
@@ -6472,7 +6518,7 @@
     const zone = isZone(el2);
     const movable = canTransform(el2);
     const id = el2.getAttribute("id") ?? "";
-    const tag = zone ? `Zone \xB7 ${zoneName(el2)}` : TAG_NAMES[el2.localName] ?? el2.localName;
+    const tag = zone ? `Zone \xB7 ${zoneName(el2)}` : drawnDiagram(el2) ? "Diagram" : TAG_NAMES[el2.localName] ?? el2.localName;
     panel.append(
       section(
         tag,
@@ -6590,6 +6636,7 @@
     const textZone = zone && el2.localName === "foreignObject" && !!el2.querySelector(".inkflow-content");
     const shapeTag = textZone ? el2.getAttribute("data-ink-tag") ?? "rect" : el2.localName;
     if ((!zone || textZone) && src?.writable && (movable || ed.layoutMode)) {
+      const picture = !!pictureOf(el2) || !!drawnDiagram(el2);
       const fills = ![
         "line",
         "polyline",
@@ -6602,9 +6649,9 @@
       panel.append(
         section(
           "Style",
-          fills && !pictureOf(el2) && paintRow([sel], "fill"),
-          !pictureOf(el2) && el2.localName !== "g" && paintRow([sel], "stroke"),
-          !pictureOf(el2) && el2.localName !== "g" && row2(
+          fills && !picture && paintRow([sel], "fill"),
+          !picture && el2.localName !== "g" && paintRow([sel], "stroke"),
+          !picture && el2.localName !== "g" && row2(
             "Stroke width",
             numberInput(
               strokeWidth,
@@ -6678,6 +6725,11 @@
     }
     if (!zone && src?.writable && pictureOf(el2)) {
       panel.append(pictureSection(sel));
+    }
+    if (!zone && src?.writable && drawnDiagram(el2)) {
+      panel.append(diagramSection(sel));
+      const shapes = diagramShapesSection(sel);
+      if (shapes) panel.append(shapes);
     }
     if (!zone && src?.writable && (movable || ed.layoutMode)) {
       panel.append(detailsSection(sel));
@@ -6967,6 +7019,7 @@
           "on"
         )
       ) : null,
+      isDiagramHref(href) && !cropped ? showAsRow(sel, "picture") : null,
       h(
         "div",
         { class: "btn-row" },
@@ -7015,6 +7068,154 @@
           )
         )
       )
+    );
+  }
+  function showAsRow(sel, mode) {
+    return row2(
+      "Show as",
+      selectInput(
+        DIAGRAM_MODES.map((m) => ({ value: m.value, label: m.label })),
+        mode,
+        (v) => void sendSvgOps(
+          [
+            {
+              sel,
+              ops: [
+                // Its shapes are named after it.
+                {
+                  kind: "ensure-id",
+                  loc: sel.loc,
+                  base: "diagram",
+                  key: "diagram"
+                },
+                {
+                  kind: "attrs",
+                  loc: sel.loc,
+                  set: {
+                    "inkflow:drawio": v === "picture" ? null : v
+                  }
+                }
+              ]
+            }
+          ],
+          "Show diagram as"
+        )
+      )
+    );
+  }
+  function diagramSection(sel) {
+    const svg = drawnDiagram(sel.el);
+    const href = svg.getAttribute("data-drawio") ?? "";
+    const par = svg.getAttribute("preserveAspectRatio") ?? "xMidYMid meet";
+    const fit = FITS.find((f) => f.par === par)?.value ?? "contain";
+    return section(
+      "draw.io",
+      h(
+        "div",
+        { class: "source-hint" },
+        h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
+        openButton(projectFile(href))
+      ),
+      h(
+        "div",
+        { class: "btn-row" },
+        button(
+          "Edit diagram",
+          "Open it in draw.io (or double-click it)",
+          () => editDiagram(sel),
+          "on"
+        )
+      ),
+      showAsRow(sel, diagramMode(svg)),
+      row2(
+        "Fit",
+        selectInput(
+          FITS.map((f) => ({ value: f.value, label: f.label })),
+          fit,
+          (v) => void sendSvgOps(
+            [
+              {
+                sel,
+                ops: [
+                  {
+                    kind: "attrs",
+                    loc: sel.loc,
+                    set: {
+                      preserveAspectRatio: FITS.find((f) => f.value === v)?.par ?? null
+                    }
+                  }
+                ]
+              }
+            ],
+            "Diagram fit"
+          )
+        )
+      )
+    );
+  }
+  function diagramShapesSection(sel) {
+    const slide = currentSlide();
+    const model = ed.model;
+    const svg = drawnDiagram(sel.el);
+    if (!slide || !model || !svg) return null;
+    const shapes = diagramShapes(svg);
+    if (!shapes.length) return null;
+    const editable = slide.animationsEditable && model.deckEditable;
+    const list3 = h("div", { class: "diagram-shapes" });
+    const flash = (el2, on2) => setHover(on2 ? el2 : null);
+    for (const shape of shapes) {
+      const count = slide.animations.filter(
+        (c) => c.element === shape.id
+      ).length;
+      const name2 = shape.label || `(${shape.id.slice(svg.id.length + 1)})`;
+      const item = h(
+        "div",
+        { class: "diagram-shape" },
+        h(
+          "span",
+          { class: "diagram-shape-name", title: `#${shape.id}` },
+          name2
+        ),
+        count ? h(
+          "span",
+          {
+            class: "hint",
+            title: "Animations on this shape (see Animation order)"
+          },
+          `${count} \u2726`
+        ) : null
+      );
+      item.addEventListener("mouseenter", () => flash(shape.el, true));
+      item.addEventListener("mouseleave", () => flash(shape.el, false));
+      if (editable) {
+        const add = animationPicker(
+          model.animationTypes,
+          false,
+          "Animate\u2026"
+        );
+        add.addEventListener("change", () => {
+          if (!add.value) return;
+          flash(shape.el, false);
+          void edit({
+            action: "anim",
+            slide: slide.deckIndex,
+            op: "insert",
+            index: slide.animations.length,
+            spec: { type: add.value, element: shape.id, fields: {} }
+          });
+        });
+        item.append(add);
+      }
+      list3.append(item);
+    }
+    return section(
+      "Shapes",
+      h(
+        "p",
+        { class: "hint" },
+        "Animate the diagram's shapes one by one. To change a shape, edit the diagram in draw.io."
+      ),
+      list3
     );
   }
   function linkOf(el2) {

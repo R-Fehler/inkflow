@@ -15,6 +15,7 @@ import {
     select,
     selectionBox,
     sendSvgOps,
+    setHover,
     showSites,
     sitesPerSide,
     slideBox,
@@ -31,7 +32,15 @@ import {
     startCrop,
 } from "./crop";
 import { clear, h, icon, toast } from "./dom";
-import { editDiagram, isDiagramHref } from "./drawio";
+import {
+    DIAGRAM_MODES,
+    type DiagramMode,
+    diagramMode,
+    drawnDiagram,
+    editDiagram,
+    isDiagramHref,
+} from "./drawio";
+import { diagramShapes } from "./drawioshapes";
 import { layoutLabel, openGallery } from "./gallery";
 import {
     type Box,
@@ -629,7 +638,9 @@ function animationList(
 
 function selectById(id: string): void {
     const svg = slideRoot();
-    const el = svg?.querySelector(`[id="${CSS.escape(id)}"]`);
+    const found = svg?.querySelector(`[id="${CSS.escape(id)}"]`);
+    // A shape of a drawn-in diagram is part of that one object.
+    const el = found?.closest("[data-ink]") ?? null;
     if (el) {
         enterGroup(null);
         select([el as SVGGraphicsElement]);
@@ -700,20 +711,11 @@ function elementAnimations(sel: Selected): HTMLElement {
         );
     });
     if (editable) {
-        const groups: Record<string, TypeInfo[]> = {};
-        for (const t of model.animationTypes) {
-            if (t.kind === "video" && !isZone(sel.el)) continue;
-            const kind = t.kind ?? "other";
-            groups[kind] = [...(groups[kind] ?? []), t];
-        }
-        const add = h("select", { class: "add-anim" });
-        add.append(h("option", { value: "" }, "+ Add animation…"));
-        for (const [kind, types] of Object.entries(groups)) {
-            const og = h("optgroup", { label: kind });
-            for (const t of types)
-                og.append(h("option", { value: t.type }, t.type));
-            add.append(og);
-        }
+        const add = animationPicker(
+            model.animationTypes,
+            isZone(sel.el),
+            "+ Add animation…",
+        );
         add.addEventListener("change", () => {
             const type = add.value;
             if (!type) return;
@@ -748,6 +750,28 @@ function elementAnimations(sel: Selected): HTMLElement {
         );
     }
     return section("Animations", body);
+}
+
+function animationPicker(
+    all: TypeInfo[],
+    video: boolean,
+    prompt: string,
+): HTMLSelectElement {
+    const groups: Record<string, TypeInfo[]> = {};
+    for (const t of all) {
+        if (t.kind === "video" && !video) continue;
+        const kind = t.kind ?? "other";
+        groups[kind] = [...(groups[kind] ?? []), t];
+    }
+    const add = h("select", { class: "add-anim" }) as HTMLSelectElement;
+    add.append(h("option", { value: "" }, prompt));
+    for (const [kind, types] of Object.entries(groups)) {
+        const og = h("optgroup", { label: kind });
+        for (const t of types)
+            og.append(h("option", { value: t.type }, t.type));
+        add.append(og);
+    }
+    return add;
 }
 
 // ── Object panel ──
@@ -859,7 +883,9 @@ function renderObjectPanel(sel: Selected): void {
     const id = el.getAttribute("id") ?? "";
     const tag = zone
         ? `Zone · ${zoneName(el)}`
-        : (TAG_NAMES[el.localName] ?? el.localName);
+        : drawnDiagram(el)
+          ? "Diagram"
+          : (TAG_NAMES[el.localName] ?? el.localName);
     panel.append(
         section(
             tag,
@@ -1004,6 +1030,7 @@ function renderObjectPanel(sel: Selected): void {
         ? (el.getAttribute("data-ink-tag") ?? "rect")
         : el.localName;
     if ((!zone || textZone) && src?.writable && (movable || ed.layoutMode)) {
+        const picture = !!pictureOf(el) || !!drawnDiagram(el);
         const fills = ![
             "line",
             "polyline",
@@ -1016,11 +1043,9 @@ function renderObjectPanel(sel: Selected): void {
         panel.append(
             section(
                 "Style",
-                fills && !pictureOf(el) && paintRow([sel], "fill"),
-                !pictureOf(el) &&
-                    el.localName !== "g" &&
-                    paintRow([sel], "stroke"),
-                !pictureOf(el) &&
+                fills && !picture && paintRow([sel], "fill"),
+                !picture && el.localName !== "g" && paintRow([sel], "stroke"),
+                !picture &&
                     el.localName !== "g" &&
                     row(
                         "Stroke width",
@@ -1100,6 +1125,11 @@ function renderObjectPanel(sel: Selected): void {
     }
     if (!zone && src?.writable && pictureOf(el)) {
         panel.append(pictureSection(sel));
+    }
+    if (!zone && src?.writable && drawnDiagram(el)) {
+        panel.append(diagramSection(sel));
+        const shapes = diagramShapesSection(sel);
+        if (shapes) panel.append(shapes);
     }
     if (!zone && src?.writable && (movable || ed.layoutMode)) {
         panel.append(detailsSection(sel));
@@ -1443,6 +1473,7 @@ function pictureSection(sel: Selected): HTMLElement {
                   ),
               )
             : null,
+        isDiagramHref(href) && !cropped ? showAsRow(sel, "picture") : null,
         h(
             "div",
             { class: "btn-row" },
@@ -1497,6 +1528,169 @@ function pictureSection(sel: Selected): HTMLElement {
                     ),
             ),
         ),
+    );
+}
+
+// How a draw.io diagram shows on the slide: its picture, or drawn into the
+// slide (the pipeline's drawio_inline.py), where its shapes can be animated
+// and its text takes the deck's font, and, themed, the deck's colours.
+function showAsRow(sel: Selected, mode: DiagramMode): HTMLElement {
+    return row(
+        "Show as",
+        selectInput(
+            DIAGRAM_MODES.map((m) => ({ value: m.value, label: m.label })),
+            mode,
+            (v) =>
+                void sendSvgOps(
+                    [
+                        {
+                            sel,
+                            ops: [
+                                // Its shapes are named after it.
+                                {
+                                    kind: "ensure-id",
+                                    loc: sel.loc,
+                                    base: "diagram",
+                                    key: "diagram",
+                                },
+                                {
+                                    kind: "attrs",
+                                    loc: sel.loc,
+                                    set: {
+                                        "inkflow:drawio":
+                                            v === "picture" ? null : v,
+                                    },
+                                },
+                            ],
+                        },
+                    ],
+                    "Show diagram as",
+                ),
+        ),
+    );
+}
+
+function diagramSection(sel: Selected): HTMLElement {
+    const svg = drawnDiagram(sel.el)!;
+    const href = svg.getAttribute("data-drawio") ?? "";
+    const par = svg.getAttribute("preserveAspectRatio") ?? "xMidYMid meet";
+    const fit = FITS.find((f) => f.par === par)?.value ?? "contain";
+    return section(
+        "draw.io",
+        h(
+            "div",
+            { class: "source-hint" },
+            h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
+            openButton(projectFile(href)),
+        ),
+        h(
+            "div",
+            { class: "btn-row" },
+            button(
+                "Edit diagram",
+                "Open it in draw.io (or double-click it)",
+                () => editDiagram(sel),
+                "on",
+            ),
+        ),
+        showAsRow(sel, diagramMode(svg)),
+        row(
+            "Fit",
+            selectInput(
+                FITS.map((f) => ({ value: f.value, label: f.label })),
+                fit,
+                (v) =>
+                    void sendSvgOps(
+                        [
+                            {
+                                sel,
+                                ops: [
+                                    {
+                                        kind: "attrs",
+                                        loc: sel.loc,
+                                        set: {
+                                            preserveAspectRatio:
+                                                FITS.find((f) => f.value === v)
+                                                    ?.par ?? null,
+                                        },
+                                    },
+                                ],
+                            },
+                        ],
+                        "Diagram fit",
+                    ),
+            ),
+        ),
+    );
+}
+
+// The diagram's shapes, each with its animations' count and a picker that
+// animates it (the shape is named <diagram id>-<draw.io cell id>).
+function diagramShapesSection(sel: Selected): HTMLElement | null {
+    const slide = currentSlide();
+    const model = ed.model;
+    const svg = drawnDiagram(sel.el);
+    if (!slide || !model || !svg) return null;
+    const shapes = diagramShapes(svg);
+    if (!shapes.length) return null;
+    const editable = slide.animationsEditable && model.deckEditable;
+    const list = h("div", { class: "diagram-shapes" });
+    const flash = (el: Element, on: boolean) => setHover(on ? el : null);
+    for (const shape of shapes) {
+        const count = slide.animations.filter(
+            (c) => c.element === shape.id,
+        ).length;
+        const name = shape.label || `(${shape.id.slice(svg.id.length + 1)})`;
+        const item = h(
+            "div",
+            { class: "diagram-shape" },
+            h(
+                "span",
+                { class: "diagram-shape-name", title: `#${shape.id}` },
+                name,
+            ),
+            count
+                ? h(
+                      "span",
+                      {
+                          class: "hint",
+                          title: "Animations on this shape (see Animation order)",
+                      },
+                      `${count} ✦`,
+                  )
+                : null,
+        );
+        item.addEventListener("mouseenter", () => flash(shape.el, true));
+        item.addEventListener("mouseleave", () => flash(shape.el, false));
+        if (editable) {
+            const add = animationPicker(
+                model.animationTypes,
+                false,
+                "Animate…",
+            );
+            add.addEventListener("change", () => {
+                if (!add.value) return;
+                flash(shape.el, false);
+                void edit({
+                    action: "anim",
+                    slide: slide.deckIndex,
+                    op: "insert",
+                    index: slide.animations.length,
+                    spec: { type: add.value, element: shape.id, fields: {} },
+                });
+            });
+            item.append(add);
+        }
+        list.append(item);
+    }
+    return section(
+        "Shapes",
+        h(
+            "p",
+            { class: "hint" },
+            "Animate the diagram's shapes one by one. To change a shape, edit the diagram in draw.io.",
+        ),
+        list,
     );
 }
 
