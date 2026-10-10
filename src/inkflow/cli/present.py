@@ -12,7 +12,7 @@ from inkflow.cli._common import deck_option, main, resolve_deck_path
 from inkflow.editor.session import Exporters
 from inkflow.export import build_pdf, build_static_html
 from inkflow.logging import Levels, report
-from inkflow.server import open_browser, pick_ports
+from inkflow.server import DEFAULT_PORT, open_browser, pick_ports
 from inkflow.server import serve as _serve
 
 # The editor's Export dialog runs the same builds as the commands below.
@@ -59,9 +59,30 @@ def serve(
     resolved = resolve_deck_path(deck_path)
     if _already_served(resolved, "/", open_it=False):
         return
-    port, ws_port = pick_ports(host, port, ws_port)
+    auto = port is None and ws_port is None
+    port, ws_port = _ports(host, port, ws_port)
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(_serve(resolved, host, port, ws_port, levels, exporters=EXPORTERS))
+        asyncio.run(
+            _serve(
+                resolved,
+                host,
+                port,
+                ws_port,
+                levels,
+                exporters=EXPORTERS,
+                auto_ports=auto,
+            )
+        )
+
+
+def _ports(host: str, port: int | None, ws_port: int | None) -> tuple[int, int]:
+    """The ports to serve on; says so when the default ones are taken (another
+    deck's server, such as the author's editor while an agent previews its
+    worktree), since the address is then not the usual one."""
+    picked = pick_ports(host, port, ws_port)
+    if port is None and picked[0] != DEFAULT_PORT:
+        report("Ports", f"{DEFAULT_PORT} is taken: using {picked[0]} (and {picked[1]})")
+    return picked
 
 
 def _already_served(deck_py: Path, path: str, *, open_it: bool) -> bool:
@@ -161,7 +182,8 @@ def edit(
         if _already_served(resolved, "/edit", open_it=not no_open):
             return
     open_path = None if no_open else "/edit"
-    port, ws_port = pick_ports(host, port, ws_port)
+    auto = port is None and ws_port is None
+    port, ws_port = _ports(host, port, ws_port)
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(
             _serve(
@@ -173,6 +195,7 @@ def edit(
                 open_path,
                 exporters=EXPORTERS,
                 quit_when_idle=quit_when_idle,
+                auto_ports=auto,
             )
         )
 

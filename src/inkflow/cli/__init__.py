@@ -21,6 +21,7 @@ for _submodule in (
     "project",
     "slides",
     "verify",
+    "worktree",
 ):
     import_module(f"inkflow.cli.{_submodule}")
 

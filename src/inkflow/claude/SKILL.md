@@ -234,6 +234,22 @@ picture alone: draw.io redraws the picture from the source.
   Keep its `d` roughly right; the author's "Re-route all"
   in the editor snaps it to the shapes. Rename an id and update `connect-*` too.
 
+## Working on a branch
+
+When the author asks for a proposal, a variant, an alternative, or to "work on
+a branch", don't touch their deck:
+
+1. `inkflow worktree add <name>` (short, kebab-case). It makes branch
+   `deck/<name>` in `.inkflow/worktrees/<name>` and prints `path:` and `deck:`.
+2. Work only there: `--deck <that deck.py>` on every inkflow command
+   (`outline`, `slide`, `verify`, `render`…), edit only files under `path:`,
+   and commit there (`git -C <path> add -A`, `git -C <path> commit -m …`).
+   `inkflow context` still describes the author's editor on their own deck.
+3. Commit when done and tell the author to review it with **Compare** in the
+   editor's Git menu (or `inkflow compare`). They merge it themselves (Git
+   menu, or `inkflow worktree merge <name>`); don't merge or remove a
+   worktree unless asked.
+
 ## Check your work
 
 1. `inkflow verify` for authoring mistakes (missing ids, zones, layouts).

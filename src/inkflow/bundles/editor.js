@@ -12765,6 +12765,38 @@ Decks: new, open, recent` : "Decks";
     document.getElementById("btn-export")?.addEventListener("click", openExport);
   }
 
+  // src/ts/editor/worktreetext.ts
+  function branchName(wt) {
+    return wt.branch ?? `@${wt.head}`;
+  }
+  function summary(wt) {
+    const parts = [
+      wt.ahead ? `${wt.ahead} ahead` : "",
+      wt.behind ? `${wt.behind} behind` : "",
+      wt.dirty ? "uncommitted changes" : "",
+      wt.deck ? "" : "no deck"
+    ].filter(Boolean);
+    return parts.length ? parts.join(" \xB7 ") : "up to date";
+  }
+  function deckDir(deck) {
+    const cut2 = Math.max(deck.lastIndexOf("/"), deck.lastIndexOf("\\"));
+    return cut2 > 0 ? deck.slice(0, cut2) : deck;
+  }
+  function shellQuote(path) {
+    return /^[\w@%+=:,./\\-]+$/.test(path) ? path : `'${path.replace(/'/g, "'\\''")}'`;
+  }
+  function agentPrompt(wt) {
+    const deck = wt.deck ?? `${wt.path}/deck.py`;
+    return [
+      `Work on this deck in the git worktree ${wt.path} (branch ${branchName(wt)}), not in the deck I have open.`,
+      `Pass --deck ${shellQuote(deck)} to every inkflow command, change only files under that folder, and commit there when you are done.`,
+      "Do not merge it: I will compare and merge it myself."
+    ].join(" ");
+  }
+  function agentCommand(wt) {
+    return `cd ${shellQuote(wt.deck ? deckDir(wt.deck) : wt.path)} && claude`;
+  }
+
   // src/ts/editor/git.ts
   var menu5 = document.getElementById("context-menu");
   var button3 = document.getElementById("btn-git");
@@ -12957,6 +12989,7 @@ Continue?`)) return null;
           !status.hasCommits
         )
       );
+      if (status.hasCommits) menu5.append(...await worktreeSection());
     }
     const r2 = button3.getBoundingClientRect();
     showMenu(Math.max(8, r2.right - 260), r2.bottom + 4);
@@ -13415,6 +13448,275 @@ Continue?`)) return null;
         wide: true,
         hint: status.scope ? `changes to ${status.scope}/` : void 0
       }
+    );
+  }
+  async function worktreeOp(op, args = {}, question = "", rewrites = false, quiet = false) {
+    const notice = rewrites && undoNoticeDue();
+    if (question || notice) {
+      const text = [question, notice ? UNDO_NOTICE : ""].filter(Boolean).join("\n\n");
+      if (!confirm(text)) return null;
+      if (notice) undoNoticeShown();
+    }
+    button3.classList.add("busy");
+    const res = await request({ action: "worktree", op, ...args });
+    button3.classList.remove("busy");
+    if (res.git) {
+      status = res.git;
+      render2();
+    }
+    if (!res.ok) {
+      if (!quiet) toast(res.error ?? `worktree ${op} failed`, "error");
+      return res;
+    }
+    if (typeof res.message === "string") toast(res.message, "ok");
+    if (typeof res.note === "string") toast(res.note, "info");
+    if (res.historyCleared) {
+      ed.canUndo = false;
+      ed.canRedo = false;
+      emit("history");
+    }
+    return res;
+  }
+  async function worktreeList() {
+    const res = await request({ action: "worktree", op: "list" });
+    return res.ok ? res.worktrees : [];
+  }
+  async function worktreeSection() {
+    const others = (await worktreeList()).filter((w2) => !w2.main);
+    return [
+      h("div", { class: "menu-sep" }),
+      h("div", { class: "menu-title" }, "Worktrees"),
+      ...others.map(
+        (wt) => h(
+          "div",
+          { class: "menu-wt" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "menu-item",
+              title: `${wt.path}
+Merge, remove, or what to tell the agent`,
+              onclick: () => {
+                closeMenu();
+                worktreeDialog(wt);
+              }
+            },
+            h("span", { class: "wt-branch" }, branchName(wt)),
+            h("span", { class: "wt-state" }, summary(wt))
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "menu-mini",
+              disabled: !wt.deck,
+              title: "Compare its slides with this deck",
+              onclick: () => {
+                closeMenu();
+                compareWith(wt);
+              }
+            },
+            "Compare"
+          )
+        )
+      ),
+      menuItem("New worktree for an agent\u2026", () => newWorktreeDialog())
+    ];
+  }
+  function compareWith(wt) {
+    if (!wt.deck) return;
+    document.dispatchEvent(
+      new CustomEvent("inkflow:compare", {
+        detail: { kind: "path", deck: wt.deck, label: branchName(wt) }
+      })
+    );
+  }
+  function copyBlock(text) {
+    return h(
+      "div",
+      { class: "wt-copy" },
+      h("pre", { class: "wt-command" }, text),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "pbtn",
+          onclick: () => void navigator.clipboard.writeText(text).then(
+            () => toast("Copied", "ok"),
+            () => toast("Could not copy: select the text", "error")
+          )
+        },
+        "Copy"
+      )
+    );
+  }
+  function newWorktreeDialog() {
+    const name2 = h("input", {
+      type: "text",
+      placeholder: "e.g. bolder-colours",
+      spellcheck: "false"
+    });
+    const create = async () => {
+      const value = name2.value.trim().replace(/\s+/g, "-");
+      if (!value) return;
+      const res = await worktreeOp("add", { name: value });
+      if (res?.ok) worktreeDialog(res.worktree, true);
+    };
+    name2.addEventListener("keydown", (e2) => {
+      if (e2.key === "Enter") {
+        e2.preventDefault();
+        void create();
+      }
+    });
+    openDialog(
+      "New worktree for an agent",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "p",
+          { class: "hint" },
+          `A copy of the deck on a branch of its own, deck/<name>, from the last commit of ${status.branch ?? "this version"}. A coding agent works and commits there while your deck stays as it is; then compare and merge it, or remove it.`
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Name"),
+          h(
+            "div",
+            { class: "btn-row" },
+            name2,
+            h(
+              "button",
+              {
+                type: "button",
+                class: "pbtn primary",
+                onclick: () => void create()
+              },
+              "Create"
+            )
+          )
+        ),
+        (status.changes ?? []).some((c2) => c2.inDeck) && h(
+          "p",
+          { class: "hint warn" },
+          "Your uncommitted changes to the deck are not in it: commit first to include them."
+        )
+      ),
+      { wide: true }
+    );
+    name2.focus();
+  }
+  function worktreeDialog(wt, created = false) {
+    const into = status.branch;
+    const merge = async () => {
+      const n3 = wt.ahead;
+      const question = [
+        `Merge ${branchName(wt)} (${n3} commit${n3 === 1 ? "" : "s"}) into ${into}? Its changes land in your deck's files now.`,
+        wt.dirty ? "Its uncommitted changes are not merged (commit them there first)." : ""
+      ].filter(Boolean).join("\n\n");
+      const res = await worktreeOp(
+        "merge",
+        { branch: wt.branch },
+        question,
+        true
+      );
+      if (res?.ok) closeDialog();
+    };
+    const remove = async () => {
+      const lost = [
+        wt.dirty ? "uncommitted changes" : "",
+        wt.ahead ? `${wt.ahead} unmerged commit${wt.ahead === 1 ? "" : "s"}` : ""
+      ].filter(Boolean);
+      if (!confirm(
+        `Remove the worktree ${wt.name} (${wt.path})?${lost.length ? `
+
+It has ${lost.join(" and ")}.` : ""}`
+      ))
+        return;
+      let res = await worktreeOp(
+        "remove",
+        { name: wt.path },
+        "",
+        false,
+        true
+      );
+      if (res && !res.ok) {
+        if (!confirm(
+          `${res.error}
+
+Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
+        ))
+          return;
+        res = await worktreeOp("remove", { name: wt.path, force: true });
+      }
+      if (res?.ok) closeDialog();
+    };
+    openDialog(
+      `Worktree ${branchName(wt)}`,
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "p",
+          { class: "hint" },
+          created ? "Created. " : "",
+          `${summary(wt)} \xB7 `,
+          h("code", { class: "git-path" }, wt.path)
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Tell the agent"),
+          copyBlock(agentPrompt(wt))
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Or start one there"),
+          copyBlock(agentCommand(wt))
+        ),
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn danger",
+              onclick: () => void remove()
+            },
+            "Remove\u2026"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              disabled: !wt.deck,
+              title: "Its slides side by side with this deck's",
+              onclick: () => {
+                closeDialog();
+                compareWith(wt);
+              }
+            },
+            "Compare"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              disabled: !wt.branch || !into || wt.ahead === 0,
+              title: into ? `Bring its commits into ${into}` : "Switch the deck to a branch first",
+              onclick: () => void merge()
+            },
+            into ? `Merge into ${into}\u2026` : "Merge\u2026"
+          )
+        )
+      ),
+      { wide: true }
     );
   }
   var timer3 = 0;

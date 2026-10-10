@@ -182,6 +182,43 @@ commands:
           flag:
             deck: ["$files([\".py\"])"]
 
+  - name: worktree
+    description: Work on the deck in a separate git worktree, on its own branch.
+    commands:
+      - name: add
+        description: A new worktree on branch deck/NAME.
+        flags:
+          --base=: Start from this commit or branch
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: list
+        description: Every worktree of the deck's repository.
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: merge
+        description: Merge a worktree's branch into the deck's branch.
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: remove
+        description: Remove a worktree (and its merged deck/ branch).
+        flags:
+          --force: Even with uncommitted changes or unmerged commits
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
   - name: setup-claude
     description: Install the Claude Code prompt hook and inkflow skill.
     flags:

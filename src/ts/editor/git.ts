@@ -2,15 +2,25 @@
 // and how many files changed; its menu commits (with a dated message to
 // change), pushes, pulls, discards changes, takes back the last commit,
 // switches or creates branches and browses the deck's history (view an old
-// version, revert a commit, restore the deck to it). The server runs git
-// (editor/gitops.py); files it changes reach the editor through the usual
-// rebuild.
+// version, revert a commit, restore the deck to it), and keeps worktrees: a
+// branch of the deck in a folder of its own for a coding agent to work in,
+// compared, merged or removed from here. The server runs git
+// (editor/gitops.py, editor/worktrees.py); files it changes reach the editor
+// through the usual rebuild.
 
 import { closeDialog, openDialog } from "./dialog";
 import { clear, h, toast } from "./dom";
 import { connected, request } from "./net";
-import { menuItem, showMenu } from "./sorter";
+import { closeMenu, menuItem, showMenu } from "./sorter";
 import { ed, emit, on } from "./state";
+import type { EditResult } from "./types";
+import {
+    agentCommand,
+    agentPrompt,
+    branchName,
+    summary,
+    type Worktree,
+} from "./worktreetext";
 
 const menu = document.getElementById("context-menu")!;
 const button = document.getElementById("btn-git") as HTMLButtonElement;
@@ -288,6 +298,7 @@ async function openMenu(): Promise<void> {
                 !status.hasCommits,
             ),
         );
+        if (status.hasCommits) menu.append(...(await worktreeSection()));
     }
     const r = button.getBoundingClientRect();
     showMenu(Math.max(8, r.right - 260), r.bottom + 4);
@@ -794,6 +805,310 @@ async function historyDialog(): Promise<void> {
             wide: true,
             hint: status.scope ? `changes to ${status.scope}/` : undefined,
         },
+    );
+}
+
+// ── Worktrees ──
+
+/** Run one `worktree` operation; returns its result, failed or not (an
+ * error is shown unless `quiet`), or null when not confirmed. `question` is
+ * asked first; `rewrites`: it changes the deck's files (a merge), so the undo
+ * notice may be due. */
+async function worktreeOp(
+    op: string,
+    args: Record<string, unknown> = {},
+    question = "",
+    rewrites = false,
+    quiet = false,
+): Promise<EditResult | null> {
+    const notice = rewrites && undoNoticeDue();
+    if (question || notice) {
+        const text = [question, notice ? UNDO_NOTICE : ""]
+            .filter(Boolean)
+            .join("\n\n");
+        if (!confirm(text)) return null;
+        if (notice) undoNoticeShown();
+    }
+    button.classList.add("busy");
+    const res = await request({ action: "worktree", op, ...args });
+    button.classList.remove("busy");
+    if (res.git) {
+        status = res.git as Status;
+        render();
+    }
+    if (!res.ok) {
+        if (!quiet) toast(res.error ?? `worktree ${op} failed`, "error");
+        return res;
+    }
+    if (typeof res.message === "string") toast(res.message, "ok");
+    if (typeof res.note === "string") toast(res.note, "info");
+    if (res.historyCleared) {
+        ed.canUndo = false;
+        ed.canRedo = false;
+        emit("history");
+    }
+    return res;
+}
+
+async function worktreeList(): Promise<Worktree[]> {
+    const res = await request({ action: "worktree", op: "list" });
+    return res.ok ? (res.worktrees as Worktree[]) : [];
+}
+
+/** The menu's section: one row per other worktree (its state, and Compare),
+ * then the way to make one. */
+async function worktreeSection(): Promise<HTMLElement[]> {
+    const others = (await worktreeList()).filter((w) => !w.main);
+    return [
+        h("div", { class: "menu-sep" }),
+        h("div", { class: "menu-title" }, "Worktrees"),
+        ...others.map((wt) =>
+            h(
+                "div",
+                { class: "menu-wt" },
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "menu-item",
+                        title: `${wt.path}\nMerge, remove, or what to tell the agent`,
+                        onclick: () => {
+                            closeMenu();
+                            worktreeDialog(wt);
+                        },
+                    },
+                    h("span", { class: "wt-branch" }, branchName(wt)),
+                    h("span", { class: "wt-state" }, summary(wt)),
+                ),
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "menu-mini",
+                        disabled: !wt.deck,
+                        title: "Compare its slides with this deck",
+                        onclick: () => {
+                            closeMenu();
+                            compareWith(wt);
+                        },
+                    },
+                    "Compare",
+                ),
+            ),
+        ),
+        menuItem("New worktree for an agent…", () => newWorktreeDialog()),
+    ];
+}
+
+// The compare view listens for this: the deck in that folder, side by side
+// with this one.
+function compareWith(wt: Worktree): void {
+    if (!wt.deck) return;
+    document.dispatchEvent(
+        new CustomEvent("inkflow:compare", {
+            detail: { kind: "path", deck: wt.deck, label: branchName(wt) },
+        }),
+    );
+}
+
+function copyBlock(text: string): HTMLElement {
+    return h(
+        "div",
+        { class: "wt-copy" },
+        h("pre", { class: "wt-command" }, text),
+        h(
+            "button",
+            {
+                type: "button",
+                class: "pbtn",
+                onclick: () =>
+                    void navigator.clipboard.writeText(text).then(
+                        () => toast("Copied", "ok"),
+                        () => toast("Could not copy: select the text", "error"),
+                    ),
+            },
+            "Copy",
+        ),
+    );
+}
+
+function newWorktreeDialog(): void {
+    const name = h("input", {
+        type: "text",
+        placeholder: "e.g. bolder-colours",
+        spellcheck: "false",
+    }) as HTMLInputElement;
+    const create = async () => {
+        const value = name.value.trim().replace(/\s+/g, "-");
+        if (!value) return;
+        const res = await worktreeOp("add", { name: value });
+        if (res?.ok) worktreeDialog(res.worktree as Worktree, true);
+    };
+    name.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            void create();
+        }
+    });
+    openDialog(
+        "New worktree for an agent",
+        h(
+            "div",
+            { class: "git-form" },
+            h(
+                "p",
+                { class: "hint" },
+                `A copy of the deck on a branch of its own, deck/<name>, from the last commit of ${status.branch ?? "this version"}. A coding agent works and commits there while your deck stays as it is; then compare and merge it, or remove it.`,
+            ),
+            h(
+                "div",
+                { class: "field" },
+                h("span", { class: "field-label" }, "Name"),
+                h(
+                    "div",
+                    { class: "btn-row" },
+                    name,
+                    h(
+                        "button",
+                        {
+                            type: "button",
+                            class: "pbtn primary",
+                            onclick: () => void create(),
+                        },
+                        "Create",
+                    ),
+                ),
+            ),
+            (status.changes ?? []).some((c) => c.inDeck) &&
+                h(
+                    "p",
+                    { class: "hint warn" },
+                    "Your uncommitted changes to the deck are not in it: commit first to include them.",
+                ),
+        ),
+        { wide: true },
+    );
+    name.focus();
+}
+
+/** One worktree: what to tell the agent, Compare, Merge, Remove. */
+function worktreeDialog(wt: Worktree, created = false): void {
+    const into = status.branch;
+    const merge = async () => {
+        const n = wt.ahead;
+        const question = [
+            `Merge ${branchName(wt)} (${n} commit${n === 1 ? "" : "s"}) into ${into}? Its changes land in your deck's files now.`,
+            wt.dirty
+                ? "Its uncommitted changes are not merged (commit them there first)."
+                : "",
+        ]
+            .filter(Boolean)
+            .join("\n\n");
+        const res = await worktreeOp(
+            "merge",
+            { branch: wt.branch },
+            question,
+            true,
+        );
+        if (res?.ok) closeDialog();
+    };
+    const remove = async () => {
+        const lost = [
+            wt.dirty ? "uncommitted changes" : "",
+            wt.ahead
+                ? `${wt.ahead} unmerged commit${wt.ahead === 1 ? "" : "s"}`
+                : "",
+        ].filter(Boolean);
+        if (
+            !confirm(
+                `Remove the worktree ${wt.name} (${wt.path})?${lost.length ? `\n\nIt has ${lost.join(" and ")}.` : ""}`,
+            )
+        )
+            return;
+        let res = await worktreeOp(
+            "remove",
+            { name: wt.path },
+            "",
+            false,
+            true,
+        );
+        if (res && !res.ok) {
+            if (
+                !confirm(
+                    `${res.error}\n\nRemove it anyway? Its uncommitted changes and unmerged commits are lost.`,
+                )
+            )
+                return;
+            res = await worktreeOp("remove", { name: wt.path, force: true });
+        }
+        if (res?.ok) closeDialog();
+    };
+    openDialog(
+        `Worktree ${branchName(wt)}`,
+        h(
+            "div",
+            { class: "git-form" },
+            h(
+                "p",
+                { class: "hint" },
+                created ? "Created. " : "",
+                `${summary(wt)} · `,
+                h("code", { class: "git-path" }, wt.path),
+            ),
+            h(
+                "div",
+                { class: "field" },
+                h("span", { class: "field-label" }, "Tell the agent"),
+                copyBlock(agentPrompt(wt)),
+            ),
+            h(
+                "div",
+                { class: "field" },
+                h("span", { class: "field-label" }, "Or start one there"),
+                copyBlock(agentCommand(wt)),
+            ),
+            h(
+                "div",
+                { class: "btn-row end" },
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "pbtn danger",
+                        onclick: () => void remove(),
+                    },
+                    "Remove…",
+                ),
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "pbtn",
+                        disabled: !wt.deck,
+                        title: "Its slides side by side with this deck's",
+                        onclick: () => {
+                            closeDialog();
+                            compareWith(wt);
+                        },
+                    },
+                    "Compare",
+                ),
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "pbtn primary",
+                        disabled: !wt.branch || !into || wt.ahead === 0,
+                        title: into
+                            ? `Bring its commits into ${into}`
+                            : "Switch the deck to a branch first",
+                        onclick: () => void merge(),
+                    },
+                    into ? `Merge into ${into}…` : "Merge…",
+                ),
+            ),
+        ),
+        { wide: true },
     );
 }
 

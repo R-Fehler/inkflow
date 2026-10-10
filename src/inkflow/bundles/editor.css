@@ -2677,3 +2677,53 @@ body.start-mode #workspace {
   color: var(--subtext);
   font-size: 11px;
 }
+.menu-wt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.menu-wt .menu-item {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.wt-branch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wt-state {
+  font-size: 11px;
+  color: var(--subtext);
+}
+.menu-mini {
+  padding: 2px 8px;
+  font-size: 12px;
+  background: none;
+  border: 1px solid var(--ui-line);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.menu-mini:hover:not(:disabled) {
+  background: var(--sel-soft);
+}
+.menu-mini:disabled {
+  opacity: 0.4;
+}
+.wt-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.wt-command {
+  flex: 1;
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
+  background: var(--sel-soft);
+  border-radius: 5px;
+}
