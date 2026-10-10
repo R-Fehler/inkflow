@@ -45,6 +45,12 @@ Add, delete, duplicate, move, hide/show or re-id slides with `inkflow slide …`
 slide's Markdown, notes, drawing and ink files along, and with the editor open
 each is a step the author can undo there.
 
+To find or change wording across the deck, `inkflow find TEXT` lists every
+match (slide, file, `#id` or Markdown line and zone) in SVG text, Markdown,
+notes and deck.py's titles/zone text, and `inkflow replace TEXT NEW` changes
+them all as one undoable step (`--regex`, `--case`, `--word`, `-s SLIDE`,
+`--dry-run` first when unsure).
+
 ## Files
 
 - `deck.py`: `main()` returns `Deck(slides=[Slide(...), ...])`. Slide order,

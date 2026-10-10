@@ -206,6 +206,32 @@ commands:
           flag:
             deck: ["$files([\".py\"])"]
 
+  - name: find
+    description: Find text on the slides, as the editor's Find does.
+    flags:
+      -d, --deck=: Path to deck.py
+      -r, --regex: TEXT is a regular expression
+      -c, --case: Match case
+      -w, --word: Whole words only
+      -s, --slide=: Only this slide (number or id)
+      --json: Print the matches as JSON
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+
+  - name: replace
+    description: Replace text on the slides, as the editor's Replace All does.
+    flags:
+      -d, --deck=: Path to deck.py
+      -r, --regex: TEXT is a regular expression
+      -c, --case: Match case
+      -w, --word: Whole words only
+      -s, --slide=: Only this slide (number or id)
+      -n, --dry-run: Show what would change; write nothing
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+
   - name: worktree
     description: Work on the deck in a separate git worktree, on its own branch.
     commands:

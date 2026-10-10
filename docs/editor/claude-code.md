@@ -58,11 +58,42 @@ right away.
 | `inkflow goto N` | Shows slide `N` in the editor open on this deck. |
 | `inkflow select ID…` | Selects elements by id in the editor open on this deck, so Claude can point at what it means. |
 | `inkflow slide …` | Adds, deletes, duplicates, moves, hides, shows, renames or retitles slides, with their files (below). |
+| `inkflow find TEXT` / `inkflow replace TEXT NEW` | The editor's Find and Replace: every match on the slides with where it is, and a replace that is one undoable step ([below](#finding-and-replacing-text)). |
 | `inkflow worktree …` | A copy of the deck on a branch of its own for Claude to work in, merged when you like it ([below](#working-on-a-branch)). |
 | `inkflow compare [LEFT] RIGHT` | Which slides differ between two versions: the working copy, a revision (`main`, `HEAD~2`) or a deck folder. One line per slide that differs (`~ 3 features: slides/features.md, notes`, `+ 4 compare`, `- 7 morph`, `↕ 5 → 6 media`); `--json` adds the changed elements; `--sheet` writes side-by-side images of only those slides (see [Comparing two versions](compare.md)). |
 
 With several editors running, `goto` and `select` find the right one from the
 deck's `.inkflow/context.json`.
+
+## Finding and replacing text
+
+`inkflow find` and `inkflow replace` search exactly what the editor's Find
+dialog searches: the text in each slide's drawings (and in the project's
+layouts and overlays it is built on), its Markdown and speaker notes, and in
+`deck.py` only author text (titles, `zones={...}` text, `Inline(...)`), never
+code. Each match is one line: the slide it shows on, the file and where in it
+(an SVG text's `#id`, a Markdown line and its zone), and the match in brackets
+with some context:
+
+```text
+$ inkflow find widget
+slide 1 (drawn): slides/drawn.svg #label: "Blue [widget]s"
+slide 2 (intro): slides/intro.md:3 [content]: "All about [widget]s."
+slide 1 (drawn): deck.py: "[Widget]s"
+3 matches on 2 slides
+```
+
+| Option | |
+|---|---|
+| `--regex` / `--case` / `--word` | A regular expression (`NEW` may use `\1`, `\g<name>`), match case, whole words. |
+| `-s SLIDE` | Only that slide's files, and only its own text in `deck.py`. A layout's text changes on every slide built on it. |
+| `--dry-run` | (`replace`) Each match with what it would become; nothing is written. |
+| `--json` | (`find`) The matches as JSON. |
+
+`replace` replaces every match in one step: with the editor open, that step
+is *Agent: Replace "widget" with "gadget"* in its undo history, like the
+editor's own Replace All; otherwise the files are changed directly. It prints
+every file it wrote.
 
 ## Changing the slide list
 

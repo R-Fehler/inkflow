@@ -375,3 +375,9 @@ def title_cmd(ref: str, text: str, deck_path: Path) -> None:
         {"action": "slide", "op": "title", "slide": index, "title": text},
         f"Retitle {slides.name(index)}",
     )
+
+
+# Shared with the other commands that edit through the session
+# (`inkflow replace`, `inkflow anim`).
+SlideRefs = _Slides
+apply_step = _apply

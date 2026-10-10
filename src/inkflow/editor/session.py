@@ -1108,6 +1108,7 @@ class EditorSession:
                 segments, _ = self._segments(path, kind, path.read_bytes())
             except Exception:
                 continue  # an unparsable file has nothing to offer
+            segments = _on_deck_slide(segments, kind, msg)
             for hit in iter_hits(path, kind, segments, pat):
                 hits.append(hit.to_json())
                 if len(hits) >= MAX_HITS:
@@ -1133,6 +1134,7 @@ class EditorSession:
                 continue
             data = txn.read(path)
             segments, serialize = self._segments(path, kind, data)
+            segments = _on_deck_slide(segments, kind, msg)
             count = replace_in(
                 segments,
                 pat,
@@ -2802,3 +2804,14 @@ class EditorSession:
             raise EditError(str(exc)) from exc
         assert arrival is not None
         return self._placed(arrival)
+
+
+def _on_deck_slide(
+    segments: list[Segment], kind: str, msg: dict[str, object]
+) -> list[Segment]:
+    """deck.py's text limited to one ``Slide(...)`` (``deckSlide``: its deck
+    index), for a search of one slide; other files' segments as they are."""
+    only = msg.get("deckSlide")
+    if kind != "deck" or not isinstance(only, int) or isinstance(only, bool):
+        return segments
+    return [s for s in segments if s.slide == only]

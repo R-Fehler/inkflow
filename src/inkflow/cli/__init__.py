@@ -21,6 +21,7 @@ for _submodule in (
     "present",
     "project",
     "slides",
+    "text",
     "verify",
     "worktree",
 ):

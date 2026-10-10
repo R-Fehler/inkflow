@@ -198,7 +198,8 @@ src/
                                dialog: token overrides as one marked block in the project's
                                styles.css, values validated, never raw CSS), findreplace.py
                                (find/replace over SVG text, Markdown and deck.py author-text
-                               literals only), gitops.py (the Git menu: status, commit,
+                               literals only; `deckSlide` keeps deck.py to one slide's
+                               text, the dialog's "This slide"), gitops.py (the Git menu: status, commit,
                                push/pull, discard, undo commit, branches, deck-scoped log,
                                view/revert/restore a commit, `lfs_status` = media
                                no LFS rule covers or committed as full copies, `lfs_track`
@@ -239,7 +240,12 @@ src/
                                (the `slide` group: add, delete, duplicate, move, hide, show,
                                rename, title; SLIDE = presentation number or id; runs the
                                session's `slide` action via editor/remote.py, so with an
-                               editor open it is an undoable "Agent: …" step there),
+                               editor open it is an undoable "Agent: …" step there;
+                               `SlideRefs`/`apply_step` are shared with text.py and
+                               anim.py), text.py (`find`/`replace`: the session's `find`
+                               and `replace` actions over the files `build_model` lists
+                               per slide, as the Find dialog sends them; `-s` sends
+                               `deckSlide`, deck.py text of that Slide(...) only),
                                authoring.py
                                (clean, label2id, add, parent group, sync, layouts), color.py (colorize,
                                palette), verify.py, worktree.py (the `worktree` group: add,
