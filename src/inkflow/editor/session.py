@@ -2265,6 +2265,15 @@ class EditorSession:
         else:
             raise EditError(f"unknown slide operation {op!r}")
         self._save_deck(txn, source, imports)
+        follow = msg.get("follow")
+        # Where the slide the editor shows ends up, for it to stay on it.
+        if (
+            slides_after is not None
+            and isinstance(follow, int)
+            and 0 <= follow < len(deck.slides)
+        ):
+            kept = [i for i, s in enumerate(slides_after) if s is deck.slides[follow]]
+            extra["select"] = kept[0] if kept else min(follow, len(slides_after) - 1)
         if slides_after is not None:
             self._follow_ink(deck, slides_after, origins, txn)
         if relink is not None:

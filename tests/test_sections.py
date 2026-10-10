@@ -472,6 +472,15 @@ def test_section_edits_are_refused_cleanly(project: Path) -> None:
         _apply(project, {"op": "section-remove", "section": 0, "slides": True})
 
 
+def test_the_editor_follows_its_slide_through_a_move(project: Path) -> None:
+    # The editor shows "Setup" (1); moving Results first puts it at 2.
+    result = _apply(project, {"op": "section-move", "section": 1, "to": 0, "follow": 1})
+    assert result["select"] == 2
+    # A moved slide is followed too (here: the one moved).
+    result = _apply(project, {"op": "move", "from": 0, "to": 3, "section": 1})
+    assert result["select"] == 3
+
+
 def test_an_agent_step_is_labelled_as_such(project: Path) -> None:
     result = _apply(
         project,

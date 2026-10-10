@@ -7,6 +7,7 @@ The deck DSL you use in `deck.py`. Everything here is imported from the top-leve
 from inkflow import (
     Deck,
     Slide,
+    Section,
     Image,
     Video,
     TextBox,
@@ -25,6 +26,8 @@ see the [Animations](animations.md) and [Transitions](transitions.md) reference 
 ::: inkflow.manifest.Deck
 
 ::: inkflow.manifest.Slide
+
+::: inkflow.manifest.Section
 
 ::: inkflow.overlay.Overlay
 

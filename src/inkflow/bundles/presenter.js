@@ -2224,6 +2224,52 @@
     return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:middle" aria-label="Step ${current2} of ${total}">${paths}</svg>`;
   }
 
+  // src/ts/shared/sections.ts
+  function sectionRuns(slides) {
+    const runs = [];
+    slides.forEach((s2, i2) => {
+      const section = s2.section ?? null;
+      const last = runs[runs.length - 1];
+      if (last && (last.section?.index ?? -1) === (section?.index ?? -1)) {
+        last.end = i2 + 1;
+      } else {
+        runs.push({ section, start: i2, end: i2 + 1 });
+      }
+    });
+    return runs;
+  }
+  function sectionPosition(slides, i2) {
+    const run = sectionRuns(slides).find((r2) => i2 >= r2.start && i2 < r2.end);
+    if (!run?.section) return null;
+    return {
+      name: run.section.name,
+      at: i2 - run.start + 1,
+      of: run.end - run.start
+    };
+  }
+  function gridRows(runs, cols) {
+    return runs.reduce((n2, r2) => n2 + Math.ceil((r2.end - r2.start) / cols), 0);
+  }
+  function verticalNeighbor(boxes, i2, dir) {
+    const me = boxes[i2];
+    if (!me) return i2;
+    const tops = [...new Set(boxes.map((b2) => b2.top))].sort((a2, b2) => a2 - b2);
+    const row = tops.indexOf(me.top) + dir;
+    if (row < 0 || row >= tops.length) return i2;
+    const center = me.left + me.width / 2;
+    let best = i2;
+    let bestD = Number.POSITIVE_INFINITY;
+    boxes.forEach((b2, j2) => {
+      if (b2.top !== tops[row]) return;
+      const d2 = Math.abs(b2.left + b2.width / 2 - center);
+      if (d2 < bestD) {
+        best = j2;
+        bestD = d2;
+      }
+    });
+    return best;
+  }
+
   // src/ts/shared/keyframes.ts
   var templates = /* @__PURE__ */ new Map();
   function parseOffsets(keyText) {
@@ -2677,6 +2723,8 @@
   }
   function updateStatus() {
     const infoHtml = `<span class="slide-current">${state.slideIndex + 1}</span> / ${state.slides.length}`;
+    const at = sectionPosition(state.slides, state.slideIndex);
+    slideInfo.title = at ? `${at.name}: ${at.at} of ${at.of}` : "";
     const ringHtml = buildStepRing(state.step, maxStep2());
     slideInfo.innerHTML = infoHtml;
     stepInfo.innerHTML = ringHtml;
@@ -2694,6 +2742,7 @@
   var pvTimerToggle = document.getElementById("pv-timer-toggle");
   var pvTimerReset = document.getElementById("pv-timer-reset");
   var pvSlideInfo = document.getElementById("pv-slide-info");
+  var pvSection = document.getElementById("pv-section");
   var pvStepRing = document.getElementById("pv-step-ring");
   var pvNextInner = document.getElementById("pv-next-inner");
   var pvNotes = document.getElementById("pv-notes");
@@ -2742,6 +2791,12 @@
     const total = state.slides.length;
     pvSlideInfo.innerHTML = `<span class="slide-current">${total ? state.slideIndex + 1 : "\u2013"}</span> / ${total || "\u2013"}`;
     pvStepRing.innerHTML = buildStepRing(state.step, maxStep2());
+    if (pvSection) {
+      const at = sectionPosition(state.slides, state.slideIndex);
+      pvSection.hidden = !at;
+      pvSection.textContent = at ? `\xA7 ${at.name} \xB7 ${at.at}/${at.of}` : "";
+      pvSection.title = at ? `Section \u201C${at.name}\u201D: slide ${at.at} of ${at.of}` : "";
+    }
   }
   function _scalePvNext() {
     const svg = pvNextInner.querySelector("svg");
@@ -4928,6 +4983,11 @@
     sendNav(CUT);
   }
 
+  // src/ts/shared/escape.ts
+  function escapeHtml(s2) {
+    return s2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
   // src/ts/presenter/overview.ts
   var overview = document.getElementById("overview");
   var overviewGrid = document.getElementById("overview-grid");
@@ -4952,6 +5012,11 @@
     const scale = Math.min(thumb.clientWidth / vb.w, thumb.clientHeight / vb.h);
     svg.style.transform = `scale(${scale})`;
   }
+  function cellAt(i2) {
+    return overviewGrid.querySelector(
+      `.overview-cell[data-index="${i2}"]`
+    );
+  }
   function computeCols() {
     const cols = getComputedStyle(overviewGrid).gridTemplateColumns.split(" ").length;
     state._overviewCols = cols || 1;
@@ -4963,11 +5028,15 @@
     const availH = overview.clientHeight - parseFloat(getComputedStyle(overview).paddingTop) - parseFloat(getComputedStyle(overview).paddingBottom);
     const [vbW, vbH] = firstSlideViewBox();
     const ratio = vbH / vbW;
+    const runs = sectionRuns(state.slides);
+    const heading = overviewGrid.querySelector(".overview-section");
+    const headings = runs.filter((r2) => r2.section).length;
+    const headingH = heading ? heading.offsetHeight + gap : 0;
     let cols = n2;
     for (let c2 = 1; c2 <= n2; c2++) {
       const thumbW = (availW - (c2 - 1) * gap) / c2;
-      const rows = Math.ceil(n2 / c2);
-      if (rows * (thumbW * ratio + gap) - gap <= availH) {
+      const rows = gridRows(runs, c2);
+      if (rows * (thumbW * ratio + gap) - gap + headings * headingH <= availH) {
         cols = Math.max(2, c2);
         break;
       }
@@ -4976,11 +5045,29 @@
   }
   function overviewSetActive(i2) {
     state._overviewActive = Math.max(0, Math.min(state.slides.length - 1, i2));
-    overviewGrid.querySelectorAll(".overview-cell").forEach((el, idx) => {
-      el.classList.toggle("active", idx === state._overviewActive);
+    overviewGrid.querySelectorAll(".overview-cell").forEach((el) => {
+      el.classList.toggle(
+        "active",
+        Number(el.dataset.index) === state._overviewActive
+      );
     });
-    const active2 = overviewGrid.children[state._overviewActive];
-    if (active2) active2.scrollIntoView({ block: "nearest" });
+    cellAt(state._overviewActive)?.scrollIntoView({ block: "nearest" });
+  }
+  function overviewMoveVertical(dir) {
+    const cells = [
+      ...overviewGrid.querySelectorAll(".overview-cell")
+    ];
+    const boxes = cells.map((el) => ({
+      left: el.offsetLeft,
+      top: el.offsetTop,
+      width: el.offsetWidth
+    }));
+    const here = cells.findIndex(
+      (el) => Number(el.dataset.index) === state._overviewActive
+    );
+    if (here === -1) return;
+    const next = cells[verticalNeighbor(boxes, here, dir)];
+    overviewSetActive(Number(next.dataset.index));
   }
   function overviewCommit() {
     history.pushState(null, "", window.location.href);
@@ -4992,7 +5079,7 @@
     sendNav(CUT);
   }
   function computeStageFlip() {
-    const activeCell = overviewGrid.children[state._overviewActive];
+    const activeCell = cellAt(state._overviewActive);
     if (!activeCell) return null;
     const thumb = activeCell.querySelector(".overview-thumb");
     const el = thumb ?? activeCell;
@@ -5023,7 +5110,7 @@
     overviewGrid.style.transform = `scale(${scale})`;
   }
   function setActiveHighlight(visible, durationSeconds) {
-    const activeCell = overviewGrid.children[state._overviewActive];
+    const activeCell = cellAt(state._overviewActive);
     const thumb = activeCell?.querySelector(".overview-thumb");
     const num = activeCell?.querySelector(".overview-num");
     if (thumb) {
@@ -5040,13 +5127,23 @@
     overviewGrid.style.cssText = "";
     const [vbW, vbH] = firstSlideViewBox();
     overview.style.setProperty("--thumb-ar", `${vbW} / ${vbH}`);
-    state.slides.forEach((s2, i2) => {
-      const cell = document.createElement("div");
-      cell.className = "overview-cell";
-      cell.dataset.index = String(i2);
-      cell.innerHTML = `<div class="overview-num">${i2 + 1}</div><div class="overview-thumb">${s2.svg}</div>`;
-      overviewGrid.appendChild(cell);
-    });
+    for (const run of sectionRuns(state.slides)) {
+      if (run.section) {
+        const head = document.createElement("div");
+        head.className = "overview-section";
+        head.dataset.index = String(run.start);
+        const count = run.end - run.start;
+        head.innerHTML = `<span class="overview-section-name">${escapeHtml(run.section.name)}</span><span class="overview-section-count">${count} slide${count === 1 ? "" : "s"}</span>`;
+        overviewGrid.appendChild(head);
+      }
+      for (let i2 = run.start; i2 < run.end; i2++) {
+        const cell = document.createElement("div");
+        cell.className = "overview-cell";
+        cell.dataset.index = String(i2);
+        cell.innerHTML = `<div class="overview-num">${i2 + 1}</div><div class="overview-thumb">${state.slides[i2].svg}</div>`;
+        overviewGrid.appendChild(cell);
+      }
+    }
     state._overviewActive = state.slideIndex;
     overviewGrid.querySelectorAll(".overview-thumb").forEach((thumb) => {
       applyStepInstant(thumb, maxStep(thumb));
@@ -5058,7 +5155,7 @@
     computeCols();
     overviewSetActive(state._overviewActive);
     geometry = computeStageFlip();
-    const activeCell = overviewGrid.children[state._overviewActive];
+    const activeCell = cellAt(state._overviewActive);
     const activeThumb = activeCell?.querySelector(".overview-thumb");
     const activeNum = activeCell?.querySelector(".overview-num");
     if (activeThumb) activeThumb.style.outlineColor = "transparent";
@@ -5107,7 +5204,9 @@
     overview.classList.contains("visible") ? closeOverview() : openOverview();
   }
   overview.addEventListener("click", (e2) => {
-    const cell = e2.target.closest(".overview-cell");
+    const cell = e2.target.closest(
+      ".overview-cell, .overview-section"
+    );
     if (cell) {
       state._overviewActive = +cell.dataset.index;
       overviewCommit();
@@ -5124,11 +5223,6 @@
     });
   });
 
-  // src/ts/shared/escape.ts
-  function escapeHtml(s2) {
-    return s2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-  }
-
   // src/ts/presenter/picker.ts
   var picker = document.getElementById("picker");
   var pickerInput = document.getElementById("picker-input");
@@ -5142,9 +5236,19 @@
   function closePicker() {
     picker.classList.remove("visible");
   }
+  function fuzzy(text, q) {
+    let ti = 0;
+    for (let qi = 0; qi < q.length; qi++) {
+      ti = text.indexOf(q[qi], ti);
+      if (ti === -1) return false;
+      ti++;
+    }
+    return true;
+  }
   function filterPicker(query) {
     const q = query.trim();
     let matches;
+    const sectionRows = /* @__PURE__ */ new Map();
     if (q === "") {
       matches = state.slides.map((_2, i2) => i2);
     } else if (/^\d+$/.test(q)) {
@@ -5154,23 +5258,28 @@
       }, []);
     } else {
       const lq = q.toLowerCase();
-      matches = state.slides.reduce((acc, s2, i2) => {
-        const title = (s2.title || "").toLowerCase();
-        let ti = 0;
-        for (let qi = 0; qi < lq.length; qi++) {
-          ti = title.indexOf(lq[qi], ti);
-          if (ti === -1) return acc;
-          ti++;
+      matches = [];
+      for (const run of sectionRuns(state.slides)) {
+        if (run.section && fuzzy(run.section.name.toLowerCase(), lq)) {
+          sectionRows.set(matches.length, run.section.name);
+          matches.push(run.start);
         }
-        acc.push(i2);
-        return acc;
-      }, []);
+      }
+      state.slides.forEach((s2, i2) => {
+        if (fuzzy((s2.title || "").toLowerCase(), lq)) matches.push(i2);
+      });
     }
     state._pickerMatches = matches;
     state._pickerActive = 0;
-    pickerList.innerHTML = matches.map(
-      (idx, pos) => `<div role="option" data-pos="${pos}" class="${pos === 0 ? "active" : ""}"><span class="pk-num">${idx + 1}</span><span class="pk-title">${escapeHtml(state.slides[idx].title || "")}</span></div>`
-    ).join("");
+    pickerList.innerHTML = matches.map((idx, pos) => {
+      const active3 = pos === 0 ? " active" : "";
+      const section = sectionRows.get(pos);
+      if (section != null) {
+        return `<div role="option" data-pos="${pos}" class="pk-section-row${active3}"><span class="pk-num">\xA7</span><span class="pk-title">${escapeHtml(section)}</span><span class="pk-section">section \xB7 ${idx + 1}</span></div>`;
+      }
+      const name = state.slides[idx].section?.name;
+      return `<div role="option" data-pos="${pos}" class="${active3.trim()}"><span class="pk-num">${idx + 1}</span><span class="pk-title">${escapeHtml(state.slides[idx].title || "")}</span>` + (name ? `<span class="pk-section">${escapeHtml(name)}</span>` : "") + "</div>";
+    }).join("");
     const active2 = pickerList.querySelector('[role="option"].active');
     if (active2) active2.scrollIntoView({ block: "nearest" });
   }
@@ -5395,12 +5504,12 @@
       }
       if (e2.key === "ArrowDown" || e2.key === "j") {
         e2.preventDefault();
-        overviewSetActive(state._overviewActive + state._overviewCols);
+        overviewMoveVertical(1);
         return;
       }
       if (e2.key === "ArrowUp" || e2.key === "k") {
         e2.preventDefault();
-        overviewSetActive(state._overviewActive - state._overviewCols);
+        overviewMoveVertical(-1);
         return;
       }
       if (e2.key === "Enter") {

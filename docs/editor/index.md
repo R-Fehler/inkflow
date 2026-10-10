@@ -246,15 +246,41 @@ dropped too, since the receiving deck's own overlays apply. And because the
 clipboard is shared with everything else on your computer, a paste only accepts
 a plain `Slide(...)` built from inkflow's own types, never arbitrary Python.
 
+## Sections
+
+[Sections](../authoring/slides.md#sections) group the slide list under named
+headers, each with its slide count and a caret that collapses it (collapsed
+sections are remembered per deck in this browser, never written to `deck.py`;
+the section holding the slide you edit opens by itself).
+
+- **Add**: right-click a slide, **Add section here…**: the new section starts at
+  that slide and takes the rest of its section.
+- **Rename**: double-click the name (or **Rename…** in the header's menu);
+  <kbd>Enter</kbd> keeps it, <kbd>Esc</kbd> cancels.
+- **Move a section**: drag its header above or below another section (dropped on
+  a slide, it goes before or after that slide's section), or **Move section
+  up/down** in its menu. Slides before the first section stay first.
+- **Move slides between sections**: drag them (the picked slides go together);
+  dropped on a header they become the first slides of that section, so an empty
+  or collapsed section takes slides too.
+- The header's menu also has **Select all slides in section**, **Collapse all /
+  Expand all**, **Remove section** (its slides join the section before it) and
+  **Remove section and its slides…** (after a confirmation).
+
+Each of these is one step in the undo history, like any edit of the slide list.
+
 ## The grid view
 
 <kbd>G</kbd> (or the grid button in the toolbar) shows every slide as a large
-thumbnail, like the presenter's overview. It works like the slide list: click to
-pick (<kbd>Ctrl</kbd>/<kbd>Shift</kbd> for several), drag to reorder, right-click
-for the slide menu, <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> /
-<kbd>Delete</kbd> on the picked slides. The arrow keys move around the grid;
-double-click or <kbd>Enter</kbd> opens a slide, <kbd>Esc</kbd> goes back. The size
-slider sets how large the thumbnails are.
+thumbnail, like the presenter's overview, in one block per section. It works
+like the slide list: click to pick (<kbd>Ctrl</kbd>/<kbd>Shift</kbd> for
+several), drag to move the picked slides (into another section too),
+right-click for the slide menu, <kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd> /
+<kbd>Delete</kbd> on the picked slides. A section's heading selects all its
+slides with a click, collapses with its caret, moves the whole section when
+dragged and has the section menu on right-click. The arrow keys move around the
+grid, across sections; double-click or <kbd>Enter</kbd> opens a slide,
+<kbd>Esc</kbd> goes back. The size slider sets how large the thumbnails are.
 
 ## The canvas
 

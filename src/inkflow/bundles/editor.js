@@ -3253,36 +3253,36 @@
   function blankRow(width) {
     return Array.from({ length: width }, () => "");
   }
-  function uniqueName(columns2, base2) {
+  function uniqueName(columns, base2) {
     let name2 = base2;
     let n3 = 2;
-    while (columns2.includes(name2)) name2 = `${base2} ${n3++}`;
+    while (columns.includes(name2)) name2 = `${base2} ${n3++}`;
     return name2;
   }
   function pasteCells(grid, row4, col, cells) {
-    const columns2 = [...grid.columns];
+    const columns = [...grid.columns];
     const rows = grid.rows.map((r2) => [...r2]);
     let body2 = cells;
     if (row4 < 0) {
       const head = cells[0] ?? [];
       head.forEach((name2, j2) => {
         const c2 = col + j2;
-        while (columns2.length <= c2) {
-          columns2.push(
-            uniqueName(columns2, `column ${columns2.length + 1}`)
+        while (columns.length <= c2) {
+          columns.push(
+            uniqueName(columns, `column ${columns.length + 1}`)
           );
         }
-        columns2[c2] = name2.trim() || columns2[c2];
+        columns[c2] = name2.trim() || columns[c2];
       });
       body2 = cells.slice(1);
       row4 = 0;
     }
     const width = Math.max(
-      columns2.length,
+      columns.length,
       col + Math.max(0, ...body2.map((r2) => r2.length))
     );
-    while (columns2.length < width) {
-      columns2.push(uniqueName(columns2, `column ${columns2.length + 1}`));
+    while (columns.length < width) {
+      columns.push(uniqueName(columns, `column ${columns.length + 1}`));
     }
     for (const r2 of rows) while (r2.length < width) r2.push("");
     body2.forEach((line, i2) => {
@@ -3291,7 +3291,7 @@
         rows[row4 + i2][col + j2] = value;
       });
     });
-    return { columns: columns2, rows };
+    return { columns, rows };
   }
   function addRow(grid, at2 = grid.rows.length) {
     const rows = grid.rows.map((r2) => [...r2]);
@@ -3305,11 +3305,11 @@
     };
   }
   function addColumn(grid, name2) {
-    const columns2 = [
+    const columns = [
       ...grid.columns,
       uniqueName(grid.columns, name2 ?? `series ${grid.columns.length}`)
     ];
-    return { columns: columns2, rows: grid.rows.map((r2) => [...r2, ""]) };
+    return { columns, rows: grid.rows.map((r2) => [...r2, ""]) };
   }
   function removeColumn(grid, at2, s2) {
     const name2 = grid.columns[at2];
@@ -3331,9 +3331,9 @@
     const old = grid.columns[at2];
     const others = grid.columns.filter((_2, i2) => i2 !== at2);
     const name2 = uniqueName(others, wanted.trim() || old);
-    const columns2 = grid.columns.map((c2, i2) => i2 === at2 ? name2 : c2);
+    const columns = grid.columns.map((c2, i2) => i2 === at2 ? name2 : c2);
     return {
-      grid: { columns: columns2, rows: grid.rows.map((r2) => [...r2]) },
+      grid: { columns, rows: grid.rows.map((r2) => [...r2]) },
       settings: {
         ...s2,
         x: s2.x === old ? name2 : s2.x,
@@ -3616,11 +3616,368 @@
     );
   }
 
+  // src/ts/editor/sections.ts
+  function sectionOf(sections2, i2) {
+    for (let k2 = 0; k2 < sections2.length; k2++) {
+      const s2 = sections2[k2];
+      if (i2 >= s2.start && i2 < s2.start + s2.count) return k2;
+    }
+    return null;
+  }
+  function sectionSlides(sections2, k2) {
+    const s2 = sections2[k2];
+    if (!s2) return [];
+    return Array.from({ length: s2.count }, (_2, j2) => s2.start + j2);
+  }
+  function unsectioned(sections2, n3) {
+    return sections2.length ? sections2[0].start : n3;
+  }
+  function sorterRows(n3, sections2, collapsed2) {
+    const rows = [];
+    for (let i2 = 0; i2 < unsectioned(sections2, n3); i2++) {
+      rows.push({ kind: "slide", index: i2 });
+    }
+    sections2.forEach((s2, k2) => {
+      rows.push({ kind: "header", section: k2 });
+      if (collapsed2(k2)) return;
+      for (let j2 = 0; j2 < s2.count; j2++) {
+        rows.push({ kind: "slide", index: s2.start + j2 });
+      }
+    });
+    return rows;
+  }
+  function sectionBlocks(n3, sections2) {
+    const blocks2 = [];
+    const first = unsectioned(sections2, n3);
+    if (first > 0 || !sections2.length) {
+      blocks2.push({
+        section: null,
+        slides: Array.from({ length: first }, (_2, i2) => i2)
+      });
+    }
+    sections2.forEach((_2, k2) => {
+      blocks2.push({ section: k2, slides: sectionSlides(sections2, k2) });
+    });
+    return blocks2;
+  }
+  function moveRequest(sections2, moved, insertAt, section2) {
+    const slides = [...new Set(moved)].sort((a2, b2) => a2 - b2);
+    if (!slides.length) return null;
+    const to = insertAt - slides.filter((i2) => i2 < insertAt).length;
+    const contiguous = slides.every((v2, j2) => v2 === slides[0] + j2);
+    const sameSection = slides.every((i2) => sectionOf(sections2, i2) === section2);
+    if (contiguous && sameSection && to === slides[0]) return null;
+    return { slides, to, section: section2 };
+  }
+  function dropOnSlide(sections2, i2, after) {
+    return { insertAt: after ? i2 + 1 : i2, section: sectionOf(sections2, i2) };
+  }
+  function dropOnHeader(sections2, k2) {
+    return { insertAt: sections2[k2].start, section: k2 };
+  }
+  function sectionMoveTo(k2, gap) {
+    const to = gap > k2 ? gap - 1 : gap;
+    return to === k2 ? null : to;
+  }
+  function sectionGapAtSlide(sections2, i2) {
+    const k2 = sectionOf(sections2, i2);
+    if (k2 == null) return 0;
+    const s2 = sections2[k2];
+    return i2 - s2.start < s2.count / 2 ? k2 : k2 + 1;
+  }
+  function sectionKeys(sections2) {
+    const seen = /* @__PURE__ */ new Map();
+    return sections2.map((s2) => {
+      const n3 = (seen.get(s2.name) ?? 0) + 1;
+      seen.set(s2.name, n3);
+      return n3 > 1 ? `${s2.name}#${n3}` : s2.name;
+    });
+  }
+
+  // src/ts/editor/sectionui.ts
+  function sections() {
+    return ed.model?.sections ?? [];
+  }
+  var collapsedKeys = null;
+  var collapsedDeck = "";
+  function storageKey() {
+    return `inkflow-editor-collapsed:${ed.model?.deckPath ?? ""}`;
+  }
+  function collapsedSet() {
+    const deck = ed.model?.deckPath ?? "";
+    if (collapsedKeys && collapsedDeck === deck) return collapsedKeys;
+    collapsedDeck = deck;
+    collapsedKeys = /* @__PURE__ */ new Set();
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey()) ?? "[]");
+      if (Array.isArray(saved)) {
+        for (const k2 of saved)
+          if (typeof k2 === "string") collapsedKeys.add(k2);
+      }
+    } catch {
+    }
+    return collapsedKeys;
+  }
+  function saveCollapsed() {
+    try {
+      localStorage.setItem(storageKey(), JSON.stringify([...collapsedSet()]));
+    } catch {
+    }
+  }
+  function isCollapsed(k2) {
+    const key = sectionKeys(sections())[k2];
+    return key != null && collapsedSet().has(key);
+  }
+  function setCollapsed(k2, on2) {
+    const key = sectionKeys(sections())[k2];
+    if (key == null) return;
+    if (on2) collapsedSet().add(key);
+    else collapsedSet().delete(key);
+    saveCollapsed();
+    emit("sections");
+  }
+  function setAllCollapsed(on2) {
+    const set = collapsedSet();
+    for (const key of sectionKeys(sections())) {
+      if (on2) set.add(key);
+      else set.delete(key);
+    }
+    saveCollapsed();
+    emit("sections");
+  }
+  function revealCurrent() {
+    const k2 = sectionOf(sections(), ed.current);
+    if (k2 == null || !isCollapsed(k2)) return false;
+    const key = sectionKeys(sections())[k2];
+    collapsedSet().delete(key);
+    saveCollapsed();
+    return true;
+  }
+  async function sectionEdit(req) {
+    const result = await edit({
+      action: "slide",
+      follow: ed.current,
+      ...req
+    });
+    if (result.ok && typeof result.select === "number") {
+      followSelect(result.select);
+    }
+    return result.ok;
+  }
+  async function moveSlidesTo(slides, insertAt, section2) {
+    const move = moveRequest(sections(), slides, insertAt, section2);
+    if (!move) return;
+    if (await sectionEdit({ op: "move", ...move })) ed.slideSelection.clear();
+  }
+  async function moveSectionToGap(k2, gap) {
+    const to = sectionMoveTo(k2, gap);
+    if (to == null) return;
+    await sectionEdit({ op: "section-move", section: k2, to });
+  }
+  async function addSectionAt(slide) {
+    const name2 = await askName("Add section", "New section");
+    if (name2 == null) return;
+    await sectionEdit({ op: "section-add", slide, name: name2 });
+  }
+  async function removeSection(k2, withSlides) {
+    const s2 = sections()[k2];
+    if (!s2) return;
+    if (withSlides && !window.confirm(
+      `Remove section \u201C${s2.name}\u201D and its ${s2.count} slide${s2.count === 1 ? "" : "s"} from the deck? (Their files stay on disk.)`
+    )) {
+      return;
+    }
+    await sectionEdit({ op: "section-remove", section: k2, slides: withSlides });
+  }
+  function selectSection(k2) {
+    const indices = sectionSlides(sections(), k2);
+    ed.focus = "sorter";
+    ed.slideSelection.clear();
+    if (!indices.length) {
+      emit("slide-selection");
+      return;
+    }
+    for (const i2 of indices) ed.slideSelection.add(i2);
+    if (!indices.includes(ed.current)) gotoSlide(indices[0]);
+    emit("slide-selection");
+  }
+  function askName(title2, initial) {
+    return new Promise((resolve) => {
+      let answer = null;
+      const input = h("input", {
+        type: "text",
+        class: "section-name-input",
+        value: initial,
+        "aria-label": "Section name"
+      });
+      const ok = h(
+        "button",
+        { type: "submit", class: "pbtn primary" },
+        "Add"
+      );
+      const form = h(
+        "form",
+        { class: "section-name-form" },
+        input,
+        ok
+      );
+      form.addEventListener("submit", (e2) => {
+        e2.preventDefault();
+        const name2 = input.value.trim();
+        if (!name2) return;
+        answer = name2;
+        closeDialog();
+      });
+      openDialog(title2, form, { onClose: () => resolve(answer) });
+      input.focus();
+      input.select();
+    });
+  }
+  function startRename(k2, nameEl) {
+    const s2 = sections()[k2];
+    if (!s2 || !ed.model?.deckEditable) return;
+    const input = h("input", {
+      type: "text",
+      class: "section-rename",
+      value: s2.name,
+      "aria-label": "Section name"
+    });
+    let done = false;
+    const finish2 = (commit) => {
+      if (done) return;
+      done = true;
+      const name2 = input.value.trim();
+      if (commit && name2 && name2 !== s2.name) {
+        void sectionEdit({ op: "section-rename", section: k2, name: name2 });
+      } else {
+        emit("sections");
+      }
+    };
+    input.addEventListener("keydown", (e2) => {
+      e2.stopPropagation();
+      if (e2.key === "Enter") {
+        e2.preventDefault();
+        finish2(true);
+      } else if (e2.key === "Escape") {
+        e2.preventDefault();
+        finish2(false);
+      }
+    });
+    input.addEventListener("blur", () => finish2(true));
+    for (const ev of ["click", "dblclick", "pointerdown", "dragstart"]) {
+      input.addEventListener(ev, (e2) => e2.stopPropagation());
+    }
+    nameEl.replaceChildren(input);
+    input.focus();
+    input.select();
+  }
+  var renameNext = null;
+  function openSectionMenu(x2, y2, k2) {
+    const menu6 = document.getElementById("context-menu");
+    const s2 = sections()[k2];
+    if (!s2) return;
+    const editable = !!ed.model?.deckEditable;
+    const n3 = sections().length;
+    menu6.replaceChildren();
+    menu6.append(
+      menuItem(
+        "Rename\u2026",
+        () => {
+          renameNext = k2;
+          emit("sections");
+        },
+        !editable
+      ),
+      menuItem(
+        "Select all slides in section",
+        () => selectSection(k2),
+        s2.count === 0
+      ),
+      menuItem(
+        "Move section up",
+        () => void moveSectionToGap(k2, k2 - 1),
+        !editable || k2 === 0
+      ),
+      menuItem(
+        "Move section down",
+        () => void moveSectionToGap(k2, k2 + 2),
+        !editable || k2 === n3 - 1
+      ),
+      menuItem(
+        isCollapsed(k2) ? "Expand" : "Collapse",
+        () => setCollapsed(k2, !isCollapsed(k2))
+      ),
+      menuItem("Collapse all", () => setAllCollapsed(true)),
+      menuItem("Expand all", () => setAllCollapsed(false)),
+      menuItem(
+        "Remove section",
+        () => void removeSection(k2, false),
+        !editable
+      ),
+      menuItem(
+        "Remove section and its slides\u2026",
+        () => void removeSection(k2, true),
+        !editable || s2.count === 0
+      )
+    );
+    showMenu(x2, y2);
+  }
+  function sectionHeader(k2, view3, onClick) {
+    const s2 = sections()[k2];
+    const collapsed2 = isCollapsed(k2);
+    const editable = !!ed.model?.deckEditable;
+    const name2 = h("span", { class: "section-name" }, s2.name);
+    const caret = h(
+      "button",
+      {
+        type: "button",
+        class: "section-caret",
+        title: collapsed2 ? "Expand section" : "Collapse section",
+        "aria-expanded": collapsed2 ? "false" : "true",
+        onclick: (e2) => {
+          e2.stopPropagation();
+          setCollapsed(k2, !collapsed2);
+        }
+      },
+      icon("down", 14)
+    );
+    const head = h(
+      "div",
+      {
+        class: `section-head ${view3}-section-head${collapsed2 ? " collapsed" : ""}`,
+        draggable: editable ? "true" : null,
+        "data-section": k2,
+        title: `${s2.name}: ${s2.count} slide${s2.count === 1 ? "" : "s"}${editable ? " (drag to move the section, double-click to rename)" : ""}`
+      },
+      caret,
+      name2,
+      h(
+        "span",
+        { class: "section-count" },
+        s2.count === 0 ? "empty" : String(s2.count)
+      )
+    );
+    name2.addEventListener("dblclick", (e2) => {
+      e2.stopPropagation();
+      startRename(k2, name2);
+    });
+    head.addEventListener("click", (e2) => onClick?.(e2));
+    head.addEventListener("contextmenu", (e2) => {
+      e2.preventDefault();
+      e2.stopPropagation();
+      openSectionMenu(e2.clientX, e2.clientY, k2);
+    });
+    if (renameNext === k2) {
+      renameNext = null;
+      queueMicrotask(() => startRename(k2, name2));
+    }
+    return head;
+  }
+
   // src/ts/editor/sorter.ts
   var list = document.getElementById("sorter-list");
   var addBtn = document.getElementById("sorter-add");
   var menu = document.getElementById("context-menu");
-  var dragFrom = null;
   function pickSlide(i2, e2) {
     ed.focus = "sorter";
     if (e2.shiftKey) {
@@ -3715,76 +4072,183 @@
     }
   };
   var thumbs = new Thumbs();
+  var dragging = { now: null };
+  function dragSlides(i2) {
+    if (ed.slideSelection.size > 1 && ed.slideSelection.has(i2)) {
+      return [...ed.slideSelection].sort((a2, b2) => a2 - b2);
+    }
+    return [i2];
+  }
+  var DROP_MARKS = ["drop-before", "drop-after", "drop-into"];
+  function clearDropMarks(root2) {
+    root2.querySelectorAll(".drop-before, .drop-after, .drop-into").forEach(
+      (el2) => {
+        el2.classList.remove(...DROP_MARKS);
+      }
+    );
+  }
+  function markGap(root2, gap, last) {
+    clearDropMarks(root2);
+    const head = root2.querySelector(`.section-head[data-section="${gap}"]`);
+    if (head) head.classList.add("drop-before");
+    else last?.classList.add("drop-after");
+  }
+  function headerGap(head, k2, e2) {
+    const r2 = head.getBoundingClientRect();
+    const lower = e2.clientY > r2.top + r2.height / 2;
+    const s2 = sections()[k2];
+    return lower && (isCollapsed(k2) || !s2?.count) ? k2 + 1 : k2;
+  }
+  function dropAtEnd(drag) {
+    const all = sections();
+    if (drag.kind === "section") {
+      void moveSectionToGap(drag.section, all.length);
+      return;
+    }
+    const n3 = ed.model?.slides.length ?? 0;
+    void moveSlidesTo(drag.slides, n3, all.length ? all.length - 1 : null);
+  }
+  function slideItem(slide, i2) {
+    const item = h(
+      "div",
+      {
+        class: `sorter-item${i2 === ed.current ? " active" : ""}${ed.slideSelection.has(i2) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
+        draggable: ed.model?.deckEditable ? "true" : null,
+        title: slide.title ?? slide.id ?? slide.src,
+        "data-index": i2
+      },
+      h("span", { class: "sorter-num" }, String(i2 + 1)),
+      thumbs.thumb(slide)
+    );
+    item.addEventListener("click", (e2) => pickSlide(i2, e2));
+    item.addEventListener("contextmenu", (e2) => {
+      e2.preventDefault();
+      ed.focus = "sorter";
+      if (!ed.slideSelection.has(i2)) {
+        ed.slideSelection.clear();
+        gotoSlide(i2);
+      }
+      openSlideMenu(e2.clientX, e2.clientY, i2);
+    });
+    item.addEventListener("dragstart", (e2) => {
+      dragging.now = { kind: "slides", slides: dragSlides(i2) };
+      e2.dataTransfer?.setData("text/plain", String(i2));
+      item.classList.add("dragging");
+    });
+    item.addEventListener("dragend", () => {
+      dragging.now = null;
+      item.classList.remove("dragging");
+      clearDropMarks(list);
+    });
+    item.addEventListener("dragover", (e2) => {
+      const drag = dragging.now;
+      if (!drag) return;
+      e2.preventDefault();
+      e2.stopPropagation();
+      if (drag.kind === "section") {
+        const gap = sectionGapAtSlide(sections(), i2);
+        markGap(list, gap, list.lastElementChild);
+        return;
+      }
+      const r2 = item.getBoundingClientRect();
+      clearDropMarks(list);
+      item.classList.add(
+        e2.clientY > r2.top + r2.height / 2 ? "drop-after" : "drop-before"
+      );
+    });
+    item.addEventListener("drop", (e2) => {
+      e2.preventDefault();
+      e2.stopPropagation();
+      const drag = dragging.now;
+      clearDropMarks(list);
+      if (!drag) return;
+      if (drag.kind === "section") {
+        const gap = sectionGapAtSlide(sections(), i2);
+        void moveSectionToGap(drag.section, gap);
+        return;
+      }
+      const r2 = item.getBoundingClientRect();
+      const after = e2.clientY > r2.top + r2.height / 2;
+      const target = dropOnSlide(sections(), i2, after);
+      void moveSlidesTo(drag.slides, target.insertAt, target.section);
+    });
+    return item;
+  }
+  function headerItem(k2) {
+    const head = sectionHeader(k2, "sorter", (e2) => {
+      if (e2.ctrlKey || e2.metaKey || e2.shiftKey) selectSection(k2);
+    });
+    head.addEventListener("dragstart", (e2) => {
+      dragging.now = { kind: "section", section: k2 };
+      e2.dataTransfer?.setData("text/plain", `section:${k2}`);
+      head.classList.add("dragging");
+    });
+    head.addEventListener("dragend", () => {
+      dragging.now = null;
+      head.classList.remove("dragging");
+      clearDropMarks(list);
+    });
+    head.addEventListener("dragover", (e2) => {
+      const drag = dragging.now;
+      if (!drag) return;
+      e2.preventDefault();
+      e2.stopPropagation();
+      if (drag.kind === "section") {
+        markGap(list, headerGap(head, k2, e2), list.lastElementChild);
+        return;
+      }
+      clearDropMarks(list);
+      head.classList.add("drop-into");
+    });
+    head.addEventListener("drop", (e2) => {
+      e2.preventDefault();
+      e2.stopPropagation();
+      const drag = dragging.now;
+      clearDropMarks(list);
+      if (!drag) return;
+      if (drag.kind === "section") {
+        void moveSectionToGap(drag.section, headerGap(head, k2, e2));
+        return;
+      }
+      const target = dropOnHeader(sections(), k2);
+      void moveSlidesTo(drag.slides, target.insertAt, target.section);
+    });
+    return head;
+  }
   function renderSorter() {
     clear(list);
     thumbs.begin();
     const slides = ed.model?.slides ?? [];
-    slides.forEach((slide, i2) => {
-      const item = h(
-        "div",
-        {
-          class: `sorter-item${i2 === ed.current ? " active" : ""}${ed.slideSelection.has(i2) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
-          draggable: ed.model?.deckEditable ? "true" : null,
-          title: slide.title ?? slide.id ?? slide.src,
-          "data-index": i2
-        },
-        h("span", { class: "sorter-num" }, String(i2 + 1)),
-        thumbs.thumb(slide)
+    for (const row4 of sorterRows(slides.length, sections(), isCollapsed)) {
+      list.append(
+        row4.kind === "header" ? headerItem(row4.section) : slideItem(slides[row4.index], row4.index)
       );
-      item.addEventListener("click", (e2) => pickSlide(i2, e2));
-      item.addEventListener("contextmenu", (e2) => {
-        e2.preventDefault();
-        ed.focus = "sorter";
-        if (!ed.slideSelection.has(i2)) {
-          ed.slideSelection.clear();
-          gotoSlide(i2);
-        }
-        openSlideMenu(e2.clientX, e2.clientY, i2);
-      });
-      item.addEventListener("dragstart", (e2) => {
-        dragFrom = i2;
-        e2.dataTransfer?.setData("text/plain", String(i2));
-        item.classList.add("dragging");
-      });
-      item.addEventListener("dragend", () => {
-        dragFrom = null;
-        item.classList.remove("dragging");
-        list.querySelectorAll(".drop-before, .drop-after").forEach((el2) => {
-          el2.classList.remove("drop-before", "drop-after");
-        });
-      });
-      item.addEventListener("dragover", (e2) => {
-        if (dragFrom == null) return;
-        e2.preventDefault();
-        const r2 = item.getBoundingClientRect();
-        const after = e2.clientY > r2.top + r2.height / 2;
-        item.classList.toggle("drop-after", after);
-        item.classList.toggle("drop-before", !after);
-      });
-      item.addEventListener("dragleave", () => {
-        item.classList.remove("drop-before", "drop-after");
-      });
-      item.addEventListener("drop", (e2) => {
-        e2.preventDefault();
-        if (dragFrom == null) return;
-        const r2 = item.getBoundingClientRect();
-        const after = e2.clientY > r2.top + r2.height / 2;
-        let to = after ? i2 + 1 : i2;
-        if (dragFrom < to) to -= 1;
-        void moveSlide(dragFrom, to);
-      });
-      list.append(item);
-    });
+    }
     thumbs.end();
     list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
   }
-  async function moveSlide(from, to) {
-    if (from === to) return;
-    const result = await edit({ action: "slide", op: "move", from, to });
-    if (result.ok) {
-      ed.current = to;
-      emit("slide");
-    }
+  function initListDrop() {
+    list.addEventListener("dragover", (e2) => {
+      const drag = dragging.now;
+      if (!drag || e2.target !== list) return;
+      e2.preventDefault();
+      if (drag.kind === "section") {
+        markGap(list, sections().length, list.lastElementChild);
+      } else {
+        clearDropMarks(list);
+        list.lastElementChild?.classList.add("drop-after");
+      }
+    });
+    list.addEventListener("drop", (e2) => {
+      const drag = dragging.now;
+      if (!drag || e2.target !== list) return;
+      e2.preventDefault();
+      clearDropMarks(list);
+      dropAtEnd(drag);
+    });
+  }
+  function followSelect(i2) {
+    pendingSelect = i2;
   }
   async function newSlide(layout, after = ed.current) {
     const result = await edit({
@@ -3907,6 +4371,9 @@
       )
     );
     menu.append(menuItem("Delete", () => void deleteSlide(i2), !editable));
+    menu.append(
+      menuItem("Add section here\u2026", () => void addSectionAt(i2), !editable)
+    );
     showMenu(x2, y2);
   }
   function showMenu(x2, y2) {
@@ -3927,8 +4394,13 @@
       if (ed.current >= n3) ed.current = Math.max(0, n3 - 1);
       renderSorter();
     });
-    on("slide", renderSorter);
+    on("slide", () => {
+      revealCurrent();
+      renderSorter();
+    });
     on("slide-selection", renderSorter);
+    on("sections", renderSorter);
+    initListDrop();
     addBtn.addEventListener("click", () => {
       if (!ed.model?.deckEditable) {
         toast(
@@ -4372,12 +4844,12 @@
           })
         );
       }
-      const shown = startingWith(
+      const shown2 = startingWith(
         (f2.files ?? []).map((x2) => x2.name),
         filter
       );
       for (const file of f2.files ?? []) {
-        if (!shown.includes(file.name)) continue;
+        if (!shown2.includes(file.name)) continue;
         list3.append(
           entry(
             `\u{1F39E} ${file.name}`,
@@ -4391,7 +4863,7 @@
           )
         );
       }
-      if (!dirs.length && !shown.length) {
+      if (!dirs.length && !shown2.length) {
         list3.append(
           h(
             "p",
@@ -5678,14 +6150,14 @@
     const src = ownSource();
     if (!up || !src) return;
     let href = relativePath(src.path, up.path);
-    let shown = up.rel;
+    let shown2 = up.rel;
     if (isPdfRef(up.path)) {
       const choice = await choosePage(up.path);
       if (!choice) return;
       href = withPage(href, choice.page);
-      shown = choice.url;
+      shown2 = choice.url;
     }
-    const size3 = shown ? await naturalSize(shown) : { w: 400, h: 300 };
+    const size3 = shown2 ? await naturalSize(shown2) : { w: 400, h: 300 };
     const svg = slideRoot();
     const vb = svg?.viewBox.baseVal;
     const maxW = (vb?.width || 1920) * 0.5;
@@ -6113,7 +6585,7 @@
       clear(fields);
       const numeric = numericColumns(grid);
       const x2 = xColumn(grid, settings2);
-      const shown = plotted(grid, settings2);
+      const shown2 = plotted(grid, settings2);
       const kind = settings2.kind;
       const title2 = h("input", {
         type: "text",
@@ -6148,7 +6620,7 @@
       const twoAxes = secondAxisAllowed(settings2);
       for (const c2 of choices) {
         const usable = numeric.includes(c2);
-        const box = check(c2, shown.includes(c2), (on2) => {
+        const box = check(c2, shown2.includes(c2), (on2) => {
           settings2.y = toggleSeries(grid, settings2, c2, on2);
           if (!on2) settings2.y2 = toggleRight(settings2, c2, false);
         });
@@ -6156,7 +6628,7 @@
           box.classList.add("off");
           box.title = "Not all numbers";
         }
-        if (twoAxes && usable && shown.includes(c2)) {
+        if (twoAxes && usable && shown2.includes(c2)) {
           const right = check(
             "right axis",
             (settings2.y2 ?? []).includes(c2),
@@ -7757,7 +8229,7 @@
     };
     const numeric = value.numeric ?? [];
     const x2 = xColumn(grid, s2);
-    const shown = s2.y ?? numeric.filter((c2) => c2 !== x2);
+    const shown2 = s2.y ?? numeric.filter((c2) => c2 !== x2);
     const check = (label4, on2, fn) => {
       const box = h("input", { type: "checkbox" });
       box.checked = on2;
@@ -7768,11 +8240,11 @@
     const twoAxes = secondAxisAllowed(s2);
     for (const c2 of grid.columns.filter((c3) => c3 !== x2)) {
       const box = h("input", { type: "checkbox" });
-      box.checked = shown.includes(c2);
+      box.checked = shown2.includes(c2);
       box.disabled = !numeric.includes(c2);
       box.addEventListener("change", () => {
         const next = grid.columns.filter(
-          (n3) => n3 === c2 ? box.checked : shown.includes(n3)
+          (n3) => n3 === c2 ? box.checked : shown2.includes(n3)
         );
         const auto = numeric.filter((n3) => n3 !== x2);
         const same = next.length === auto.length && next.every((n3, i2) => n3 === auto[i2]);
@@ -7782,7 +8254,7 @@
         });
       });
       const entry = h("label", { class: "chart-check" }, box, c2);
-      if (twoAxes && shown.includes(c2) && numeric.includes(c2)) {
+      if (twoAxes && shown2.includes(c2) && numeric.includes(c2)) {
         const right = h("input", { type: "checkbox" });
         right.checked = (s2.y2 ?? []).includes(c2);
         right.addEventListener(
@@ -8381,9 +8853,9 @@
   }
   function paintRow(sel, prop) {
     const first = sel[0].el;
-    const shown = boxShown(first);
-    const token = shown ? tokenOf(first, prop) : null;
-    const computed = shown ? getComputedStyle(first)[prop] : "none";
+    const shown2 = boxShown(first);
+    const token = shown2 ? tokenOf(first, prop) : null;
+    const computed = shown2 ? getComputedStyle(first)[prop] : "none";
     const send = (paint) => {
       const plans = sel.map((s2) => ({
         sel: s2,
@@ -8952,9 +9424,9 @@
       ],
       label4
     );
-    const shown = el2.hasAttribute("inkflow:show-shape");
+    const shown2 = el2.hasAttribute("inkflow:show-shape");
     const box = h("input", { type: "checkbox" });
-    box.checked = shown;
+    box.checked = shown2;
     box.addEventListener(
       "change",
       () => void sendSvgOps(
@@ -9127,8 +9599,8 @@
     return isPdfRef(ref) ? `${name2} \xB7 page ${pdfPage(ref)}` : name2;
   }
   function pdfPageRow(sel, image, file, page, imageOps) {
-    const show = async (n3, shown) => {
-      const url = shown ?? await pageUrl(file, n3);
+    const show = async (n3, shown2) => {
+      const url = shown2 ?? await pageUrl(file, n3);
       const src = sourceOf(sel.key);
       const root2 = ed.model?.projectDir;
       if (!url || !src || !root2 || n3 === page) return;
@@ -10203,12 +10675,32 @@
     });
   }
 
+  // src/ts/shared/sections.ts
+  function verticalNeighbor(boxes, i2, dir) {
+    const me = boxes[i2];
+    if (!me) return i2;
+    const tops = [...new Set(boxes.map((b2) => b2.top))].sort((a2, b2) => a2 - b2);
+    const row4 = tops.indexOf(me.top) + dir;
+    if (row4 < 0 || row4 >= tops.length) return i2;
+    const center = me.left + me.width / 2;
+    let best2 = i2;
+    let bestD = Number.POSITIVE_INFINITY;
+    boxes.forEach((b2, j2) => {
+      if (b2.top !== tops[row4]) return;
+      const d2 = Math.abs(b2.left + b2.width / 2 - center);
+      if (d2 < bestD) {
+        best2 = j2;
+        bestD = d2;
+      }
+    });
+    return best2;
+  }
+
   // src/ts/editor/grid.ts
   var view = document.getElementById("grid-view");
   var list2 = document.getElementById("grid-list");
   var sizeInput = document.getElementById("grid-size");
   var thumbs2 = new Thumbs();
-  var dragFrom2 = null;
   function toggleGrid(on2 = view.hidden === true) {
     view.hidden = !on2;
     document.body.classList.toggle("grid-mode", on2);
@@ -10227,125 +10719,211 @@
     toggleGrid(false);
     gotoSlide(i2);
   }
+  function lastMark() {
+    return list2.lastElementChild;
+  }
+  function gridItem(slide, i2) {
+    const item = h(
+      "div",
+      {
+        class: `grid-item${i2 === ed.current ? " active" : ""}${ed.slideSelection.has(i2) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
+        draggable: ed.model?.deckEditable ? "true" : null,
+        "data-index": i2
+      },
+      thumbs2.thumb(slide),
+      h(
+        "div",
+        { class: "grid-caption" },
+        h("span", { class: "grid-num" }, String(i2 + 1)),
+        h(
+          "span",
+          { class: "grid-title" },
+          slide.title ?? slide.id ?? slide.src
+        ),
+        slide.animations.length ? h(
+          "span",
+          {
+            class: "grid-badge",
+            title: `${slide.animations.length} animation(s)`
+          },
+          "\u2726"
+        ) : null
+      )
+    );
+    item.addEventListener("click", (e2) => {
+      pickSlide(i2, e2);
+      ed.focus = "sorter";
+    });
+    item.addEventListener("dblclick", () => open3(i2));
+    item.addEventListener("contextmenu", (e2) => {
+      e2.preventDefault();
+      if (!ed.slideSelection.has(i2)) {
+        ed.slideSelection.clear();
+        gotoSlide(i2);
+      }
+      ed.focus = "sorter";
+      openSlideMenu(e2.clientX, e2.clientY, i2);
+    });
+    item.addEventListener("dragstart", (e2) => {
+      dragging.now = { kind: "slides", slides: dragSlides(i2) };
+      e2.dataTransfer?.setData("text/plain", String(i2));
+      item.classList.add("dragging");
+    });
+    item.addEventListener("dragend", () => {
+      dragging.now = null;
+      clearDropMarks(list2);
+      item.classList.remove("dragging");
+    });
+    item.addEventListener("dragover", (e2) => {
+      const drag = dragging.now;
+      if (!drag) return;
+      e2.preventDefault();
+      e2.stopPropagation();
+      if (drag.kind === "section") {
+        markGap(list2, sectionGapAtSlide(sections(), i2), lastMark());
+        return;
+      }
+      const r2 = item.getBoundingClientRect();
+      clearDropMarks(list2);
+      item.classList.add(
+        e2.clientX > r2.left + r2.width / 2 ? "drop-after" : "drop-before"
+      );
+    });
+    item.addEventListener("drop", (e2) => {
+      e2.preventDefault();
+      e2.stopPropagation();
+      const drag = dragging.now;
+      clearDropMarks(list2);
+      if (!drag) return;
+      if (drag.kind === "section") {
+        void moveSectionToGap(
+          drag.section,
+          sectionGapAtSlide(sections(), i2)
+        );
+        return;
+      }
+      const r2 = item.getBoundingClientRect();
+      const after = e2.clientX > r2.left + r2.width / 2;
+      const target = dropOnSlide(sections(), i2, after);
+      void moveSlidesTo(drag.slides, target.insertAt, target.section);
+    });
+    return item;
+  }
+  function gridHeader(k2) {
+    const head = sectionHeader(k2, "grid", () => selectSection(k2));
+    head.addEventListener("dragstart", (e2) => {
+      dragging.now = { kind: "section", section: k2 };
+      e2.dataTransfer?.setData("text/plain", `section:${k2}`);
+      head.closest(".grid-section")?.classList.add("dragging");
+    });
+    head.addEventListener("dragend", () => {
+      dragging.now = null;
+      head.closest(".grid-section")?.classList.remove("dragging");
+      clearDropMarks(list2);
+    });
+    head.addEventListener("dragover", (e2) => {
+      const drag = dragging.now;
+      if (!drag) return;
+      e2.preventDefault();
+      e2.stopPropagation();
+      if (drag.kind === "section") {
+        markGap(list2, headerGap(head, k2, e2), lastMark());
+        return;
+      }
+      clearDropMarks(list2);
+      head.classList.add("drop-into");
+    });
+    head.addEventListener("drop", (e2) => {
+      e2.preventDefault();
+      e2.stopPropagation();
+      const drag = dragging.now;
+      clearDropMarks(list2);
+      if (!drag) return;
+      if (drag.kind === "section") {
+        void moveSectionToGap(drag.section, headerGap(head, k2, e2));
+        return;
+      }
+      const target = dropOnHeader(sections(), k2);
+      void moveSlidesTo(drag.slides, target.insertAt, target.section);
+    });
+    return head;
+  }
   function renderGrid() {
     if (view.hidden) return;
     clear(list2);
     thumbs2.begin();
     const slides = ed.model?.slides ?? [];
-    slides.forEach((slide, i2) => {
-      const item = h(
-        "div",
-        {
-          class: `grid-item${i2 === ed.current ? " active" : ""}${ed.slideSelection.has(i2) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
-          draggable: ed.model?.deckEditable ? "true" : null,
-          "data-index": i2
-        },
-        thumbs2.thumb(slide),
-        h(
-          "div",
-          { class: "grid-caption" },
-          h("span", { class: "grid-num" }, String(i2 + 1)),
-          h(
-            "span",
-            { class: "grid-title" },
-            slide.title ?? slide.id ?? slide.src
-          ),
-          slide.animations.length ? h(
-            "span",
-            {
-              class: "grid-badge",
-              title: `${slide.animations.length} animation(s)`
-            },
-            "\u2726"
-          ) : null
-        )
-      );
-      item.addEventListener("click", (e2) => {
-        pickSlide(i2, e2);
-        ed.focus = "sorter";
+    const all = sections();
+    for (const block of sectionBlocks(slides.length, all)) {
+      const k2 = block.section;
+      const wrap2 = h("div", {
+        class: `grid-section${k2 == null ? " unsectioned" : ""}`
       });
-      item.addEventListener("dblclick", () => open3(i2));
-      item.addEventListener("contextmenu", (e2) => {
-        e2.preventDefault();
-        if (!ed.slideSelection.has(i2)) {
-          ed.slideSelection.clear();
-          gotoSlide(i2);
+      if (k2 != null) wrap2.append(gridHeader(k2));
+      if (k2 == null || !isCollapsed(k2)) {
+        const grid = h("div", { class: "grid-section-list" });
+        for (const i2 of block.slides) grid.append(gridItem(slides[i2], i2));
+        if (k2 != null && !block.slides.length) {
+          grid.append(
+            h(
+              "div",
+              { class: "grid-empty" },
+              "No slides: drop some on the heading"
+            )
+          );
         }
-        ed.focus = "sorter";
-        openSlideMenu(e2.clientX, e2.clientY, i2);
-      });
-      item.addEventListener("dragstart", (e2) => {
-        dragFrom2 = i2;
-        e2.dataTransfer?.setData("text/plain", String(i2));
-        item.classList.add("dragging");
-      });
-      item.addEventListener("dragend", () => {
-        dragFrom2 = null;
-        list2.querySelectorAll(".drop-before, .drop-after").forEach((el2) => {
-          el2.classList.remove("drop-before", "drop-after");
-        });
-        item.classList.remove("dragging");
-      });
-      item.addEventListener("dragover", (e2) => {
-        if (dragFrom2 == null) return;
-        e2.preventDefault();
-        const r2 = item.getBoundingClientRect();
-        const after = e2.clientX > r2.left + r2.width / 2;
-        item.classList.toggle("drop-after", after);
-        item.classList.toggle("drop-before", !after);
-      });
-      item.addEventListener("dragleave", () => {
-        item.classList.remove("drop-before", "drop-after");
-      });
-      item.addEventListener("drop", (e2) => {
-        e2.preventDefault();
-        if (dragFrom2 == null) return;
-        const r2 = item.getBoundingClientRect();
-        let to = e2.clientX > r2.left + r2.width / 2 ? i2 + 1 : i2;
-        if (dragFrom2 < to) to -= 1;
-        void moveSlide(dragFrom2, to);
-      });
-      list2.append(item);
-    });
+        wrap2.append(grid);
+      }
+      list2.append(wrap2);
+    }
     thumbs2.end();
-    list2.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+    list2.querySelector(".grid-item.active")?.scrollIntoView({
+      block: "nearest"
+    });
   }
-  function columns() {
-    const items = [...list2.children];
-    if (items.length < 2) return 1;
-    const top = items[0].offsetTop;
-    const n3 = items.findIndex((el2) => el2.offsetTop !== top);
-    return n3 === -1 ? items.length : n3;
+  function shown() {
+    return [...list2.querySelectorAll(".grid-item")];
   }
   function onKey(e2) {
     if (view.hidden) return;
     const target = e2.target;
     if (target.closest("input, textarea, select, #dialog, #find-panel")) return;
-    const n3 = ed.model?.slides.length ?? 0;
+    const items = shown();
+    const indices = items.map((el2) => Number(el2.dataset.index));
+    const here = indices.indexOf(ed.current);
     const move = (to) => {
       e2.preventDefault();
       e2.stopPropagation();
+      if (to == null) return;
       ed.slideSelection.clear();
-      gotoSlide(Math.max(0, Math.min(n3 - 1, to)));
+      gotoSlide(to);
+    };
+    const vertical = (dir) => {
+      if (here === -1) return indices[0];
+      const boxes = items.map((el2) => {
+        const r2 = el2.getBoundingClientRect();
+        return { left: r2.left, top: Math.round(r2.top), width: r2.width };
+      });
+      return indices[verticalNeighbor(boxes, here, dir)];
     };
     switch (e2.key) {
       case "ArrowLeft":
-        move(ed.current - 1);
+        move(indices[Math.max(0, here - 1)]);
         break;
       case "ArrowRight":
-        move(ed.current + 1);
+        move(indices[Math.min(indices.length - 1, here + 1)]);
         break;
       case "ArrowUp":
-        move(ed.current - columns());
+        move(vertical(-1));
         break;
       case "ArrowDown":
-        move(ed.current + columns());
+        move(vertical(1));
         break;
       case "Home":
-        move(0);
+        move(indices[0]);
         break;
       case "End":
-        move(n3 - 1);
+        move(indices[indices.length - 1]);
         break;
       case "Enter":
         e2.preventDefault();
@@ -10366,6 +10944,26 @@
     } catch {
     }
   }
+  function initListDrop2() {
+    list2.addEventListener("dragover", (e2) => {
+      const drag = dragging.now;
+      if (!drag || e2.target !== list2) return;
+      e2.preventDefault();
+      if (drag.kind === "section") {
+        markGap(list2, sections().length, lastMark());
+      } else {
+        clearDropMarks(list2);
+        lastMark()?.classList.add("drop-after");
+      }
+    });
+    list2.addEventListener("drop", (e2) => {
+      const drag = dragging.now;
+      if (!drag || e2.target !== list2) return;
+      e2.preventDefault();
+      clearDropMarks(list2);
+      dropAtEnd(drag);
+    });
+  }
   function initGrid() {
     document.getElementById("btn-grid")?.addEventListener("click", () => toggleGrid());
     document.getElementById("grid-close")?.addEventListener("click", () => toggleGrid(false));
@@ -10378,9 +10976,11 @@
     sizeInput.value = String(saved);
     setSize(saved);
     sizeInput.addEventListener("input", () => setSize(Number(sizeInput.value)));
+    initListDrop2();
     on("model", renderGrid);
     on("slide", renderGrid);
     on("slide-selection", renderGrid);
+    on("sections", renderGrid);
   }
 
   // src/ts/editor/richtext.ts
@@ -13263,9 +13863,9 @@ ${UNDO_NOTICE}` : question)) {
         openCompare(LIVE, chosen);
       }
     };
-    const sections = [];
+    const sections2 = [];
     if (side) {
-      sections.push(
+      sections2.push(
         h(
           "div",
           { class: "btn-row" },
@@ -13305,7 +13905,7 @@ ${UNDO_NOTICE}` : question)) {
         (b2) => b2 !== data.branch && !inTree.has(b2)
       );
       if (others.length || branches.length) {
-        sections.push(
+        sections2.push(
           h("h3", {}, "A branch or worktree"),
           h(
             "div",
@@ -13363,7 +13963,7 @@ ${UNDO_NOTICE}` : question)) {
           )
         );
       }
-      sections.push(
+      sections2.push(
         h("h3", {}, "A commit"),
         h(
           "div",
@@ -13421,14 +14021,14 @@ ${UNDO_NOTICE}` : question)) {
       if (f2?.isDeck)
         pick2({ kind: "path", deck: joinPath(f2.path, "deck.py") });
     });
-    sections.push(
+    sections2.push(
       h("h3", {}, "Another deck folder"),
       picker.el,
       h("div", { class: "btn-row end" }, folderBtn)
     );
     openDialog(
       side ? `Show on the ${side}\u2026` : "Compare the working copy with\u2026",
-      h("div", { class: "git-form cmp-picker" }, ...sections),
+      h("div", { class: "git-form cmp-picker" }, ...sections2),
       { large: true }
     );
   }

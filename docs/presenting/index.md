@@ -62,8 +62,12 @@ Type a few letters, or a slide number, and press <kbd>Enter</kbd>.
 Matching is fuzzy, so `arc` finds "Architecture overview".
 It jumps to that slide with its build already complete,
 which is what you want when someone asks about an earlier diagram.
+In a deck with [sections](../authoring/slides.md#sections), each slide shows its
+section, and a section whose name matches is listed first: picking it jumps to
+its first slide.
 
-**The overview** (<kbd>o</kbd>) shows the whole deck as a thumbnail grid.
+**The overview** (<kbd>o</kbd>) shows the whole deck as a thumbnail grid,
+under a heading per section (click one to go to the section's first slide).
 Arrow keys move the selection, <kbd>Enter</kbd> opens the highlighted slide,
 and <kbd>o</kbd> or <kbd>Esc</kbd> returns without moving.
 
@@ -126,7 +130,8 @@ and fullscreen.
 
 ## Where you are in the deck
 
-The status bar carries the slide number, a ring showing progress through
+The status bar carries the slide number (hover it for the section and the
+slide's place in it), a ring showing progress through
 the current slide's steps, and buttons for the overview, the presenter panel,
 [sync mode](sync.md#sync-modes) and fullscreen.
 
