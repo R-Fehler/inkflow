@@ -188,7 +188,7 @@ function pickFromList(el: Element): void {
         toast(
             ed.layoutMode
                 ? "This object cannot be edited here"
-                : "From a layout or overlay: use Edit layout to change it",
+                : "From a layout or overlay: change it in the Slide master",
         );
         return;
     }

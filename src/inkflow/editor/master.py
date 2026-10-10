@@ -33,6 +33,7 @@ from lxml import etree
 
 from inkflow import ns
 from inkflow.clean import is_preview_layer, strip_preview_layers
+from inkflow.editor.previews import sample_zones
 from inkflow.editor.provenance import is_element
 from inkflow.editor.svgops import SvgFile
 from inkflow.layout import (
@@ -50,7 +51,7 @@ from inkflow.layout import (
 from inkflow.manifest import Deck, Slide
 from inkflow.overlay import Overlay
 from inkflow.pipeline import resolve_overlay_chains, resolve_slide_src
-from inkflow.svgio import SvgElement, parse_svg_file
+from inkflow.svgio import SvgElement
 
 if TYPE_CHECKING:
     from inkflow.themes import Theme
@@ -568,45 +569,6 @@ def overlay_name(raw: str) -> str:
 
 
 # ── The master view's canvas ──────────────────────────────────────────────────
-
-
-def sample_zones(path: Path, project_dir: Path, theme: Theme | None) -> dict[str, str]:
-    """Sample text for a layout's text zones (its hints where it has them),
-    so the master view shows each zone's type and place."""
-    from inkflow.editor.model import is_media_zone
-    from inkflow.editor.previews import sample_text
-
-    info = layout_zones(path, project_dir, theme)
-    hints = layout_hints(path, project_dir, theme)
-    out: dict[str, str] = {}
-    for zone in info.zones:
-        if is_media_zone(zone):
-            continue
-        hint = hints.get(zone)
-        if hint:
-            out[zone] = f"# {hint}" if zone == "title" else hint
-        else:
-            out[zone] = sample_text(zone)
-    return out
-
-
-def layout_hints(path: Path, project_dir: Path, theme: Theme | None) -> dict[str, str]:
-    """``inkflow:hint`` prompts of a layout and its ancestors (nearest wins)."""
-    try:
-        chain = [*resolve_chain(path, project_dir, theme), path]
-    except ValueError:
-        chain = [path]
-    hints: dict[str, str] = {}
-    for p in chain:
-        try:
-            root = parse_svg_file(p)
-        except Exception:
-            continue
-        for el in root.iter(ns.INKFLOW_HINT):
-            zone, text = el.get("zone"), (el.text or "").strip()
-            if zone and text:
-                hints[zone] = text
-    return hints
 
 
 def master_slide(

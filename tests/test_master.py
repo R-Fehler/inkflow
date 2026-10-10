@@ -668,6 +668,57 @@ def test_add_a_placeholder_to_a_layout(project: Path) -> None:
     assert result["zone"] != "title"
 
 
+def test_refreshing_previews_joins_the_last_step(project: Path) -> None:
+    """Leaving the slide master refreshes the Inkscape previews as part of
+    the last edit, so Undo takes back what the user saw change."""
+    CliRunner().invoke(main, ["sync", "--deck", str(project / "deck.py")])
+    deck = load_deck(project / "deck.py")
+    session = EditorSession(project / "deck.py")
+    theme_file = BUILTIN / "base.svg"
+    session.apply(
+        {
+            "action": "svg",
+            "file": str(theme_file),
+            "copyLayout": True,
+            "ops": [
+                {"kind": "attrs", "loc": _locator(theme_file), "set": {"fill": "#123"}}
+            ],
+        },
+        deck,
+    )
+    drawn = project / "slides" / "drawn.svg"
+    before = drawn.read_text()
+    result = session.apply(
+        {"action": "master", "op": "previews", "attach": True},
+        load_deck(project / "deck.py"),
+    )
+    assert drawn.read_text() != before  # its preview shows the new background
+    assert len(session.history.done) == 1
+    assert result["undoLabel"] == "Edit shape"
+    session.apply({"action": "undo"}, deck)
+    assert drawn.read_text() == before
+    assert not (project / "layouts" / "base.svg").exists()
+
+
+def test_layout_previews_show_template_hints_and_roots(project: Path) -> None:
+    _apply(
+        project,
+        {
+            "action": "master",
+            "op": "save",
+            "slide": 1,
+            "name": "Code",
+            "hints": True,
+        },
+    )
+    deck = load_deck(project / "deck.py")
+    previews = {p["name"]: p for p in layout_previews(deck, project / "deck.py")}
+    assert "Code examples" in cast("str", previews["code"]["svg"])
+    assert "base" not in previews
+    roots = layout_previews(deck, project / "deck.py", roots=True)
+    assert "base" in {p["name"] for p in roots}
+
+
 def test_previews_follow_the_master(project: Path) -> None:
     """A copy, a revert or a new overlay updates the Inkscape previews of the
     deck's files in the same step: `verify` stays clean."""

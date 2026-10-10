@@ -1,5 +1,5 @@
 // The top toolbar and the keyboard: tools, undo/redo, zoom, build-step preview,
-// layout mode, and the object commands (delete, duplicate, group, z-order) that
+// and the object commands (delete, duplicate, group, z-order) that
 // both the panel buttons and shortcuts trigger.
 
 import { maxStep } from "../shared/step";

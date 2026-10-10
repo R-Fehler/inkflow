@@ -167,6 +167,28 @@ server the files are changed directly, and `git` is the undo. The editor keeps i
 git and is not watched for changes. `render` needs Chromium or Chrome, like
 `inkflow export`; one installed by Playwright is found too.
 
+## The slide master
+
+The layouts behind every slide and the overlays on top of them are the deck's
+[slide master](index.md#slide-master). A theme's layouts live in an installed
+package and are never written: `inkflow layout copy NAME` gives the deck its own
+copy, which every slide on that layout follows (also through the theme's other
+layouts: a copy of `base` is the background of every built-in layout).
+
+| Command | What it does |
+|---|---|
+| `inkflow layouts` | Every layout and overlay with its zones, parent chain, how many slides use it, and which are the deck's own copies of the theme's. |
+| `inkflow layout copy NAME` | `layouts/NAME.svg`, the deck's copy of the theme's layout (`inkflow:copy-of`); edit it in Inkscape or with `inkflow shape -s N` on a slide drawn from it. |
+| `inkflow layout revert NAME` | Deletes the deck's copy: slides go back to the theme's layout. |
+| `inkflow layout save N NAME [--hints] [--pictures]` | Slide `N` as a new layout: `customCodeExamples` → `layouts/custom-code-examples.svg`, its drawing and parent kept, its zones empty (`--hints`: their text kept as placeholder prompts; `--pictures`: pictures become picture placeholders). Then `inkflow slide add --layout custom-code-examples`. |
+| `inkflow layout rename NAME NEW` / `layout delete NAME [--move-to L]` | The deck's own layouts only; references follow, and a layout slides use is deleted only with `--move-to`. |
+| `inkflow overlay new NAME [--slide N]` | `overlays/NAME.svg` at the deck's size, added to `Deck(overlays=[...])` (with `--slide`, to that slide's own list) after the overlays it already gets. |
+| `inkflow overlay copy NAME` / `overlay revert NAME` | The same copy-on-write for a theme's overlay. |
+
+Each one is a single undo step, an *Agent: …* step in an open editor, like
+`inkflow slide`, and brings the Inkscape previews of the deck's files up to
+date in the same step.
+
 ## Renaming and moving files
 
 Never rename or move a deck's file with `mv` or `git mv`: slides name it by

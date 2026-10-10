@@ -39,7 +39,10 @@ export function cancelStroke(): void {
 }
 
 function penActive(): boolean {
-    return ed.tool === "pen" && ed.step == null && !ed.richEditing;
+    // Ink is a slide's own drawing: the slide master has no slide.
+    return (
+        ed.tool === "pen" && ed.step == null && !ed.richEditing && !ed.master
+    );
 }
 
 // Strokes sent but not yet back from a rebuild, by id.
@@ -164,6 +167,11 @@ export function initInk(): void {
     });
 
     on("tool", () => {
+        if (ed.tool === "pen" && ed.master) {
+            toast(
+                "The pen draws on a slide: close the slide master to draw ink, or use the shapes here",
+            );
+        }
         palette.el.hidden = ed.tool !== "pen";
     });
     on("render", showPending);

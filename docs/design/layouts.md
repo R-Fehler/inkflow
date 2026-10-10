@@ -150,7 +150,69 @@ To see what is available in your project right now:
 inkflow layouts
 ```
 
-It prints every layout and overlay with its parent chain and its zones.
+It prints every layout and overlay with its parent chain, its zones and how
+many slides use it, and marks the deck's own copies of the theme's layouts.
+
+## Changing a theme's layout: the deck's own copy
+
+A theme's layouts (the built-in ones included) live in an installed package
+and are never written. To change one for a deck, the deck gets its own copy:
+
+```bash
+inkflow layout copy base      # or edit it in the editor's slide master
+```
+
+The copy is `layouts/base.svg`, the theme's file with two root attributes:
+
+```xml
+<svg ... inkflow:copy-of="builtin:base">              <!-- base has no parent -->
+<svg ... inkflow:copy-of="builtin:agenda" inkflow:parent="builtin:title">
+```
+
+`inkflow:copy-of` names the theme's file the copy replaces, and the copy then
+stands in for it **everywhere**, not only for slides naming it: when any
+reference (a bare name, `builtin:base`, `theme:agenda`, or the theme's own
+`./base` inside `numbered.svg`) resolves to the theme's file, the project's
+copy is used instead. So a copy of `base` is the background of every built-in
+layout, and of every layout of yours built on them, and a copy of `title`
+changes `content`, `agenda` and the other layouts built on `title`. The copy's
+own parent names the theme's ancestor explicitly (`builtin:title`), which the
+project's copy of that ancestor stands in for whenever there is one. Only what
+you copy changes: copying `agenda` touches agenda slides only.
+
+The rule follows only marked copies. A project layout that merely shares a
+name with a theme's (an own `title.svg` drawn as a title slide) replaces it for
+slides naming it, as the search above says, but never slips into the theme's
+chains. A copy built on its own original (`inkflow:parent="builtin:content"`
+in a copy of `content`) goes on to the theme's file rather than looping.
+
+`inkflow layout revert base` deletes the copy: the theme's layout is used
+again. The editor's [slide master](../editor/index.md#slide-master) copies on
+the first edit and reverts from its menu.
+
+## Templates: a slide saved as a layout
+
+```bash
+inkflow layout save 2 customCodeExamples --hints
+inkflow slide add --layout custom-code-examples
+```
+
+Saves slide 2 as `layouts/custom-code-examples.svg`, keeping the name as typed
+in `inkflow:label` (the editor's gallery shows it). The slide's own drawing
+carries over (its preview layers dropped, its file references rewritten for
+`layouts/`), with its `inkflow:parent`; a slide drawn straight from a layout
+gives a layout built on that one. Zones stay, empty: their text lives in the
+slide's Markdown or `deck.py`. `--hints` keeps each zone's first line as a
+placeholder prompt the editor shows in the empty zone of a new slide:
+
+```xml
+<inkflow:hint zone="title">Code examples</inkflow:hint>
+```
+
+Hints are editor-only: the build takes them out. `--pictures` turns the
+slide's own pictures into picture zones (`zone-picture`, `zone-picture-2`…) of
+the same box. `inkflow layout rename` and `layout delete [--move-to L]`
+manage the deck's own layouts; references follow a rename.
 
 ## Built-in layouts
 

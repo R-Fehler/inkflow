@@ -88,7 +88,9 @@ src/
                                directly, no timing) — starts a `Video` on a step, not on load
     transitions.py    concrete transition types (Cut, Crossfade, Morph, Push, Cover,
                                Zoom, Fade, Wipe) subclassing manifest.Transition
-    pipeline.py       animation annotation + layout inlining
+    pipeline.py       animation annotation + layout inlining; `process_slide(keep_zones=)`
+                               keeps unfilled zones as dashed boxes (the slide master);
+                               `pop_hints` takes `<inkflow:hint>` out, into `EmptyZone.hint`
     content.py        TextBox / Image / Video / chart injection into zone rects, with
                                alignment support; Video emits data-* playback attrs (driven
                                by video.ts); a chart is a nested <svg> in the zone's box
@@ -107,6 +109,15 @@ src/
                                (`behind` + `overlays` + css), each layer a
                                `PreviewLayer(path, ref)` — refs come from the caller since
                                a backdrop or an overlay is not named by an inkflow:parent.
+                               Copy-on-write: `deck_copy` = the project's
+                               `<kind>/<same name>.svg` carrying `inkflow:copy-of`
+                               (`theme_ref`: `builtin:x`/`theme:x`) stands in for that
+                               theme file wherever any reference resolves to it, the
+                               theme's own `./base` chains included
+                               (`resolve_parent_path(follow_copies=False)` names the
+                               theme's file; `resolve_chain` falls back to it rather
+                               than loop); unmarked same-named files never do.
+                               `copy_of`/`label_of` read the root attributes.
                                Layer digests are canonical (c14n, whitespace-stripped), so a
                                synced ancestor does not read as stale forever.
                                The preview `<style>` also paints unstyled zone shapes as
@@ -323,7 +334,28 @@ src/
                                `inkflow pack`),
                                previews.py (layout gallery renders; like the model's
                                layout list, `layout.layouts_for`: built-in layouts
-                               in the deck's shape, the project's own always),
+                               in the deck's shape, the project's own always; zones
+                               show a template's hints; `roots` adds `base`),
+                               master.py (the slide master: `layout_entries` (every
+                               layout, the project's copy winning, parent, `slides`
+                               on it directly, `reach` through it), `background_name`,
+                               `overlay_entries`, `master_tree` (the editor's list),
+                               `copy_bytes` (a theme file as the deck's copy: only
+                               root attributes change, so locators hold; parent as
+                               `builtin:`/`theme:`), `template_bytes` (a slide as a
+                               layout: preview layers dropped, refs rebased, zones
+                               empty, `<inkflow:hint zone>` prompts, pictures to
+                               `zone-picture` rects), `overlay_bytes`, `master_slide`
+                               (the one-slide composition `master-render` draws);
+                               the session's `master` action (copy / revert / save /
+                               rename / delete / new-overlay / add-zone / previews),
+                               `master-tree`, `master-render`, and `copyLayout` on any
+                               request with a `file`: `_copy_on_write` makes the copy
+                               in the same step and points the request at it;
+                               copy/revert/delete/new-overlay set `_previews`, so
+                               `_refresh_previews` rewrites the deck's stale Inkscape
+                               previews into that step after the commit; `attach`
+                               joins the author's last step (leaving the master)),
                                themeedit.py (Theme
                                dialog: token overrides as one marked block in the project's
                                styles.css, values validated, never raw CSS; the session's
@@ -369,7 +401,10 @@ src/
                                commands are grouped by area: project.py (init, setup-git,
                                setup-pages, completion), present.py (serve, edit, build, export), agent.py
                                (outline, context, render, goto, select, setup-claude),
-                               compare.py (`inkflow compare [LEFT] RIGHT`), slides.py
+                               compare.py (`inkflow compare [LEFT] RIGHT`), master.py
+                               (`inkflow layout` copy/revert/save/rename/delete and
+                               `inkflow overlay` new/copy/revert: the session's
+                               `master` action through editor/remote.py), slides.py
                                (the `slide` group: add, delete, duplicate, move, hide, show,
                                rename, title, and `slide section` add/rename/move/remove;
                                SLIDE = presentation number or id, SECTION = name or
@@ -690,6 +725,19 @@ src/
                       for a slide, the deck menu's "Files…" view: a dialog that
                       previews the session's `rename` dry run as the name is
                       typed; path maths in pathtext.ts),
+                      master.ts (the slide master: "Slide master" in the
+                      toolbar; its list replaces the sorter (`#master`), each
+                      entry drawn by the session's `master-render` into
+                      `ed.master`, which `currentSlide()`/`currentRendered()`
+                      return, so the canvas, insert tools and panels work
+                      unchanged; only `ed.master.path`'s objects select, the
+                      others get `.master-context`; a theme file's source gets
+                      `copyTo` and net.ts adds `copyLayout` to requests naming
+                      it, then follows `copied`; Save as layout…, New overlay,
+                      placeholders, rename/delete/revert dialogs; the props
+                      panel's `masterPanel`) over mastertree.ts (pure: the
+                      layout tree under the background, badges, usage words,
+                      `copyTarget`; tested),
                       git.ts (Git menu; its Worktrees section: rows with
                       Compare = `inkflow:compare` CustomEvent {kind: "path",
                       deck, label} for the compare view, a dialog with what to
@@ -915,6 +963,9 @@ Overlays become part of the slide SVG, so they travel with it during a transitio
 **Overlay preview in `sync` resolves a file→overlays mapping that has no single right answer.** `sync` works on files, overlays are declared on slides, so a shared layout is backed by slides that may disagree. `sync.plan_preview` decides in three steps: an explicit `inkflow:preview-overlays` attribute on the file → what every slide backing it agrees on → the deck default. The last is a guess and biases toward *showing* chrome (over-reserved space beats overlap), so the fired rule is printed per file (`PreviewRule`) and points at the attribute when the guess is wrong. `--no-deck` has no mapping to derive and uses the attribute only. A file that is itself an overlay (in an `overlays/` dir **or** referenced as one by the deck — the union covers drafts and off-convention paths) gets no chrome, only whatever `inkflow:preview` names as a backdrop (a layout, or a relative path to a real slide). There is deliberately **no default backdrop**: an overlay cannot know what it lands on, and falling back to the theme's `base` previews chrome against the wrong canvas size and a background colour the deck never paints whenever the deck is built on raw SVGs rather than layouts. `sync` reports `no backdrop` so the omission is visible. Both attributes are authoring-only and never read by the pipeline.
 
 Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop + ancestor chain), `inkflow:overlay-src`/`-hash` what goes on top. `clean.strip_preview_layers` removes both, which is what keeps a synced slide from painting its chrome twice (once from the preview, once from runtime composition) and keeps an ancestor's own overlay layers from leaking into every child. `verify` shares `plan_preview` (so it cannot disagree about staleness) and skips files outside the project dir, which `sync` would never write.
+
+**A theme's layout is copied on write, and the copy stands in for it everywhere.**
+The ask is PowerPoint's slide master: edit the background of every slide, or every slide of one type, without touching each slide. Theme and built-in layouts live in an installed package and are never written, so editing one (the slide master, `inkflow layout copy`) writes `layouts/<name>.svg`: the theme's file with only its root attributes changed (`inkflow:copy-of="builtin:agenda"`, `inkflow:parent` re-expressed as `builtin:title`), so element locators taken on the theme's file still hold for the edit made in the same step. The decision is in resolution (`layout.deck_copy`): any reference that lands on a theme file the project has a marked copy of gets the copy, including the built-in layouts' own `./base` and `./title` parents. That is what makes "edit the background" reach every built-in layout while copying only `base`, and per-type edits copy only that layout. Copying the whole chain was the alternative; it would freeze every ancestor at the time of the copy and make each later copy's edits invisible to the others. Only *marked* copies redirect, so an existing project `layouts/title.svg` (a title slide of the user's own) keeps shadowing the bare name only, as before. Revert = delete the copy. A template is a layout made from a slide (`master.template_bytes`): zones stay as empty zones (their text lives in Markdown/deck.py anyway), optional `<inkflow:hint zone>` prompts that the pipeline pops before output and the editor shows on empty zones. Master edits that change what other files preview (copy, revert, new overlay) refresh the deck's Inkscape previews inside the same History step after the commit (`_refresh_previews`, from disk); ordinary drags do not, and leaving the master view sends `previews` with `attach`, merged into the last step, so `verify` stays clean and Undo still takes back exactly what was seen.
 
 **The visual editor writes the deck's own files; it has no document model of its own.**
 `inkflow edit` (or `/edit` on any `serve`) is a second page on the same server. The server builds with `process_deck(editor=True)`, which stamps every element read from a source file with `data-ink="<source index>:<child path>"` — the child path counted on the tree *as parsed from disk*, before cleaning (`clean_inkscape_tree(before_clean=...)`), so `provenance.locate` finds the same node when an edit is written back. `SlideData.edit` carries the source list, the pruned empty zones and where each zone's content was written; the presenter copy drops it (`_without_edit`), the editor gets it inside `build_model`'s model (`editor-model` message, sent after each `update` to clients that said `hello` as editors).

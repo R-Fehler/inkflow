@@ -59,7 +59,7 @@ function editTextOf(el: SVGGraphicsElement): void {
     const src = slide.sources?.[key];
     if (!src?.writable) {
         toast(
-            "This text lives in a layout; switch to layout mode to edit it",
+            "This text lives in a layout: edit it in the Slide master",
             "error",
         );
         return;

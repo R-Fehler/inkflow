@@ -9017,7 +9017,10 @@ Undo brings them back.`
     const src = sourceOf(sel.key);
     if (!image || !src) return;
     if (!src.writable) {
-      toast("This picture lives in a layout; switch to layout mode", "error");
+      toast(
+        "This picture lives in a layout: edit it in the Slide master",
+        "error"
+      );
       return;
     }
     void openDrawio({
@@ -9707,7 +9710,7 @@ Undo brings them back.`
     }
     if (!selectable(el2)) {
       toast(
-        ed.layoutMode ? "This object cannot be edited here" : "From a layout or overlay: use Edit layout to change it"
+        ed.layoutMode ? "This object cannot be edited here" : "From a layout or overlay: change it in the Slide master"
       );
       return;
     }
@@ -19537,7 +19540,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     pad?.cancel();
   }
   function penActive() {
-    return ed.tool === "pen" && ed.step == null && !ed.richEditing;
+    return ed.tool === "pen" && ed.step == null && !ed.richEditing && !ed.master;
   }
   var pending2 = /* @__PURE__ */ new Map();
   function liveLayer(svg) {
@@ -19643,6 +19646,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       onErase: (ids, hidden) => void erase(ids, hidden)
     });
     on("tool", () => {
+      if (ed.tool === "pen" && ed.master) {
+        toast(
+          "The pen draws on a slide: close the slide master to draw ink, or use the shapes here"
+        );
+      }
       palette.el.hidden = ed.tool !== "pen";
     });
     on("render", showPending);
@@ -22254,7 +22262,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const src = slide.sources?.[key];
     if (!src?.writable) {
       toast(
-        "This text lives in a layout; switch to layout mode to edit it",
+        "This text lives in a layout: edit it in the Slide master",
         "error"
       );
       return;
