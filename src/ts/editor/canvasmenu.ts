@@ -20,13 +20,16 @@ import { editChart, insertChart } from "./chart";
 import { copy, cut, pasteFromClipboard } from "./clipboard";
 import { pictureOf, startCrop } from "./crop";
 import { clear, h } from "./dom";
-import { diagramOf, editDiagram, newDiagram } from "./drawio";
+import { diagramOf, drawnDiagram, editDiagram, newDiagram } from "./drawio";
 import { openGallery } from "./gallery";
+import { projectFile } from "./geom";
 import { insertVideoFile, typeInto } from "./insert";
 import { edit } from "./net";
 import { isHidden, toggleHidden, toggleLocked } from "./objects";
 import { openMenu as openWithMenu } from "./openwith";
+import { sourceRef } from "./pdfpages";
 import { alignSelection } from "./props";
+import { renameFile } from "./rename";
 import { deleteSlide, duplicateSlide, menuItem, showMenu } from "./sorter";
 import { currentSlide, ed, emit, sourceOf } from "./state";
 import { copyStyle, hasCopiedStyle, pasteStyle } from "./stylecopy";
@@ -109,8 +112,16 @@ function objectMenu(): HTMLElement[] {
         if (pictureOf(el)) {
             items.push(menuItem("Crop", () => void startCrop(one!)));
         }
-        if (items.length) items.push(sep());
     }
+    // A file is renamed for the deck, not the slide: a picture or chart in a
+    // layout's zone has one too, though the object itself cannot be moved.
+    const only = ed.selection.length === 1 ? ed.selection[0].el : null;
+    const file = only ? fileOf(only) : null;
+    if (file) {
+        const name = file.split("/").pop() ?? file;
+        items.push(menuItem(`Rename ${name}…`, () => void renameFile(file)));
+    }
+    if (items.length) items.push(sep());
     items.push(
         menuItem("Cut", () => cut()),
         menuItem("Copy", () => copy()),
@@ -175,6 +186,22 @@ function objectMenu(): HTMLElement[] {
         }
     }
     return items;
+}
+
+// The file an object shows (a picture, a PDF page, a diagram, a zone's
+// image, video or chart data), for "Rename …".
+function fileOf(el: Element): string | null {
+    const drawn = drawnDiagram(el);
+    if (drawn) return projectFile(drawn.getAttribute("data-drawio"));
+    const image = pictureOf(el);
+    if (image) return projectFile(sourceRef(image));
+    if (!isZone(el)) return null;
+    const media = currentSlide()?.zones[zoneName(el)];
+    if (media?.kind === "image" || media?.kind === "video") {
+        return projectFile(media.src);
+    }
+    if (media?.kind === "chart" && !media.inline) return media.path ?? null;
+    return null;
 }
 
 // Where on the slide the menu was opened (a new chart is placed there).

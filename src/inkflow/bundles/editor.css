@@ -2448,6 +2448,130 @@ body.offline #offline-banner {
   text-decoration: none;
   color: inherit;
 }
+.rename-body,
+.files-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rename-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rename-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rename-label {
+  flex: none;
+  width: 52px;
+  color: var(--subtext);
+}
+.rename-row input {
+  flex: 1;
+  min-width: 0;
+  font: 12px ui-monospace, monospace;
+}
+.rename-ext {
+  flex: none;
+  color: var(--subtext);
+}
+.rename-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.rename-status {
+  min-height: 2.6em;
+  padding: 8px 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: 8px;
+}
+.rename-msg {
+  margin: 2px 0;
+}
+.rename-status.busy {
+  opacity: 0.6;
+}
+.rename-status.error {
+  border-color: #e5484d;
+  color: #e5484d;
+}
+.rename-summary {
+  font-weight: 600;
+}
+.rename-head {
+  color: var(--subtext);
+  font-size: 12px;
+}
+.rename-list {
+  margin: 2px 0 6px;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+.rename-code {
+  font: 12px ui-monospace, monospace;
+}
+.rename-details summary {
+  cursor: pointer;
+  color: var(--subtext);
+}
+.rename-details {
+  max-height: 30vh;
+  overflow-y: auto;
+}
+.rename-warning {
+  color: #e5a50a;
+}
+.rename-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.rename-count {
+  margin-right: auto;
+}
+.files-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.files-folder {
+  margin: 8px 0 2px;
+  color: var(--subtext);
+  font-size: 12px;
+}
+.files-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 2px 8px;
+}
+.files-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.files-uses,
+.files-size {
+  flex: none;
+  color: var(--subtext);
+  font-size: 12px;
+}
+.files-size {
+  width: 64px;
+  text-align: right;
+}
+.files-row.unused .files-uses {
+  color: #e5a50a;
+}
 #grid-view {
   grid-column: 2;
   grid-row: 1 / span 2;

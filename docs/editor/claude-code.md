@@ -149,6 +149,7 @@ does, so nothing is left behind or orphaned:
 | `inkflow slide section remove S [--with-slides]` | Removes it; its slides join the section before it, or with `--with-slides` are deleted like `slide delete`. |
 | `inkflow slide hide N` / `show ID` | Sets or clears `visible=False`. |
 | `inkflow slide rename N NEW_ID` | Sets `id=`; its ink file and every `slide:<old id>` link follow. |
+| `inkflow slide rename-files N NAME [--keep-id] [-n]` | Renames the slide's own drawing, Markdown, notes and ink file to `NAME` (each in its folder); its id becomes `NAME` (unless it has an `id=`, or `--keep-id` writes the old one), and every reference and `slide:` link follows. |
 | `inkflow slide title N TEXT` | Sets `title=` (`""` removes it). |
 
 A slide is named by its number, counted as the presenter and `inkflow goto` count
@@ -165,6 +166,31 @@ that server, as one step in the editor's undo history: the editor shows
 server the files are changed directly, and `git` is the undo. The editor keeps its state in `.inkflow/` in the project, which ignores itself in
 git and is not watched for changes. `render` needs Chromium or Chrome, like
 `inkflow export`; one installed by Playwright is found too.
+
+## Renaming and moving files
+
+Never rename or move a deck's file with `mv` or `git mv`: slides name it by
+path (an `<image href>`, a Markdown image, `Image("…")` in `deck.py`, a
+layout's `inkflow:parent`), and those references would break. `inkflow mv`
+moves the file and rewrites every reference in one step, each resolved
+relative to the file it is written in:
+
+```bash
+inkflow mv assets/IMG_0042.jpg assets/team-photo.jpg   # the extension may be left out
+inkflow mv data/chart-3.csv data/revenue -n            # --dry-run: print the edits only
+inkflow mv diagrams/diagram-2.drawio.svg figures/      # into a folder, keeping its name
+inkflow mv layouts/two-col.svg layouts/compare.svg     # parent="two-col" becomes "compare"
+inkflow slide rename-files 4 architecture              # slide 4's drawing, md, notes, ink
+```
+
+`OLD` and `NEW` are relative to the current folder (or the project); `NEW` may
+be a folder, a new one is created, and one left empty is removed. The
+extension never changes. A slide whose id came from the renamed file's name
+(`slides/intro.md` gives `intro`) takes the new one, and its ink file and
+`slide:` links follow. `--dry-run` lists every reference it would rewrite.
+With the editor open, the rename is one *Agent: …* step there, undone with
+<kbd>Ctrl</kbd>+<kbd>Z</kbd>. A path built in code in `deck.py` cannot be
+followed: the command warns when `deck.py` still names the old file.
 
 ## Shapes and arrows
 

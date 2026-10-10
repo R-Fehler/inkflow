@@ -727,9 +727,9 @@
     code: '<path d="M5.5 4 2 8l3.5 4M10.5 4 14 8l-3.5 4"/>',
     fit: '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>'
   };
-  function icon(name2, size3 = 16) {
+  function icon(name2, size4 = 16) {
     const wrap2 = document.createElement("span");
-    wrap2.innerHTML = `<svg viewBox="0 0 16 16" width="${size3}" height="${size3}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name2] ?? ""}</svg>`;
+    wrap2.innerHTML = `<svg viewBox="0 0 16 16" width="${size4}" height="${size4}" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name2] ?? ""}</svg>`;
     return wrap2.firstElementChild;
   }
   var toastTimer = 0;
@@ -1331,9 +1331,9 @@
   };
   var pendingSlides = null;
   function applyDeckSize(model2) {
-    const size3 = model2.deckSize;
-    if (!size3) return;
-    const [w2, h3] = size3.canvas;
+    const size4 = model2.deckSize;
+    if (!size4) return;
+    const [w2, h3] = size4.canvas;
     setDeckCanvas(w2, h3);
     document.documentElement.style.setProperty("--deck-ar", `${w2} / ${h3}`);
   }
@@ -1554,19 +1554,19 @@
     return { dx: x2.delta, dy: y2.delta, guidesX: x2.at, guidesY: y2.at };
   }
   function distribute(boxes, axis) {
-    const size3 = axis === "x" ? "width" : "height";
+    const size4 = axis === "x" ? "width" : "height";
     const order2 = boxes.map((b2, i2) => ({ b: b2, i: i2 })).sort((p2, q) => p2.b[axis] - q.b[axis]);
     const out = boxes.map((b2) => b2[axis]);
     if (order2.length < 3) return out;
     const first = order2[0].b;
     const last = order2[order2.length - 1].b;
-    const total = order2.reduce((s2, o2) => s2 + o2.b[size3], 0);
-    const span = last[axis] + last[size3] - first[axis];
+    const total = order2.reduce((s2, o2) => s2 + o2.b[size4], 0);
+    const span = last[axis] + last[size4] - first[axis];
     const gap = (span - total) / (order2.length - 1);
     let pos = first[axis];
     for (const o2 of order2) {
       out[o2.i] = pos;
-      pos += o2.b[size3] + gap;
+      pos += o2.b[size4] + gap;
     }
     return out;
   }
@@ -3887,6 +3887,538 @@
     );
   }
 
+  // src/ts/editor/pathtext.ts
+  function sepOf(path) {
+    return path.includes("\\") && !path.includes("/") ? "\\" : "/";
+  }
+  function withSep(dir) {
+    const sep2 = sepOf(dir);
+    return dir.endsWith(sep2) ? dir : dir + sep2;
+  }
+  function joinPath(dir, name2) {
+    return withSep(dir) + name2;
+  }
+  function baseName(path) {
+    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+  }
+  function samePath(a2, b2) {
+    const norm = (p2) => p2.replace(/(.)[\\/]+$/, "$1");
+    return norm(a2) === norm(b2);
+  }
+  function commonPrefix(names) {
+    if (!names.length) return "";
+    let prefix = names[0];
+    for (const name2 of names.slice(1)) {
+      let i2 = 0;
+      while (i2 < prefix.length && i2 < name2.length && prefix[i2].toLowerCase() === name2[i2].toLowerCase()) {
+        i2++;
+      }
+      prefix = prefix.slice(0, i2);
+    }
+    return prefix;
+  }
+  function startingWith(names, typed) {
+    const t2 = typed.toLowerCase();
+    return names.filter((n3) => n3.toLowerCase().startsWith(t2));
+  }
+  function splitTyped(value) {
+    const i2 = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+    if (i2 < 0) return { dir: "", prefix: value };
+    return { dir: value.slice(0, i2 + 1), prefix: value.slice(i2 + 1) };
+  }
+  function assetRef(href) {
+    return href.replace(/\?v=[0-9a-f]+$/, "");
+  }
+  function isPdfRef(ref) {
+    return /\.pdf(?:[#?]|$)/i.test(ref) && !/^[a-z][a-z0-9+.-]*:/i.test(ref);
+  }
+  function pdfPage(ref) {
+    const m2 = /#(?:.*&)?page=(\d+)/i.exec(ref);
+    return m2 ? Math.max(1, Number(m2[1])) : 1;
+  }
+  function withPage(ref, page) {
+    const file = ref.replace(/#.*$/, "");
+    return page > 1 ? `${file}#page=${page}` : file;
+  }
+  function splitFileName(rel) {
+    const cut2 = rel.lastIndexOf("/");
+    const folder = cut2 < 0 ? "" : rel.slice(0, cut2);
+    const name2 = rel.slice(cut2 + 1);
+    const drawio = /\.drawio\.svg$/i.exec(name2);
+    const dot = name2.lastIndexOf(".");
+    const ext = drawio ? drawio[0] : dot > 0 ? name2.slice(dot) : "";
+    return { folder, stem: name2.slice(0, name2.length - ext.length), ext };
+  }
+  function joinFileName(folder, stem, ext) {
+    const dir = folder.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+    const name2 = `${stem.trim()}${ext}`;
+    return dir ? `${dir}/${name2}` : name2;
+  }
+  function projectRel(path, projectDir) {
+    if (!path) return null;
+    if (!path.startsWith("/") && !/^[a-z]:[\\/]/i.test(path)) {
+      return path.split("/").includes("..") ? null : path;
+    }
+    const root2 = projectDir.replace(/[\\/]+$/, "");
+    if (!path.startsWith(`${root2}/`)) return null;
+    return path.slice(root2.length + 1);
+  }
+
+  // src/ts/editor/rename.ts
+  function plural(n3, word) {
+    return `${n3} ${word}${n3 === 1 ? "" : "s"}`;
+  }
+  function relOf(path) {
+    if (!path) return null;
+    const rel = projectRel(
+      path.replace(/[?#].*$/, ""),
+      ed.model?.projectDir ?? ""
+    );
+    return rel && !rel.startsWith("_theme/") && !rel.startsWith("_pdf/") ? rel : null;
+  }
+  function renameButton(path, label4 = "Rename\u2026") {
+    const rel = relOf(path);
+    if (!rel) return null;
+    return h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn open-with",
+        title: `Give ${rel} another name or folder; every reference follows`,
+        onclick: () => void renameFile(rel)
+      },
+      label4
+    );
+  }
+  function summaryLine(p2) {
+    if (!p2.references) return "Nothing refers to it: only the file moves.";
+    return `Updates ${plural(p2.references, "reference")} in ${plural(p2.files, "file")}.`;
+  }
+  function previewBody(p2, opts2) {
+    const box = h("div", { class: "rename-preview" });
+    if (opts2.moves && p2.moves.length) {
+      box.append(
+        h("p", { class: "rename-msg rename-head" }, "Files"),
+        h(
+          "ul",
+          { class: "rename-list" },
+          ...p2.moves.map(
+            (m2) => h(
+              "li",
+              {},
+              h("code", { class: "rename-code" }, m2.from),
+              " \u2192 ",
+              h("code", { class: "rename-code" }, m2.to)
+            )
+          )
+        )
+      );
+    }
+    if (p2.shared.length) {
+      box.append(
+        h("p", { class: "rename-msg rename-head" }, "Stay as they are"),
+        h(
+          "ul",
+          { class: "rename-list" },
+          ...p2.shared.map(
+            (s2) => h("li", {}, h("code", { class: "rename-code" }, s2))
+          )
+        )
+      );
+    }
+    box.append(h("p", { class: "rename-msg rename-summary" }, summaryLine(p2)));
+    for (const [old, now] of Object.entries(p2.ids)) {
+      box.append(
+        h(
+          "p",
+          { class: "hint" },
+          `The slide id ${old} becomes ${now}; its saved ink follows${p2.links ? `, and ${plural(p2.links, "slide: link")} ${p2.links === 1 ? "is" : "are"} rewritten` : ""}.`
+        )
+      );
+    }
+    if (p2.edits.length) {
+      const byFile = /* @__PURE__ */ new Map();
+      for (const e2 of p2.edits) {
+        const list4 = byFile.get(e2.file) ?? [];
+        list4.push(e2);
+        byFile.set(e2.file, list4);
+      }
+      const list3 = h("ul", { class: "rename-list" });
+      for (const [file, edits] of byFile) {
+        list3.append(
+          h(
+            "li",
+            {},
+            h("code", { class: "rename-code" }, file),
+            h(
+              "ul",
+              {},
+              ...edits.map(
+                (e2) => h(
+                  "li",
+                  { class: "hint" },
+                  `${e2.kind}: `,
+                  h("code", { class: "rename-code" }, e2.old),
+                  " \u2192 ",
+                  h("code", { class: "rename-code" }, e2.new)
+                )
+              )
+            )
+          )
+        );
+      }
+      box.append(
+        h(
+          "details",
+          { class: "rename-details" },
+          h("summary", {}, "Show the references"),
+          list3
+        )
+      );
+    }
+    for (const w2 of p2.warnings) {
+      box.append(h("p", { class: "rename-msg rename-warning" }, w2));
+    }
+    return box;
+  }
+  function renameDialog(opts2) {
+    const status2 = h("div", { class: "rename-status" });
+    const go = h(
+      "button",
+      { type: "button", class: "pbtn primary", disabled: true },
+      "Rename"
+    );
+    const cancel2 = h(
+      "button",
+      { type: "button", class: "pbtn", onclick: () => closeDialog() },
+      "Cancel"
+    );
+    let token = 0;
+    let timer5 = 0;
+    let last = null;
+    const refresh2 = async () => {
+      const mine = ++token;
+      const req = opts2.build();
+      go.disabled = true;
+      if (typeof req === "string") {
+        status2.className = "rename-status";
+        status2.replaceChildren(h("p", { class: "rename-msg hint" }, req));
+        return;
+      }
+      status2.className = "rename-status busy";
+      const res = await request({ ...req, dryRun: true });
+      if (mine !== token) return;
+      if (!res.ok) {
+        last = null;
+        status2.className = "rename-status error";
+        status2.replaceChildren(
+          h(
+            "p",
+            { class: "rename-msg" },
+            res.error ?? "This name cannot be used"
+          )
+        );
+        return;
+      }
+      last = res.rename;
+      status2.className = "rename-status";
+      status2.replaceChildren(previewBody(last, { moves: opts2.moves }));
+      go.disabled = false;
+    };
+    const schedule2 = () => {
+      window.clearTimeout(timer5);
+      timer5 = window.setTimeout(() => void refresh2(), 200);
+    };
+    for (const input of opts2.inputs) {
+      input.addEventListener("input", schedule2);
+      input.addEventListener("change", schedule2);
+      input.addEventListener("keydown", (e2) => {
+        if (e2.key === "Enter" && !go.disabled) {
+          e2.preventDefault();
+          go.click();
+        }
+      });
+    }
+    go.addEventListener("click", async () => {
+      const req = opts2.build();
+      if (typeof req === "string") return;
+      go.disabled = true;
+      const res = await edit(req);
+      if (!res.ok) {
+        status2.className = "rename-status error";
+        status2.replaceChildren(
+          h("p", { class: "rename-msg" }, res.error ?? "Rename failed")
+        );
+        return;
+      }
+      const p2 = res.rename ?? last;
+      closeDialog();
+      toast(
+        `${res.label ?? "Renamed"}${p2?.references ? ` \xB7 ${plural(p2.references, "reference")} updated` : ""}`,
+        "ok"
+      );
+      opts2.done(p2);
+    });
+    openDialog(
+      opts2.title,
+      h(
+        "div",
+        { class: "rename-body" },
+        opts2.fields,
+        status2,
+        h("div", { class: "rename-actions" }, cancel2, go)
+      ),
+      { hint: opts2.hint }
+    );
+    opts2.inputs[opts2.inputs.length - 1]?.focus();
+    opts2.inputs[opts2.inputs.length - 1]?.select();
+    status2.replaceChildren(
+      h("p", { class: "hint" }, "Type a new name to see what changes.")
+    );
+  }
+  async function renameFile(path, done = () => {
+  }) {
+    const rel = relOf(path);
+    if (!rel) {
+      toast("Only the deck's own files can be renamed", "error");
+      return;
+    }
+    const { folder, stem, ext } = splitFileName(rel);
+    const folderInput = h("input", {
+      type: "text",
+      value: folder,
+      spellcheck: "false",
+      placeholder: "(the deck's folder)",
+      title: "The folder, relative to deck.py; a new one is created"
+    });
+    const nameInput = h("input", {
+      type: "text",
+      value: stem,
+      spellcheck: "false",
+      title: "Letters, digits, - and _"
+    });
+    const fields = h(
+      "div",
+      { class: "rename-fields" },
+      h(
+        "label",
+        { class: "rename-row" },
+        h("span", { class: "rename-label" }, "Folder"),
+        folderInput
+      ),
+      h(
+        "label",
+        { class: "rename-row" },
+        h("span", { class: "rename-label" }, "Name"),
+        nameInput,
+        h(
+          "code",
+          { class: "rename-ext", title: "The extension stays" },
+          ext
+        )
+      )
+    );
+    renameDialog({
+      title: `Rename ${rel.split("/").pop() ?? rel}`,
+      hint: "Every slide, Markdown file and deck.py line that names it follows",
+      fields,
+      inputs: [folderInput, nameInput],
+      moves: false,
+      build: () => {
+        if (!nameInput.value.trim()) return "Give it a name.";
+        const to = joinFileName(folderInput.value, nameInput.value, ext);
+        if (to === rel) return "Type a new name to see what changes.";
+        return { action: "rename", from: rel, to };
+      },
+      done: () => done()
+    });
+  }
+  function renameSlideFiles(deckIndex) {
+    const slide = ed.model?.slides[deckIndex];
+    if (!slide) return;
+    const current2 = slide.md?.kind === "file" && slide.md.rel ? splitFileName(slide.md.rel).stem : slide.srcRel && !slide.srcShared ? splitFileName(slide.srcRel).stem : slide.id ?? "";
+    const nameInput = h("input", {
+      type: "text",
+      value: current2,
+      spellcheck: "false",
+      title: "Letters, digits, - and _ (no folder, no extension)"
+    });
+    const keep = h("input", { type: "checkbox" });
+    const id = slide.id ?? "";
+    const fields = h(
+      "div",
+      { class: "rename-fields" },
+      h(
+        "label",
+        { class: "rename-row" },
+        h("span", { class: "rename-label" }, "Name"),
+        nameInput
+      ),
+      slide.explicitId ? h(
+        "p",
+        { class: "hint" },
+        `Its id stays ${slide.explicitId} (set in deck.py).`
+      ) : h(
+        "label",
+        {
+          class: "rename-check",
+          title: "Write id= into deck.py so links and ink keep the old id"
+        },
+        keep,
+        ` Keep the slide id ${id}`
+      )
+    );
+    renameDialog({
+      title: "Rename slide files",
+      hint: "Its drawing, Markdown, notes and ink get the new name",
+      fields,
+      inputs: [nameInput],
+      moves: true,
+      build: () => {
+        const stem = nameInput.value.trim();
+        if (!stem) return "Give it a name.";
+        return {
+          action: "rename",
+          slide: deckIndex,
+          stem,
+          keepId: keep.checked
+        };
+      },
+      done: () => {
+      }
+    });
+    keep.addEventListener(
+      "change",
+      () => nameInput.dispatchEvent(new Event("input"))
+    );
+  }
+  function size(bytes) {
+    if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
+    if (bytes >= 1e3) return `${Math.round(bytes / 1e3)} KB`;
+    return `${bytes} B`;
+  }
+  async function openFiles() {
+    const res = await request({ action: "files" });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot list the deck's files", "error");
+      return;
+    }
+    const files2 = res.files ?? [];
+    const unused = files2.filter((f2) => !f2.uses);
+    const picked = /* @__PURE__ */ new Set();
+    const list3 = h("div", { class: "files-list" });
+    const deleteBtn = h(
+      "button",
+      { type: "button", class: "pbtn", disabled: true },
+      "Delete unused\u2026"
+    );
+    const sync = () => {
+      deleteBtn.disabled = !picked.size;
+      deleteBtn.textContent = picked.size ? `Delete ${plural(picked.size, "file")}\u2026` : "Delete unused\u2026";
+    };
+    let folder = null;
+    for (const f2 of files2) {
+      const { folder: dir } = splitFileName(f2.path);
+      if (dir !== folder) {
+        folder = dir;
+        list3.append(h("div", { class: "files-folder" }, `${dir || "."}/`));
+      }
+      const check = h("input", {
+        type: "checkbox",
+        disabled: f2.uses > 0,
+        title: f2.uses ? "In use" : "Pick it to delete"
+      });
+      check.addEventListener("change", () => {
+        if (check.checked) picked.add(f2.path);
+        else picked.delete(f2.path);
+        sync();
+      });
+      list3.append(
+        h(
+          "div",
+          { class: `files-row${f2.uses ? "" : " unused"}` },
+          check,
+          h(
+            "code",
+            { class: "rename-code files-name", title: f2.path },
+            f2.path.split("/").pop() ?? f2.path
+          ),
+          h(
+            "span",
+            { class: "files-uses" },
+            f2.uses ? plural(f2.uses, "use") : "unused"
+          ),
+          h("span", { class: "files-size" }, size(f2.size)),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn open-with",
+              title: "Give it another name or folder; every reference follows",
+              onclick: () => void renameFile(f2.path, () => void openFiles())
+            },
+            "Rename\u2026"
+          )
+        )
+      );
+    }
+    deleteBtn.addEventListener("click", async () => {
+      const paths = [...picked];
+      if (!window.confirm(
+        `Delete ${plural(paths.length, "file")} nothing uses?
+
+${paths.join("\n")}
+
+Undo brings them back.`
+      )) {
+        return;
+      }
+      const r2 = await edit({ action: "delete-files", paths });
+      if (r2.ok) {
+        toast(r2.label ?? "Deleted", "ok");
+        void openFiles();
+      }
+    });
+    const selectUnused = h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn",
+        disabled: !unused.length,
+        onclick: () => {
+          for (const row4 of list3.querySelectorAll(
+            ".files-row.unused input"
+          )) {
+            row4.checked = true;
+          }
+          for (const f2 of unused) picked.add(f2.path);
+          sync();
+        }
+      },
+      "Pick all unused"
+    );
+    const body2 = h(
+      "div",
+      { class: "files-body" },
+      files2.length ? list3 : h("p", { class: "hint" }, "No files yet."),
+      h(
+        "div",
+        { class: "rename-actions" },
+        h(
+          "span",
+          { class: "hint rename-count" },
+          `${plural(files2.length, "file")} \xB7 ${unused.length} unused`
+        ),
+        selectUnused,
+        deleteBtn
+      )
+    );
+    openDialog("Files", body2, {
+      wide: true,
+      hint: "Pictures, videos, data, diagrams and slide files; a use is a reference in a slide, Markdown or deck.py"
+    });
+  }
+
   // src/ts/editor/sections.ts
   function sectionOf(sections2, i2) {
     for (let k2 = 0; k2 < sections2.length; k2++) {
@@ -4642,6 +5174,9 @@
         !editable
       )
     );
+    menu.append(
+      menuItem("Rename files\u2026", () => renameSlideFiles(i2), !editable)
+    );
     menu.append(menuItem("Delete", () => void deleteSlide(i2), !editable));
     menu.append(
       menuItem("Add section here\u2026", () => void addSectionAt(i2), !editable)
@@ -4832,60 +5367,6 @@
       text = lastCopied ?? "";
     }
     await pasteText(text);
-  }
-
-  // src/ts/editor/pathtext.ts
-  function sepOf(path) {
-    return path.includes("\\") && !path.includes("/") ? "\\" : "/";
-  }
-  function withSep(dir) {
-    const sep2 = sepOf(dir);
-    return dir.endsWith(sep2) ? dir : dir + sep2;
-  }
-  function joinPath(dir, name2) {
-    return withSep(dir) + name2;
-  }
-  function baseName(path) {
-    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
-  }
-  function samePath(a2, b2) {
-    const norm = (p2) => p2.replace(/(.)[\\/]+$/, "$1");
-    return norm(a2) === norm(b2);
-  }
-  function commonPrefix(names) {
-    if (!names.length) return "";
-    let prefix = names[0];
-    for (const name2 of names.slice(1)) {
-      let i2 = 0;
-      while (i2 < prefix.length && i2 < name2.length && prefix[i2].toLowerCase() === name2[i2].toLowerCase()) {
-        i2++;
-      }
-      prefix = prefix.slice(0, i2);
-    }
-    return prefix;
-  }
-  function startingWith(names, typed) {
-    const t2 = typed.toLowerCase();
-    return names.filter((n3) => n3.toLowerCase().startsWith(t2));
-  }
-  function splitTyped(value) {
-    const i2 = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
-    if (i2 < 0) return { dir: "", prefix: value };
-    return { dir: value.slice(0, i2 + 1), prefix: value.slice(i2 + 1) };
-  }
-  function assetRef(href) {
-    return href.replace(/\?v=[0-9a-f]+$/, "");
-  }
-  function isPdfRef(ref) {
-    return /\.pdf(?:[#?]|$)/i.test(ref) && !/^[a-z][a-z0-9+.-]*:/i.test(ref);
-  }
-  function pdfPage(ref) {
-    const m2 = /#(?:.*&)?page=(\d+)/i.exec(ref);
-    return m2 ? Math.max(1, Number(m2[1])) : 1;
-  }
-  function withPage(ref, page) {
-    const file = ref.replace(/#.*$/, "");
-    return page > 1 ? `${file}#page=${page}` : file;
   }
 
   // src/ts/editor/pdfpages.ts
@@ -5601,7 +6082,7 @@
         );
       })
     );
-    const size3 = h("select", {});
+    const size4 = h("select", {});
     for (const p2 of PRESETS) {
       const bigger = p2.height && info4.height && p2.height > info4.height;
       const option2 = h(
@@ -5610,10 +6091,10 @@
         p2.height ? `${p2.label}${bigger ? " (no larger than the source)" : ""}` : `${p2.label}${info4.width && info4.height ? ` (${info4.width}\xD7${info4.height})` : ""}`
       );
       option2.selected = p2.height === height;
-      size3.append(option2);
+      size4.append(option2);
     }
-    size3.addEventListener("change", () => {
-      height = size3.value ? Number(size3.value) : null;
+    size4.addEventListener("change", () => {
+      height = size4.value ? Number(size4.value) : null;
       void update();
     });
     const slider = h("input", {
@@ -5674,7 +6155,7 @@
     let finished = false;
     async function update() {
       qualityLabel.textContent = data.qualities[quality] ?? "";
-      size3.disabled = slider.disabled = format === "copy";
+      size4.disabled = slider.disabled = format === "copy";
       const res = await request({
         action: "convert-plan",
         path,
@@ -5769,7 +6250,7 @@
           "label",
           { class: "field" },
           h("span", { class: "field-label" }, "Resolution"),
-          size3
+          size4
         ),
         h(
           "div",
@@ -6386,13 +6867,13 @@
     const src = ownSource();
     const slide = currentSlide();
     if (!up || !src || !slide) return;
-    const size3 = await videoSize(up.rel);
+    const size4 = await videoSize(up.rel);
     const vb = slideRoot()?.viewBox.baseVal;
     const vw = vb?.width || 1920;
     const vh = vb?.height || 1080;
-    const k2 = Math.min(vw * 0.6 / size3.w, vh * 0.6 / size3.h);
-    const w2 = size3.w * k2;
-    const h3 = size3.h * k2;
+    const k2 = Math.min(vw * 0.6 / size4.w, vh * 0.6 / size4.h);
+    const w2 = size4.w * k2;
+    const h3 = size4.h * k2;
     const cx = Math.min(Math.max(at3?.x ?? vw / 2, w2 / 2), vw - w2 / 2);
     const cy = Math.min(Math.max(at3?.y ?? vh / 2, h3 / 2), vh - h3 / 2);
     const parent = insertParent();
@@ -6417,7 +6898,7 @@
         path: up.path,
         slide: slide.deckIndex,
         zone: id.replace(/^zone-/, ""),
-        browser: size3
+        browser: size4
       });
     }
   }
@@ -6447,14 +6928,14 @@
       href = withPage(href, choice.page);
       shown2 = choice.url;
     }
-    const size3 = shown2 ? await naturalSize(shown2) : { w: 400, h: 300 };
+    const size4 = shown2 ? await naturalSize(shown2) : { w: 400, h: 300 };
     const svg = slideRoot();
     const vb = svg?.viewBox.baseVal;
     const maxW = (vb?.width || 1920) * 0.5;
     const maxH = (vb?.height || 1080) * 0.5;
-    const k2 = Math.min(1, maxW / size3.w, maxH / size3.h);
-    const w2 = size3.w * k2;
-    const h3 = size3.h * k2;
+    const k2 = Math.min(1, maxW / size4.w, maxH / size4.h);
+    const w2 = size4.w * k2;
+    const h3 = size4.h * k2;
     const cx = at3?.x ?? (vb?.width || 1920) / 2;
     const cy = at3?.y ?? (vb?.height || 1080) / 2;
     const parent = insertParent().el;
@@ -6686,16 +7167,16 @@
     let settings2 = initialSettings;
     let timer5 = 0;
     let asked = 0;
-    let size3 = newChartBox();
+    let size4 = newChartBox();
     if (target.kind === "edit") {
       const el2 = slideRoot()?.querySelector(`[id="zone-${target.zone}"]`);
       const box = el2 ? slideBox(el2) : null;
-      if (box) size3 = { ...size3, width: box.width, height: box.height };
+      if (box) size4 = { ...size4, width: box.width, height: box.height };
     }
     const table = h("table", { class: "chart-grid" });
     const fields = h("div", { class: "chart-fields" });
     const preview = h("div", { class: "chart-preview" });
-    preview.style.aspectRatio = `${size3.width} / ${size3.height}`;
+    preview.style.aspectRatio = `${size4.width} / ${size4.height}`;
     const status2 = h("span", { class: "hint chart-status" });
     const schedule2 = () => {
       window.clearTimeout(timer5);
@@ -6710,8 +7191,8 @@
         zone: target.kind === "edit" ? target.zone : null,
         chart: settings2,
         table: trimmed(grid),
-        width: size3.width,
-        height: size3.height
+        width: size4.width,
+        height: size4.height
       });
       if (mine !== asked) return;
       if (!res.ok) {
@@ -8752,6 +9233,14 @@
     addFile("Notes", slide.notes.rel, slide.notes.path);
     const deckPath = ed.model?.deckPath;
     if (deckPath) addFile("Deck", fileName2(deckPath), deckPath);
+    if (editable)
+      files2.append(
+        button(
+          "Rename files\u2026",
+          "Give this slide's drawing, Markdown, notes and ink one new name (its id follows)",
+          () => renameSlideFiles(di)
+        )
+      );
     const textInDeck = slide.md?.kind !== "file" && (slide.md?.kind === "inline" || Object.values(slide.zones).some((z) => z.kind === "text"));
     if (textInDeck && editable)
       files2.append(
@@ -9363,7 +9852,8 @@
               { class: "hint media-src" },
               media.inline ? "Data written in deck.py" : media.src ?? ""
             ),
-            media.path ? openButton(media.path) : null
+            media.path ? openButton(media.path) : null,
+            media.inline ? null : renameButton(media.path)
           ),
           button(
             "Edit data\u2026",
@@ -9377,7 +9867,8 @@
             "div",
             { class: "source-hint" },
             h("p", { class: "hint media-src" }, media.src ?? ""),
-            openButton(projectFile(media.src))
+            openButton(projectFile(media.src)),
+            renameButton(projectFile(media.src))
           ),
           ...media.kind === "image" && isPdfRef(media.src ?? "") ? [zonePageRow(slide, name2, media.src ?? "")] : [],
           button(
@@ -9807,7 +10298,8 @@
         "div",
         { class: "source-hint" },
         h("p", { class: "hint media-src" }, pictureName(href)),
-        openButton(projectFile(href))
+        openButton(projectFile(href)),
+        renameButton(projectFile(href))
       ),
       pdf ? pdfPageRow(sel, image, pdf, pdfPage(href), imageOps) : null,
       isDiagramHref(href) ? h(
@@ -9900,8 +10392,8 @@
       };
       const width = Number.parseFloat(image.getAttribute("width") ?? "");
       if (!isCropped(sel.el) && width > 0) {
-        const size3 = await naturalSize(url);
-        set.height = fmt(width * size3.h / size3.w);
+        const size4 = await naturalSize(url);
+        set.height = fmt(width * size4.h / size4.w);
       }
       imageOps(set, `Show page ${n3}`);
     };
@@ -9962,7 +10454,8 @@
         "div",
         { class: "source-hint" },
         h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
-        openButton(projectFile(href))
+        openButton(projectFile(href)),
+        renameButton(projectFile(href))
       ),
       h(
         "div",
@@ -13001,8 +13494,14 @@ ${area2.value.slice(pos)}`;
       if (pictureOf(el2)) {
         items.push(menuItem("Crop", () => void startCrop(one)));
       }
-      if (items.length) items.push(sep());
     }
+    const only = ed.selection.length === 1 ? ed.selection[0].el : null;
+    const file = only ? fileOf(only) : null;
+    if (file) {
+      const name2 = file.split("/").pop() ?? file;
+      items.push(menuItem(`Rename ${name2}\u2026`, () => void renameFile(file)));
+    }
+    if (items.length) items.push(sep());
     items.push(
       menuItem("Cut", () => cut()),
       menuItem("Copy", () => copy()),
@@ -13065,6 +13564,19 @@ ${area2.value.slice(pos)}`;
       }
     }
     return items;
+  }
+  function fileOf(el2) {
+    const drawn = drawnDiagram(el2);
+    if (drawn) return projectFile(drawn.getAttribute("data-drawio"));
+    const image = pictureOf(el2);
+    if (image) return projectFile(sourceRef(image));
+    if (!isZone(el2)) return null;
+    const media = currentSlide()?.zones[zoneName(el2)];
+    if (media?.kind === "image" || media?.kind === "video") {
+      return projectFile(media.src);
+    }
+    if (media?.kind === "chart" && !media.inline) return media.path ?? null;
+    return null;
   }
   function clickedAt() {
     return clientToSlide(at.x, at.y);
@@ -14554,6 +15066,12 @@ Decks: new, open, recent` : "Decks";
         menu4.append(item);
       }
     }
+    if (ed.model) {
+      menu4.append(
+        h("div", { class: "menu-sep" }),
+        menuItem("Files\u2026", () => void openFiles())
+      );
+    }
     menu4.append(
       h("div", { class: "menu-sep" }),
       menuItem("Quit Inkflow", () => void quit())
@@ -14603,7 +15121,7 @@ Decks: new, open, recent` : "Decks";
       update();
     });
     let look = data.themes.some((t2) => t2.id === "current") ? "current" : "starter";
-    const size3 = h(
+    const size4 = h(
       "select",
       {},
       ...(data.posterSizes ?? []).map(
@@ -14614,7 +15132,7 @@ Decks: new, open, recent` : "Decks";
       "label",
       { class: "field inline poster-size" },
       h("span", { class: "field-label" }, "Paper size"),
-      size3
+      size4
     );
     sizeRow.hidden = true;
     const looks = h(
@@ -14702,7 +15220,7 @@ Decks: new, open, recent` : "Decks";
         path: join(folder.path, name2.value.trim()),
         title: title2.value,
         theme: look,
-        size: look === "poster" ? size3.value : null,
+        size: look === "poster" ? size4.value : null,
         git: !folder.repo && git2.checked,
         lfs: lfs.checked
       });
@@ -14917,7 +15435,7 @@ Decks: new, open, recent` : "Decks";
       placeholder: (stem) => `${stem}.pdf`
     }
   ];
-  function size(bytes) {
+  function size2(bytes) {
     if (bytes > 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
     return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
   }
@@ -14969,7 +15487,7 @@ Decks: new, open, recent` : "Decks";
       const r2 = result;
       status2.className = "export-status done";
       status2.replaceChildren(
-        h("span", {}, `Saved to ${r2.rel} \xB7 ${size(r2.size)}`),
+        h("span", {}, `Saved to ${r2.rel} \xB7 ${size2(r2.size)}`),
         h(
           "a",
           { href: r2.download, class: "pbtn", download: "" },
@@ -15540,7 +16058,7 @@ Continue?`)) return null;
     const l2 = status.lfs;
     return l2 ? [...l2.uncovered, ...l2.unconverted] : [];
   }
-  function size2(bytes) {
+  function size3(bytes) {
     if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
     if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
     return `${bytes} B`;
@@ -15555,7 +16073,7 @@ Continue?`)) return null;
           { class: "git-file" },
           h("span", { class: "git-status" }, f2.kind),
           h("code", { class: "git-path" }, f2.path),
-          h("span", { class: "hint git-size" }, size2(f2.size))
+          h("span", { class: "hint git-size" }, size3(f2.size))
         )
       )
     );
@@ -17210,8 +17728,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       const sizes = sizesOf(tool);
       const largest = sizes[sizes.length - 1];
       this.sizes.replaceChildren(
-        ...sizes.map((size3, i2) => {
-          const px = Math.max(3, Math.round(size3 / largest * 16));
+        ...sizes.map((size4, i2) => {
+          const px = Math.max(3, Math.round(size4 / largest * 16));
           const b2 = button4(
             ["Thin", "Medium", "Thick"][i2] ?? `Size ${i2 + 1}`,
             `<span class="ink-dot ${tool}" style="width:${px}px;height:${tool === "highlighter" ? Math.max(3, Math.round(px / 2.5)) : px}px"></span>`,
@@ -17592,16 +18110,16 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       "change",
       () => void save3({ mode: mode2.value || null }, "Colour mode")
     );
-    const size3 = h("input", {
+    const size4 = h("input", {
       type: "number",
       min: 8,
       max: 200,
       value: t2.fontSize ?? "",
       placeholder: String(t2.themeFontSize)
     });
-    size3.disabled = !ed.model?.deckEditable;
-    size3.addEventListener("change", () => {
-      const n3 = parseInt(size3.value, 10);
+    size4.disabled = !ed.model?.deckEditable;
+    size4.addEventListener("change", () => {
+      const n3 = parseInt(size4.value, 10);
       void save3({ fontSize: Number.isFinite(n3) ? n3 : null }, "Font size");
     });
     const list3 = h("datalist", { id: "theme-font-list" });
@@ -17613,7 +18131,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         "div",
         { class: "theme-top" },
         h("label", {}, h("span", {}, "Colour mode"), mode2),
-        h("label", {}, h("span", {}, "Base font size (px)"), size3)
+        h("label", {}, h("span", {}, "Base font size (px)"), size4)
       ),
       h("h3", {}, "Fonts"),
       list3,

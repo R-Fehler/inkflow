@@ -205,6 +205,16 @@ commands:
           flag:
             deck: ["$files([\".py\"])"]
 
+      - name: rename-files
+        description: Rename a slide's own files; references, id, ink and links follow.
+        flags:
+          --keep-id: Keep the slide's current id (written as id=)
+          -n, --dry-run: Print the moves and reference edits; change nothing
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
       - name: title
         description: Set a slide's title (title=).
         flags:
@@ -625,6 +635,18 @@ commands:
     completion:
       flag:
         deck: ["$files([\".py\"])"]
+
+  - name: mv
+    description: Rename or move a project file; every reference to it follows.
+    flags:
+      -d, --deck=: Path to deck.py
+      -n, --dry-run: Print the moves and reference edits; change nothing
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+      positional:
+        - ["$files"]
+        - ["$files"]
 
   - name: worktree
     description: Work on the deck in a separate git worktree, on its own branch.

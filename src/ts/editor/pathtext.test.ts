@@ -3,9 +3,12 @@ import {
     assetRef,
     commonPrefix,
     isPdfRef,
+    joinFileName,
     joinPath,
     pdfPage,
+    projectRel,
     samePath,
+    splitFileName,
     splitTyped,
     startingWith,
     withPage,
@@ -73,5 +76,46 @@ describe("PDF references", () => {
         expect(withPage("../a/plot.pdf#page=2", 4)).toBe(
             "../a/plot.pdf#page=4",
         );
+    });
+});
+
+describe("file names in the rename dialog", () => {
+    it("splits a path into folder, stem and extension", () => {
+        expect(splitFileName("assets/IMG_0042.JPG")).toEqual({
+            folder: "assets",
+            stem: "IMG_0042",
+            ext: ".JPG",
+        });
+        expect(splitFileName("diagrams/diagram-2.drawio.svg")).toEqual({
+            folder: "diagrams",
+            stem: "diagram-2",
+            ext: ".drawio.svg",
+        });
+        expect(splitFileName("README")).toEqual({
+            folder: "",
+            stem: "README",
+            ext: "",
+        });
+        expect(splitFileName(".hidden")).toEqual({
+            folder: "",
+            stem: ".hidden",
+            ext: "",
+        });
+    });
+
+    it("joins the fields back, trimming slashes", () => {
+        expect(joinFileName(" /assets/photos/ ", " cover ", ".png")).toBe(
+            "assets/photos/cover.png",
+        );
+        expect(joinFileName("", "cover", ".png")).toBe("cover.png");
+        expect(joinFileName("a\\b", "c", ".csv")).toBe("a/b/c.csv");
+    });
+
+    it("makes a model path relative to the project", () => {
+        expect(projectRel("/p/deck/data/a.csv", "/p/deck")).toBe("data/a.csv");
+        expect(projectRel("/p/deck/data/a.csv", "/p/deck/")).toBe("data/a.csv");
+        expect(projectRel("/elsewhere/a.csv", "/p/deck")).toBeNull();
+        expect(projectRel("assets/a.png", "/p/deck")).toBe("assets/a.png");
+        expect(projectRel("../a.png", "/p/deck")).toBeNull();
     });
 });

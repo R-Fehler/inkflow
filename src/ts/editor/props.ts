@@ -84,6 +84,7 @@ import { edit } from "./net";
 import { fileName, openButton } from "./openwith";
 import { isPdfRef, pdfPage, withPage } from "./pathtext";
 import { choosePage, pageUrl, sourceRef } from "./pdfpages";
+import { renameButton, renameSlideFiles } from "./rename";
 import { distribute } from "./snap";
 import { currentSlide, ed, emit, on, sourceOf } from "./state";
 import type {
@@ -702,6 +703,14 @@ function renderSlidePanel(): void {
     addFile("Notes", slide.notes.rel, slide.notes.path);
     const deckPath = ed.model?.deckPath;
     if (deckPath) addFile("Deck", fileName(deckPath), deckPath);
+    if (editable)
+        files.append(
+            button(
+                "Rename files…",
+                "Give this slide's drawing, Markdown, notes and ink one new name (its id follows)",
+                () => renameSlideFiles(di),
+            ),
+        );
     const textInDeck =
         slide.md?.kind !== "file" &&
         (slide.md?.kind === "inline" ||
@@ -1429,6 +1438,7 @@ function renderObjectPanel(sel: Selected): void {
                             : (media.src ?? ""),
                     ),
                     media.path ? openButton(media.path) : null,
+                    media.inline ? null : renameButton(media.path),
                 ),
                 button(
                     "Edit data…",
@@ -1446,6 +1456,7 @@ function renderObjectPanel(sel: Selected): void {
                     { class: "source-hint" },
                     h("p", { class: "hint media-src" }, media.src ?? ""),
                     openButton(projectFile(media.src)),
+                    renameButton(projectFile(media.src)),
                 ),
                 ...(media.kind === "image" && isPdfRef(media.src ?? "")
                     ? [zonePageRow(slide, name, media.src ?? "")]
@@ -1949,6 +1960,7 @@ function pictureSection(sel: Selected): HTMLElement {
             { class: "source-hint" },
             h("p", { class: "hint media-src" }, pictureName(href)),
             openButton(projectFile(href)),
+            renameButton(projectFile(href)),
         ),
         pdf ? pdfPageRow(sel, image, pdf, pdfPage(href), imageOps) : null,
         isDiagramHref(href)
@@ -2129,6 +2141,7 @@ function diagramSection(sel: Selected): HTMLElement {
             { class: "source-hint" },
             h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
             openButton(projectFile(href)),
+            renameButton(projectFile(href)),
         ),
         h(
             "div",
