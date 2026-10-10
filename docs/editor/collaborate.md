@@ -112,8 +112,25 @@ through an SSH tunnel of their own: nothing listens on the network, and the
 pages, pictures, videos and the live connection all travel inside SSH on the
 one port.
 
+Usually three kinds of computers take part:
+
+```text
+ your computer                  the server                  a collaborator's computer
+ a browser          ── SSH ──▶  runs inkflow       ◀── SSH ──  a browser
+ (the owner link)    tunnel     holds the deck      tunnel    (an editor or view link)
+                                (a git clone)
+```
+
+You set the server up once and open the deck as its owner
+([Setting up the server](#setting-up-the-server)); then you invite people
+([Inviting collaborators](#inviting-collaborators)). Collaborators install
+nothing: no inkflow, no git, no copy of the deck. They need an SSH login on the
+server and a browser. Give each their own login: someone logged in with your
+account *is* you there (your files, your shell, your owner link).
+
 In the editor, **Share… → Share via SSH** writes out every command below for
-your deck (its repository, its folder, the port), each with **Copy**.
+your deck (its repository, its folder, the port), each with **Copy**: on your
+computer the setup steps, on the server the message for your collaborators.
 
 ### SSH mode
 
@@ -146,7 +163,10 @@ In SSH mode, turning the links on (**Turn on links**, or `--share`) never makes
 the server listen on the network: the links name `localhost`, for each guest to
 open through their own tunnel.
 
-### Just you, on a server
+### Setting up the server
+
+On your computer, once per deck (or whenever you want to work on the server
+alone):
 
 1. **Push your latest changes**: the server clones the deck from its
    repository (Git menu → Commit, then Push). A deck without a remote needs
@@ -212,9 +232,9 @@ To forward a different local port (7777 is busy on your computer), say
 `ssh -L 8000:localhost:7777 …` and open the owner link with `8000` in place of
 `7777`.
 
-### Inviting collaborators through the server
+### Inviting collaborators
 
-Each collaborator needs their own SSH login on the server. In the editor you
+Each collaborator needs their own SSH login on the server, and nothing else. In the editor you
 opened as the owner, **Share… → Share via SSH** turns the links on (**Turn on
 links**) and writes a message for an editor and one for a viewer, with
 **Copy**:

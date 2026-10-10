@@ -20575,6 +20575,59 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       h("h3", {}, title2)
     );
   }
+  function setupPicture(here) {
+    const box = (title2, lines, mark) => h(
+      "div",
+      { class: `ssh-box${mark ? " here" : ""}` },
+      mark ? h("span", { class: "ssh-here" }, "you are here") : null,
+      h("strong", {}, title2),
+      ...lines.map((l2) => h("span", {}, l2))
+    );
+    const tunnel = (dir) => h(
+      "div",
+      { class: "ssh-tunnel" },
+      h(
+        "span",
+        { class: "ssh-across" },
+        dir === "right" ? "SSH tunnel \u2192" : "\u2190 SSH tunnel"
+      ),
+      h(
+        "span",
+        { class: "ssh-down" },
+        dir === "right" ? "\u2193 SSH tunnel" : "\u2191 SSH tunnel"
+      )
+    );
+    return h(
+      "div",
+      { class: "ssh-picture" },
+      h(
+        "div",
+        { class: "ssh-machines" },
+        box(
+          "Your computer",
+          ["a browser", "opens the owner link"],
+          here === "laptop"
+        ),
+        tunnel("right"),
+        box(
+          "The server",
+          ["runs inkflow", "holds the deck (a git clone)"],
+          here === "server"
+        ),
+        tunnel("left"),
+        box(
+          "Each collaborator's computer",
+          ["a browser + ssh", "opens an editor or view link"],
+          false
+        )
+      ),
+      h(
+        "p",
+        { class: "hint" },
+        "Your collaborators install nothing: no inkflow, no git, no copy of the deck. They need an SSH login on the server and a browser. Give each their own login: someone logged in with your account is you there (your files, your shell, your owner link)."
+      )
+    );
+  }
   function moveView(status3, opts2) {
     let current2 = status3;
     const login2 = textInput2(
@@ -20622,8 +20675,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       h(
         "p",
         {},
-        "On a server you and your collaborators can log in to over SSH, the deck runs once for everyone: each of you opens it through an SSH tunnel, and nothing listens on the network."
+        "On a server you and your collaborators can log in to over SSH, the deck runs once for everyone: each of you opens it through an SSH tunnel, and nothing listens on the network. The steps below are yours; the last ones give you the message to send your collaborators."
       ),
+      setupPicture("laptop"),
       h(
         "div",
         { class: "ssh-fields" },
@@ -20740,6 +20794,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         {},
         `This editor runs on a server in SSH mode${user}. Each collaborator logs in to it with their own SSH account, forwarding a port, and opens their link through that tunnel. Nothing listens on the network.`
       ),
+      setupPicture("server"),
       h(
         "div",
         { class: "ssh-fields" },

@@ -129,6 +129,64 @@ function header(title: string, back: () => void): HTMLElement {
     );
 }
 
+/** The three computers involved, `here` marked: your laptop and each
+ * collaborator's reach the one server that runs inkflow through tunnels. */
+export function setupPicture(here: "laptop" | "server"): HTMLElement {
+    const box = (title: string, lines: string[], mark: boolean) =>
+        h(
+            "div",
+            { class: `ssh-box${mark ? " here" : ""}` },
+            mark ? h("span", { class: "ssh-here" }, "you are here") : null,
+            h("strong", {}, title),
+            ...lines.map((l) => h("span", {}, l)),
+        );
+    const tunnel = (dir: "right" | "left") =>
+        h(
+            "div",
+            { class: "ssh-tunnel" },
+            h(
+                "span",
+                { class: "ssh-across" },
+                dir === "right" ? "SSH tunnel →" : "← SSH tunnel",
+            ),
+            h(
+                "span",
+                { class: "ssh-down" },
+                dir === "right" ? "↓ SSH tunnel" : "↑ SSH tunnel",
+            ),
+        );
+    return h(
+        "div",
+        { class: "ssh-picture" },
+        h(
+            "div",
+            { class: "ssh-machines" },
+            box(
+                "Your computer",
+                ["a browser", "opens the owner link"],
+                here === "laptop",
+            ),
+            tunnel("right"),
+            box(
+                "The server",
+                ["runs inkflow", "holds the deck (a git clone)"],
+                here === "server",
+            ),
+            tunnel("left"),
+            box(
+                "Each collaborator's computer",
+                ["a browser + ssh", "opens an editor or view link"],
+                false,
+            ),
+        ),
+        h(
+            "p",
+            { class: "hint" },
+            "Your collaborators install nothing: no inkflow, no git, no copy of the deck. They need an SSH login on the server and a browser. Give each their own login: someone logged in with your account is you there (your files, your shell, your owner link).",
+        ),
+    );
+}
+
 /** A: the deck runs on this computer; move it to a server. */
 function moveView(status: SshStatus, opts: SshViewOptions): SshView {
     let current = status;
@@ -177,8 +235,9 @@ function moveView(status: SshStatus, opts: SshViewOptions): SshView {
         h(
             "p",
             {},
-            "On a server you and your collaborators can log in to over SSH, the deck runs once for everyone: each of you opens it through an SSH tunnel, and nothing listens on the network.",
+            "On a server you and your collaborators can log in to over SSH, the deck runs once for everyone: each of you opens it through an SSH tunnel, and nothing listens on the network. The steps below are yours; the last ones give you the message to send your collaborators.",
         ),
+        setupPicture("laptop"),
         h(
             "div",
             { class: "ssh-fields" },
@@ -299,6 +358,7 @@ function inviteView(status: SshStatus, opts: SshViewOptions): SshView {
             {},
             `This editor runs on a server in SSH mode${user}. Each collaborator logs in to it with their own SSH account, forwarding a port, and opens their link through that tunnel. Nothing listens on the network.`,
         ),
+        setupPicture("server"),
         h(
             "div",
             { class: "ssh-fields" },
