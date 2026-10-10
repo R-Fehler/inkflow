@@ -9,6 +9,11 @@ servers never write the same files.
 A record is trusted only when its server answers ``/_inkflow/instance`` with
 the same process id: a crashed server's record, or its port since taken by
 another program, is dropped on the way.
+
+A server in SSH mode (``--ssh``) records its owner token too, which this
+machine's other users must not read: the directory is the user's own
+(``0700``) and each record ``0600``. Commands (``inkflow slide``, ``goto``…)
+send it with every request, as the owner's page sends its cookie.
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from dataclasses import asdict, dataclass
 from http.client import HTTPResponse
 from pathlib import Path
 from typing import cast
+from urllib.parse import quote
 
 import platformdirs
 
@@ -42,6 +48,8 @@ class Instance:
     """The open deck.py (resolved), or None on the start page."""
     tls: bool = False
     """Served over HTTPS (``--tls``)."""
+    owner_token: str | None = None
+    """SSH mode: what makes a request from this machine the owner."""
 
     @property
     def address(self) -> str:
@@ -50,11 +58,29 @@ class Instance:
         return f"[{host}]" if ":" in host else host
 
     def url(self, path: str = "/edit") -> str:
+        """A page's address (without the owner token: to show)."""
         return f"{'https' if self.tls else 'http'}://{self.address}:{self.port}{path}"
 
+    def owner_url(self, path: str = "/edit") -> str:
+        """A page's address as the owner opens it: with the owner token in
+        SSH mode (the owner link)."""
+        if not self.owner_token:
+            return self.url(path)
+        joiner = "&" if "?" in path else "?"
+        return self.url(f"{path}{joiner}k={quote(self.owner_token)}")
+
     def ws_url(self) -> str:
-        """The server's WebSocket (on its HTTP port)."""
-        return f"{'wss' if self.tls else 'ws'}://{self.address}:{self.port}{WS_PATH}"
+        """The server's WebSocket (on its HTTP port), with the owner token
+        in SSH mode."""
+        token = f"?k={quote(self.owner_token)}" if self.owner_token else ""
+        scheme = "wss" if self.tls else "ws"
+        return f"{scheme}://{self.address}:{self.port}{WS_PATH}{token}"
+
+    def cookie(self) -> str | None:
+        """The ``Cookie`` header carrying the owner token (SSH mode)."""
+        if not self.owner_token:
+            return None
+        return f"inkflow-{self.port}={self.owner_token}"
 
 
 def loopback_tls() -> ssl.SSLContext:
@@ -75,11 +101,27 @@ def _file(pid: int) -> Path:
     return _dir() / f"{pid}.json"
 
 
+def on_port(port: int) -> Instance | None:
+    """The running server on ``port`` (on this machine), if one is."""
+    return next((i for i in running() if i.port == port), None)
+
+
 def register(instance: Instance) -> None:
-    """Record (or update) this process's server."""
+    """Record (or update) this process's server: readable by this user only
+    (the record may hold the owner token)."""
     try:
-        _dir().mkdir(parents=True, exist_ok=True)
-        _file(instance.pid).write_text(json.dumps(asdict(instance)), encoding="utf-8")
+        folder = _dir()
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            folder.chmod(0o700)  # made before records held secrets
+        path = _file(instance.pid)
+        data = json.dumps(asdict(instance)).encode()
+        partial = path.with_suffix(".tmp")
+        partial.unlink(missing_ok=True)
+        fd = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as out:
+            _ = out.write(data)
+        _ = partial.replace(path)
     except OSError:
         pass  # Only reuse across servers is lost.
 
@@ -94,6 +136,7 @@ def _read(path: Path) -> Instance | None:
         raw = cast(object, json.loads(path.read_text(encoding="utf-8")))
         data = cast("dict[str, object]", raw)
         deck = data.get("deck")
+        token = data.get("owner_token")
         return Instance(
             pid=int(cast("int", data["pid"])),
             host=str(data["host"]),
@@ -101,6 +144,7 @@ def _read(path: Path) -> Instance | None:
             ws_port=int(cast("int", data.get("ws_port", data["port"]))),
             deck=str(deck) if isinstance(deck, str) else None,
             tls=data.get("tls") is True,
+            owner_token=token if isinstance(token, str) and token else None,
         )
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -113,10 +157,12 @@ def probe(instance: Instance, timeout: float = 1.0) -> dict[str, object] | None:
     if instance.tls:
         handlers.append(urllib.request.HTTPSHandler(context=loopback_tls()))
     opener = urllib.request.build_opener(*handlers)
+    request = urllib.request.Request(instance.url(PROBE_PATH))
+    cookie = instance.cookie()
+    if cookie:
+        request.add_header("Cookie", cookie)
     try:
-        response = cast(
-            "HTTPResponse", opener.open(instance.url(PROBE_PATH), timeout=timeout)
-        )
+        response = cast("HTTPResponse", opener.open(request, timeout=timeout))
         with response:
             data = cast("dict[str, object]", json.loads(response.read()))
     except (OSError, ValueError):
@@ -151,6 +197,7 @@ def running(exclude_pid: int | None = None) -> list[Instance]:
                 ws_port=instance.ws_port,
                 deck=str(deck) if isinstance(deck, str) else None,
                 tls=instance.tls,
+                owner_token=instance.owner_token,
             )
         )
     return found

@@ -10,6 +10,7 @@ from urllib.parse import quote
 import click
 
 from inkflow import instances
+from inkflow.access import over_ssh
 from inkflow.cli._common import deck_option, main, resolve_deck_path
 from inkflow.editor.session import Exporters
 from inkflow.export import build_pdf, build_static_html
@@ -39,6 +40,17 @@ _ws_port_option = click.option(
 
 def _share_options(f: Callable[..., None]) -> Callable[..., None]:
     f = click.option(
+        "--ssh/--no-ssh",
+        "ssh",
+        default=None,
+        help="SSH mode, for a machine other people log in to: only the owner "
+        + "link inkflow prints edits as the owner (anyone else on this machine "
+        + "would otherwise be the owner too), and share links name localhost, "
+        + "for each collaborator to open through their own `ssh -L` tunnel; "
+        + "nothing listens on the network. [default: on when started from an "
+        + "SSH login (SSH_CONNECTION or SSH_CLIENT set)]",
+    )(f)
+    f = click.option(
         "--tls",
         nargs=2,
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -60,14 +72,23 @@ def _share_options(f: Callable[..., None]) -> Callable[..., None]:
         is_flag=True,
         help="Share on the local network (or VPN): listen on every interface "
         + "(or --host) and print an editor link and a view link for each "
-        + "address. Without it only this machine can connect.",
+        + "address. Without it only this machine can connect. In SSH mode: "
+        + "the links work from the start, through tunnels.",
     )(f)
 
 
 def _sharing(
-    share: bool, allow_hosts: tuple[str, ...], tls: tuple[Path, Path] | None
+    share: bool,
+    allow_hosts: tuple[str, ...],
+    tls: tuple[Path, Path] | None,
+    ssh: bool | None,
 ) -> Sharing:
-    return Sharing(share=share, allow_hosts=allow_hosts, tls=tls or None)
+    return Sharing(
+        share=share,
+        allow_hosts=allow_hosts,
+        tls=tls or None,
+        ssh=over_ssh() if ssh is None else ssh,
+    )
 
 
 @main.command()
@@ -91,6 +112,7 @@ def serve(
     share: bool,
     allow_hosts: tuple[str, ...],
     tls: tuple[Path, Path] | None,
+    ssh: bool | None,
 ) -> None:
     """Start the presentation server with live reload.
 
@@ -99,6 +121,10 @@ def serve(
     full page reload. Only this machine can connect, unless `--share`: then
     the server also listens on the network and prints a view link (and an
     editor link) for each address; other machines need one of them.
+
+    On a machine other people log in to (SSH mode, the default from an SSH
+    login; `--no-ssh` turns it off), being on the machine is not enough:
+    open the owner link the server prints, through `ssh -L`.
 
     Keyboard shortcuts in the terminal:
 
@@ -122,7 +148,7 @@ def serve(
                 levels,
                 exporters=EXPORTERS,
                 auto_ports=auto,
-                sharing=_sharing(share, allow_hosts, tls),
+                sharing=_sharing(share, allow_hosts, tls, ssh),
             )
         )
 
@@ -144,9 +170,9 @@ def _already_served(deck_py: Path, path: str, *, open_it: bool) -> bool:
     other = instances.serving(deck_py)
     if other is None:
         return False
-    report("Already open", f"{other.url(path)} (process {other.pid})")
+    report("Already open", f"{other.owner_url(path)} (process {other.pid})")
     if open_it:
-        open_browser(other.url(path))
+        open_browser(other.owner_url(path))
     return True
 
 
@@ -202,6 +228,7 @@ def edit(
     share: bool,
     allow_hosts: tuple[str, ...],
     tls: tuple[Path, Path] | None,
+    ssh: bool | None,
     no_open: bool,
     start: bool,
     quit_when_idle: float | None,
@@ -228,9 +255,14 @@ def edit(
     Share the deck with people on the same network (or VPN) with `--share`:
     each address gets an editor link and a view link (the editor's Share…
     button shows them too, with QR codes, and turns sharing on and off).
-    From another machine over SSH, forward the port instead:
-    `ssh -L 7777:localhost:7777 you@this-machine`, run `inkflow edit
-    --no-open` here, and open `http://localhost:7777/edit` there.
+
+    On a server you and others log in to over SSH: `ssh -L
+    7777:localhost:7777 you@server`, run `inkflow edit --no-open` there, and
+    open the owner link it prints (`http://localhost:7777/edit?k=…`) on your
+    own computer. Started from an SSH login, inkflow is in SSH mode (`--ssh`,
+    `--no-ssh` to turn it off): only that link makes you the owner, and
+    Share → Share via SSH writes out the commands and links for your
+    collaborators, who open them through tunnels of their own.
 
     Keyboard shortcuts in the terminal are those of `serve`, plus `e` to open the
     editor again.
@@ -264,7 +296,7 @@ def edit(
                 exporters=EXPORTERS,
                 quit_when_idle=quit_when_idle,
                 auto_ports=auto,
-                sharing=_sharing(share, allow_hosts, tls),
+                sharing=_sharing(share, allow_hosts, tls, ssh),
             )
         )
 

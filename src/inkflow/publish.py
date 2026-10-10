@@ -171,13 +171,18 @@ def repo_root(directory: Path) -> Path | None:
     return Path(root).resolve() if root else None
 
 
-def origin(root: Path) -> Remote | None:
-    """The ``origin`` remote (else the first one), taken apart."""
+def remote_url(root: Path) -> str | None:
+    """The URL of the ``origin`` remote (else the first one), as configured."""
     names = (_git(root, "remote") or "").split()
     if not names:
         return None
     name = "origin" if "origin" in names else names[0]
-    url = _git(root, "remote", "get-url", name)
+    return _git(root, "remote", "get-url", name) or None
+
+
+def origin(root: Path) -> Remote | None:
+    """The ``origin`` remote (else the first one), taken apart."""
+    url = remote_url(root)
     return parse_remote(url) if url else None
 
 

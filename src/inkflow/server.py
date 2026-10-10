@@ -39,7 +39,7 @@ from websockets.asyncio.server import serve as ws_serve
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response as WsResponse
 
-from inkflow import instances
+from inkflow import instances, sshshare
 from inkflow.access import (
     TOKEN_PARAM,
     WS_PATH,
@@ -164,12 +164,17 @@ class _Share:
     access: Access
     people: People
     rebind: Callable[[bool], Awaitable[None]] | None
-    """Set while serving: listen on the LAN (True) or this machine only."""
+    """Set while serving: listen on the LAN (True) or this machine only
+    (in SSH mode: where it listens already, links on or off)."""
+    ssh_info: dict[str, object] | None
+    """What "Share via SSH" writes its commands from (``sshshare.details``),
+    gathered when the owner opens the Share dialog."""
 
     def __init__(self) -> None:
         self.access = Access(DEFAULT_PORT)
         self.people = People()
         self.rebind = None
+        self.ssh_info = None
 
 
 _share = _Share()
@@ -467,19 +472,40 @@ async def notify(
 # ── Sharing ───────────────────────────────────────────────────────────────────
 
 
+def _link_addresses(access: Access) -> list[str]:
+    """Where share links point: this machine's network addresses, or in SSH
+    mode ``localhost`` (each guest opens it through their own tunnel)."""
+    return ["localhost"] if access.ssh else lan_addresses()
+
+
 def _share_status() -> dict[str, object]:
     """What the owner's Share dialog shows."""
     access = _share.access
     return {
         "type": "share-status",
         "sharing": access.sharing,
-        "links": access.links(lan_addresses()) if access.sharing else [],
-        "names": sorted(
+        "links": access.links(_link_addresses(access)) if access.sharing else [],
+        "names": []
+        if access.ssh
+        else sorted(
             {n for n in access.names if n.endswith(".local")} | access.allow_hosts
         ),
         "port": access.port,
+        "ssh": access.ssh,
+        "sshInfo": _share.ssh_info,
         "people": _share.people.listing(),
     }
+
+
+async def _gather_ssh_info() -> None:
+    session = _editor["session"]
+    deck = session.deck_path if session is not None and session.has_deck else None
+    try:
+        _share.ssh_info = await asyncio.to_thread(
+            sshshare.details, deck, _share.access.port
+        )
+    except Exception as exc:  # A guess for the dialog: never fails the status.
+        logger.debug(f"share via SSH: {exc}")
 
 
 async def _disconnect(
@@ -503,7 +529,9 @@ async def _handle_share(websocket: ServerConnection, msg: dict[str, object]) -> 
     access = _share.access
     error: str | None = None
     try:
-        if op == "on" and not access.sharing:
+        if op == "status":
+            await _gather_ssh_info()
+        elif op == "on" and not access.sharing:
             access.sharing = True
             if _share.rebind is not None:
                 await _share.rebind(True)
@@ -1133,6 +1161,14 @@ async def _refuse(
     await _respond(writer, status, page(title, text))
 
 
+_SSH_401 = (
+    "This inkflow server runs on a machine other people can log in to, so "
+    + "being on it is not enough to edit. If you started it, open the owner "
+    + "link it printed in its terminal (http://localhost:<port>/edit?k=…, "
+    + "with your tunnel's local port if you forwarded another one). If someone "
+    + "shared the deck with you, open the link they sent."
+)
+
 _VIEW_ONLY = (
     "This link shows the presentation only. Ask the person sharing the deck "
     + "for an editor link to change it."
@@ -1214,6 +1250,11 @@ def make_http_handler(
 
             if role is None:
                 logger.debug(f"refused {peer}: no valid share link")
+                if access.ssh and not access.presents_token(request):
+                    await _refuse(
+                        writer, "401 Unauthorized", "Open the owner link", _SSH_401
+                    )
+                    return
                 await _refuse(
                     writer,
                     "401 Unauthorized",
@@ -1223,14 +1264,18 @@ def make_http_handler(
                 )
                 return
             if token is not None and TOKEN_PARAM in request.query:
-                # A share link: the cookie keeps the guest in; the page moves
-                # on to the same address without the token.
-                logger.info(f"guest joined as {role} with {redacted(token)}")
+                # A share link (or the owner link): the cookie keeps them in;
+                # the page moves on to the same address without the token.
+                who = (
+                    "owner signed in" if role == "owner" else f"guest joined as {role}"
+                )
+                logger.info(f"{who} with {redacted(token)}")
+                cookie = access.set_cookie(token, request.host)
                 await _respond(
                     writer,
                     "200 OK",
                     enter_page(request.without_token()),
-                    extra=f"Set-Cookie: {access.set_cookie(token)}\r\n".encode(),
+                    extra=f"Set-Cookie: {cookie}\r\n".encode(),
                 )
                 return
             editor_only = _is_editor_path(request_path) or path.startswith(
@@ -1417,9 +1462,10 @@ async def _read_keys(
                 shutdown.set()
                 return
             elif ch == "o":
-                _open_browser(f"{base}:{http_port}")
+                _open_browser(f"{base}:{http_port}{_share.access.owner_path('/')}")
             elif ch == "e":
-                _open_browser(f"{base}:{http_port}/edit")
+                path = _share.access.owner_path("/edit")
+                _open_browser(f"{base}:{http_port}{path}")
             elif ch == "r" and deck_path is not None:
                 async with lock:
                     await rebuild(deck_path, ui, levels)
@@ -1480,7 +1526,11 @@ class Sharing:
     """How a server is shared (``inkflow edit --share``)."""
 
     share: bool = False
-    """Share links work from the start (and the server listens on the LAN)."""
+    """Share links work from the start (and the server listens on the LAN,
+    except in SSH mode)."""
+    ssh: bool = False
+    """SSH mode (``--ssh``): only the owner link makes the owner, links name
+    ``localhost`` for each guest's tunnel, nothing listens on the network."""
     allow_hosts: tuple[str, ...] = ()
     """More names to answer to: a reverse proxy's, a tailnet name."""
     tls: tuple[Path, Path] | None = None
@@ -1506,20 +1556,49 @@ def _lan_host(host: str) -> Hosts:
     return [host, "localhost"]
 
 
+def _listen_hosts(host: str, *, shared: bool, ssh: bool) -> Hosts:
+    """Where the server listens for ``--host``, shared or not. In SSH mode
+    links are opened through tunnels to this machine, so sharing never moves
+    the listener onto the network (only an explicit ``--host`` does)."""
+    if ssh:
+        shared = _shares(host)
+    return _lan_host(host) if shared else _local_host(host)
+
+
 def _shares(host: str) -> bool:
     """Whether a ``--host`` lets other machines in (so it shares)."""
     return not is_loopback_name(split_host(host)[0])
 
 
+def owner_lines(access: Access, port: int) -> list[str]:
+    """In SSH mode, the owner link (the one thing the person who started the
+    server opens, through their tunnel) and the tunnel to open it through."""
+    if not access.ssh:
+        return []
+    server = next(iter(sshshare.server_names()), "<this server>")
+    user = sshshare.login_user() or "<you>"
+    return [
+        f"{access.scheme}://localhost:{port}{access.owner_path('/edit')}",
+        f"open it through: ssh -L {port}:localhost:{port} {user}@{server}",
+    ]
+
+
 def share_lines(access: Access, port: int) -> list[str]:
     """What the terminal says about sharing: the two links per address, the
-    mDNS name, and how to reach the server through SSH instead."""
+    mDNS name, and how to reach the server through SSH instead. In SSH mode
+    the links name ``localhost``, for each guest's own tunnel."""
     if not access.sharing:
         return []
     lines: list[str] = []
-    links = access.links(lan_addresses())
+    links = access.links(_link_addresses(access))
     for link in links:
         lines += [f"edit  {link['editor']}", f"view  {link['view']}"]
+    if access.ssh:
+        lines.append(
+            f"guests: ssh -N -L {port}:localhost:{port} <their login>@<this "
+            + "server>, then their link (Share → Share via SSH writes it out)"
+        )
+        return lines
     names = {n for n in access.names if n.endswith(".local")} | access.allow_hosts
     for name in sorted(names):
         lines.append(f"also  {access.scheme}://{name}:{port} (same ?k= links)")
@@ -1570,6 +1649,7 @@ async def serve(
         allow_hosts={h.lower() for h in sharing.allow_hosts},
         tls=sharing.tls is not None,
         sharing=sharing.share or _shares(host),
+        ssh=sharing.ssh,
     )
     retries = 5 if auto_ports else 0
     while True:
@@ -1798,9 +1878,13 @@ async def _serve_deck(
         bridge = Bridge(ws_entry, max_size=80 * 1024 * 1024, forget=_share.people.leave)
         http_handler = make_http_handler(http_port, project_dir, edit_commands, bridge)
         listener = Listener(http_handler, http_port, _tls_context(tls))
+
         # Bind before the Live UI so port conflicts fail fast with a clean message
+        def listen_on(shared: bool) -> Hosts:
+            return _listen_hosts(host, shared=shared, ssh=access.ssh)
+
         try:
-            await listener.open(_lan_host(host) if access.sharing else local_host)
+            await listener.open(listen_on(access.sharing))
         except OSError as e:
             if e.errno == errno.EADDRINUSE:
                 raise _PortBusy(
@@ -1810,11 +1894,13 @@ async def _serve_deck(
 
         async def rebind(shared: bool) -> None:
             assert listener is not None
-            await listener.move(_lan_host(host) if shared else local_host)
+            await listener.move(listen_on(shared))
             ui_ref[0].set_share(share_lines(access, http_port))
 
         _share.rebind = rebind
-        # Other inkflow processes find this server (and its deck) here.
+        _share.ssh_info = None
+        # Other inkflow processes find this server (and its deck) here; in
+        # SSH mode with the owner token, which only this user can read.
         instances.register(
             instances.Instance(
                 pid=os.getpid(),
@@ -1823,8 +1909,20 @@ async def _serve_deck(
                 ws_port=ws_port if ws_port is not None else http_port,
                 deck=str(deck_path.resolve()) if deck_path else None,
                 tls=tls is not None,
+                owner_token=access.owner_token if access.ssh else None,
             )
         )
+        owner = owner_lines(access, http_port)
+        if owner:
+            console.print(
+                "[bold]SSH mode[/bold]  being on this machine is not enough to "
+                + "edit: open the owner link, through your SSH tunnel",
+                highlight=False,
+            )
+            console.print(
+                f"[bold]Owner[/bold]  {owner[0]}", highlight=False, soft_wrap=True
+            )
+            console.print(f"       {owner[1]}", highlight=False)
         for line in share_lines(access, http_port):
             console.print(f"[bold]Sharing[/bold]  {line}", highlight=False)
 
@@ -1837,6 +1935,7 @@ async def _serve_deck(
                 get_clients=lambda: len(_state["ws_clients"]),
                 scheme=scheme,
             )
+            ui.set_owner(owner)
             ui.set_share(share_lines(access, http_port))
             ui_ref.append(ui)
             try:
@@ -1856,7 +1955,8 @@ async def _serve_deck(
                         await rebuild(deck_path, ui, levels)
                     if open_path is not None:
                         _open_browser(
-                            f"{scheme}://{browse_host}:{http_port}{open_path}"
+                            f"{scheme}://{browse_host}:{http_port}"
+                            + access.owner_path(open_path)
                         )
                     tasks = [
                         *(

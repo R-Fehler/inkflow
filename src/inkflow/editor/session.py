@@ -2223,7 +2223,7 @@ class EditorSession:
                         "ok": True,
                         "deck": str(deck_py),
                         "opening": False,
-                        "redirect": other.url("/edit"),
+                        "redirect": other.owner_url("/edit"),
                     }
         except (projects.ProjectError, places.PlacesError, OSError) as exc:
             raise EditError(str(exc)) from exc

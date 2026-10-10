@@ -355,7 +355,16 @@ _port_option = click.option(
 
 def _editor_url(deck_path: Path, port: int | None, host: str) -> str:
     """The WebSocket of the editor open on this deck, from its context: on
-    the server's one port (or the old separate one it was started with)."""
+    the server's one port (or the old separate one it was started with).
+    The server's own record comes first: in SSH mode it holds the owner
+    token the request needs (never written to the project's context)."""
+    from inkflow import instances
+
+    serving = instances.serving(deck_path.resolve())
+    if serving is not None and port in (None, serving.port):
+        return serving.ws_url()
+    if port is not None and (other := instances.on_port(port)) is not None:
+        return other.ws_url()
     data = read_context(deck_path.resolve().parent) or {}
     raw = data.get("server")
     server = cast("dict[str, object]", raw) if isinstance(raw, dict) else {}

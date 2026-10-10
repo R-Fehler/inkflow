@@ -46,6 +46,8 @@ commands:
       --share: Share on the network with editor and view links
       --allow-host=: Also answer to this host name
       --tls=: Serve HTTPS with this certificate and key
+      --ssh: "SSH mode: only the owner link makes the owner, links for tunnels"
+      --no-ssh: Not SSH mode, even from an SSH login
     completion:
       flag:
         deck: ["$files([\".py\"])"]
@@ -60,6 +62,8 @@ commands:
       --share: Share on the network with editor and view links
       --allow-host=: Also answer to this host name
       --tls=: Serve HTTPS with this certificate and key
+      --ssh: "SSH mode: only the owner link makes the owner, links for tunnels"
+      --no-ssh: Not SSH mode, even from an SSH login
       --no-open: Do not open the editor in a browser on start
       --start: Open the start page (new deck, open, recent) instead of a deck
       --quit-when-idle=: Stop once no page has been open this many seconds
