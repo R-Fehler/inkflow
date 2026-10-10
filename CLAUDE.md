@@ -96,7 +96,8 @@ src/
                                private /tmp), and `_run_chromium` checks the written file
                                and reports Chromium's stderr
     assets.py         asset reference resolution. `AssetRoots` holds the allowed roots
-                               (project dir, theme asset dir) and converts between an
+                               (project dir, theme asset dir, and the PDF page cache
+                               `.inkflow/cache/pdf/` as `_pdf/`) and converts between an
                                absolute path and a canonical ref both ways; `AssetSource`
                                resolves the refs written in one file; `svg_reader` is the
                                composition reader that canonicalises each SVG as it is read
@@ -182,6 +183,17 @@ src/
                                `light-dark()` by its light half) and moves recoloured
                                presentation attributes into style (no var() there).
                                contract.css sets its `color-scheme` from `data-theme`
+    pdf.py            PDF figures: a picture naming a PDF (`plot.pdf#page=2`; `Image(...,
+                               page=2)` is kept as that fragment) shows its page converted
+                               to SVG by the first converter available: PyMuPDF (the
+                               optional `pdf` extra, AGPL, imported by name only here),
+                               then pdftocairo, mutool, Inkscape (`converter`, `CONVERTERS`).
+                               `convert` caches by content hash + page + converter;
+                               `PdfPages` (one per build, in `DeckContext`) rewrites every
+                               `<image>`/`<img>` after content injection, keeping the PDF
+                               ref in `data-inkflow-pdf`, or draws a placeholder (one
+                               warning per build, `install_hint`); `page_count` for
+                               the editor's page picker and `verify`
     clean.py          SVG Inkscape metadata stripping (used by cli and pre-commit hook)
     label2id.py       `inkflow label2id`: promote each element's inkscape:label to its
                                SVG id (Inkscape convenience for Morph/animation targets).
@@ -292,6 +304,10 @@ src/
                       only ffmpeg reads),
                       drawioshapes.ts (a drawn-in diagram's shapes for the
                       Shapes/Animate list),
+                      pdfpages.ts (a PDF figure's page: `choosePage` dialog of
+                      thumbnails from the `pdf-pages`/`pdf-page` session actions;
+                      `sourceRef` = `data-inkflow-pdf` or the href, what the panel,
+                      Open ▾ and copy write back),
                       drawio.ts (draw.io embed mode in a full-screen iframe, JSON
                       postMessage protocol checked by source + origin: configure
                       → load → save → export xmlsvg → `drawio-save`; a new diagram's
@@ -382,6 +398,9 @@ Opt out per-deck: `Deck(embed_fonts=False)`.
 An asset must live under an allowed root: the project dir (canonical prefix `""`), or the active theme's `asset_dir()` (prefix `_theme/`, so a pip-installed theme can ship branding). `locate` matches longest prefix first, which reserves `_theme/` at the project root. A reference that escapes every root is warned about and left as written rather than re-anchored somewhere it never pointed at — the server has always refused paths outside the project, so it was never reachable. Symlink the directory in to bring it back inside; containment collapses `..` without resolving symlinks precisely so that works.
 
 `build`/`export` copy every referenced local file into the output dir, mirroring the source tree; a canonical ref is relative and `..`-free by construction, so `out_dir / ref` always lands inside and needs no rewriting. `_slide_refs` scans the *emitted* SVG and notes rather than walking the deck, so a pruned zone takes its asset with it. A reference that resolves to nothing is a `logger.warning`, not a silent skip. `serve` streams the same refs on demand instead of copying.
+
+**PDF figures are a derived asset, converted at build time and never committed.**
+Browsers show no PDF in `<image>`/`<img>`, so `pdf.PdfPages.apply` (a pipeline step after content injection, so SVG pictures, `Image` zones and Markdown images are covered alike) points each PDF reference at its page converted to SVG in `.inkflow/cache/pdf/` (git-ignored, unwatched; named by content hash + page + converter, so a saved PDF converts again and the watcher's rebuild shows it). The cache is a third `AssetRoots` root with the canonical prefix `_pdf/`, reserved like `_theme/`: `serve`, `build` (copied to `out/_pdf/`, not a hidden folder static hosts may refuse), `--inline-assets` and `export` handle a converted page exactly as any picture, with no special case. The PDF reference survives beside it as `data-inkflow-pdf`, which the editor reads instead of the href (`pdfpages.sourceRef`), so nothing it writes back (page change, replace, copy/paste) ever names the cache; moves and crops edit the source SVG, whose href is the PDF. PyMuPDF is optional (`inkflow[pdf]`) and loaded with `importlib` so inkflow stays MIT and type-checks without it; the system tools are the fallback. With no converter the picture becomes a placeholder data URI and the build warns once.
 
 `build --inline-assets` swaps the copy for `_inline_assets`, which rewrites each reference to a `data:` URI through `assets.rewrite_references` — the same `REFERENCE_PATTERNS` the scan uses, so both halves learn a new reference kind at once. It runs *after* `embed_fonts_css_subsetted`, because the subsetter scans these very slide strings for used characters and base64 would pin the whole font. `assets.MIME_TYPES` is the shared table naming what `serve` sends and what the data URI claims; a suffix missing from it is copied out and warned about rather than dropped, so the build can fall short of one file but never loses an asset. Each reference is inlined where it stands, so a shared asset is carried once per use — the reason this is a flag and not the default.
 

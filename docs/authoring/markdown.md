@@ -149,6 +149,9 @@ Local files are copied into the output of
 [`inkflow build` and `inkflow export`](../presenting/export.md).
 Remote `https://` and `data:` URIs are left alone.
 
+A PDF works too, `![Results](../figures/results.pdf#page=2)`:
+see [PDF figures](pdf-figures.md).
+
 ## Linking to another slide
 
 A link with the `slide:` scheme jumps to the slide with that `id`:

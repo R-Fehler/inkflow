@@ -82,6 +82,15 @@ Slide(
 
 Paths are relative to `deck.py`; keep media files in `assets/`.
 
+A **PDF figure** (a plot or drawing from a paper) is used as it is, wherever a
+picture goes: `<image href="../figures/plot.pdf#page=2" .../>` in an SVG,
+`Image("figures/plot.pdf", page=2)` in `zones=`, `![](plot.pdf)` in Markdown.
+No fragment means page 1. Always write the PDF's own path: the build converts
+the page to SVG in `.inkflow/cache/pdf/` and the served slide shows it under
+`_pdf/…` (with `data-inkflow-pdf` naming the PDF), but that cache is never a
+source to reference or edit. A dashed placeholder box means no converter is
+installed (`pip install "inkflow[pdf]"`, or poppler's `pdftocairo`).
+
 A **draw.io diagram** is `diagrams/<name>.drawio.svg` (draw.io's editable SVG:
 a picture with the diagram's `<mxfile>` source in the root's `content`
 attribute, stored uncompressed), shown on a slide as an `<image href>`. To

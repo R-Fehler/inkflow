@@ -202,6 +202,14 @@ cd inkflow/demo
 uv run inkflow serve
 ```
 
+**PDF figures** from a paper go on a slide as they are (vector, with their own fonts).
+The easiest way to show them is the `pdf` extra, one install on any system:
+`pip install "inkflow[pdf]"` (or `uv add "inkflow[pdf]"` in a deck's folder).
+It brings in PyMuPDF, which is AGPL-3.0 (or commercially licensed by Artifex);
+Inkflow itself stays MIT and never requires it. Poppler's `pdftocairo`, MuPDF's
+`mutool` or Inkscape work instead, with nothing to add.
+See [PDF figures](https://ll-nick.github.io/inkflow/authoring/pdf-figures/).
+
 No SVG editor is invoked at serve time. Inkscape or any other tool writes the files, Inkflow reads them.
 Saving a slide reloads the presenter automatically.
 

@@ -387,6 +387,14 @@ arrow to where its shapes now are.
 
 ## Pictures
 
+The picture button (<kbd>I</kbd>), a file dropped on the slide or pasted, and
+**Replace…** take PNG, JPEG, WebP, GIF, SVG and PDF files. A PDF (a figure from a
+paper) shows one page as vector graphics: one with several pages asks which, showing
+them as thumbnails, and an image zone holding a PDF has the same **Page** controls.
+The slide keeps the PDF itself (`plot.pdf#page=2`); what it shows is converted by a
+[PDF converter](../authoring/pdf-figures.md#installing-a-converter), and without one
+the picture is a dashed placeholder until one is installed.
+
 Select a picture and the panel offers:
 
 - **Crop**, or double-click the picture: the handles now trim its edges while the
@@ -395,6 +403,9 @@ Select a picture and the panel offers:
   In the SVG a cropped picture is a small `<svg>` frame around the `<image>`, which
   Inkscape and browsers show the same way.
 - **Replace…** swaps in another file at the same size and place.
+- **Page**, for a [PDF figure](../authoring/pdf-figures.md): the page it shows, typed
+  in or picked from the PDF's pages with **Pages…**. A new page keeps the picture's
+  width and takes the page's shape.
 - **Fit**: fit inside its box, fill it (cropping the edges), or stretch.
 - **Alt text**, for screen readers (any object has it, see below).
 
@@ -704,6 +715,7 @@ default app:
 | PNG, JPEG, WebP, GIF… | GIMP, Krita, Pinta |
 | Markdown, `deck.py`, CSS | VS Code, VSCodium, Zed, Sublime Text, Kate, gedit… |
 | Video | VLC, mpv |
+| PDF | Okular, Document Viewer, Zathura, Inkscape |
 
 A command set in the environment comes first: `INKFLOW_EDIT_CMD`, or a more
 specific `INKFLOW_EDIT_CMD_SVG`, `INKFLOW_EDIT_CMD_PNG` (any extension) or

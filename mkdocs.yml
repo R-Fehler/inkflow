@@ -74,6 +74,7 @@ nav:
   - Authoring:
     - Slides: authoring/slides.md
     - Markdown content: authoring/markdown.md
+    - PDF figures: authoring/pdf-figures.md
     - Steps: authoring/steps.md
     - Animations: authoring/animations.md
     - Transitions: authoring/transitions.md
