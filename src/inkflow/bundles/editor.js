@@ -7307,7 +7307,10 @@
       () => send({ kind: "cell-label", cell, text: area2.value }, "Shape label")
     );
     area2.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) area2.blur();
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        area2.blur();
+      }
     });
     panel.append(
       section(
@@ -7334,7 +7337,7 @@
         h(
           "p",
           { class: "hint" },
-          `Changes go into the diagram's draw.io source, and draw.io redraws it (its arrows follow).${themed ? " In the deck's theme, colours show as the nearest theme colour." : ""} Copying, grouping, rotating and stacking shapes stay in draw.io. Esc leaves the diagram.`
+          `Changes go into the diagram's draw.io source, and draw.io redraws it (its arrows follow).${themed ? " In the deck's theme, colours show as the nearest theme colour." : ""} Copying, grouping, rotating and stacking shapes stay in draw.io. Enter keeps a label; Esc leaves the diagram.`
         ),
         h(
           "div",
@@ -8471,6 +8474,13 @@
     on("selection", renderProps);
     on("render", renderProps);
     on("preview", renderProps);
+    panel.addEventListener("keydown", (e) => {
+      const field = e.target;
+      if (e.key !== "Escape" || !typingIn(field)) return;
+      e.preventDefault();
+      field.blur();
+      if (ed.scope?.closest("svg[data-drawio]")) enterGroup(null);
+    });
     panel.addEventListener("focusout", () => {
       window.setTimeout(() => {
         if (refreshOnBlur && !panel.contains(document.activeElement)) {

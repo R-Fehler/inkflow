@@ -457,8 +457,9 @@ route and attach again when the diagram is drawn.
 **Editing the shapes on the slide.** With a drawn mode, the draw.io panel has
 **Edit shapes here**. When it is on, double-clicking the diagram enters it
 like a group: click a shape to select it, then move it, resize it, delete it,
-or change its label (double-click it, or the **Label** field), fill, line
-colour and line width in its panel; <kbd>Esc</kbd> leaves the diagram. The
+or change its label (double-click it, or the **Label** field: <kbd>Enter</kbd>
+keeps it), fill, line colour and line width in its panel; <kbd>Esc</kbd> leaves
+the diagram, also straight from a field of the panel (keeping what you typed). The
 diagram stays a draw.io diagram: every change is written into its draw.io
 source (the shape's position and size, label or style), so it opens in
 draw.io exactly as you left it. The slide shows the change at once, then
