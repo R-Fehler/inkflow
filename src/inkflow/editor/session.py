@@ -24,25 +24,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, cast
 
-from lxml import etree
-
 from inkflow import animations as animations_module
-from inkflow import drawio, instances, ns
+from inkflow import drawio, instances
 from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
-from inkflow.assets import is_local_ref
-from inkflow.drawio_inline import DiagramMode, diagram_mode
 from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, open_with
 from inkflow.editor import gitops, media, nativedialog, places, projects
 from inkflow.editor.codegen import Code, coerce_fields
 from inkflow.editor.deckedit import DeckEditError, DeckSource
-from inkflow.editor.drawioedit import (
-    BACKUP,
-    DiagramEditError,
-    apply_cell_ops,
-    converted,
-    restored,
-)
+from inkflow.editor.drawioedit import DiagramEditError, apply_cell_ops
 from inkflow.editor.findreplace import (
     MAX_HITS,
     DeckStrings,
@@ -96,7 +86,6 @@ from inkflow.logging import logger
 from inkflow.manifest import Deck, Image, Inline, Slide, TextBox, Video
 from inkflow.ns import INKFLOW_SHOW_SHAPE
 from inkflow.pipeline import resolve_slide_src, slide_ids
-from inkflow.svgio import SvgElement, parse_svg
 from inkflow.sync import build_context, plan_preview
 from inkflow.transitions import Transition
 from inkflow.zones import remove_zone_section, replace_zone_text, zone_spans
@@ -212,8 +201,7 @@ class _Txn:
     """The files one request writes, staged in memory until commit."""
 
     project_dir: Path
-    staged: dict[Path, bytes | None]
-    """New contents by path; ``None`` deletes the file."""
+    staged: dict[Path, bytes]
     originals: dict[Path, bytes | None]
 
     def __init__(self, project_dir: Path) -> None:
@@ -224,10 +212,7 @@ class _Txn:
     def read(self, path: Path) -> bytes:
         path = self._check(path)
         if path in self.staged:
-            staged = self.staged[path]
-            if staged is None:
-                raise EditError(f"{path.name} does not exist")
-            return staged
+            return self.staged[path]
         if path not in self.originals:
             self.originals[path] = path.read_bytes() if path.exists() else None
         data = self.originals[path]
@@ -240,13 +225,6 @@ class _Txn:
         if path not in self.originals:
             self.originals[path] = path.read_bytes() if path.exists() else None
         self.staged[path] = data
-
-    def delete(self, path: Path) -> None:
-        """Remove a file in this step (undo brings it back)."""
-        path = self._check(path)
-        if path not in self.originals:
-            self.originals[path] = path.read_bytes() if path.exists() else None
-        self.staged[path] = None
 
     def _check(self, path: Path) -> Path:
         resolved = path.resolve()
@@ -261,27 +239,10 @@ class _Txn:
             if self.originals[path] != data
         ]
         for change in changes:
-            if change.after is None:
-                change.path.unlink(missing_ok=True)
-                continue
             change.path.parent.mkdir(parents=True, exist_ok=True)
+            assert change.after is not None
             change.path.write_bytes(change.after)
         return _Step(label, changes)
-
-
-_NOT_DECK = frozenset({"node_modules", "site-packages", "__pycache__"})
-
-
-def _rebase_images(group: SvgElement, source_dir: Path, target_dir: Path) -> None:
-    """Pictures inside a diagram, referenced from the slide's SVG instead."""
-    for el in group.iter(f"{{{ns.SVG}}}image"):
-        for attr in ("href", f"{{{ns.XLINK}}}href"):
-            ref = el.get(attr)
-            if ref and is_local_ref(ref):
-                el.set(
-                    attr,
-                    Path(os.path.relpath(source_dir / ref, target_dir)).as_posix(),
-                )
 
 
 def _slug(text: str) -> str:
@@ -452,8 +413,6 @@ class EditorSession:
             "paste-objects": self._paste_objects,
             "drawio-save": self._drawio_save,
             "drawio-new": self._drawio_new,
-            "drawio-convert": self._drawio_convert,
-            "drawio-restore": self._drawio_restore,
         }.get(cast("str", action))
         if handler is None:
             raise EditError(f"unknown action {action!r}")
@@ -1405,116 +1364,6 @@ class EditorSession:
             structural=False,
         )
         return "New diagram"
-
-    def _drawio_convert(
-        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
-    ) -> str:
-        """A diagram's picture becomes the slide's own shapes (one way: draw.io
-        no longer edits them). With ``backup`` the draw.io file is kept in
-        ``assets/drawio/`` (moved there unless other files still show it),
-        linked from the shapes for "Restore diagram"; without, it is deleted
-        unless other files still show it. One undo step either way."""
-        del deck
-        path, svg = self._svg_for_edit(msg, txn)
-        image = element_at(svg.root, msg.get("loc"))
-        href = next(
-            (v for a in ("href", f"{{{ns.XLINK}}}href") if (v := image.get(a))), ""
-        ).split("?")[0]
-        if etree.QName(image).localname != "image" or not href.endswith(drawio.SUFFIX):
-            raise EditError("that is not a draw.io diagram")
-        diagram_path = (path.parent / href).resolve()
-        data = txn.read(diagram_path)
-        try:
-            diagram = parse_svg(data)
-        except etree.XMLSyntaxError as exc:
-            raise EditError(f"{diagram_path.name} is not an SVG: {exc}") from exc
-        mode = diagram_mode(image)
-        group = converted(
-            image,
-            diagram,
-            DiagramMode.INLINE if mode is DiagramMode.PICTURE else mode,
-            href,
-        )
-        _rebase_images(group, diagram_path.parent, path.parent)
-        elsewhere = self._shown_elsewhere(diagram_path, path)
-        if msg.get("backup"):
-            stem = diagram_path.name[: -len(drawio.SUFFIX)]
-            backup = _unique_path(
-                self.project_dir / "assets" / "drawio", stem, drawio.SUFFIX
-            )
-            txn.write(backup, data)
-            group.set(BACKUP, Path(os.path.relpath(backup, path.parent)).as_posix())
-        if not elsewhere:
-            txn.delete(diagram_path)
-        parent = image.getparent()
-        if parent is None:
-            raise EditError("the diagram has no place on the slide")
-        parent.replace(image, group)
-        txn.write(path, svg.to_bytes())
-        extra.update(structural=True, ids={"group": group.get("id", "")})
-        return "Convert diagram to slide shapes"
-
-    def _drawio_restore(
-        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
-    ) -> str:
-        """Shapes converted from a diagram become its picture again, from the
-        backup (back in ``diagrams/``); changes made to them since are lost."""
-        del deck
-        path, svg = self._svg_for_edit(msg, txn)
-        group = element_at(svg.root, msg.get("loc"))
-        ref = group.get(BACKUP)
-        if not ref:
-            raise EditError("these shapes keep no draw.io backup")
-        backup = (path.parent / ref).resolve()
-        data = txn.read(backup)
-        name = backup.name
-        folder = self.project_dir / "diagrams"
-        target = folder / name
-        if target.exists() and txn.read(target) != data:
-            target = _unique_path(folder, name[: -len(drawio.SUFFIX)], drawio.SUFFIX)
-        if target.resolve() != backup:
-            txn.write(target, data)
-            txn.delete(backup)
-        image = restored(group, Path(os.path.relpath(target, path.parent)).as_posix())
-        parent = group.getparent()
-        if parent is None:
-            raise EditError("the shapes have no place on the slide")
-        parent.replace(group, image)
-        txn.write(path, svg.to_bytes())
-        extra.update(structural=True)
-        return "Restore draw.io diagram"
-
-    def _svg_for_edit(self, msg: dict[str, object], txn: _Txn) -> tuple[Path, SvgFile]:
-        path = Path(cast("str", msg.get("file")))
-        data = txn.read(path)
-        expected = msg.get("hash")
-        if isinstance(expected, str) and expected and file_hash(data) != expected:
-            raise EditError(f"{path.name} changed on disk; wait for the reload")
-        return path, SvgFile.from_bytes(path, data)
-
-    def _shown_elsewhere(self, diagram: Path, slide: Path) -> bool:
-        """Whether a file other than ``slide``, or a second place in it, still
-        names the diagram (a picture on another slide, a Markdown image...)."""
-        name = diagram.name
-        for candidate in self.project_dir.rglob("*"):
-            inside = candidate.relative_to(self.project_dir).parts
-            if (
-                candidate.suffix not in (".svg", ".md", ".py")
-                # Hidden folders (.git, .venv, .inkflow) and dependencies.
-                or any(p.startswith(".") or p in _NOT_DECK for p in inside)
-                or candidate.resolve() == diagram.resolve()
-                or not candidate.is_file()
-            ):
-                continue
-            try:
-                count = candidate.read_text(encoding="utf-8").count(name)
-            except (OSError, UnicodeDecodeError):
-                continue
-            if candidate.resolve() == slide.resolve():
-                count -= 1
-            if count > 0:
-                return True
-        return False
 
     def _fit_diagram_image(
         self, image: dict[str, object], data: bytes, txn: _Txn, box: object = None

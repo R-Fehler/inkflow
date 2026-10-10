@@ -99,7 +99,7 @@ def inline_diagrams(
         )
         taken.add(prefix)
         key = register(path) if register is not None else None
-        drawn = drawn_svg(image, diagram, prefix, href, mode, key)
+        drawn = _drawn(image, diagram, prefix, href, mode, key)
         parent = image.getparent()
         if parent is not None:
             parent.replace(image, drawn)
@@ -116,7 +116,7 @@ def _fresh_id(stem: str, taken: set[str]) -> str:
     return name
 
 
-def drawn_svg(
+def _drawn(
     image: SvgElement,
     diagram: SvgElement,
     prefix: str,

@@ -41,14 +41,12 @@ import {
 } from "./crop";
 import { clear, h, icon, toast } from "./dom";
 import {
-    convertDiagram,
     DIAGRAM_MODES,
     type DiagramMode,
     diagramMode,
     drawnDiagram,
     editDiagram,
     isDiagramHref,
-    restoreDiagram,
 } from "./drawio";
 import {
     cellLabel,
@@ -1365,9 +1363,6 @@ function renderObjectPanel(sel: Selected): void {
     if (!zone && src?.writable && pictureOf(el)) {
         panel.append(pictureSection(sel));
     }
-    if (!zone && src?.writable && el.hasAttribute("inkflow:drawio-backup")) {
-        panel.append(backupSection(sel));
-    }
     if (!zone && src?.writable && drawnDiagram(el)) {
         panel.append(diagramSection(sel));
         const shapes = diagramShapesSection(sel);
@@ -1716,7 +1711,6 @@ function pictureSection(sel: Selected): HTMLElement {
               )
             : null,
         isDiagramHref(href) && !cropped ? showAsRow(sel, "picture") : null,
-        isDiagramHref(href) && !cropped ? convertRow(sel) : null,
         h(
             "div",
             { class: "btn-row" },
@@ -1838,7 +1832,6 @@ function diagramSection(sel: Selected): HTMLElement {
         ),
         showAsRow(sel, diagramMode(svg)),
         editShapesRow(sel, svg),
-        convertRow(sel),
         row(
             "Fit",
             selectInput(
@@ -1864,46 +1857,6 @@ function diagramSection(sel: Selected): HTMLElement {
                         ],
                         "Diagram fit",
                     ),
-            ),
-        ),
-    );
-}
-
-function convertRow(sel: Selected): HTMLElement {
-    return h(
-        "div",
-        { class: "btn-row" },
-        button(
-            "Convert to slide shapes…",
-            "Make the diagram's shapes ordinary shapes of this slide (one way; asks first)",
-            () => convertDiagram(sel),
-        ),
-    );
-}
-
-// Shapes converted from a draw.io diagram (inkflow:drawio-backup): the
-// backup they link to, and the way back.
-function backupSection(sel: Selected): HTMLElement {
-    const backup = sel.el.getAttribute("inkflow:drawio-backup") ?? "";
-    return section(
-        "draw.io backup",
-        h(
-            "p",
-            { class: "hint" },
-            "Converted from a draw.io diagram, kept as a backup:",
-        ),
-        h(
-            "div",
-            { class: "source-hint" },
-            h("p", { class: "hint media-src" }, backup.split("/").pop() ?? ""),
-        ),
-        h(
-            "div",
-            { class: "btn-row" },
-            button(
-                "Restore draw.io diagram…",
-                "Back to the diagram (changes to these shapes since are lost; asks first)",
-                () => restoreDiagram(sel),
             ),
         ),
     );

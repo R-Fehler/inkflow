@@ -2041,8 +2041,7 @@ foreignObject.rich-editing .math-chip.editing {
   flex-wrap: nowrap;
   margin: 0;
 }
-.hint.warn,
-.deck-form p.warn {
+.hint.warn {
   color: var(--yellow);
 }
 .git-btn.warn .git-badge {
