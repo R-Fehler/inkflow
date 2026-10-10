@@ -17,24 +17,48 @@ import { edit, request } from "./net";
 import { currentSlide, sourceOf } from "./state";
 import type { Selected } from "./types";
 
-/** The slide's picture of a diagram, if this object is one. */
-export function diagramOf(el: Element): SVGImageElement | null {
+/**
+ * A draw.io diagram on the slide: its picture, or the diagram drawn into the
+ * slide (an <svg> standing in for that picture, see drawio_inline.py).
+ */
+export function diagramOf(el: Element): SVGGraphicsElement | null {
+    const drawn = drawnDiagram(el);
+    if (drawn) return drawn;
     const image = pictureOf(el);
-    const href =
-        image?.getAttribute("href") ?? image?.getAttribute("xlink:href") ?? "";
-    return isDiagramHref(href) ? image : null;
+    return image && isDiagramHref(hrefOf(image)) ? image : null;
+}
+
+/** A diagram drawn into the slide (inkflow:drawio="inline" / "themed"). */
+export function drawnDiagram(el: Element): SVGSVGElement | null {
+    return el.localName === "svg" && el.hasAttribute("data-drawio")
+        ? (el as SVGSVGElement)
+        : null;
 }
 
 export function isDiagramHref(href: string): boolean {
     return /\.drawio\.svg$/i.test(href.split(/[?#]/)[0]);
 }
 
-function hrefOf(image: Element): string {
+function hrefOf(el: Element): string {
     return (
-        image.getAttribute("href") ??
-        image.getAttribute("xlink:href") ??
+        el.getAttribute("data-drawio") ??
+        el.getAttribute("href") ??
+        el.getAttribute("xlink:href") ??
         ""
     ).split(/[?#]/)[0];
+}
+
+export type DiagramMode = "picture" | "inline" | "themed";
+
+export const DIAGRAM_MODES: { value: DiagramMode; label: string }[] = [
+    { value: "picture", label: "Picture" },
+    { value: "inline", label: "Drawn on the slide" },
+    { value: "themed", label: "In the deck's theme" },
+];
+
+export function diagramMode(el: Element): DiagramMode {
+    const mode = drawnDiagram(el)?.getAttribute("data-drawio-mode");
+    return mode === "inline" || mode === "themed" ? mode : "picture";
 }
 
 interface Target {

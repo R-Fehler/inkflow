@@ -198,6 +198,10 @@ def _best_match(
 def _first_named_family(value: str) -> str | None:
     for part in value.split(","):
         name = part.strip().strip("'\"")
+        if name.startswith("var("):
+            # A theme token (a drawn-in diagram's text): the deck's own font,
+            # embedded from the styles that define it.
+            return None
         if name.lower() not in _GENERIC_FAMILIES:
             return name
     return None

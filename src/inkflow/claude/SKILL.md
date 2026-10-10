@@ -87,7 +87,11 @@ a picture with the diagram's `<mxfile>` source in the root's `content`
 attribute, stored uncompressed), shown on a slide as an `<image href>`. To
 change one, edit the `<mxGraphModel>` inside `content` *and* the drawing, or
 better ask the author to open it in draw.io (double-click it in the editor).
-`inkflow clean --stdout FILE` prints its source readably.
+`inkflow clean --stdout FILE` prints its source readably. With
+`inkflow:drawio="inline"` (or `"themed"`: the deck's colours and fonts) on that
+`<image>`, the build draws the diagram into the slide instead of its picture;
+each draw.io cell is then an element named `<image id>-<cell id>` that
+`animations=[...]` can target (`FadeIn("flow-client")`).
 
 ## Text boxes, colours and links
 

@@ -410,8 +410,30 @@ as a picture, and draw.io desktop, the VS Code draw.io extension or
 offers draw.io desktop when it is installed). The editor stores the source
 uncompressed, and `git diff` shows it as XML, one shape a line, after
 `inkflow setup-git`. The pre-commit cleaner leaves `.drawio.svg` files alone.
-On the slide a diagram is an ordinary picture: move, resize, crop, link and
-animate it as a whole.
+On the slide a diagram is placed like a picture: move, resize, rotate, link
+and animate it as a whole.
+
+**Picture or drawing.** The diagram's panel has a **Show as** choice:
+
+| Show as | On the slide | Font | Colours |
+|---|---|---|---|
+| **Picture** (the default) | the picture draw.io saved; can be cropped | draw.io's | draw.io's |
+| **Drawn on the slide** | the diagram's shapes, drawn into the slide | the deck's body font instead of draw.io's default (Helvetica); a font you pick in draw.io stays | draw.io's, in their dark or light version to match the deck |
+| **In the deck's theme** | the same | the deck's fonts (body, or code for monospaced text) | the theme's: draw.io's palette maps to the theme's colours by name (its blue to the theme's blue, pale fills to tints), any other colour by hue; black text becomes the theme's text colour |
+
+Drawn diagrams list their shapes in a **Shapes** section: hover one to see it,
+pick an animation in **Animate…** to bring shapes in one by one. Each shape is
+named `<diagram id>-<draw.io id>` (`flow-client`), so in `deck.py` it is
+`FadeIn("flow-client")` like any other element. draw.io keeps a shape's id
+when you edit the diagram (it shows it in **Edit Data**, <kbd>Ctrl</kbd>+<kbd>M</kbd>),
+so its animations stay attached; delete the shape and its animation warns
+that its element is gone. The shapes are still drawn by
+draw.io: to change one, edit the diagram (the editor's own tools would be
+overwritten by the next save in draw.io).
+
+In the slide's SVG the choice is one attribute on the picture,
+`inkflow:drawio="inline"` or `"themed"`; the file keeps the `<image>`, so
+Inkscape and other SVG viewers still show the picture.
 
 **Where draw.io comes from.** draw.io is too big to ship with inkflow, so it
 loads from `https://embed.diagrams.net` by default and needs an internet
@@ -434,9 +456,6 @@ as a placeholder, and opens in the draw.io app; save there and the slide
 updates. If the app is not installed, the editor says where to get it
 ([drawio.com](https://www.drawio.com), or
 `flatpak install flathub com.jgraph.drawio.desktop`).
-
-**Not yet.** A diagram keeps draw.io's own colours, so it does not follow the
-deck's dark or light mode, and its shapes cannot be animated one by one.
 
 ## Video
 
