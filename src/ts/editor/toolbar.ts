@@ -282,7 +282,11 @@ function onKey(e: KeyboardEvent): void {
         // Ctrl+M: a new slide on this slide's layout; with Shift, pick one.
         if (e.shiftKey) void openGallery({ mode: "insert", after: ed.current });
         else if (ed.model?.deckEditable) void newSlideLike(ed.current);
-        else toast("deck.py builds its slides in code; add slides there", "error");
+        else
+            toast(
+                "deck.py builds its slides in code; add slides there",
+                "error",
+            );
     } else if (mod && key === "Enter") {
         handled();
         present();
