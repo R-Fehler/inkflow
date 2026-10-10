@@ -1,4 +1,5 @@
 import type { SlideData } from "../shared/types";
+import type { PlaceholderList } from "./placeholdertext";
 import type { EditorModel, Selected, SlideModel, SourceInfo } from "./types";
 
 export type Tool =
@@ -32,6 +33,8 @@ export interface MasterView {
     slide: SlideModel;
     data: SlideData;
     onSlide: number | null; // deck index of the slide shown, else null
+    // Its placeholders (`master-placeholders`), for the props panel.
+    placeholders?: PlaceholderList;
 }
 
 // All mutable editor state, in one place (mirrors presenter/state.ts).

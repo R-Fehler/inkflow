@@ -182,6 +182,10 @@ layouts: a copy of `base` is the background of every built-in layout).
 | `inkflow layout revert NAME` | Deletes the deck's copy: slides go back to the theme's layout. |
 | `inkflow layout save N NAME [--hints] [--pictures]` | Slide `N` as a new layout: `customCodeExamples` → `layouts/custom-code-examples.svg`, its drawing and parent kept, its zones empty (`--hints`: their text kept as placeholder prompts; `--pictures`: pictures become picture placeholders). Then `inkflow slide add --layout custom-code-examples`. |
 | `inkflow layout rename NAME NEW` / `layout delete NAME [--move-to L]` | The deck's own layouts only; references follow, and a layout slides use is deleted only with `--move-to`. |
+| `inkflow layout placeholders L [--json]` | Layout `L`'s placeholders (zones): kind, prompt, box, the layout each is written in and the slides that fill it. |
+| `inkflow layout placeholder add L NAME [--kind picture] [--prompt TEXT] [--box x,y,w,h]` | A new zone in `L` (a theme's layout is copied first), with the prompt an empty zone shows on a new slide. |
+| `inkflow layout placeholder rename L OLD NEW [-n]` | Renames the zone and, on every slide built on `L`, its `::OLD::` Markdown, `zones={"OLD": …}` and animation targets; refused when a slide already uses `NEW`. `-n` only says what would change. |
+| `inkflow layout placeholder prompt L NAME TEXT` / `--clear`, `placeholder remove L NAME [--drop-content]` | Sets or clears the prompt; removes the zone (the slides' content for it stays unless `--drop-content`). |
 | `inkflow overlay new NAME [--slide N]` | `overlays/NAME.svg` at the deck's size, added to `Deck(overlays=[...])` (with `--slide`, to that slide's own list) after the overlays it already gets. |
 | `inkflow overlay copy NAME` / `overlay revert NAME` | The same copy-on-write for a theme's overlay. |
 

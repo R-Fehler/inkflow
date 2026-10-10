@@ -631,6 +631,19 @@ def unreferenced_zones(root: SvgElement) -> list[SvgElement]:
     ]
 
 
+def empty_zone_shapes(root: SvgElement) -> list[SvgElement]:
+    """Zone shapes nothing filled, as the editor offers them to fill: the
+    placeholders pruned before rendering, and the shapes shown as boxes
+    (``inkflow:show-shape``: a placeholder made from a drawn shape), which
+    stay."""
+    return [
+        el
+        for el in root.iter(*_ZONE_SHAPE_TAGS)
+        if (el.get("id") or "").startswith("zone-")
+        and (not el.get("class") or el.get(ns.INKFLOW_SHOW_SHAPE) == "true")
+    ]
+
+
 def zone_box(el: SvgElement) -> tuple[float, float, float, float]:
     """A zone shape's ``(x, y, width, height)`` in its own user units."""
     rect = _zone_geometry(el).rect

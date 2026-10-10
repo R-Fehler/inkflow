@@ -120,7 +120,7 @@ def _layout_entries(deck: Deck, project_dir: Path) -> dict[str, LayoutEntry]:
     return entries
 
 
-def _slide_layouts(
+def slide_layouts(
     deck: Deck, project_dir: Path
 ) -> list[tuple[Path | None, list[Path]]]:
     """For each deck slide: the layout it is built on directly and every
@@ -153,7 +153,7 @@ def layout_entries(deck: Deck, project_dir: Path) -> dict[str, LayoutEntry]:
     winning, with its parent and the slides using it."""
     entries = _layout_entries(deck, project_dir)
     by_path = {e.path.resolve(): e for e in entries.values()}
-    for i, (direct, chain) in enumerate(_slide_layouts(deck, project_dir)):
+    for i, (direct, chain) in enumerate(slide_layouts(deck, project_dir)):
         if direct is not None and direct in by_path:
             by_path[direct].slides.append(i)
         for p in chain:
@@ -358,7 +358,7 @@ def copy_bytes(
     if ref is None:
         raise MasterError(f"{path.name} is not a theme's {kind.singular}")
     svg = SvgFile.from_bytes(path, path.read_bytes())
-    root = _with_inkflow(svg)
+    root = with_inkflow(svg)
     parent = root.get(ns.INKFLOW_PARENT)
     if parent is not None:
         target = resolve_parent_path(
@@ -452,7 +452,7 @@ def hint_of(text: str) -> str:
     return ""
 
 
-def _with_inkflow(svg: SvgFile) -> SvgElement:
+def with_inkflow(svg: SvgFile) -> SvgElement:
     """The file's root, declaring the ``inkflow:`` prefix (lxml cannot add a
     declaration to an element: the root is rebuilt, its children moved)."""
     root = svg.root
@@ -524,7 +524,7 @@ def template_bytes(
             ).encode(),
         )
         root = svg.root
-    root = _with_inkflow(svg)
+    root = with_inkflow(svg)
     if parent is None:
         _drop(root, ns.INKFLOW_PARENT)
     else:

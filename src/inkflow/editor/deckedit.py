@@ -977,6 +977,29 @@ class DeckSource:
             return
         self._replace(zones, seq.build())
 
+    def rename_zone_key(self, index: int, old: str, new: str) -> bool:
+        """Call zone ``old`` of ``zones={...}`` ``new``, its value and comments
+        kept; False when the slide has no such key."""
+        call = self.slide_call(index)
+        arg = _kwarg(call, "zones")
+        if arg is None:
+            return False
+        if not isinstance(arg.value, cst.Dict):
+            raise DeckEditError("this slide's zones are not a literal dict")
+        for el in arg.value.elements:
+            if (
+                isinstance(el, cst.DictElement)
+                and isinstance(el.key, cst.SimpleString)
+                and el.key.evaluated_value == old
+            ):
+                quote = el.key.quote
+                key = cst.SimpleString(
+                    f"{quote}{new}{quote}" if quote in ('"', "'") else _py_str(new)
+                )
+                self._replace(el.key, key)
+                return True
+        return False
+
     # ── Imports ──
 
     def ensure_imports(self, names: set[str]) -> None:

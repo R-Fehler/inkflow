@@ -6,7 +6,10 @@ its own copy of one (``layouts/<name>.svg``), which every slide on it then
 follows, also through the theme's own chains: a copy of ``base`` is the
 background of every built-in layout. ``layout revert`` deletes the copy.
 ``layout save`` makes a new layout (a template) from a slide. ``overlay new``
-adds an overlay, drawn on top of every slide (or of one).
+adds an overlay, drawn on top of every slide (or of one). ``layout
+placeholder`` adds, renames, prompts and removes a layout's placeholders (its
+zones), a rename following every slide's content for it; ``layout
+placeholders`` lists them.
 
 Like ``inkflow slide``, each command is the visual editor's own session
 action (``master``), so with an editor open it is an undoable "Agent: …" step
@@ -15,6 +18,7 @@ there (``editor.remote``).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import cast
 
@@ -22,6 +26,7 @@ import click
 
 from inkflow.cli._common import deck_option, main
 from inkflow.cli._edits import DeckSlides, apply_edit, report_rename
+from inkflow.editor.remote import RemoteEditError, apply_request
 from inkflow.logging import report
 
 
@@ -242,3 +247,270 @@ def _note(result: dict[str, object]) -> None:
     if isinstance(overlay, dict):
         made = cast("dict[str, str]", overlay)
         report("Overlay", f"{made.get('name')} is drawn on {made.get('where')}")
+
+
+# ── Placeholders ──────────────────────────────────────────────────────────────
+
+
+def _box(raw: str | None) -> dict[str, float]:
+    if raw is None:
+        return {}
+    try:
+        x, y, w, h = (float(v) for v in raw.split(","))
+    except ValueError as exc:
+        raise click.BadParameter(
+            "give the box as x,y,width,height", param_hint="--box"
+        ) from exc
+    return {"x": x, "y": y, "width": w, "height": h}
+
+
+def _where(layout: str, overlay: bool) -> dict[str, object]:
+    return {"overlay": layout} if overlay else {"layout": layout}
+
+
+def _report_plan(result: dict[str, object], dry_run: bool) -> None:
+    plan = cast("dict[str, object]", result.get("placeholder") or {})
+    for edit in cast("list[str]", plan.get("edits") or []):
+        report(
+            "Would edit" if dry_run else "Edited",
+            edit,
+            style="yellow" if dry_run else "dim",
+        )
+    names = cast("list[str]", plan.get("slideNames") or [])
+    if names:
+        report("Slides", ", ".join(names), style="yellow" if dry_run else "green")
+    for warning in cast("list[str]", plan.get("warnings") or []):
+        report("Warning", warning, style="yellow")
+
+
+_overlay_flag = click.option(
+    "--overlay",
+    is_flag=True,
+    help="LAYOUT names an overlay (drawn on top of every slide).",
+)
+
+
+@layout_group.command("placeholders")
+@click.argument("layout")
+@deck_option
+@_overlay_flag
+@click.option("--json", "as_json", is_flag=True, help="Print JSON.")
+def layout_placeholders(
+    layout: str, deck_path: Path, overlay: bool, as_json: bool
+) -> None:
+    """List the placeholders (zones) of LAYOUT.
+
+    Each with its kind (text, or picture for a zone named for one), its
+    prompt (what the empty zone says on a new slide), its box, the layout it
+    is written in (LAYOUT's own, or one it is built on) and the slides that
+    fill it.
+    """
+    from inkflow.editor.session import EditError, EditorSession
+
+    slides = DeckSlides.load(deck_path)
+    session = EditorSession(slides.path)
+    try:
+        info = session.apply(
+            {"action": "master-placeholders", **_where(layout, overlay)}, slides.deck
+        )
+    except EditError as exc:
+        raise click.ClickException(str(exc)) from exc
+    found = cast("list[dict[str, object]]", info["placeholders"])
+    if as_json:
+        out = {
+            "layout": info["name"],
+            "file": info["file"],
+            "slides": info["slides"],
+            "placeholders": found,
+        }
+        click.echo(json.dumps(out, indent=2))
+        return
+    users = cast("list[int]", info["slides"])
+    report("Layout", f"{info['name']} · on {len(users)} slide{'s' * (len(users) != 1)}")
+    for p in found:
+        box = ",".join(f"{v:g}" for v in cast("list[float]", p["box"]))
+        filled = cast("list[int]", p["filled"])
+        shown = ", ".join(
+            str(slides.numbers[i]) if slides.numbers[i] is not None else slides.ids[i]
+            for i in filled
+        )
+        where = "" if p["own"] else f" (from {p['layout']})"
+        prompt = f" · prompt {p['prompt']!r}" if p["prompt"] else ""
+        fills = f"filled on slides {shown}" if filled else "no slide fills it"
+        report(
+            str(p["name"]),
+            f"{p['kind']} · box {box}{where}{prompt} · {fills}",
+            style="green" if p["own"] else "dim",
+        )
+
+
+@layout_group.group("placeholder")
+def placeholder_group() -> None:
+    """Add, rename, prompt or remove a layout's placeholders (its zones).
+
+    A placeholder is an empty zone each slide on the layout fills with its
+    own text or picture; its prompt is what the empty zone says on a new
+    slide. A theme's layout is copied into the deck on the first change, as
+    the editor's slide master does.
+    """
+
+
+@placeholder_group.command("add")
+@click.argument("layout")
+@click.argument("name")
+@deck_option
+@_overlay_flag
+@click.option(
+    "--kind",
+    type=click.Choice(["text", "picture"]),
+    default="text",
+    show_default=True,
+    help="A text placeholder, or one for a picture or video.",
+)
+@click.option("--prompt", default=None, help="What the empty zone says on a new slide.")
+@click.option(
+    "--box", default=None, metavar="X,Y,W,H", help="Its box [default: the middle]."
+)
+def placeholder_add(
+    layout: str,
+    name: str,
+    deck_path: Path,
+    overlay: bool,
+    kind: str,
+    prompt: str | None,
+    box: str | None,
+) -> None:
+    """Add the placeholder NAME to LAYOUT (zone-NAME).
+
+    A picture placeholder's name says it is one: `hero` becomes
+    zone-picture-hero. Refused when a slide on LAYOUT already has the name.
+    """
+    slides = DeckSlides.load(deck_path)
+    request: dict[str, object] = {
+        "action": "master",
+        "op": "add-zone",
+        **_where(layout, overlay),
+        "zoneKind": kind,
+        "name": name,
+        "exact": True,
+        "previews": True,
+        **_box(box),
+    }
+    if prompt:
+        request["prompt"] = prompt
+    applied = apply_edit(slides, request, f"Add {kind} placeholder {name} to {layout}")
+    _note(applied.result)
+    zone = applied.result.get("zone")
+    if isinstance(zone, str):
+        report("Zone", f"zone-{zone}: slides fill it with ::{zone}:: in their Markdown")
+
+
+@placeholder_group.command("rename")
+@click.argument("layout")
+@click.argument("old")
+@click.argument("new")
+@deck_option
+@_overlay_flag
+@click.option("-n", "--dry-run", is_flag=True, help="Only say what would change.")
+def placeholder_rename(
+    layout: str, old: str, new: str, deck_path: Path, overlay: bool, dry_run: bool
+) -> None:
+    """Rename placeholder OLD of LAYOUT to NEW, the slides following.
+
+    On every slide built on LAYOUT (also through a layout built on it):
+    `::OLD::` in its Markdown, `zones={"OLD": ...}` and animations aimed at
+    zone-OLD. Refused when one of them already uses NEW.
+    """
+    slides = DeckSlides.load(deck_path)
+    request: dict[str, object] = {
+        "action": "master",
+        "op": "zone-rename",
+        **_where(layout, overlay),
+        "zone": old,
+        "to": new,
+        "previews": True,
+    }
+    if dry_run:
+        try:
+            applied = apply_request(
+                slides.path, slides.deck, slides.hash, {**request, "dryRun": True}
+            )
+        except RemoteEditError as exc:
+            raise click.ClickException(str(exc)) from exc
+        _report_plan(applied.result, dry_run=True)
+        return
+    applied = apply_edit(
+        slides, request, f"Rename placeholder {old} to {new} on layout {layout}"
+    )
+    _note(applied.result)
+    _report_plan(applied.result, dry_run=False)
+
+
+@placeholder_group.command("prompt")
+@click.argument("layout")
+@click.argument("name")
+@click.argument("text", required=False)
+@deck_option
+@_overlay_flag
+@click.option("--clear", is_flag=True, help="Remove the prompt.")
+def placeholder_prompt(
+    layout: str,
+    name: str,
+    text: str | None,
+    deck_path: Path,
+    overlay: bool,
+    clear: bool,
+) -> None:
+    """Set the prompt of placeholder NAME of LAYOUT: what its empty zone says
+    on a new slide, and the text a click there types in."""
+    if clear == (text is not None):
+        raise click.UsageError("give the prompt TEXT, or --clear")
+    slides = DeckSlides.load(deck_path)
+    applied = apply_edit(
+        slides,
+        {
+            "action": "master",
+            "op": "zone-prompt",
+            **_where(layout, overlay),
+            "zone": name,
+            "prompt": "" if clear else text,
+            "previews": True,
+        },
+        f"{'Clear' if clear else 'Set'} the prompt of {name} on layout {layout}",
+    )
+    _note(applied.result)
+
+
+@placeholder_group.command("remove")
+@click.argument("layout")
+@click.argument("name")
+@deck_option
+@_overlay_flag
+@click.option(
+    "--drop-content",
+    is_flag=True,
+    help="Also delete what the slides put in it (their ::NAME:: text, zones= entry).",
+)
+def placeholder_remove(
+    layout: str, name: str, deck_path: Path, overlay: bool, drop_content: bool
+) -> None:
+    """Remove placeholder NAME from LAYOUT.
+
+    A placeholder made from a drawn shape stays as that shape. The slides'
+    content for it stays in their files (and no longer shows) unless
+    --drop-content.
+    """
+    slides = DeckSlides.load(deck_path)
+    applied = apply_edit(
+        slides,
+        {
+            "action": "master",
+            "op": "zone-remove",
+            **_where(layout, overlay),
+            "zone": name,
+            "dropContent": drop_content,
+            "previews": True,
+        },
+        f"Remove placeholder {name} from layout {layout}",
+    )
+    _report_plan(applied.result, dry_run=False)
