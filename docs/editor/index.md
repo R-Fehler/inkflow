@@ -62,7 +62,9 @@ refuses rather than overwrite a file that was changed outside the editor since.
 The Undo and Redo buttons name the step they would take back.
 
 Slide-list changes an agent makes with
-[`inkflow slide`](claude-code.md#changing-the-slide-list) while the editor is
+[`inkflow slide`](claude-code.md#changing-the-slide-list), and the shapes,
+text boxes and arrows it draws with
+[`inkflow shape`](claude-code.md#shapes-and-arrows), while the editor is
 open go through the editor too: each is an ordinary undo step, labelled
 *Agent: …*, announced at the bottom of the window with an **Undo** button (it
 takes back that change while nothing else came after it; then use

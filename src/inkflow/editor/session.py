@@ -322,6 +322,21 @@ def _py(value: object) -> str:
     return Code().literal(value)
 
 
+_ZONE_NAME = re.compile(r"[A-Za-z][\w-]*")
+
+
+def _zone_base(msg: dict[str, object], default: str) -> str:
+    """The name a new zone asks for (``zone``: an agent's ``--id``), else
+    ``default``; numbered on (``-2``) when the slide has it already."""
+    name = msg.get("zone")
+    if not isinstance(name, str) or not name:
+        return default
+    name = name.removeprefix("zone-")
+    if not _ZONE_NAME.fullmatch(name):
+        raise EditError(f"{name!r} is not a zone name: letters, digits, - and _")
+    return name
+
+
 class HtmlBuilder(Protocol):
     def __call__(
         self, deck_path: Path, out_dir: Path, inline_assets: bool = False
@@ -369,6 +384,9 @@ class EditorSession:
     """A deck.py the editor asked to open instead (the server switches to it)."""
     quit_requested: bool
     """The editor asked the server to stop ("Quit Inkflow")."""
+    shape_deck_hash: str | None
+    """While shape commands run: the deck.py they changed and loaded since
+    the build (``_shapes``), which their next action may change in turn."""
     has_deck: bool
     """False on the start page (no deck yet): only opening or creating a deck
     works, and the home folder stands in for the project."""
@@ -391,6 +409,7 @@ class EditorSession:
         self.conversions = media.Conversions(self.project_dir)
         self.history = History()
         self.built_hash = None
+        self.shape_deck_hash = None
         self.server = {}
         self.exports = {}
 
@@ -462,6 +481,8 @@ class EditorSession:
             except TransferError as exc:
                 raise EditError(str(exc)) from exc
             return {"ok": True, "bundle": bundle}
+        if action == "shape":
+            return self._shapes(msg, deck)
         txn = _Txn(self.project_dir)
         extra: dict[str, object] = {}
         handler = {
@@ -606,7 +627,7 @@ class EditorSession:
         if (
             not fresh
             and self.built_hash is not None
-            and file_hash(data) != self.built_hash
+            and file_hash(data) not in (self.built_hash, self.shape_deck_hash)
         ):
             raise EditError("deck.py changed since the last build; try again")
         return DeckSource(data.decode("utf-8"))
@@ -998,11 +1019,24 @@ class EditorSession:
         a new zone rect in the slide's own SVG, and ``Chart(...)`` filling it
         through ``zones={...}`` in deck.py, as one step."""
         index, slide = self._deck_slide(deck, msg)
-        columns, rows = chartedit.grid(msg.get("table"))
-        path = chartedit.new_data_file(self.project_dir)
-        txn.write(path, serialize_rows(".csv", columns, rows).encode("utf-8"))
+        src = msg.get("src")
+        if isinstance(src, str) and src:
+            # A data file the project has already (an agent's `--data`): read
+            # where it is, so editing the file redraws the chart.
+            path = Path(src)
+            path = (path if path.is_absolute() else self.project_dir / path).resolve()
+            if not chartedit.is_data_file(path) or not path.is_file():
+                raise EditError(f"no chart data at {src} (CSV, TSV, JSON or Markdown)")
+            try:
+                chartedit.load(Chart(self._deck_rel(path)), self.project_dir)
+            except (ChartError, UnicodeDecodeError) as exc:
+                raise EditError(f"{path.name}: {exc}") from exc
+        else:
+            columns, rows = chartedit.grid(msg.get("table"))
+            path = chartedit.new_data_file(self.project_dir)
+            txn.write(path, serialize_rows(".csv", columns, rows).encode("utf-8"))
         chart = chartedit.apply_settings(Chart(self._deck_rel(path)), msg.get("chart"))
-        zone = self._new_zone(msg, deck, slide, txn, "chart")
+        zone = self._new_zone(msg, deck, slide, txn, _zone_base(msg, "chart"))
         source = self._deck_source(txn)
         code = Code()
         source.set_zone(index, zone, code.call(chart))
@@ -1055,7 +1089,7 @@ class EditorSession:
         ``zones={...}`` in deck.py)."""
         index, slide = self._deck_slide(deck, msg)
         text = str(msg.get("text") or "Text").strip() or "Text"
-        zone = self._new_zone(msg, deck, slide, txn, "text")
+        zone = self._new_zone(msg, deck, slide, txn, _zone_base(msg, "text"))
         self._put_zone_text(index, slide, deck, zone, text, txn)
         extra["ids"] = {"new": f"zone-{zone}"}
         extra["zone"] = zone
@@ -1844,7 +1878,8 @@ class EditorSession:
         if old.startswith("zone-"):
             zone_id = old
         else:
-            zone_id = self._free_zone_id(svg, path, slide, deck, txn, "text")
+            base = _zone_base(msg, "text")
+            zone_id = self._free_zone_id(svg, path, slide, deck, txn, base)
             apply_ops(
                 svg, [{"kind": "id", "loc": msg.get("loc"), "id": zone_id, "from": old}]
             )
@@ -1869,6 +1904,64 @@ class EditorSession:
         extra["ids"] = {"new": zone_id}
         extra["structural"] = True
         return "Text in shape"
+
+    # ── Shapes from the command line (``inkflow shape``) ──
+
+    def _shapes(self, msg: dict[str, object], deck: Deck) -> dict[str, object]:
+        """An agent's shape commands (editor/shapes.py), as one undoable step.
+
+        Each command runs the actions the editor sends for the same click, as
+        requests of their own: every one sees the files as the one before left
+        them (a new Markdown file, a slide's new drawing). They share one
+        ``coalesce`` key, so the History merges them into a single step; when
+        a command is refused, that step is taken back and nothing remains.
+        """
+        from inkflow.editor import shapes
+
+        expected = msg.get("deckHash")
+        if (
+            isinstance(expected, str)
+            and self.built_hash is not None
+            and expected != self.built_hash
+        ):
+            raise EditError("deck.py changed since the last build; try again")
+        key = f"shape-{secrets.token_hex(6)}"
+        try:
+            outcome = shapes.run(self, msg, deck, key)
+        except (EditError, ValueError, OSError) as exc:
+            done = self.history.done
+            if done and done[-1].coalesce == key:
+                self.history.undo()
+                self.history.undone.pop()
+            raise EditError(str(exc)) from exc
+        finally:
+            self.shape_deck_hash = None
+        done = self.history.done
+        step = done[-1] if done and done[-1].coalesce == key else None
+        result: dict[str, object]
+        if step is not None:
+            # Closed: the author's next nudge must not merge into it.
+            step.coalesce = None
+            result = self._result(step)
+        else:
+            result = {
+                "ok": True,
+                "label": "",
+                "hashes": {},
+                "changes": [],
+                "step": 0,
+                "canUndo": bool(done),
+                "canRedo": bool(self.history.undone),
+                **self.history_labels(),
+            }
+        result["shapes"] = outcome.reports
+        result["created"] = outcome.created
+        result["ids"] = {"new": outcome.created[-1]} if outcome.created else {}
+        result["structural"] = True
+        return result
+
+    def slide_id(self, slide: Slide, deck: Deck) -> str:
+        return self._slide_id(slide, deck)
 
     # ── Zone content that follows its zone ──
 

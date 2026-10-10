@@ -9,6 +9,7 @@ from inkflow.animations import Animation, PlayVideo
 from inkflow.assets import AssetRoots, AssetSource
 from inkflow.charts import ResolvedChart, render
 from inkflow.clean import clean_inkscape_tree
+from inkflow.editor.scene import Scene
 from inkflow.layout import (
     are_preview_layers_current,
     discover_layouts,
@@ -16,8 +17,8 @@ from inkflow.layout import (
     resolve_default_zone,
 )
 from inkflow.loaders import load_md, resolve_content_src
-from inkflow.manifest import Chart, Inline, Media, Slide, TextBox, Video
-from inkflow.pipeline import resolve_overlay_chains, resolve_slide_src
+from inkflow.manifest import Chart, Deck, Inline, Media, Slide, TextBox, Video
+from inkflow.pipeline import resolve_overlay_chains, resolve_slide_src, slide_ids
 from inkflow.sizes import same_aspect
 from inkflow.svg import (
     canvas_size,
@@ -314,6 +315,37 @@ def _check_sync(src: Path, preview: PreviewContext) -> list[Issue]:
     return []
 
 
+def _check_connectors(
+    slide: Slide, project_dir: Path, deck: Deck | None
+) -> list[Issue]:
+    """Arrows attached to shapes whose drawn ends no longer meet them (the
+    shapes moved in Inkscape, draw.io or by hand since the arrow was routed):
+    the editor's stale-arrow rule, which ``inkflow shape reroute`` fixes."""
+    if deck is None:
+        return []
+    visible = [s for s in deck.slides if s.visible]
+    shown = [i for i, s in enumerate(visible) if s is slide]
+    slide_id = slide_ids(visible)[shown[0]] if shown else slide_ids([slide])[0]
+    try:
+        scene = Scene.compose(project_dir, deck, slide, slide_id)
+    except (ValueError, OSError):
+        return []  # reported by the composition checks
+    issues: list[Issue] = []
+    for conn in scene.attached():
+        shapes = scene.stale_ends(conn)
+        if shapes:
+            name = f"#{conn.get('id')}" if conn.get("id") else "without an id"
+            issues.append(
+                (
+                    "warn",
+                    f"arrow {name} no longer meets {' and '.join(shapes)} "
+                    + "(moved since it was routed): run `inkflow shape reroute "
+                    + f"-s {slide_id}`",
+                )
+            )
+    return issues
+
+
 def _unresolved_src_issue(src: str, project_dir: Path, theme: Theme | None) -> Issue:
     """Author-facing issue for an unresolvable ``Slide.src``.
 
@@ -399,4 +431,5 @@ def verify_slide(
     ]
     issues += check_size(root, preview.deck)
     issues += _check_sync(src, preview)
+    issues += _check_connectors(slide, project_dir, preview.deck)
     return issues

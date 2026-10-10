@@ -196,7 +196,8 @@ See the [editor guide](https://ll-nick.github.io/inkflow/editor/) for everything
 
 A coding agent gets the same deck through the command line: `inkflow outline` sums it up
 in a few lines per slide, `inkflow slide add/move/delete …` changes the slide list with
-every file it touches (an undoable step in the open editor), and `inkflow render --check`
+every file it touches (an undoable step in the open editor), `inkflow shape …` draws
+shapes, text boxes and attached arrows exactly as the editor does, and `inkflow render --check`
 reports text that overflows its box or objects off the slide, with `--sheet` for all
 slides in one image ([Editing with Claude Code](https://ll-nick.github.io/inkflow/editor/claude-code/)).
 

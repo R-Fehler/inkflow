@@ -20,6 +20,7 @@ for _submodule in (
     "color",
     "present",
     "project",
+    "shapes",
     "slides",
     "verify",
     "worktree",

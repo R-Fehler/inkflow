@@ -58,6 +58,7 @@ right away.
 | `inkflow goto N` | Shows slide `N` in the editor open on this deck. |
 | `inkflow select ID…` | Selects elements by id in the editor open on this deck, so Claude can point at what it means. |
 | `inkflow slide …` | Adds, deletes, duplicates, moves, hides, shows, renames or retitles slides, with their files (below). |
+| `inkflow shape …` | Draws on a slide as the editor does: shapes, text boxes, pictures, charts, and arrows attached to shapes, routed exactly where the editor routes them ([below](#shapes-and-arrows)). |
 | `inkflow worktree …` | A copy of the deck on a branch of its own for Claude to work in, merged when you like it ([below](#working-on-a-branch)). |
 | `inkflow compare [LEFT] RIGHT` | Which slides differ between two versions: the working copy, a revision (`main`, `HEAD~2`) or a deck folder. One line per slide that differs (`~ 3 features: slides/features.md, notes`, `+ 4 compare`, `- 7 morph`, `↕ 5 → 6 media`); `--json` adds the changed elements; `--sheet` writes side-by-side images of only those slides (see [Comparing two versions](compare.md)). |
 
@@ -100,6 +101,52 @@ that server, as one step in the editor's undo history: the editor shows
 server the files are changed directly, and `git` is the undo. The editor keeps its state in `.inkflow/` in the project, which ignores itself in
 git and is not watched for changes. `render` needs Chromium or Chrome, like
 `inkflow export`; one installed by Playwright is found too.
+
+## Shapes and arrows
+
+`inkflow shape` makes the change the editor makes for the same click, through
+the same editor actions. Claude uses it instead of writing SVG by hand, so an
+arrow's path is exactly the one the editor would draw (and follows its shapes
+when they move), a text box is its zone and its Markdown written together,
+ids stay unique, and renaming an object keeps its arrows and animations
+attached. With the editor open, each command is one step in its undo history
+(*Agent: Connect plan to build on slide 3 (flow)*), like `inkflow slide`.
+
+| Command | What it does |
+|---|---|
+| `inkflow shape list [-s N] [--json]` | The slide's own objects: id, kind, box in slide units, text, and each arrow's ends (`plan:right -> build:left`), flagged `STALE` when they no longer meet their shapes; then the ids of its layout and overlays. |
+| `inkflow shape add rect\|ellipse [--at X,Y] [--size W,H] [--id ID] [--text T]` | The editor's shape; with `--text`, text in it: it becomes the text zone `zone-ID`, its text a section of the slide's Markdown. `--fill`/`--stroke` take a theme colour (`accent`, `surface`, …) or `#hex`. |
+| `inkflow shape add textbox --text T` | A wrapping Markdown text box: a `zone-text` rect and its `::text::` section, in one step. |
+| `inkflow shape add text\|line\|arrow\|image\|chart …` | An SVG `<text>` line; a line or arrow with free ends (`--from X,Y --to X,Y`); a picture (`--src FILE`; `--drawio inline` draws a draw.io diagram into the slide); a chart (`--data data/x.csv --chart line`). |
+| `inkflow shape connect A B [--style elbow] [--from SITE] [--to SITE]` | An arrow attached to two shapes, zones or shapes of a drawn-in draw.io diagram (`<diagram id>-<cell id>`). A site is a side (`top`) or a point along one (`top@0.25`); without them, the nearest pair the shapes offer. `--arrow end\|start\|both\|none`, `--bend x:640` for an elbow's middle segment. |
+| `inkflow shape sites ID N` | Offers `N` connection points per side. |
+| `inkflow shape move\|resize\|align\|distribute …` | Moves (`--by DX,DY`, `--to X,Y`), resizes (`--size W,H --anchor center`), aligns (`left`, `middle`, …; one object: on the slide) or spaces objects; their arrows follow, as when you drag them. |
+| `inkflow shape style\|text\|rename\|delete\|duplicate\|group\|ungroup\|order\|lock\|unlock\|hide\|show\|link …` | The rest of the editor's object panel: colours, opacity, text, a new id (arrows and animations follow), deleting (a zone's text goes too), copies, groups, stacking order, locking, hiding, links (`slide:<id>`, a number, a URL). |
+| `inkflow shape reroute [IDs] [--all]` | Puts arrows back on their shapes after the shapes moved elsewhere (Inkscape, draw.io, a hand edit): the editor's **Re-route all**, for one slide or every slide. |
+| `inkflow shape batch [FILE]` | A JSON list of commands (from stdin) as one step: one undo, one rebuild, nothing changed if one is refused. |
+
+```bash
+inkflow shape batch -s 3 <<'EOF'
+[{"add": "rect", "id": "plan", "at": [160, 420], "size": [320, 140], "text": "Plan"},
+ {"add": "rect", "id": "build", "at": [800, 640], "size": [320, 140], "text": "Build"},
+ {"add": "rect", "id": "ship", "at": [1440, 420], "size": [320, 140], "text": "Ship"},
+ {"connect": ["plan", "build"], "style": "elbow"},
+ {"connect": ["build", "ship"], "style": "elbow"}]
+EOF
+```
+
+Every command takes `-s/--slide` (a number or an id; without it, the slide
+open in the editor) and `--json`. A slide drawn straight from a shared layout
+first gets a drawing of its own, as when you draw on it in the editor; objects
+of layouts and overlays are refused (arrows may still attach to them).
+
+The routing runs without a browser: `inkflow shape` has a Python copy of the
+editor's connector maths, held to the editor's by a shared set of cases both
+test suites check, and computes each shape's box from the SVG the way the
+browser does (transforms, cropped pictures, zones, draw.io shapes, curves).
+Only a plain SVG `<text>` has no exact box without a browser, so arrows attach
+to shapes and text boxes, not to `<text>`. `inkflow verify` warns about arrows
+whose shapes moved since they were routed, naming `inkflow shape reroute`.
 
 ## Working on a branch
 
