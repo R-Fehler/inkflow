@@ -15024,10 +15024,10 @@ Decks: new, open, recent` : "Decks";
     const re2 = /https?:\/\/[^\s)]+[^\s).,;]/g;
     let last = 0;
     for (const m2 of text.matchAll(re2)) {
-      const at2 = m2.index ?? 0;
-      if (at2 > last) parts.push({ text: text.slice(last, at2) });
+      const at3 = m2.index ?? 0;
+      if (at3 > last) parts.push({ text: text.slice(last, at3) });
       parts.push({ url: m2[0] });
-      last = at2 + m2[0].length;
+      last = at3 + m2[0].length;
     }
     if (last < text.length) parts.push({ text: text.slice(last) });
     return parts;

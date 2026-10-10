@@ -69,15 +69,28 @@ def context(deck_path: Path, as_json: bool, hook: bool) -> None:
         click.echo(format_context(data))
 
 
+def _number(deck_path: Path, ref: str) -> int:
+    """SLIDE as the presenter numbers it: a number, or a slide id."""
+    ref = ref.strip()
+    if ref.isdigit():
+        return int(ref)
+    from inkflow.cli._edits import DeckSlides
+
+    slides = DeckSlides.load(deck_path)
+    number = slides.numbers[slides.index(ref)]
+    if number is None:
+        raise click.BadParameter(f"slide {ref!r} is hidden", param_hint="SLIDE")
+    return number
+
+
 @main.command()
 @deck_option
 @click.option(
     "--slide",
     "-s",
-    "number",
-    type=int,
+    "slide",
     default=None,
-    help="Show one slide (1-based) in detail: full zone texts, zone boxes, "
+    help="Show one slide (number or id) in detail: full zone texts, zone boxes, "
     + "element ids, animations as deck.py writes them.",
 )
 @click.option("--json", "as_json", is_flag=True, help="Print the full structure.")
@@ -87,7 +100,7 @@ def context(deck_path: Path, as_json: bool, hook: bool) -> None:
     help="With --slide: add every element's box as the browser draws it"
     + " (`inkflow render --boxes`; needs Chromium).",
 )
-def outline(deck_path: Path, number: int | None, as_json: bool, boxes: bool) -> None:
+def outline(deck_path: Path, slide: str | None, as_json: bool, boxes: bool) -> None:
     """Print what is on every slide, in a few lines each.
 
     For each slide: its number, id, title and position in deck.py's
@@ -100,6 +113,7 @@ def outline(deck_path: Path, number: int | None, as_json: bool, boxes: bool) -> 
     from inkflow.pipeline import process_deck
     from inkflow.server import load_deck
 
+    number = None if slide is None else _number(deck_path, slide)
     if boxes and number is None:
         raise click.UsageError("--boxes needs --slide N")
     resolved = resolve_deck_path(deck_path)
@@ -164,9 +178,8 @@ def _current_slide(project_dir: Path) -> int:
     "--slide",
     "-s",
     "slides",
-    type=int,
     multiple=True,
-    help="Slide number (1-based); repeatable. Default: the editor's current slide"
+    help="Slide number (1-based) or id; repeatable. Default: the editor's current slide"
     + " (every slide with --sheet or --check).",
 )
 @click.option("--all", "all_slides", is_flag=True, help="Render every slide.")
@@ -221,7 +234,7 @@ def _current_slide(project_dir: Path) -> int:
 )
 def render(
     deck_path: Path,
-    slides: tuple[int, ...],
+    slides: tuple[str, ...],
     all_slides: bool,
     step: int | None,
     sheet: bool,
@@ -265,7 +278,9 @@ def render(
     if all_slides or (not slides and (sheet or check)):
         numbers = None
     else:
-        numbers = list(slides) or [_current_slide(project_dir)]
+        numbers = [_number(resolved, s) for s in slides] or [
+            _current_slide(project_dir)
+        ]
     out: Path | None = None
     # --boxes alone writes no images; with --output it does both.
     if not check and not (boxes and output is None):
@@ -350,25 +365,26 @@ _host_option = click.option("--host", default="localhost", show_default=True)
 
 
 @main.command()
-@click.argument("slide", type=int)
+@click.argument("slide")
 @deck_option
 @_ws_port_option
 @_host_option
-def goto(slide: int, deck_path: Path, ws_port: int | None, host: str) -> None:
-    """Show slide SLIDE (1-based) in every editor open on the deck."""
+def goto(slide: str, deck_path: Path, ws_port: int | None, host: str) -> None:
+    """Show SLIDE (a number, 1-based, or an id) in every editor open on the deck."""
     port = _editor_ws_port(deck_path, ws_port)
-    _send(port, host, {"type": "editor-command", "command": "goto", "slide": slide})
+    number = _number(deck_path, slide)
+    _send(port, host, {"type": "editor-command", "command": "goto", "slide": number})
 
 
 @main.command("select")
 @click.argument("ids", nargs=-1, required=True)
-@click.option("--slide", type=int, default=None, help="Go to this slide first.")
+@click.option("--slide", default=None, help="Go to this slide (number or id) first.")
 @deck_option
 @_ws_port_option
 @_host_option
 def select_cmd(
     ids: tuple[str, ...],
-    slide: int | None,
+    slide: str | None,
     deck_path: Path,
     ws_port: int | None,
     host: str,
@@ -376,7 +392,10 @@ def select_cmd(
     """Select elements by id in every editor open on the deck."""
     port = _editor_ws_port(deck_path, ws_port)
     if slide is not None:
-        _send(port, host, {"type": "editor-command", "command": "goto", "slide": slide})
+        number = _number(deck_path, slide)
+        _send(
+            port, host, {"type": "editor-command", "command": "goto", "slide": number}
+        )
     _send(
         port,
         host,
