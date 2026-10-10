@@ -28,12 +28,20 @@ export interface TextSource {
 }
 
 export interface ZoneValue {
-    kind: "text" | "textbox" | "image" | "video" | "other";
+    kind: "text" | "textbox" | "image" | "video" | "chart" | "other";
     text?: string;
     src?: string;
     fit?: string;
-    // An image's or video's settings, by field name (see mediaTypes).
-    fields?: Record<string, FieldValue>;
+    // An image's or video's settings, by field name (see mediaTypes); a
+    // chart's (its y is a list of column names).
+    fields?: Record<string, FieldValue | string[]>;
+    // A chart: its data file (absolute), whether the data is written inline
+    // in deck.py, its columns (and which hold numbers), or why it cannot be read.
+    path?: string;
+    inline?: boolean;
+    columns?: string[];
+    numeric?: string[];
+    error?: string;
 }
 
 export type FieldValue = string | number | boolean | null;

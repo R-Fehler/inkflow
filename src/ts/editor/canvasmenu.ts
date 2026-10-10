@@ -8,6 +8,7 @@ import {
     canTransform,
     canTypeInto,
     clearSelection,
+    clientToSlide,
     enterGroup,
     isZone,
     pick,
@@ -15,6 +16,7 @@ import {
     selectAll,
     zoneName,
 } from "./canvas";
+import { editChart, insertChart } from "./chart";
 import { copy, cut, pasteFromClipboard } from "./clipboard";
 import { pictureOf, startCrop } from "./crop";
 import { clear, h } from "./dom";
@@ -98,6 +100,12 @@ function objectMenu(): HTMLElement[] {
         if (diagramOf(el)) {
             items.push(menuItem("Edit diagram", () => editDiagram(one!)));
         }
+        const chartZone = isZone(el) ? zoneName(el) : null;
+        if (chartZone && currentSlide()?.zones[chartZone]?.kind === "chart") {
+            items.push(
+                menuItem("Edit chart data…", () => void editChart(chartZone)),
+            );
+        }
         if (pictureOf(el)) {
             items.push(menuItem("Crop", () => void startCrop(one!)));
         }
@@ -169,6 +177,11 @@ function objectMenu(): HTMLElement[] {
     return items;
 }
 
+// Where on the slide the menu was opened (a new chart is placed there).
+function clickedAt(): { x: number; y: number } {
+    return clientToSlide(at.x, at.y);
+}
+
 // A video straight from disk: the server copies it, however big.
 async function insertFromDisk(): Promise<void> {
     const start = ed.model?.projectDir ?? "";
@@ -187,6 +200,7 @@ function slideMenu(): HTMLElement[] {
         menuItem("Select all", () => selectAll()),
         menuItem("Insert video from a folder…", () => void insertFromDisk()),
         menuItem("New diagram (draw.io)…", () => newDiagram()),
+        menuItem("Insert chart…", () => void insertChart(clickedAt())),
         sep(),
         title("Slide"),
         menuItem(

@@ -2651,3 +2651,201 @@ body.start-mode #workspace {
 .diagram-shape .add-anim {
     max-width: 110px;
 }
+
+/* ── Chart dialog (chart.ts): data grid, settings, preview ── */
+
+.chart-dialog {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 380px;
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 14px 18px;
+    height: min(640px, 76vh);
+}
+
+.chart-data {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+}
+
+.chart-tools {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.hint.chart-tools-hint {
+    margin: 0 0 0 6px;
+}
+
+.chart-grid-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid var(--ui-line);
+    border-radius: 6px;
+}
+
+.chart-grid {
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+}
+
+.chart-grid th,
+.chart-grid td {
+    padding: 0;
+    border: 1px solid var(--ui-line);
+}
+
+.chart-grid thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--ui-panel);
+}
+
+.chart-grid input[type="text"] {
+    width: 120px;
+    height: 28px;
+    padding: 0 7px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+.chart-grid input[type="text"]:focus {
+    outline: 2px solid var(--sel);
+    outline-offset: -2px;
+    background: var(--ui-bg);
+}
+
+.chart-grid input.chart-head {
+    font-weight: 600;
+}
+
+.chart-th {
+    display: flex;
+    align-items: center;
+}
+
+.chart-corner {
+    width: 36px;
+}
+
+.chart-rownum {
+    background: var(--ui-panel);
+}
+
+.chart-x {
+    flex: none;
+    min-width: 22px;
+    height: 28px;
+    padding: 0 6px;
+    background: none;
+    border: none;
+    color: var(--subtext);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.chart-x:hover:not(:disabled) {
+    color: var(--red);
+}
+
+.chart-x:disabled {
+    visibility: hidden;
+}
+
+.chart-rownum .chart-x {
+    width: 100%;
+}
+
+.chart-side {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.chart-side h3 {
+    margin: 6px 0 0;
+}
+
+.chart-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.chart-field {
+    display: grid;
+    grid-template-columns: 84px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.chart-field > span:first-child {
+    align-self: start;
+    padding-top: 5px;
+    color: var(--subtext);
+}
+
+.chart-series,
+.chart-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+}
+
+/* Lined up with the fields above (their 84px label column and gap). */
+.chart-options {
+    padding-left: 92px;
+}
+
+.chart-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+}
+
+.chart-check.off {
+    opacity: 0.5;
+}
+
+.chart-preview {
+    width: 100%;
+    padding: 8px;
+    background: var(--inkflow-bg, var(--ui-bg));
+    border: 1px solid var(--ui-line);
+    border-radius: 6px;
+}
+
+.chart-preview .inkflow-chart {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+.chart-status {
+    min-height: 1.4em;
+}
+
+.chart-actions {
+    display: flex;
+    grid-column: 1 / -1;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.hint.chart-actions-hint {
+    margin: 0 auto 0 0;
+}
+
+.hint.error {
+    color: var(--red);
+}

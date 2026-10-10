@@ -1933,7 +1933,7 @@
       });
       rh.dataset.handle = "rot";
       const frames = ed.selection.some(
-        (s) => s.el.localName === "svg" && !s.el.hasAttribute("data-drawio") || isDiagramCell(s.el)
+        (s) => s.el.localName === "svg" && !s.el.hasAttribute("data-drawio") && !s.el.classList.contains("inkflow-chart") || isDiagramCell(s.el)
       );
       if (!ed.cropMode && !frames) overlay.append(rh);
       for (const h2 of HANDLES) {
@@ -3079,47 +3079,200 @@
     emit("zoom");
   }
 
-  // src/ts/editor/pathtext.ts
-  function sepOf(path) {
-    return path.includes("\\") && !path.includes("/") ? "\\" : "/";
+  // src/ts/editor/chartgrid.ts
+  var CHART_KINDS = [
+    { value: "bar", label: "Bar" },
+    { value: "line", label: "Line" },
+    { value: "area", label: "Area" },
+    { value: "scatter", label: "Scatter" },
+    { value: "pie", label: "Pie" }
+  ];
+  function defaultSettings() {
+    return {
+      kind: "bar",
+      x: null,
+      y: null,
+      title: null,
+      stacked: false,
+      horizontal: false,
+      legend: null,
+      labels: false,
+      donut: false
+    };
   }
-  function withSep(dir) {
-    const sep2 = sepOf(dir);
-    return dir.endsWith(sep2) ? dir : dir + sep2;
+  function sampleGrid() {
+    return {
+      columns: ["category", "series 1", "series 2"],
+      rows: [
+        ["A", "4", "2"],
+        ["B", "6", "3"],
+        ["C", "5", "4"],
+        ["D", "8", "5"]
+      ]
+    };
   }
-  function joinPath(dir, name2) {
-    return withSep(dir) + name2;
+  var NUMBER = /^[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?(?:[eE][-+]?\d+)?$/;
+  function isNumber(text) {
+    const s = text.trim();
+    return /\d/.test(s) && NUMBER.test(s);
   }
-  function baseName(path) {
-    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+  function numericColumns(grid) {
+    return grid.columns.filter((_, c) => {
+      const cells = grid.rows.map((r) => r[c] ?? "").filter((v) => v.trim());
+      return cells.length > 0 && cells.every(isNumber);
+    });
   }
-  function samePath(a, b) {
-    const norm = (p) => p.replace(/(.)[\\/]+$/, "$1");
-    return norm(a) === norm(b);
+  function xColumn(grid, s) {
+    return s.x && grid.columns.includes(s.x) ? s.x : grid.columns[0] ?? null;
   }
-  function commonPrefix(names) {
-    if (!names.length) return "";
-    let prefix = names[0];
-    for (const name2 of names.slice(1)) {
-      let i = 0;
-      while (i < prefix.length && i < name2.length && prefix[i].toLowerCase() === name2[i].toLowerCase()) {
+  function plotted(grid, s) {
+    const x = xColumn(grid, s);
+    if (s.y) return s.y.filter((c) => grid.columns.includes(c));
+    return numericColumns(grid).filter((c) => c !== x);
+  }
+  function toggleSeries(grid, s, column, on2) {
+    const current2 = plotted(grid, s);
+    const next = on2 ? grid.columns.filter((c) => c === column || current2.includes(c)) : current2.filter((c) => c !== column);
+    const auto = plotted(grid, { ...s, y: null });
+    const same = next.length === auto.length && next.every((c, i) => c === auto[i]);
+    return same ? null : next;
+  }
+  function parseClipboard(text) {
+    const body2 = text.replace(/\r\n?/g, "\n").replace(/\n$/, "");
+    const sep2 = body2.includes("	") ? "	" : body2.includes(",") ? "," : "	";
+    const rows = [];
+    let row3 = [];
+    let cell = "";
+    let quoted = false;
+    let i = 0;
+    while (i < body2.length) {
+      const ch = body2[i];
+      if (quoted) {
+        if (ch === '"' && body2[i + 1] === '"') {
+          cell += '"';
+          i += 2;
+          continue;
+        }
+        if (ch === '"') quoted = false;
+        else cell += ch;
         i++;
+        continue;
       }
-      prefix = prefix.slice(0, i);
+      if (ch === '"' && cell === "") quoted = true;
+      else if (ch === sep2) {
+        row3.push(cell);
+        cell = "";
+      } else if (ch === "\n") {
+        row3.push(cell);
+        rows.push(row3);
+        row3 = [];
+        cell = "";
+      } else cell += ch;
+      i++;
     }
-    return prefix;
+    row3.push(cell);
+    rows.push(row3);
+    return rows;
   }
-  function startingWith(names, typed) {
-    const t = typed.toLowerCase();
-    return names.filter((n2) => n2.toLowerCase().startsWith(t));
+  function isMultiCell(text) {
+    const rows = parseClipboard(text);
+    return rows.length > 1 || (rows[0]?.length ?? 0) > 1;
   }
-  function splitTyped(value) {
-    const i = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
-    if (i < 0) return { dir: "", prefix: value };
-    return { dir: value.slice(0, i + 1), prefix: value.slice(i + 1) };
+  function blankRow(width) {
+    return Array.from({ length: width }, () => "");
   }
-  function assetRef(href) {
-    return href.replace(/\?v=[0-9a-f]+$/, "");
+  function uniqueName(columns2, base2) {
+    let name2 = base2;
+    let n2 = 2;
+    while (columns2.includes(name2)) name2 = `${base2} ${n2++}`;
+    return name2;
+  }
+  function pasteCells(grid, row3, col, cells) {
+    const columns2 = [...grid.columns];
+    const rows = grid.rows.map((r) => [...r]);
+    let body2 = cells;
+    if (row3 < 0) {
+      const head = cells[0] ?? [];
+      head.forEach((name2, j) => {
+        const c = col + j;
+        while (columns2.length <= c) {
+          columns2.push(
+            uniqueName(columns2, `column ${columns2.length + 1}`)
+          );
+        }
+        columns2[c] = name2.trim() || columns2[c];
+      });
+      body2 = cells.slice(1);
+      row3 = 0;
+    }
+    const width = Math.max(
+      columns2.length,
+      col + Math.max(0, ...body2.map((r) => r.length))
+    );
+    while (columns2.length < width) {
+      columns2.push(uniqueName(columns2, `column ${columns2.length + 1}`));
+    }
+    for (const r of rows) while (r.length < width) r.push("");
+    body2.forEach((line, i) => {
+      while (rows.length <= row3 + i) rows.push(blankRow(width));
+      line.forEach((value, j) => {
+        rows[row3 + i][col + j] = value;
+      });
+    });
+    return { columns: columns2, rows };
+  }
+  function addRow(grid, at2 = grid.rows.length) {
+    const rows = grid.rows.map((r) => [...r]);
+    rows.splice(at2, 0, blankRow(grid.columns.length));
+    return { columns: [...grid.columns], rows };
+  }
+  function removeRow(grid, at2) {
+    return {
+      columns: [...grid.columns],
+      rows: grid.rows.filter((_, i) => i !== at2).map((r) => [...r])
+    };
+  }
+  function addColumn(grid, name2) {
+    const columns2 = [
+      ...grid.columns,
+      uniqueName(grid.columns, name2 ?? `series ${grid.columns.length}`)
+    ];
+    return { columns: columns2, rows: grid.rows.map((r) => [...r, ""]) };
+  }
+  function removeColumn(grid, at2, s) {
+    const name2 = grid.columns[at2];
+    const next = {
+      columns: grid.columns.filter((_, i) => i !== at2),
+      rows: grid.rows.map((r) => r.filter((_, i) => i !== at2))
+    };
+    return {
+      grid: next,
+      settings: {
+        ...s,
+        x: s.x === name2 ? null : s.x,
+        y: s.y ? s.y.filter((c) => c !== name2) : null
+      }
+    };
+  }
+  function renameColumn(grid, at2, wanted, s) {
+    const old = grid.columns[at2];
+    const others = grid.columns.filter((_, i) => i !== at2);
+    const name2 = uniqueName(others, wanted.trim() || old);
+    const columns2 = grid.columns.map((c, i) => i === at2 ? name2 : c);
+    return {
+      grid: { columns: columns2, rows: grid.rows.map((r) => [...r]) },
+      settings: {
+        ...s,
+        x: s.x === old ? name2 : s.x,
+        y: s.y ? s.y.map((c) => c === old ? name2 : c) : null
+      }
+    };
+  }
+  function trimmed(grid) {
+    return {
+      columns: [...grid.columns],
+      rows: grid.rows.filter((r) => r.some((v) => v.trim() !== ""))
+    };
   }
 
   // src/ts/editor/dialog.ts
@@ -3188,337 +3341,6 @@
     host2.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") e.stopPropagation();
     });
-  }
-
-  // src/ts/editor/folderpicker.ts
-  function megabytes(bytes) {
-    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-    if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
-    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  }
-  function folderPicker(start, onChange, files2) {
-    let folder = null;
-    let places = { favorites: [], default: null };
-    let filter = "";
-    let typing = 0;
-    const path = h("input", {
-      type: "text",
-      class: "folder-path",
-      spellcheck: "false",
-      autocomplete: "off",
-      title: "Type a path: Tab completes, Enter opens, \u2193 goes to the list"
-    });
-    const list3 = h("div", { class: "folder-list", role: "listbox" });
-    const where = h("div", { class: "hint folder-where" });
-    const placesRow = h("div", { class: "folder-places" });
-    const star = h("button", {
-      type: "button",
-      class: "pbtn folder-star"
-    });
-    const system = h(
-      "button",
-      {
-        type: "button",
-        class: "pbtn",
-        hidden: true,
-        title: "Choose with this computer's own dialog"
-      },
-      "Browse\u2026"
-    );
-    const entries = () => [...list3.querySelectorAll("button.folder")].filter(
-      (b) => !b.hidden
-    );
-    async function go(target, opts2 = {}) {
-      const res = await request({
-        action: "browse",
-        path: target,
-        files: files2?.kind
-      });
-      if (!res.ok) {
-        if (!opts2.quiet) {
-          where.textContent = res.error ?? "Cannot open that folder";
-        }
-        return false;
-      }
-      folder = res;
-      places = folder.places ?? places;
-      system.hidden = !folder.systemPicker;
-      path.value = withSep(folder.path);
-      filter = "";
-      renderList();
-      renderPlaces();
-      where.textContent = folder.repo ? `In the git repository at ${folder.repo}` : "Not in a git repository";
-      onChange(folder);
-      if (opts2.focus === "list") (entries()[0] ?? path).focus();
-      else if (opts2.focus === "path") path.focus();
-      return true;
-    }
-    function entry(label4, kind, onOpen, extra) {
-      const b = h(
-        "button",
-        {
-          type: "button",
-          class: `folder ${kind === "file" ? "file" : kind === "up" ? "up" : ""}`,
-          role: "option",
-          onclick: onOpen
-        },
-        label4,
-        extra ?? null
-      );
-      return b;
-    }
-    function renderList() {
-      clear(list3);
-      const f = folder;
-      if (!f) return;
-      if (f.parent && !filter) {
-        list3.append(
-          entry("\u2191 ..", "up", () => {
-            if (f.parent) void go(f.parent, { focus: "list" });
-          })
-        );
-      }
-      const dirs = startingWith(f.dirs, filter);
-      for (const name2 of dirs) {
-        list3.append(
-          entry(`\u{1F4C1} ${name2}`, "dir", () => {
-            void go(joinPath(f.path, name2), { focus: "list" });
-          })
-        );
-      }
-      const shown = startingWith(
-        (f.files ?? []).map((x) => x.name),
-        filter
-      );
-      for (const file of f.files ?? []) {
-        if (!shown.includes(file.name)) continue;
-        list3.append(
-          entry(
-            `\u{1F39E} ${file.name}`,
-            "file",
-            () => files2?.onFile(joinPath(f.path, file.name)),
-            h(
-              "span",
-              { class: "hint file-size" },
-              megabytes(file.size)
-            )
-          )
-        );
-      }
-      if (!dirs.length && !shown.length) {
-        list3.append(
-          h(
-            "p",
-            { class: "hint folder-empty" },
-            filter ? `Nothing here starts with \u201C${filter}\u201D.` : "No folders here."
-          )
-        );
-      }
-      path.toggleAttribute("data-own-escape", !!filter);
-    }
-    async function setPlaces(op, target) {
-      const res = await request({ action: "places-set", op, path: target });
-      if (!res.ok) {
-        toast(res.error ?? "Cannot save that", "error");
-        return;
-      }
-      places = res.places;
-      renderPlaces();
-    }
-    function chip(label4, target, remove) {
-      return h(
-        "span",
-        { class: "place" },
-        h(
-          "button",
-          {
-            type: "button",
-            class: "place-go",
-            title: target,
-            onclick: () => void go(target, { focus: "list" })
-          },
-          label4
-        ),
-        remove ? h(
-          "button",
-          {
-            type: "button",
-            class: "place-remove",
-            title: "Remove from favourites",
-            onclick: remove
-          },
-          "\xD7"
-        ) : null
-      );
-    }
-    function renderPlaces() {
-      clear(placesRow);
-      const here = folder?.path ?? "";
-      const isFavorite = places.favorites.some((p) => samePath(p, here));
-      star.textContent = isFavorite ? "\u2605" : "\u2606";
-      star.title = isFavorite ? "Remove this folder from your favourites" : "Add this folder to your favourites";
-      star.classList.toggle("on", isFavorite);
-      if (places.default) {
-        placesRow.append(
-          chip(`\u2302 ${baseName(places.default)} (default)`, places.default)
-        );
-      }
-      for (const p of places.favorites) {
-        placesRow.append(
-          chip(`\u2605 ${baseName(p)}`, p, () => void setPlaces("remove", p))
-        );
-      }
-      const isDefault = !!places.default && samePath(places.default, here);
-      placesRow.append(
-        h(
-          "button",
-          {
-            type: "button",
-            class: "place-default",
-            title: isDefault ? "New decks go here and Open deck starts here; click to forget it" : "New decks go here and Open deck starts here",
-            onclick: () => void setPlaces("default", isDefault ? null : here)
-          },
-          isDefault ? "\u2713 Default location" : "Make this the default location"
-        )
-      );
-    }
-    path.addEventListener("input", () => {
-      window.clearTimeout(typing);
-      const { dir, prefix } = splitTyped(path.value);
-      if (folder && samePath(dir, folder.path)) {
-        filter = prefix;
-        renderList();
-      } else if (dir && !prefix) {
-        typing = window.setTimeout(
-          () => void go(dir, { quiet: true }),
-          250
-        );
-      }
-    });
-    async function complete() {
-      const { dir, prefix } = splitTyped(path.value);
-      if (!folder || !samePath(dir, folder.path)) {
-        if (!dir || !await go(dir, { quiet: true })) return;
-        path.value = withSep(folder.path) + prefix;
-      }
-      const f = folder;
-      const matches = startingWith(f.dirs, prefix);
-      if (matches.length === 1) {
-        await go(joinPath(f.path, matches[0]));
-        return;
-      }
-      const common = commonPrefix(matches);
-      filter = common.length > prefix.length ? common : prefix;
-      path.value = withSep(f.path) + filter;
-      renderList();
-    }
-    path.addEventListener("keydown", (e) => {
-      if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.altKey) {
-        e.preventDefault();
-        void complete();
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        const { dir, prefix } = splitTyped(path.value);
-        const f = folder;
-        if (f && prefix && samePath(dir, f.path)) {
-          const exact = f.dirs.find(
-            (d) => d.toLowerCase() === prefix.toLowerCase()
-          );
-          const only = startingWith(f.dirs, prefix);
-          const into = exact ?? (only.length === 1 ? only[0] : null);
-          if (into) {
-            void go(joinPath(f.path, into));
-            return;
-          }
-        }
-        void go(path.value);
-      } else if (e.key === "ArrowDown") {
-        e.preventDefault();
-        entries()[0]?.focus();
-      } else if (e.key === "Escape" && filter && folder) {
-        e.preventDefault();
-        path.value = withSep(folder.path);
-        filter = "";
-        renderList();
-      }
-    });
-    list3.addEventListener("keydown", (e) => {
-      const items = entries();
-      const at2 = items.indexOf(document.activeElement);
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        const next = at2 + (e.key === "ArrowDown" ? 1 : -1);
-        if (next < 0) path.focus();
-        else items[Math.min(next, items.length - 1)]?.focus();
-      } else if (e.key === "Backspace") {
-        e.preventDefault();
-        if (filter) {
-          path.focus();
-          path.value = path.value.slice(0, -1);
-          path.dispatchEvent(new Event("input"));
-        } else if (folder?.parent) {
-          void go(folder.parent, { focus: "list" });
-        }
-      } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && e.key !== " ") {
-        e.preventDefault();
-        path.focus();
-        path.value += e.key;
-        path.dispatchEvent(new Event("input"));
-      }
-    });
-    star.addEventListener("click", () => {
-      const here = folder?.path;
-      if (!here) return;
-      const isFavorite = places.favorites.some((p) => samePath(p, here));
-      void setPlaces(isFavorite ? "remove" : "add", here);
-    });
-    system.addEventListener("click", async () => {
-      system.disabled = true;
-      const before = where.textContent;
-      where.textContent = "A dialog is open on this computer (it may be behind the browser)\u2026";
-      const res = await request({
-        action: "system-pick",
-        path: folder?.path ?? start,
-        files: files2?.kind,
-        title: files2 ? "Choose a video" : "Choose a folder"
-      });
-      system.disabled = false;
-      where.textContent = before;
-      if (!res.ok) {
-        toast(res.error ?? "No dialog could be shown", "error");
-        return;
-      }
-      const chosen = typeof res.path === "string" ? res.path : null;
-      if (!chosen) return;
-      if (files2) files2.onFile(chosen);
-      else void go(chosen);
-    });
-    const el2 = h(
-      "div",
-      { class: "folder-picker" },
-      h(
-        "div",
-        { class: "folder-bar" },
-        path,
-        system,
-        h(
-          "button",
-          {
-            type: "button",
-            class: "pbtn",
-            title: "Your home folder",
-            onclick: () => void go(folder?.home ?? "~", { focus: "list" })
-          },
-          "Home"
-        ),
-        star
-      ),
-      placesRow,
-      list3,
-      where
-    );
-    void go(start);
-    return { el: el2, current: () => folder, focus: () => path.focus() };
   }
 
   // src/ts/editor/gallery.ts
@@ -4049,6 +3871,523 @@
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closeMenu();
     });
+  }
+
+  // src/ts/editor/clipboard.ts
+  var PREFIX = "inkflow-clipboard:";
+  var lastCopied = null;
+  async function put(payload) {
+    const text = PREFIX + JSON.stringify(payload);
+    lastCopied = text;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      toast("Copied for this tab only: the browser blocked the clipboard");
+    }
+  }
+  function selectedSlides() {
+    const picked = [...ed.slideSelection].sort((a, b) => a - b);
+    return picked.length ? picked : [ed.current];
+  }
+  async function copySlides(indices = selectedSlides()) {
+    const result = await request({ action: "copy-slides", slides: indices });
+    if (!result.ok) {
+      toast(result.error ?? "could not copy", "error");
+      return false;
+    }
+    const bundle = result.bundle;
+    await put(bundle);
+    const dropped = bundle.dropped ?? [];
+    const n2 = indices.length;
+    toast(
+      `Copied ${n2} slide${n2 > 1 ? "s" : ""}` + (dropped.length ? `; left out ${dropped.join(", ")}` : "")
+    );
+    return true;
+  }
+  async function cutSlides() {
+    const indices = selectedSlides();
+    if (!await copySlides(indices)) return;
+    const result = await edit({
+      action: "slide",
+      op: "delete",
+      slides: indices
+    });
+    if (result.ok) {
+      ed.slideSelection.clear();
+      ed.current = Math.max(0, Math.min(...indices) - 1);
+      emit("slide");
+    }
+  }
+  function imageRefs(xml) {
+    const refs = /* @__PURE__ */ new Set();
+    for (const m of xml.matchAll(
+      /<image\b[^>]*?\b(?:xlink:)?href="([^"]*)"/g
+    )) {
+      if (!/^(data:|https?:|#|\/)/.test(m[1])) refs.add(m[1]);
+    }
+    return [...refs];
+  }
+  async function copyObjects(cut2 = false) {
+    const sels = ed.selection.filter((s) => s.el.localName !== "foreignObject");
+    if (!sels.length) return false;
+    const fragments = sels.map((s) => cleanForPaste(s.el));
+    const refs = fragments.flatMap(imageRefs);
+    let files2 = {};
+    if (refs.length) {
+      const result = await request({ action: "copy-assets", refs });
+      files2 = result.files ?? {};
+    }
+    await put({
+      type: "inkflow-objects",
+      version: 1,
+      project: ed.model?.projectDir,
+      sourceFile: currentSlide()?.sources?.[sels[0].key]?.path ?? "",
+      fragments,
+      files: files2
+    });
+    const n2 = sels.length;
+    toast(`${cut2 ? "Cut" : "Copied"} ${n2} object${n2 > 1 ? "s" : ""}`);
+    if (cut2) emit("delete");
+    return true;
+  }
+  function copy() {
+    if (ed.selection.length) void copyObjects();
+    else void copySlides();
+  }
+  function cut() {
+    if (ed.selection.some((s) => canTransform(s.el))) void copyObjects(true);
+    else void cutSlides();
+  }
+  async function pasteSlides(bundle) {
+    const after = ed.current;
+    const result = await edit({ action: "paste-slides", after, bundle });
+    if (!result.ok) return;
+    const n2 = result.pasted;
+    toast(`Pasted ${n2} slide${n2 > 1 ? "s" : ""}`, "ok");
+    ed.slideSelection.clear();
+    afterSlides = after + 1;
+  }
+  var afterSlides = null;
+  function followPastedSlides() {
+    if (afterSlides != null && afterSlides < (ed.model?.slides.length ?? 0)) {
+      const target = afterSlides;
+      afterSlides = null;
+      gotoSlide(target);
+    }
+  }
+  async function pasteObjects(bundle) {
+    if (!await ensureOwnDrawing()) return;
+    const src = ownSource();
+    if (!src) return;
+    const sameFile = bundle.sourceFile === src.path;
+    clearSelection();
+    const result = await edit({
+      action: "paste-objects",
+      file: src.path,
+      hash: src.hash,
+      parent: insertParent().loc,
+      fragments: bundle.fragments,
+      files: bundle.files,
+      // Copies on the same slide are offset so they do not hide the original.
+      offset: sameFile ? [24, 24] : null
+    });
+    if (result.ok && result.ids) afterRender.ids = Object.values(result.ids);
+  }
+  async function pasteText(text) {
+    const raw = text.startsWith(PREFIX) ? text : lastCopied;
+    if (!raw?.startsWith(PREFIX)) return;
+    let bundle;
+    try {
+      bundle = JSON.parse(raw.slice(PREFIX.length));
+    } catch {
+      toast("The clipboard holds damaged inkflow data", "error");
+      return;
+    }
+    if (bundle.type === "inkflow-slides") await pasteSlides(bundle);
+    else if (bundle.type === "inkflow-objects") await pasteObjects(bundle);
+  }
+  async function pasteFromClipboard() {
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      text = lastCopied ?? "";
+    }
+    await pasteText(text);
+  }
+
+  // src/ts/editor/pathtext.ts
+  function sepOf(path) {
+    return path.includes("\\") && !path.includes("/") ? "\\" : "/";
+  }
+  function withSep(dir) {
+    const sep2 = sepOf(dir);
+    return dir.endsWith(sep2) ? dir : dir + sep2;
+  }
+  function joinPath(dir, name2) {
+    return withSep(dir) + name2;
+  }
+  function baseName(path) {
+    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+  }
+  function samePath(a, b) {
+    const norm = (p) => p.replace(/(.)[\\/]+$/, "$1");
+    return norm(a) === norm(b);
+  }
+  function commonPrefix(names) {
+    if (!names.length) return "";
+    let prefix = names[0];
+    for (const name2 of names.slice(1)) {
+      let i = 0;
+      while (i < prefix.length && i < name2.length && prefix[i].toLowerCase() === name2[i].toLowerCase()) {
+        i++;
+      }
+      prefix = prefix.slice(0, i);
+    }
+    return prefix;
+  }
+  function startingWith(names, typed) {
+    const t = typed.toLowerCase();
+    return names.filter((n2) => n2.toLowerCase().startsWith(t));
+  }
+  function splitTyped(value) {
+    const i = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+    if (i < 0) return { dir: "", prefix: value };
+    return { dir: value.slice(0, i + 1), prefix: value.slice(i + 1) };
+  }
+  function assetRef(href) {
+    return href.replace(/\?v=[0-9a-f]+$/, "");
+  }
+
+  // src/ts/editor/folderpicker.ts
+  function megabytes(bytes) {
+    if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+    if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+  function folderPicker(start, onChange, files2) {
+    let folder = null;
+    let places = { favorites: [], default: null };
+    let filter = "";
+    let typing = 0;
+    const path = h("input", {
+      type: "text",
+      class: "folder-path",
+      spellcheck: "false",
+      autocomplete: "off",
+      title: "Type a path: Tab completes, Enter opens, \u2193 goes to the list"
+    });
+    const list3 = h("div", { class: "folder-list", role: "listbox" });
+    const where = h("div", { class: "hint folder-where" });
+    const placesRow = h("div", { class: "folder-places" });
+    const star = h("button", {
+      type: "button",
+      class: "pbtn folder-star"
+    });
+    const system = h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn",
+        hidden: true,
+        title: "Choose with this computer's own dialog"
+      },
+      "Browse\u2026"
+    );
+    const entries = () => [...list3.querySelectorAll("button.folder")].filter(
+      (b) => !b.hidden
+    );
+    async function go(target, opts2 = {}) {
+      const res = await request({
+        action: "browse",
+        path: target,
+        files: files2?.kind
+      });
+      if (!res.ok) {
+        if (!opts2.quiet) {
+          where.textContent = res.error ?? "Cannot open that folder";
+        }
+        return false;
+      }
+      folder = res;
+      places = folder.places ?? places;
+      system.hidden = !folder.systemPicker;
+      path.value = withSep(folder.path);
+      filter = "";
+      renderList();
+      renderPlaces();
+      where.textContent = folder.repo ? `In the git repository at ${folder.repo}` : "Not in a git repository";
+      onChange(folder);
+      if (opts2.focus === "list") (entries()[0] ?? path).focus();
+      else if (opts2.focus === "path") path.focus();
+      return true;
+    }
+    function entry(label4, kind, onOpen, extra) {
+      const b = h(
+        "button",
+        {
+          type: "button",
+          class: `folder ${kind === "file" ? "file" : kind === "up" ? "up" : ""}`,
+          role: "option",
+          onclick: onOpen
+        },
+        label4,
+        extra ?? null
+      );
+      return b;
+    }
+    function renderList() {
+      clear(list3);
+      const f = folder;
+      if (!f) return;
+      if (f.parent && !filter) {
+        list3.append(
+          entry("\u2191 ..", "up", () => {
+            if (f.parent) void go(f.parent, { focus: "list" });
+          })
+        );
+      }
+      const dirs = startingWith(f.dirs, filter);
+      for (const name2 of dirs) {
+        list3.append(
+          entry(`\u{1F4C1} ${name2}`, "dir", () => {
+            void go(joinPath(f.path, name2), { focus: "list" });
+          })
+        );
+      }
+      const shown = startingWith(
+        (f.files ?? []).map((x) => x.name),
+        filter
+      );
+      for (const file of f.files ?? []) {
+        if (!shown.includes(file.name)) continue;
+        list3.append(
+          entry(
+            `\u{1F39E} ${file.name}`,
+            "file",
+            () => files2?.onFile(joinPath(f.path, file.name)),
+            h(
+              "span",
+              { class: "hint file-size" },
+              megabytes(file.size)
+            )
+          )
+        );
+      }
+      if (!dirs.length && !shown.length) {
+        list3.append(
+          h(
+            "p",
+            { class: "hint folder-empty" },
+            filter ? `Nothing here starts with \u201C${filter}\u201D.` : "No folders here."
+          )
+        );
+      }
+      path.toggleAttribute("data-own-escape", !!filter);
+    }
+    async function setPlaces(op, target) {
+      const res = await request({ action: "places-set", op, path: target });
+      if (!res.ok) {
+        toast(res.error ?? "Cannot save that", "error");
+        return;
+      }
+      places = res.places;
+      renderPlaces();
+    }
+    function chip(label4, target, remove) {
+      return h(
+        "span",
+        { class: "place" },
+        h(
+          "button",
+          {
+            type: "button",
+            class: "place-go",
+            title: target,
+            onclick: () => void go(target, { focus: "list" })
+          },
+          label4
+        ),
+        remove ? h(
+          "button",
+          {
+            type: "button",
+            class: "place-remove",
+            title: "Remove from favourites",
+            onclick: remove
+          },
+          "\xD7"
+        ) : null
+      );
+    }
+    function renderPlaces() {
+      clear(placesRow);
+      const here = folder?.path ?? "";
+      const isFavorite = places.favorites.some((p) => samePath(p, here));
+      star.textContent = isFavorite ? "\u2605" : "\u2606";
+      star.title = isFavorite ? "Remove this folder from your favourites" : "Add this folder to your favourites";
+      star.classList.toggle("on", isFavorite);
+      if (places.default) {
+        placesRow.append(
+          chip(`\u2302 ${baseName(places.default)} (default)`, places.default)
+        );
+      }
+      for (const p of places.favorites) {
+        placesRow.append(
+          chip(`\u2605 ${baseName(p)}`, p, () => void setPlaces("remove", p))
+        );
+      }
+      const isDefault = !!places.default && samePath(places.default, here);
+      placesRow.append(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "place-default",
+            title: isDefault ? "New decks go here and Open deck starts here; click to forget it" : "New decks go here and Open deck starts here",
+            onclick: () => void setPlaces("default", isDefault ? null : here)
+          },
+          isDefault ? "\u2713 Default location" : "Make this the default location"
+        )
+      );
+    }
+    path.addEventListener("input", () => {
+      window.clearTimeout(typing);
+      const { dir, prefix } = splitTyped(path.value);
+      if (folder && samePath(dir, folder.path)) {
+        filter = prefix;
+        renderList();
+      } else if (dir && !prefix) {
+        typing = window.setTimeout(
+          () => void go(dir, { quiet: true }),
+          250
+        );
+      }
+    });
+    async function complete() {
+      const { dir, prefix } = splitTyped(path.value);
+      if (!folder || !samePath(dir, folder.path)) {
+        if (!dir || !await go(dir, { quiet: true })) return;
+        path.value = withSep(folder.path) + prefix;
+      }
+      const f = folder;
+      const matches = startingWith(f.dirs, prefix);
+      if (matches.length === 1) {
+        await go(joinPath(f.path, matches[0]));
+        return;
+      }
+      const common = commonPrefix(matches);
+      filter = common.length > prefix.length ? common : prefix;
+      path.value = withSep(f.path) + filter;
+      renderList();
+    }
+    path.addEventListener("keydown", (e) => {
+      if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        void complete();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const { dir, prefix } = splitTyped(path.value);
+        const f = folder;
+        if (f && prefix && samePath(dir, f.path)) {
+          const exact = f.dirs.find(
+            (d) => d.toLowerCase() === prefix.toLowerCase()
+          );
+          const only = startingWith(f.dirs, prefix);
+          const into = exact ?? (only.length === 1 ? only[0] : null);
+          if (into) {
+            void go(joinPath(f.path, into));
+            return;
+          }
+        }
+        void go(path.value);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        entries()[0]?.focus();
+      } else if (e.key === "Escape" && filter && folder) {
+        e.preventDefault();
+        path.value = withSep(folder.path);
+        filter = "";
+        renderList();
+      }
+    });
+    list3.addEventListener("keydown", (e) => {
+      const items = entries();
+      const at2 = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const next = at2 + (e.key === "ArrowDown" ? 1 : -1);
+        if (next < 0) path.focus();
+        else items[Math.min(next, items.length - 1)]?.focus();
+      } else if (e.key === "Backspace") {
+        e.preventDefault();
+        if (filter) {
+          path.focus();
+          path.value = path.value.slice(0, -1);
+          path.dispatchEvent(new Event("input"));
+        } else if (folder?.parent) {
+          void go(folder.parent, { focus: "list" });
+        }
+      } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && e.key !== " ") {
+        e.preventDefault();
+        path.focus();
+        path.value += e.key;
+        path.dispatchEvent(new Event("input"));
+      }
+    });
+    star.addEventListener("click", () => {
+      const here = folder?.path;
+      if (!here) return;
+      const isFavorite = places.favorites.some((p) => samePath(p, here));
+      void setPlaces(isFavorite ? "remove" : "add", here);
+    });
+    system.addEventListener("click", async () => {
+      system.disabled = true;
+      const before = where.textContent;
+      where.textContent = "A dialog is open on this computer (it may be behind the browser)\u2026";
+      const res = await request({
+        action: "system-pick",
+        path: folder?.path ?? start,
+        files: files2?.kind,
+        title: files2 ? "Choose a video" : "Choose a folder"
+      });
+      system.disabled = false;
+      where.textContent = before;
+      if (!res.ok) {
+        toast(res.error ?? "No dialog could be shown", "error");
+        return;
+      }
+      const chosen = typeof res.path === "string" ? res.path : null;
+      if (!chosen) return;
+      if (files2) files2.onFile(chosen);
+      else void go(chosen);
+    });
+    const el2 = h(
+      "div",
+      { class: "folder-picker" },
+      h(
+        "div",
+        { class: "folder-bar" },
+        path,
+        system,
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            title: "Your home folder",
+            onclick: () => void go(folder?.home ?? "~", { focus: "list" })
+          },
+          "Home"
+        ),
+        star
+      ),
+      placesRow,
+      list3,
+      where
+    );
+    void go(start);
+    return { el: el2, current: () => folder, focus: () => path.focus() };
   }
 
   // src/ts/editor/openwith.ts
@@ -5263,147 +5602,498 @@
     });
   }
 
-  // src/ts/editor/clipboard.ts
-  var PREFIX = "inkflow-clipboard:";
-  var lastCopied = null;
-  async function put(payload) {
-    const text = PREFIX + JSON.stringify(payload);
-    lastCopied = text;
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      toast("Copied for this tab only: the browser blocked the clipboard");
-    }
+  // src/ts/editor/chart.ts
+  function chartSettings(value) {
+    const f = value.fields ?? {};
+    const s = defaultSettings();
+    return {
+      kind: typeof f.kind === "string" ? f.kind : s.kind,
+      x: typeof f.x === "string" ? f.x : null,
+      y: Array.isArray(f.y) ? f.y : null,
+      title: typeof f.title === "string" ? f.title : null,
+      stacked: f.stacked === true,
+      horizontal: f.horizontal === true,
+      legend: typeof f.legend === "boolean" ? f.legend : null,
+      labels: f.labels === true,
+      donut: f.donut === true
+    };
   }
-  function selectedSlides() {
-    const picked = [...ed.slideSelection].sort((a, b) => a - b);
-    return picked.length ? picked : [ed.current];
+  function newChartBox(at2) {
+    const vb = slideRoot()?.viewBox.baseVal;
+    const vw = vb?.width || 1920;
+    const vh = vb?.height || 1080;
+    const w = Math.round(vw * 0.6);
+    const ht = Math.round(w * 9 / 16);
+    const cx = Math.min(Math.max(at2?.x ?? vw / 2, w / 2), vw - w / 2);
+    const cy = Math.min(Math.max(at2?.y ?? vh / 2, ht / 2), vh - ht / 2);
+    return { x: cx - w / 2, y: cy - ht / 2, width: w, height: ht };
   }
-  async function copySlides(indices = selectedSlides()) {
-    const result = await request({ action: "copy-slides", slides: indices });
-    if (!result.ok) {
-      toast(result.error ?? "could not copy", "error");
-      return false;
-    }
-    const bundle = result.bundle;
-    await put(bundle);
-    const dropped = bundle.dropped ?? [];
-    const n2 = indices.length;
-    toast(
-      `Copied ${n2} slide${n2 > 1 ? "s" : ""}` + (dropped.length ? `; left out ${dropped.join(", ")}` : "")
-    );
-    return true;
-  }
-  async function cutSlides() {
-    const indices = selectedSlides();
-    if (!await copySlides(indices)) return;
-    const result = await edit({
-      action: "slide",
-      op: "delete",
-      slides: indices
-    });
-    if (result.ok) {
-      ed.slideSelection.clear();
-      ed.current = Math.max(0, Math.min(...indices) - 1);
-      emit("slide");
-    }
-  }
-  function imageRefs(xml) {
-    const refs = /* @__PURE__ */ new Set();
-    for (const m of xml.matchAll(
-      /<image\b[^>]*?\b(?:xlink:)?href="([^"]*)"/g
-    )) {
-      if (!/^(data:|https?:|#|\/)/.test(m[1])) refs.add(m[1]);
-    }
-    return [...refs];
-  }
-  async function copyObjects(cut2 = false) {
-    const sels = ed.selection.filter((s) => s.el.localName !== "foreignObject");
-    if (!sels.length) return false;
-    const fragments = sels.map((s) => cleanForPaste(s.el));
-    const refs = fragments.flatMap(imageRefs);
-    let files2 = {};
-    if (refs.length) {
-      const result = await request({ action: "copy-assets", refs });
-      files2 = result.files ?? {};
-    }
-    await put({
-      type: "inkflow-objects",
-      version: 1,
-      project: ed.model?.projectDir,
-      sourceFile: currentSlide()?.sources?.[sels[0].key]?.path ?? "",
-      fragments,
-      files: files2
-    });
-    const n2 = sels.length;
-    toast(`${cut2 ? "Cut" : "Copied"} ${n2} object${n2 > 1 ? "s" : ""}`);
-    if (cut2) emit("delete");
-    return true;
-  }
-  function copy() {
-    if (ed.selection.length) void copyObjects();
-    else void copySlides();
-  }
-  function cut() {
-    if (ed.selection.some((s) => canTransform(s.el))) void copyObjects(true);
-    else void cutSlides();
-  }
-  async function pasteSlides(bundle) {
-    const after = ed.current;
-    const result = await edit({ action: "paste-slides", after, bundle });
-    if (!result.ok) return;
-    const n2 = result.pasted;
-    toast(`Pasted ${n2} slide${n2 > 1 ? "s" : ""}`, "ok");
-    ed.slideSelection.clear();
-    afterSlides = after + 1;
-  }
-  var afterSlides = null;
-  function followPastedSlides() {
-    if (afterSlides != null && afterSlides < (ed.model?.slides.length ?? 0)) {
-      const target = afterSlides;
-      afterSlides = null;
-      gotoSlide(target);
-    }
-  }
-  async function pasteObjects(bundle) {
-    if (!await ensureOwnDrawing()) return;
-    const src = ownSource();
-    if (!src) return;
-    const sameFile = bundle.sourceFile === src.path;
-    clearSelection();
-    const result = await edit({
-      action: "paste-objects",
-      file: src.path,
-      hash: src.hash,
-      parent: insertParent().loc,
-      fragments: bundle.fragments,
-      files: bundle.files,
-      // Copies on the same slide are offset so they do not hide the original.
-      offset: sameFile ? [24, 24] : null
-    });
-    if (result.ok && result.ids) afterRender.ids = Object.values(result.ids);
-  }
-  async function pasteText(text) {
-    const raw = text.startsWith(PREFIX) ? text : lastCopied;
-    if (!raw?.startsWith(PREFIX)) return;
-    let bundle;
-    try {
-      bundle = JSON.parse(raw.slice(PREFIX.length));
-    } catch {
-      toast("The clipboard holds damaged inkflow data", "error");
+  async function insertChart(at2) {
+    const slide = currentSlide();
+    if (!slide) return;
+    if (!ed.model?.deckEditable) {
+      toast(
+        "deck.py builds its slides in code; cannot add a chart here",
+        "error"
+      );
       return;
     }
-    if (bundle.type === "inkflow-slides") await pasteSlides(bundle);
-    else if (bundle.type === "inkflow-objects") await pasteObjects(bundle);
+    openChartDialog({ kind: "insert", at: at2 }, sampleGrid(), defaultSettings());
   }
-  async function pasteFromClipboard() {
-    let text = "";
-    try {
-      text = await navigator.clipboard.readText();
-    } catch {
-      text = lastCopied ?? "";
+  async function editChart(zone) {
+    const slide = currentSlide();
+    const value = slide?.zones[zone];
+    if (!slide || value?.kind !== "chart") return;
+    const res = await request({
+      action: "chart-data",
+      slide: slide.deckIndex,
+      zone
+    });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot read the chart's data", "error");
+      return;
     }
-    await pasteText(text);
+    const grid = {
+      columns: res.columns,
+      rows: res.rows
+    };
+    openChartDialog(
+      {
+        kind: "edit",
+        slide: slide.deckIndex,
+        zone,
+        src: res.src ?? null
+      },
+      grid,
+      chartSettings(value)
+    );
+  }
+  function openChartDialog(target, initial, initialSettings) {
+    let grid = initial;
+    let settings = initialSettings;
+    let timer5 = 0;
+    let asked = 0;
+    let size3 = newChartBox();
+    if (target.kind === "edit") {
+      const el2 = slideRoot()?.querySelector(`[id="zone-${target.zone}"]`);
+      const box = el2 ? slideBox(el2) : null;
+      if (box) size3 = { ...size3, width: box.width, height: box.height };
+    }
+    const table = h("table", { class: "chart-grid" });
+    const fields = h("div", { class: "chart-fields" });
+    const preview = h("div", { class: "chart-preview" });
+    preview.style.aspectRatio = `${size3.width} / ${size3.height}`;
+    const status2 = h("span", { class: "hint chart-status" });
+    const schedule2 = () => {
+      window.clearTimeout(timer5);
+      timer5 = window.setTimeout(() => void drawPreview(), 200);
+    };
+    async function drawPreview() {
+      const mine = ++asked;
+      const slide = currentSlide();
+      const res = await request({
+        action: "chart-preview",
+        slide: slide?.deckIndex,
+        zone: target.kind === "edit" ? target.zone : null,
+        chart: settings,
+        table: trimmed(grid),
+        width: size3.width,
+        height: size3.height
+      });
+      if (mine !== asked) return;
+      if (!res.ok) {
+        status2.textContent = res.error ?? "Cannot draw the chart";
+        return;
+      }
+      status2.textContent = "";
+      preview.innerHTML = String(res.svg ?? "");
+    }
+    function cellInput(row3, col, value) {
+      const input = h("input", {
+        type: "text",
+        value,
+        "data-row": row3,
+        "data-col": col,
+        spellcheck: "false"
+      });
+      if (row3 < 0) {
+        input.classList.add("chart-head");
+        input.addEventListener("change", () => {
+          const r = renameColumn(grid, col, input.value, settings);
+          grid = r.grid;
+          settings = r.settings;
+          renderAll();
+        });
+      } else {
+        input.addEventListener("input", () => {
+          grid.rows[row3][col] = input.value;
+          schedule2();
+        });
+        input.addEventListener("change", renderFields);
+      }
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          const down = e.key !== "ArrowUp";
+          let next = row3 + (down ? 1 : -1);
+          if (down && next >= grid.rows.length && e.key === "Enter") {
+            grid = addRow(grid);
+            renderGrid2();
+          }
+          next = Math.max(-1, Math.min(next, grid.rows.length - 1));
+          focusCell2(next, col);
+        }
+      });
+      return input;
+    }
+    function focusCell2(row3, col) {
+      const input = table.querySelector(
+        `input[data-row="${row3}"][data-col="${col}"]`
+      );
+      input?.focus();
+      input?.select();
+    }
+    function renderGrid2() {
+      clear(table);
+      const head = h(
+        "tr",
+        {},
+        h("th", { class: "chart-corner" }),
+        ...grid.columns.map(
+          (name2, c) => h(
+            "th",
+            {},
+            h(
+              "div",
+              { class: "chart-th" },
+              cellInput(-1, c, name2),
+              h(
+                "button",
+                {
+                  type: "button",
+                  class: "chart-x",
+                  title: `Remove column "${name2}"`,
+                  disabled: grid.columns.length <= 1,
+                  onclick: () => {
+                    const r = removeColumn(grid, c, settings);
+                    grid = r.grid;
+                    settings = r.settings;
+                    renderAll();
+                  }
+                },
+                "\xD7"
+              )
+            )
+          )
+        )
+      );
+      const body3 = grid.rows.map(
+        (cells, r) => h(
+          "tr",
+          {},
+          h(
+            "th",
+            { class: "chart-rownum" },
+            h(
+              "button",
+              {
+                type: "button",
+                class: "chart-x",
+                title: `Remove row ${r + 1}`,
+                onclick: () => {
+                  grid = removeRow(grid, r);
+                  renderAll();
+                }
+              },
+              String(r + 1)
+            )
+          ),
+          ...grid.columns.map(
+            (_, c) => h("td", {}, cellInput(r, c, cells[c] ?? ""))
+          )
+        )
+      );
+      table.append(h("thead", {}, head), h("tbody", {}, ...body3));
+    }
+    table.addEventListener("paste", (e) => {
+      const input = e.target;
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      if (!input.dataset.row || !isMultiCell(text)) return;
+      e.preventDefault();
+      grid = pasteCells(
+        grid,
+        Number(input.dataset.row),
+        Number(input.dataset.col),
+        parseClipboard(text)
+      );
+      renderAll();
+    });
+    function check(label4, on2, set) {
+      const box = h("input", { type: "checkbox" });
+      box.checked = on2;
+      box.addEventListener("change", () => {
+        set(box.checked);
+        renderFields();
+      });
+      return h("label", { class: "chart-check" }, box, label4);
+    }
+    function select2(options, value, set) {
+      const sel = h("select", {});
+      for (const o of options) {
+        const opt = h("option", { value: o.value }, o.label);
+        opt.selected = o.value === value;
+        sel.append(opt);
+      }
+      sel.addEventListener("change", () => {
+        set(sel.value);
+        renderFields();
+      });
+      return sel;
+    }
+    function field(label4, control) {
+      return h(
+        "label",
+        { class: "chart-field" },
+        h("span", {}, label4),
+        control
+      );
+    }
+    function renderFields() {
+      clear(fields);
+      const numeric = numericColumns(grid);
+      const x = xColumn(grid, settings);
+      const shown = plotted(grid, settings);
+      const kind = settings.kind;
+      const title2 = h("input", {
+        type: "text",
+        value: settings.title ?? "",
+        placeholder: "none"
+      });
+      title2.addEventListener("input", () => {
+        settings.title = title2.value.trim() || null;
+        schedule2();
+      });
+      fields.append(
+        field(
+          "Kind",
+          select2(CHART_KINDS, kind, (v) => {
+            settings.kind = v;
+          })
+        ),
+        field(
+          kind === "scatter" ? "X values" : kind === "pie" ? "Slices" : "Categories",
+          select2(
+            grid.columns.map((c) => ({ value: c, label: c })),
+            x ?? "",
+            (v) => {
+              settings.x = v === grid.columns[0] ? null : v;
+            }
+          )
+        ),
+        field("Title", title2)
+      );
+      const series = h("div", { class: "chart-series" });
+      const choices = grid.columns.filter((c) => c !== x);
+      for (const c of choices) {
+        const usable = numeric.includes(c);
+        const box = check(c, shown.includes(c), (on2) => {
+          settings.y = toggleSeries(grid, settings, c, on2);
+        });
+        if (!usable) {
+          box.classList.add("off");
+          box.title = "Not all numbers";
+        }
+        series.append(box);
+      }
+      fields.append(
+        h(
+          "div",
+          { class: "chart-field" },
+          h("span", {}, kind === "pie" ? "Sizes (first)" : "Series"),
+          choices.length ? series : h("span", { class: "hint" }, "Add a column of numbers")
+        )
+      );
+      const opts2 = h("div", { class: "chart-options" });
+      if (kind === "bar" || kind === "area") {
+        opts2.append(
+          check("Stacked", settings.stacked, (v) => {
+            settings.stacked = v;
+          })
+        );
+      }
+      if (kind === "bar") {
+        opts2.append(
+          check("Horizontal", settings.horizontal, (v) => {
+            settings.horizontal = v;
+          })
+        );
+      }
+      if (kind === "pie") {
+        opts2.append(
+          check("Donut", settings.donut, (v) => {
+            settings.donut = v;
+          })
+        );
+      }
+      opts2.append(
+        check("Value labels", settings.labels, (v) => {
+          settings.labels = v;
+        })
+      );
+      fields.append(
+        opts2,
+        field(
+          "Legend",
+          select2(
+            [
+              { value: "auto", label: "Auto" },
+              { value: "on", label: "Show" },
+              { value: "off", label: "Hide" }
+            ],
+            settings.legend == null ? "auto" : settings.legend ? "on" : "off",
+            (v) => {
+              settings.legend = v === "auto" ? null : v === "on";
+            }
+          )
+        )
+      );
+      schedule2();
+    }
+    function renderAll() {
+      renderGrid2();
+      renderFields();
+    }
+    async function save3() {
+      const data = trimmed(grid);
+      if (!data.rows.length) {
+        toast("The chart needs at least one row of data", "error");
+        return;
+      }
+      if (target.kind === "edit") {
+        const res2 = await edit({
+          action: "chart-save-data",
+          slide: target.slide,
+          zone: target.zone,
+          table: data,
+          chart: settings
+        });
+        if (res2.ok) closeDialog();
+        return;
+      }
+      if (!await ensureOwnDrawing()) return;
+      const src = ownSource();
+      const slide = currentSlide();
+      if (!src || !slide) return;
+      const box = newChartBox(target.at);
+      const parent = insertParent();
+      const a = toParent(parent.el, box.x, box.y);
+      const b = toParent(parent.el, box.x + box.width, box.y + box.height);
+      const res = await edit({
+        action: "insert-chart",
+        slide: slide.deckIndex,
+        file: src.path,
+        hash: src.hash,
+        parent: parent.loc,
+        x: Math.round(Math.min(a.x, b.x)),
+        y: Math.round(Math.min(a.y, b.y)),
+        width: Math.round(Math.abs(b.x - a.x)),
+        height: Math.round(Math.abs(b.y - a.y)),
+        chart: settings,
+        table: data
+      });
+      const id = res.ids?.new;
+      if (res.ok && id) {
+        afterRender.ids = [id];
+        closeDialog();
+      }
+    }
+    const tools = h(
+      "div",
+      { class: "chart-tools" },
+      h(
+        "button",
+        {
+          type: "button",
+          class: "pbtn",
+          onclick: () => {
+            grid = addRow(grid);
+            renderAll();
+            focusCell2(grid.rows.length - 1, 0);
+          }
+        },
+        icon("plus", 14),
+        "Row"
+      ),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "pbtn",
+          onclick: () => {
+            grid = addColumn(grid);
+            renderAll();
+            focusCell2(-1, grid.columns.length - 1);
+          }
+        },
+        icon("plus", 14),
+        "Column"
+      ),
+      h(
+        "span",
+        { class: "hint chart-tools-hint" },
+        "Paste cells copied from a spreadsheet into any cell."
+      )
+    );
+    const body2 = h(
+      "div",
+      { class: "chart-dialog" },
+      h(
+        "div",
+        { class: "chart-data" },
+        tools,
+        h("div", { class: "chart-grid-wrap" }, table)
+      ),
+      h(
+        "div",
+        { class: "chart-side" },
+        fields,
+        h("h3", {}, "Preview"),
+        preview,
+        status2
+      ),
+      h(
+        "div",
+        { class: "chart-actions" },
+        target.kind === "edit" && target.src ? h(
+          "span",
+          { class: "hint chart-actions-hint" },
+          `Saved to ${target.src}`
+        ) : target.kind === "insert" ? h(
+          "span",
+          { class: "hint chart-actions-hint" },
+          "The data is saved as a CSV file in data/."
+        ) : null,
+        h(
+          "button",
+          { type: "button", class: "pbtn", onclick: () => closeDialog() },
+          "Cancel"
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn primary",
+            onclick: () => void save3()
+          },
+          target.kind === "insert" ? "Insert chart" : "Save"
+        )
+      )
+    );
+    openDialog(target.kind === "insert" ? "Insert chart" : "Chart data", body2, {
+      large: true
+    });
+    renderAll();
+    focusCell2(0, 0);
   }
 
   // src/ts/editor/crop.ts
@@ -6718,6 +7408,106 @@
     }
     return section(kind === "video" ? "Video" : "Image", ...rows);
   }
+  function chartSection(slide, zone, value) {
+    const s = chartSettings(value);
+    const commit = (fields) => void edit({
+      action: "chart-props",
+      slide: slide.deckIndex,
+      zone,
+      fields
+    });
+    const grid = {
+      columns: value.columns ?? [],
+      rows: []
+    };
+    const numeric = value.numeric ?? [];
+    const x = xColumn(grid, s);
+    const shown = s.y ?? numeric.filter((c) => c !== x);
+    const check = (label4, on2, fn) => {
+      const box = h("input", { type: "checkbox" });
+      box.checked = on2;
+      box.addEventListener("change", () => fn(box.checked));
+      return row2(label4, box);
+    };
+    const series = h("div", { class: "chart-series" });
+    for (const c of grid.columns.filter((c2) => c2 !== x)) {
+      const box = h("input", { type: "checkbox" });
+      box.checked = shown.includes(c);
+      box.disabled = !numeric.includes(c);
+      box.addEventListener("change", () => {
+        const next = grid.columns.filter(
+          (n2) => n2 === c ? box.checked : shown.includes(n2)
+        );
+        const auto = numeric.filter((n2) => n2 !== x);
+        const same = next.length === auto.length && next.every((n2, i) => n2 === auto[i]);
+        commit({ y: same ? null : next });
+      });
+      series.append(h("label", { class: "chart-check" }, box, c));
+    }
+    const rows = [
+      row2(
+        "Kind",
+        selectInput(CHART_KINDS, s.kind, (v) => commit({ kind: v }))
+      ),
+      row2(
+        s.kind === "scatter" ? "X values" : "Categories",
+        selectInput(
+          grid.columns.map((c) => ({ value: c, label: c })),
+          x ?? "",
+          (v) => commit({ x: v === grid.columns[0] ? null : v })
+        )
+      ),
+      h(
+        "div",
+        { class: "prop-row" },
+        h(
+          "span",
+          { class: "prop-label" },
+          s.kind === "pie" ? "Sizes" : "Series"
+        ),
+        series
+      ),
+      row2(
+        "Title",
+        textInput(s.title ?? "", (v) => commit({ title: v }), "none")
+      )
+    ];
+    if (s.kind === "bar" || s.kind === "area") {
+      rows.push(check("Stacked", s.stacked, (v) => commit({ stacked: v })));
+    }
+    if (s.kind === "bar") {
+      rows.push(
+        check("Horizontal", s.horizontal, (v) => commit({ horizontal: v }))
+      );
+    }
+    if (s.kind === "pie") {
+      rows.push(check("Donut", s.donut, (v) => commit({ donut: v })));
+    }
+    rows.push(
+      check("Value labels", s.labels, (v) => commit({ labels: v })),
+      row2(
+        "Legend",
+        selectInput(
+          [
+            { value: "auto", label: "Auto" },
+            { value: "on", label: "Show" },
+            { value: "off", label: "Hide" }
+          ],
+          s.legend == null ? "auto" : s.legend ? "on" : "off",
+          (v) => commit({ legend: v === "auto" ? null : v === "on" })
+        )
+      ),
+      h(
+        "p",
+        { class: "hint" },
+        `Each series is a group with the id ${zone}-series-<column>: animate them one by one.`
+      )
+    );
+    if (value.error) {
+      rows.unshift(h("p", { class: "hint error" }, value.error));
+    }
+    return section("Chart", ...rows);
+  }
   function typeInfo(list3, type) {
     return list3.find((t) => t.type === type) ?? null;
   }
@@ -7406,7 +8196,7 @@
       const media = slide.zones[name2];
       const where = origin === "deck" ? "deck.py zones=" : origin === "md-file" ? `${slide.md?.rel ?? "Markdown"} (whole file)` : slide.md?.rel ? `${slide.md.rel} \xB7 ::${name2}::` : "deck.py";
       const textFile = origin === "deck" || !slide.md?.path ? ed.model?.deckPath : slide.md.path;
-      const isMedia = !!media && (media.kind === "image" || media.kind === "video");
+      const isMedia = !!media && (media.kind === "image" || media.kind === "video" || media.kind === "chart");
       const body2 = [
         h(
           "div",
@@ -7415,7 +8205,25 @@
           isMedia ? null : openButton(textFile)
         )
       ];
-      if (media && (media.kind === "image" || media.kind === "video")) {
+      if (media?.kind === "chart") {
+        body2.push(
+          h(
+            "div",
+            { class: "source-hint" },
+            h(
+              "p",
+              { class: "hint media-src" },
+              media.inline ? "Data written in deck.py" : media.src ?? ""
+            ),
+            media.path ? openButton(media.path) : null
+          ),
+          button(
+            "Edit data\u2026",
+            "Edit the chart's table (double-click)",
+            () => void editChart(name2)
+          )
+        );
+      } else if (media && (media.kind === "image" || media.kind === "video")) {
         body2.push(
           h(
             "div",
@@ -7467,6 +8275,9 @@
       panel.append(section("Content", ...body2));
       if (media && (media.kind === "image" || media.kind === "video")) {
         panel.append(mediaSection(slide, name2, media));
+      }
+      if (media?.kind === "chart") {
+        panel.append(chartSection(slide, name2, media));
       }
     }
     const innerVideo = zone ? null : videoOf(el2);
@@ -9928,7 +10739,7 @@ ${area2.value.slice(pos)}`;
     const next = cells[cells.indexOf(cell) + by];
     if (next) focusCell(next);
     else if (by > 0) {
-      addRow(cell);
+      addRow2(cell);
       const after = [...table.querySelectorAll("th, td")];
       focusCell(after[cells.length]);
     }
@@ -9940,7 +10751,7 @@ ${area2.value.slice(pos)}`;
     cell.append(document.createElement("br"));
     return cell;
   }
-  function addRow(cell) {
+  function addRow2(cell) {
     const row3 = cell.parentElement;
     const table = row3.closest("table");
     let body2 = table.tBodies[0];
@@ -9953,7 +10764,7 @@ ${area2.value.slice(pos)}`;
     if (row3.parentElement?.localName === "thead") body2.prepend(tr);
     else row3.after(tr);
   }
-  function addColumn(cell) {
+  function addColumn2(cell) {
     const table = cell.closest("table");
     const index = cell.cellIndex;
     for (const row3 of table.rows) {
@@ -10298,11 +11109,11 @@ ${area2.value.slice(pos)}`;
       "span",
       { class: "fmt-table" },
       h("span", { class: "fmt-sep" }),
-      btn("+row", "Add a row below", () => tableCommand(content2, addRow)),
+      btn("+row", "Add a row below", () => tableCommand(content2, addRow2)),
       btn(
         "+col",
         "Add a column to the right",
-        () => tableCommand(content2, addColumn)
+        () => tableCommand(content2, addColumn2)
       ),
       btn("\u2212row", "Delete this row", () => tableCommand(content2, deleteRow)),
       btn(
@@ -10425,7 +11236,7 @@ ${area2.value.slice(pos)}`;
         );
         continue;
       }
-      if (value && (value.kind === "image" || value.kind === "video")) {
+      if (value && (value.kind === "image" || value.kind === "video" || value.kind === "chart")) {
         await edit({
           action: "zone-media",
           slide: slide.deckIndex,
@@ -10695,6 +11506,7 @@ ${area2.value.slice(pos)}`;
     $("btn-image").addEventListener("click", () => void insertImage());
     $("btn-video").addEventListener("click", () => void insertVideo());
     $("btn-diagram").addEventListener("click", () => newDiagram());
+    $("btn-chart").addEventListener("click", () => void insertChart());
     $("zoom-in").addEventListener("click", () => setZoom(scale() * 1.25));
     $("zoom-out").addEventListener("click", () => setZoom(scale() / 1.25));
     $("zoom-fit").addEventListener("click", () => setZoom(0));
@@ -10788,6 +11600,12 @@ ${area2.value.slice(pos)}`;
       if (diagramOf(el2)) {
         items.push(menuItem("Edit diagram", () => editDiagram(one)));
       }
+      const chartZone = isZone(el2) ? zoneName(el2) : null;
+      if (chartZone && currentSlide()?.zones[chartZone]?.kind === "chart") {
+        items.push(
+          menuItem("Edit chart data\u2026", () => void editChart(chartZone))
+        );
+      }
       if (pictureOf(el2)) {
         items.push(menuItem("Crop", () => void startCrop(one)));
       }
@@ -10856,6 +11674,9 @@ ${area2.value.slice(pos)}`;
     }
     return items;
   }
+  function clickedAt() {
+    return clientToSlide(at.x, at.y);
+  }
   async function insertFromDisk() {
     const start = ed.model?.projectDir ?? "";
     const path = await pickVideoFromDisk(start);
@@ -10872,6 +11693,7 @@ ${area2.value.slice(pos)}`;
       menuItem("Select all", () => selectAll()),
       menuItem("Insert video from a folder\u2026", () => void insertFromDisk()),
       menuItem("New diagram (draw.io)\u2026", () => newDiagram()),
+      menuItem("Insert chart\u2026", () => void insertChart(clickedAt())),
       sep(),
       title("Slide"),
       menuItem(
@@ -12471,7 +13293,10 @@ Continue?`)) return null;
     ed.error = INITIAL_ERROR;
     readHash();
     hooks.editText = editTextOf;
-    hooks.editZone = (zone, el2, at2) => editZone(zone, el2, { at: at2 });
+    hooks.editZone = (zone, el2, at2) => {
+      if (currentSlide()?.zones[zone]?.kind === "chart") void editChart(zone);
+      else editZone(zone, el2, { at: at2 });
+    };
     hooks.editingHost = editingHost;
     hooks.crop = (el2) => {
       const sel = ed.selection.find((s) => s.el === el2);
@@ -12516,7 +13341,7 @@ Continue?`)) return null;
     on("error", showError);
     on("edit-zone", () => {
       const el2 = ed.selection[0]?.el;
-      if (el2 && isZone(el2)) editZone(zoneName(el2), el2);
+      if (el2 && isZone(el2)) hooks.editZone(zoneName(el2), el2);
     });
     on("edit-text", () => {
       const el2 = ed.selection[0]?.el;

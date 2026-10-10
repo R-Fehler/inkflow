@@ -20,6 +20,7 @@ import {
     slideRoot,
     zoneName,
 } from "./canvas";
+import { insertChart } from "./chart";
 import { copy, copySlides, cut, cutSlides } from "./clipboard";
 import { setCropMode } from "./crop";
 import { toast } from "./dom";
@@ -68,7 +69,12 @@ export async function deleteSelection(): Promise<void> {
             );
             continue;
         }
-        if (value && (value.kind === "image" || value.kind === "video")) {
+        if (
+            value &&
+            (value.kind === "image" ||
+                value.kind === "video" ||
+                value.kind === "chart")
+        ) {
             await edit({
                 action: "zone-media",
                 slide: slide.deckIndex,
@@ -377,6 +383,7 @@ export function initToolbar(): void {
     $("btn-image").addEventListener("click", () => void insertImage());
     $("btn-video").addEventListener("click", () => void insertVideo());
     $("btn-diagram").addEventListener("click", () => newDiagram());
+    $("btn-chart").addEventListener("click", () => void insertChart());
     $("zoom-in").addEventListener("click", () => setZoom(scale() * 1.25));
     $("zoom-out").addEventListener("click", () => setZoom(scale() / 1.25));
     $("zoom-fit").addEventListener("click", () => setZoom(0));

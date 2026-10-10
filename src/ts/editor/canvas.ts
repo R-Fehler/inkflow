@@ -886,12 +886,14 @@ export function drawOverlay(): void {
         });
         rh.dataset.handle = "rot";
         // A cropped picture's frame is kept unrotated (see planCrop).
-        // (A drawn-in draw.io diagram is a nested <svg> too, but rotates.)
+        // (A drawn-in draw.io diagram or a chart is a nested <svg> too, but
+        // rotates.)
         // (Nor do a diagram's shapes edited here: draw.io would not follow.)
         const frames = ed.selection.some(
             (s) =>
                 (s.el.localName === "svg" &&
-                    !s.el.hasAttribute("data-drawio")) ||
+                    !s.el.hasAttribute("data-drawio") &&
+                    !s.el.classList.contains("inkflow-chart")) ||
                 isDiagramCell(s.el),
         );
         if (!ed.cropMode && !frames) overlay.append(rh);
