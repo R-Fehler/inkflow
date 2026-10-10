@@ -128,7 +128,7 @@ commands:
       --host=: Server host
 
   - name: slide
-    description: Add, delete, duplicate, move, hide or rename slides.
+    description: Add, delete, duplicate, move, hide or rename slides; sections.
     commands:
       - name: add
         description: Add a slide with its own drawing, built on a layout.
@@ -162,9 +162,10 @@ commands:
             deck: ["$files([\".py\"])"]
 
       - name: move
-        description: Move a slide so it becomes slide number --to.
+        description: Move a slide so it becomes slide number --to, or into --section.
         flags:
           --to=: The number it gets
+          --section=: The section it joins
           -d, --deck=: Path to deck.py
         completion:
           flag:
@@ -201,6 +202,46 @@ commands:
         completion:
           flag:
             deck: ["$files([\".py\"])"]
+
+      - name: section
+        description: Add, rename, move or remove sections (named groups of slides).
+        commands:
+          - name: add
+            description: Start a section at slide --at.
+            flags:
+              --at=: The slide it starts at
+              -d, --deck=: Path to deck.py
+            completion:
+              flag:
+                deck: ["$files([\".py\"])"]
+
+          - name: rename
+            description: Rename a section.
+            flags:
+              -d, --deck=: Path to deck.py
+            completion:
+              flag:
+                deck: ["$files([\".py\"])"]
+
+          - name: move
+            description: Move a section, with its slides, among the sections.
+            flags:
+              --to=: Its position among the sections
+              --before=: Put it before this section
+              -d, --deck=: Path to deck.py
+            completion:
+              flag:
+                deck: ["$files([\".py\"])"]
+
+          - name: remove
+            description: Remove a section; its slides join the one before it.
+            flags:
+              --with-slides: Delete its slides too
+              --keep-files: With --with-slides, leave their files in place
+              -d, --deck=: Path to deck.py
+            completion:
+              flag:
+                deck: ["$files([\".py\"])"]
 
   - name: worktree
     description: Work on the deck in a separate git worktree, on its own branch.

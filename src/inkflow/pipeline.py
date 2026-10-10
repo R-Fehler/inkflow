@@ -97,12 +97,21 @@ class SlideEditInfo(TypedDict):
     it need not exist yet."""
 
 
+class SlideSection(TypedDict):
+    name: str
+    index: int
+    """Which section of the deck (``Deck.sections``), so two that share a name
+    stay apart."""
+
+
 class SlideData(TypedDict):
     id: str
     svg: str
     title: str
     notes: str
     editableFiles: list[EditableFile]
+    section: NotRequired[SlideSection]
+    """The section the slide is in; absent before the first section."""
     edit: NotRequired[SlideEditInfo]
 
 
@@ -920,6 +929,11 @@ def process_deck(
     ctx = deck_context(deck, project_dir, len(visible_slides), editor=editor)
     assets = ctx.assets
     ids = slide_ids(visible_slides)
+    sections = {
+        id(deck.slides[i]): k
+        for k, span in enumerate(deck.section_ranges())
+        for i in span
+    }
     results: list[SlideData] = []
     for i, (slide, slide_id) in enumerate(zip(visible_slides, ids, strict=True)):
         logger.debug(f"processing slide {i + 1}/{len(visible_slides)}: {slide_id}")
@@ -942,6 +956,9 @@ def process_deck(
             "notes": notes,
             "editableFiles": editable_files,
         }
+        section = sections.get(id(slide))
+        if section is not None:
+            data["section"] = {"name": deck.sections[section].name, "index": section}
         if processed.edit is not None:
             data["edit"] = processed.edit
         results.append(data)
