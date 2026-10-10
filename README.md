@@ -184,7 +184,7 @@ at the same time and see each other's changes live.
 - **Layouts and themes.** Start slides from a layout gallery, edit the shared layouts, pick
   one of three built-in themes (the Catppuccin default, quiet white *Paper*, big-type
   *Stage*) and set the deck's colours and fonts in a theme dialog.
-- **Animations, transitions and notes** from the properties panel; preview each build step,
+- **Animations, transitions and notes** from the properties panel; step through each click with **Steps**,
   then present from the current slide (and come back with <kbd>Shift</kbd>+<kbd>E</kbd>).
 - **Edit together.** Share the deck on your network or VPN with an editor link and a
   view link (`inkflow edit --share`, or the Share… button), or reach it over SSH; see who

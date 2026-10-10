@@ -365,8 +365,14 @@ grid, across sections; double-click or <kbd>Enter</kbd> opens a slide,
   your hand rests on the screen; with *Hand* on, one finger draws and two
   fingers still zoom (the stroke the first finger began is dropped).
 
-The editor shows every object by default. To see what the audience sees at a given
-click, pick a build step in the toolbar; editing pauses while you preview.
+The editor shows every object by default, including what appears later and what
+leaves the slide, so you can select and edit it all. To see what the audience
+sees click by click, click **Steps** in the toolbar: *Step 0* is the slide as it
+appears, each further click shows the next step (*Step 2/4*), and the click after
+the last step comes round to every object again (the button flashes *All
+objects*). <kbd>Shift</kbd>+click or a right-click goes back, and
+<kbd>Esc</kbd> returns to every object at once. Editing pauses while you preview
+a step. The button is greyed out on a slide where nothing appears step by step.
 
 **Animations at a glance.** With nothing selected, the slide panel's
 **Animation order** lists every animation of the slide with the click it plays

@@ -9860,6 +9860,85 @@ Undo brings them back.`
     on("selection", renderObjects);
   }
 
+  // src/ts/editor/stepcycle.ts
+  function nextStep(step2, max, back = false) {
+    if (max <= 0) return null;
+    if (step2 == null) return back ? max : 0;
+    const s2 = Math.min(step2, max);
+    if (back) return s2 === 0 ? null : s2 - 1;
+    return s2 >= max ? null : s2 + 1;
+  }
+  function wrapped(from, to) {
+    return from != null && to == null;
+  }
+  function stepLabel(step2, max) {
+    return step2 == null ? "Steps" : `Step ${Math.min(step2, max)}/${max}`;
+  }
+  function stepTitle(step2, max) {
+    if (max <= 0) return "Nothing on this slide appears step by step";
+    const how = "Click: next step; Shift+click or right-click: back";
+    if (step2 == null) {
+      return `Every object is shown, for editing. ${how}: the slide as the audience sees it, click by click (${max} ${max === 1 ? "click" : "clicks"}).`;
+    }
+    const where = step2 === 0 ? "as the slide appears, before the first click" : `after click ${step2} of ${max}`;
+    return `Previewing ${where}; editing is paused. ${how}; after the last step it shows every object again.`;
+  }
+
+  // src/ts/editor/stepbutton.ts
+  var flash = 0;
+  function button2() {
+    return document.getElementById("btn-step");
+  }
+  function slideMax() {
+    const svg = slideRoot();
+    return svg ? maxStep(svg) : 0;
+  }
+  function showStepLabel(step2) {
+    const b2 = button2();
+    if (!b2 || flash) return;
+    const max = slideMax();
+    b2.textContent = stepLabel(step2, max);
+    b2.title = stepTitle(step2, max);
+    b2.classList.toggle("on", step2 != null);
+    b2.disabled = max === 0 && step2 == null;
+  }
+  function renderStepButton() {
+    showStepLabel(ed.step);
+  }
+  function setStep(step2) {
+    const from = ed.step;
+    ed.step = step2;
+    document.body.classList.toggle("previewing", step2 != null);
+    render();
+    emit("step");
+    if (wrapped(from, step2)) cameRound();
+  }
+  function cameRound() {
+    const b2 = button2();
+    if (!b2) return;
+    window.clearTimeout(flash);
+    b2.classList.remove("came-round");
+    void b2.offsetWidth;
+    b2.classList.add("came-round");
+    b2.textContent = "\u21BA All objects";
+    flash = window.setTimeout(() => {
+      flash = 0;
+      b2.classList.remove("came-round");
+      renderStepButton();
+    }, 900);
+  }
+  function initStepButton() {
+    const b2 = button2();
+    if (!b2) return;
+    b2.addEventListener("click", (e2) => {
+      setStep(nextStep(ed.step, slideMax(), e2.shiftKey));
+    });
+    b2.addEventListener("contextmenu", (e2) => {
+      e2.preventDefault();
+      setStep(nextStep(ed.step, slideMax(), true));
+    });
+  }
+
   // src/ts/editor/animsteps.ts
   function cueSteps(cues, svg) {
     const seen = /* @__PURE__ */ new Map();
@@ -9922,8 +10001,7 @@ Undo brings them back.`
     });
   }
   function showStep(step2) {
-    const sel = document.getElementById("step-select");
-    if (sel) sel.value = step2 == null ? "" : String(step2);
+    showStepLabel(step2);
     for (const row5 of document.querySelectorAll(
       ".anim-row[data-step]"
     )) {
@@ -10083,7 +10161,7 @@ Undo brings them back.`
     sel.addEventListener("change", () => commit(sel.value));
     return sel;
   }
-  function button2(label4, title3, fn, cls = "") {
+  function button3(label4, title3, fn, cls = "") {
     return h(
       "button",
       { type: "button", class: `pbtn ${cls}`, title: title3, onclick: fn },
@@ -10188,7 +10266,7 @@ Undo brings them back.`
               { class: "media-poster" },
               poster ? String(poster).split("/").pop() : "None"
             ),
-            button2(
+            button3(
               poster ? "Change\u2026" : "Pick\u2026",
               poster ? `Poster: ${poster}` : "Still image shown before playback",
               async () => {
@@ -10197,7 +10275,7 @@ Undo brings them back.`
                 if (up) commit("poster", up.path);
               }
             ),
-            poster ? button2(
+            poster ? button3(
               "\u2715",
               "Remove the poster",
               () => commit("poster", null)
@@ -10292,7 +10370,7 @@ Undo brings them back.`
       { class: "prop-row" },
       h("span", { class: "prop-label" }, "Page"),
       numberInput(page, (n3) => show2(Math.max(1, Math.round(n3))), { min: 1 }),
-      button2("Pages\u2026", "See the PDF's pages and pick one", async () => {
+      button3("Pages\u2026", "See the PDF's pages and pick one", async () => {
         const choice = file ? await choosePage(file, page) : null;
         if (choice) show2(choice.page);
       })
@@ -10477,7 +10555,7 @@ Undo brings them back.`
         ),
         row3(
           "Layout",
-          button2(
+          button3(
             `${currentLayout ? layoutLabel(currentLayout) : "None"} \u25BE`,
             "Pick a layout from previews",
             () => void openGallery({
@@ -10490,12 +10568,12 @@ Undo brings them back.`
         editable && h(
           "div",
           { class: "prop-buttons" },
-          button2(
+          button3(
             "Save as layout\u2026",
             "Make a new layout (a template) from this slide: new slides can start from it",
             () => saveAsLayout(di)
           ),
-          currentLayout ? button2(
+          currentLayout ? button3(
             "Edit its layout",
             "Open the slide master at the layout this slide is built on: edits change every slide on it",
             () => void openMaster()
@@ -10561,7 +10639,7 @@ Undo brings them back.`
     if (deckPath) addFile("Deck", fileName2(deckPath), deckPath);
     if (editable)
       files2.append(
-        button2(
+        button3(
           "Rename files\u2026",
           "Give this slide's drawing, Markdown, notes and ink one new name (its id follows)",
           () => renameSlideFiles(di)
@@ -10570,7 +10648,7 @@ Undo brings them back.`
     const textInDeck = slide.md?.kind !== "file" && (slide.md?.kind === "inline" || Object.values(slide.zones).some((z) => z.kind === "text"));
     if (textInDeck && editable)
       files2.append(
-        button2(
+        button3(
           "Move text to Markdown",
           "Move this slide's text out of deck.py into its own .md file",
           () => void edit({ action: "to-markdown", slide: di })
@@ -10593,7 +10671,7 @@ Undo brings them back.`
             { class: "hint warn" },
             `${stale} ${stale === 1 ? "arrow no longer meets its shape" : "arrows no longer meet their shapes"} (moved in draw.io or another editor).`
           ) : null,
-          button2(
+          button3(
             "Re-route all",
             "Re-attach every arrow to its shapes",
             () => reroute(arrows)
@@ -10718,13 +10796,13 @@ Undo brings them back.`
             },
             `#${cue.element}`
           ),
-          step2 != null && button2(
+          step2 != null && button3(
             icon("play", 12),
             "Preview from this animation",
             () => void playAnimations(step2),
             "anim-preview-ctl"
           ),
-          editable && button2(icon("up", 12), "Earlier", () => {
+          editable && button3(icon("up", 12), "Earlier", () => {
             if (i2 > 0)
               void edit({
                 action: "anim",
@@ -10734,7 +10812,7 @@ Undo brings them back.`
                 to: i2 - 1
               });
           }),
-          editable && button2(icon("down", 12), "Later", () => {
+          editable && button3(icon("down", 12), "Later", () => {
             if (i2 < cues.length - 1) {
               void edit({
                 action: "anim",
@@ -10745,7 +10823,7 @@ Undo brings them back.`
               });
             }
           }),
-          editable && button2(icon("trash", 12), "Remove", () => {
+          editable && button3(icon("trash", 12), "Remove", () => {
             void edit({
               action: "anim",
               slide: di,
@@ -10782,12 +10860,12 @@ Undo brings them back.`
     const controls = h(
       "div",
       { class: "btn-row anim-preview" },
-      playing ? button2(
+      playing ? button3(
         "\u25A0 Stop",
         "Stop the preview (Esc)",
         () => stopPreview(),
         "anim-preview-ctl"
-      ) : button2(
+      ) : button3(
         "\u25B6 Play",
         "Play this slide's animations here, click by click",
         () => void playAnimations(1),
@@ -10841,13 +10919,13 @@ Undo brings them back.`
             trigger: cue.fields.trigger ?? "on-click"
           })
         ) : h("span", {}, cue.type),
-        steps[index] != null && button2(
+        steps[index] != null && button3(
           icon("play", 12),
           `Preview (click ${steps[index]})`,
           () => void playAnimations(steps[index] ?? 1),
           "anim-preview-ctl"
         ),
-        editable && button2(icon("trash", 12), "Remove", () => {
+        editable && button3(icon("trash", 12), "Remove", () => {
           void edit({
             action: "anim",
             slide: di,
@@ -10991,7 +11069,7 @@ Undo brings them back.`
     custom.addEventListener("change", () => send({ color: custom.value }));
     swatches.append(custom);
     swatches.append(
-      button2("\u2205", "None", () => send({ color: "none" }), "none-btn")
+      button3("\u2205", "None", () => send({ color: "none" }), "none-btn")
     );
     return row3(prop === "fill" ? "Fill" : "Stroke", swatches);
   }
@@ -11095,7 +11173,7 @@ Undo brings them back.`
         h(
           "div",
           { class: "btn-row" },
-          button2("Leave the diagram", "Esc", () => enterGroup(null))
+          button3("Leave the diagram", "Esc", () => enterGroup(null))
         )
       )
     );
@@ -11193,7 +11271,7 @@ Undo brings them back.`
             media.path ? openButton(media.path) : null,
             media.inline ? null : renameButton(media.path)
           ),
-          button2(
+          button3(
             "Edit data\u2026",
             "Edit the chart's table (double-click)",
             () => void editChart(name2)
@@ -11209,12 +11287,12 @@ Undo brings them back.`
             renameButton(projectFile(media.src))
           ),
           ...media.kind === "image" && isPdfRef(media.src ?? "") ? [zonePageRow(slide, name2, media.src ?? "")] : [],
-          button2(
+          button3(
             "Replace media\u2026",
             "Pick another image or video",
             () => void zoneMedia(name2)
           ),
-          button2("Clear", "Empty this zone", () => {
+          button3("Clear", "Empty this zone", () => {
             void edit({
               action: "zone-media",
               slide: slide.deckIndex,
@@ -11224,11 +11302,11 @@ Undo brings them back.`
           })
         );
         const video = media.kind === "video" ? videoOf(el2) : null;
-        if (video) body3.push(previewButton(video, button2));
+        if (video) body3.push(previewButton(video, button3));
         if (media.kind === "video" && media.src) {
           const src2 = media.src;
           body3.push(
-            button2(
+            button3(
               "Check & convert\u2026",
               "Can every browser play it? Convert it to MP4 or WebM, smaller or at another resolution",
               () => void openVideoCheck({
@@ -11241,7 +11319,7 @@ Undo brings them back.`
         }
       } else {
         body3.push(
-          button2(
+          button3(
             "Edit text",
             "Edit this zone's Markdown (double-click)",
             () => {
@@ -11260,7 +11338,7 @@ Undo brings them back.`
     }
     const innerVideo = zone ? null : videoOf(el2);
     if (innerVideo) {
-      panel.append(section("Video", previewButton(innerVideo, button2)));
+      panel.append(section("Video", previewButton(innerVideo, button3)));
     }
     if (movable) panel.append(geometrySection([sel]));
     const textZone = zone && el2.localName === "foreignObject" && !!el2.querySelector(".inkflow-content");
@@ -11463,12 +11541,12 @@ Undo brings them back.`
       h(
         "div",
         { class: "btn-row" },
-        button2(
+        button3(
           "Re-route",
           "Re-attach to the shapes where they are now",
           () => reroute([sel])
         ),
-        el2.hasAttribute("inkflow:bend") && button2(
+        el2.hasAttribute("inkflow:bend") && button3(
           "Reset bend",
           "Put the elbow's middle segment back where it goes by default",
           () => {
@@ -11479,7 +11557,7 @@ Undo brings them back.`
             );
           }
         ),
-        button2(
+        button3(
           "Detach",
           "Free both ends",
           () => send(
@@ -11644,7 +11722,7 @@ Undo brings them back.`
       isDiagramHref(href) ? h(
         "div",
         { class: "btn-row" },
-        button2(
+        button3(
           "Edit diagram",
           "Open it in draw.io (or double-click it)",
           () => editDiagram(sel),
@@ -11655,7 +11733,7 @@ Undo brings them back.`
       h(
         "div",
         { class: "btn-row" },
-        button2(
+        button3(
           "Replace\u2026",
           "Pick another picture; it keeps this size and place",
           async () => {
@@ -11680,17 +11758,17 @@ Undo brings them back.`
             );
           }
         ),
-        ed.cropMode ? button2(
+        ed.cropMode ? button3(
           "Done cropping",
           "Enter",
           () => setCropMode(false),
           "on"
-        ) : button2(
+        ) : button3(
           "Crop",
           "Crop (double-click the picture)",
           () => void startCrop(sel)
         ),
-        cropped ? button2(
+        cropped ? button3(
           "Reset crop",
           "Show the whole picture again",
           () => void resetCrop(sel)
@@ -11743,7 +11821,7 @@ Undo brings them back.`
       numberInput(page, (n3) => void show2(Math.max(1, Math.round(n3))), {
         min: 1
       }),
-      button2("Pages\u2026", "See the PDF's pages and pick one", async () => {
+      button3("Pages\u2026", "See the PDF's pages and pick one", async () => {
         const choice = await choosePage(file, page);
         if (choice) void show2(choice.page, choice.url);
       })
@@ -11799,7 +11877,7 @@ Undo brings them back.`
       h(
         "div",
         { class: "btn-row" },
-        button2(
+        button3(
           "Edit diagram",
           "Open it in draw.io (or double-click it)",
           () => editDiagram(sel),
@@ -11895,7 +11973,7 @@ Undo brings them back.`
     if (!shapes2.length) return null;
     const editable = slide.animationsEditable && model2.deckEditable;
     const list4 = h("div", { class: "diagram-shapes" });
-    const flash = (el2, on2) => setHover(on2 ? el2 : null);
+    const flash2 = (el2, on2) => setHover(on2 ? el2 : null);
     for (const shape of shapes2) {
       const count = slide.animations.filter(
         (c2) => c2.element === shape.id
@@ -11918,8 +11996,8 @@ Undo brings them back.`
           `${count} \u2726`
         ) : null
       );
-      item2.addEventListener("mouseenter", () => flash(shape.el, true));
-      item2.addEventListener("mouseleave", () => flash(shape.el, false));
+      item2.addEventListener("mouseenter", () => flash2(shape.el, true));
+      item2.addEventListener("mouseleave", () => flash2(shape.el, false));
       if (editable) {
         const add = animationPicker(
           model2.animationTypes,
@@ -11928,7 +12006,7 @@ Undo brings them back.`
         );
         add.addEventListener("change", () => {
           if (!add.value) return;
-          flash(shape.el, false);
+          flash2(shape.el, false);
           void edit({
             action: "anim",
             slide: slide.deckIndex,
@@ -12098,13 +12176,13 @@ Undo brings them back.`
       h(
         "div",
         { class: "btn-row" },
-        button2(
+        button3(
           h("b", {}, "B"),
           "Bold",
           () => setAll({ "font-weight": bold ? null : "bold" }, "Bold"),
           bold ? "on" : ""
         ),
-        button2(
+        button3(
           h("i", {}, "I"),
           "Italic",
           () => setAll(
@@ -12113,25 +12191,25 @@ Undo brings them back.`
           ),
           italic ? "on" : ""
         ),
-        button2(
+        button3(
           "\u27F8",
           "Align start",
           () => setAll({ "text-anchor": null }, "Align"),
           anchor2 === "start" ? "on" : ""
         ),
-        button2(
+        button3(
           "\u21D4",
           "Align middle",
           () => setAll({ "text-anchor": "middle" }, "Align"),
           anchor2 === "middle" ? "on" : ""
         ),
-        button2(
+        button3(
           "\u27F9",
           "Align end",
           () => setAll({ "text-anchor": "end" }, "Align"),
           anchor2 === "end" ? "on" : ""
         ),
-        button2("Edit", "Edit text (double-click)", () => emit("edit-text"))
+        button3("Edit", "Edit text (double-click)", () => emit("edit-text"))
       )
     );
   }
@@ -12238,26 +12316,26 @@ Undo brings them back.`
       h(
         "div",
         { class: "btn-row" },
-        button2("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
-        button2("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
-        button2("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
-        button2("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
-        button2(
+        button3("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
+        button3("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
+        button3("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
+        button3("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
+        button3(
           icon("copy", 14),
           "Duplicate (Ctrl+D)",
           () => emit("duplicate")
         ),
-        sels.length > 1 && button2(
+        sels.length > 1 && button3(
           icon("group", 14),
           "Group (Ctrl+G)",
           () => emit("group")
         ),
-        isGroup && button2(
+        isGroup && button3(
           "Ungroup",
           "Ungroup (Ctrl+Shift+G)",
           () => emit("ungroup")
         ),
-        button2(
+        button3(
           icon("trash", 14),
           "Delete (Del)",
           () => emit("delete"),
@@ -12310,7 +12388,7 @@ Undo brings them back.`
     const movable = sels.every((s2) => canTransform(s2.el));
     panel.append(section(`${sels.length} objects`));
     if (movable) {
-      const a2 = (label4, title3, how) => button2(label4, title3, () => alignSelection(how));
+      const a2 = (label4, title3, how) => button3(label4, title3, () => alignSelection(how));
       panel.append(
         section(
           "Align",
@@ -13656,7 +13734,7 @@ $$`;
       window.clearTimeout(timer6);
       timer6 = window.setTimeout(() => void send(), 450);
     });
-    const button7 = (name2, title3, fn) => h(
+    const button8 = (name2, title3, fn) => h(
       "button",
       {
         type: "button",
@@ -13673,14 +13751,14 @@ $$`;
       "div",
       { class: "zone-toolbar" },
       h("span", { class: "zone-label" }, `${zone} \xB7 Markdown`),
-      button7("B", "Bold (Ctrl+B)", () => wrapSelection(area2, "**")),
-      button7("I", "Italic (Ctrl+I)", () => wrapSelection(area2, "*")),
-      button7("H", "Heading", () => prefixLines(area2, "## ")),
-      button7("\u2022", "Bullet list", () => prefixLines(area2, "- ")),
-      button7("1.", "Numbered list", () => prefixLines(area2, "1. ")),
-      button7("`", "Code", () => wrapSelection(area2, "`")),
-      button7("\u2211", "Math", () => wrapSelection(area2, "$")),
-      button7("\u23F5", "Reveal on click: insert a ::step:: marker", () => {
+      button8("B", "Bold (Ctrl+B)", () => wrapSelection(area2, "**")),
+      button8("I", "Italic (Ctrl+I)", () => wrapSelection(area2, "*")),
+      button8("H", "Heading", () => prefixLines(area2, "## ")),
+      button8("\u2022", "Bullet list", () => prefixLines(area2, "- ")),
+      button8("1.", "Numbered list", () => prefixLines(area2, "1. ")),
+      button8("`", "Code", () => wrapSelection(area2, "`")),
+      button8("\u2211", "Math", () => wrapSelection(area2, "$")),
+      button8("\u23F5", "Reveal on click: insert a ::step:: marker", () => {
         const pos = area2.selectionStart;
         area2.value = `${area2.value.slice(0, pos)}
 ::step::
@@ -14680,17 +14758,6 @@ ${area2.value.slice(pos)}`;
     root2.dataset.theme = root2.dataset.theme === "light" ? "" : "light";
     render();
   }
-  function renderStepSelect() {
-    const sel = $("step-select");
-    const svg = slideRoot();
-    const max = svg ? maxStep(svg) : 0;
-    sel.innerHTML = "";
-    sel.append(new Option("All objects", ""));
-    for (let i2 = 0; i2 <= max; i2++)
-      sel.append(new Option(`Build step ${i2}`, String(i2)));
-    sel.value = ed.step == null ? "" : String(Math.min(ed.step, max));
-    sel.disabled = max === 0 && ed.step == null;
-  }
   function toggleFullscreen() {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void document.documentElement.requestFullscreen?.().catch(() => {
@@ -14820,6 +14887,8 @@ ${area2.value.slice(pos)}`;
     } else if (ed.cropMode && (key === "Escape" || key === "Enter")) {
       handled();
       setCropMode(false);
+    } else if (key === "Escape" && ed.step != null && !document.body.classList.contains("anim-playing")) {
+      setStep(null);
     } else if (key === "Escape") {
       if (ed.tool !== "select") setTool("select");
       else if (ed.scope) enterGroup(null);
@@ -14868,15 +14937,9 @@ ${area2.value.slice(pos)}`;
     $("btn-present").addEventListener("click", present);
     $("btn-fullscreen").addEventListener("click", toggleFullscreen);
     document.addEventListener("fullscreenchange", updateFullscreen);
-    $("step-select").addEventListener("change", (e2) => {
-      const v2 = e2.target.value;
-      ed.step = v2 === "" ? null : Number(v2);
-      document.body.classList.toggle("previewing", ed.step != null);
-      render();
-      emit("step");
-    });
+    initStepButton();
     document.addEventListener("keydown", onKey2);
-    on("render", renderStepSelect);
+    on("render", renderStepButton);
     on("render", updateZoomLabel);
     on("zoom", updateZoomLabel);
     on("history", updateHistory);
@@ -16503,7 +16566,7 @@ ${UNDO_NOTICE}` : question)) {
 
   // src/ts/editor/decks.ts
   var menu5 = document.getElementById("context-menu");
-  var button3 = document.getElementById("btn-deck");
+  var button4 = document.getElementById("btn-deck");
   function lookThumb(look) {
     const c2 = look.preview;
     if (!c2) return null;
@@ -16536,8 +16599,8 @@ ${UNDO_NOTICE}` : question)) {
   }
   function renderButton() {
     const dir = ed.model?.projectDir;
-    button3.textContent = `${dir ? baseName2(dir) : "deck"} \u25BE`;
-    button3.title = dir ? `${dir}
+    button4.textContent = `${dir ? baseName2(dir) : "deck"} \u25BE`;
+    button4.title = dir ? `${dir}
 Decks: new, open, recent` : "Decks";
   }
   async function info2() {
@@ -16575,7 +16638,7 @@ Decks: new, open, recent` : "Decks";
       h("div", { class: "menu-sep" }),
       menuItem("Quit Inkflow", () => void quit())
     );
-    const r2 = button3.getBoundingClientRect();
+    const r2 = button4.getBoundingClientRect();
     showMenu(r2.left, r2.bottom + 4);
   }
   async function openDeck(path) {
@@ -16909,7 +16972,7 @@ Decks: new, open, recent` : "Decks";
     document.body.append(page);
   }
   function initDecks() {
-    button3.addEventListener("click", () => void openMenu2());
+    button4.addEventListener("click", () => void openMenu2());
     on("model", renderButton);
     renderButton();
   }
@@ -17604,29 +17667,29 @@ Decks: new, open, recent` : "Decks";
 
   // src/ts/editor/git.ts
   var menu6 = document.getElementById("context-menu");
-  var button4 = document.getElementById("btn-git");
-  var label2 = button4.querySelector(".git-label");
-  var badge3 = button4.querySelector(".git-badge");
+  var button5 = document.getElementById("btn-git");
+  var label2 = button5.querySelector(".git-label");
+  var badge3 = button5.querySelector(".git-badge");
   var status = { repo: false, git: false };
   function render3() {
-    button4.hidden = !status.git;
+    button5.hidden = !status.git;
     if (!status.repo) {
       label2.textContent = "Git";
       badge3.hidden = true;
-      button4.title = "Not versioned: create a git repository for this deck";
+      button5.title = "Not versioned: create a git repository for this deck";
       return;
     }
     label2.textContent = status.branch ?? `@${status.detached ?? "?"}`;
     const n3 = status.changes?.length ?? 0;
     const lfsIssues = lfsFiles().length;
-    button4.classList.toggle("warn", lfsIssues > 0);
+    button5.classList.toggle("warn", lfsIssues > 0);
     badge3.hidden = n3 === 0 && lfsIssues === 0;
     badge3.textContent = n3 ? String(n3) : "!";
     const sync = [
       status.ahead ? `${status.ahead} to push` : "",
       status.behind ? `${status.behind} to pull` : ""
     ].filter(Boolean).join(", ");
-    button4.title = [
+    button5.title = [
       status.branch ? `Branch ${status.branch}` : `Viewing ${status.detached}`,
       n3 ? `${n3} changed file${n3 === 1 ? "" : "s"}` : "No changes",
       sync,
@@ -17658,9 +17721,9 @@ Decks: new, open, recent` : "Decks";
 Continue?`)) return null;
       if (notice) undoNoticeShown();
     }
-    button4.classList.add("busy");
+    button5.classList.add("busy");
     const res = await request({ action: "git", op, ...args });
-    button4.classList.remove("busy");
+    button5.classList.remove("busy");
     if (res.git) {
       status = res.git;
       render3();
@@ -17791,7 +17854,7 @@ Continue?`)) return null;
       );
       if (status.hasCommits) menu6.append(...await worktreeSection());
     }
-    const r2 = button4.getBoundingClientRect();
+    const r2 = button5.getBoundingClientRect();
     showMenu(Math.max(8, r2.right - 260), r2.bottom + 4);
   }
   function publishItems() {
@@ -18331,9 +18394,9 @@ Continue?`)) return null;
       if (!confirm(text)) return null;
       if (notice) undoNoticeShown();
     }
-    button4.classList.add("busy");
+    button5.classList.add("busy");
     const res = await request({ action: "worktree", op, ...args });
-    button4.classList.remove("busy");
+    button5.classList.remove("busy");
     if (res.git) {
       status = res.git;
       render3();
@@ -18594,7 +18657,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   var timer4 = 0;
   function initGit() {
-    button4.addEventListener("click", () => void openMenu3());
+    button5.addEventListener("click", () => void openMenu3());
     on("model", () => {
       window.clearTimeout(timer4);
       timer4 = window.setTimeout(() => void refreshGit(), 600);
@@ -19343,7 +19406,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   function icon2(name2) {
     return `<svg aria-hidden="true" viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${ICONS[name2]}</svg>`;
   }
-  function button5(title3, content2, data) {
+  function button6(title3, content2, data) {
     const b2 = document.createElement("button");
     b2.type = "button";
     b2.className = "ink-btn";
@@ -19378,12 +19441,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       this.el = el2;
       const tools = group(
         ...["pen", "highlighter", "eraser"].map(
-          (t2) => button5(TOOL_TITLES[t2], icon2(t2), { inkTool: t2 })
+          (t2) => button6(TOOL_TITLES[t2], icon2(t2), { inkTool: t2 })
         )
       );
       const swatches = group(
         ...SWATCHES.map((s2, i2) => {
-          const b2 = button5(
+          const b2 = button6(
             s2.label,
             `<span class="ink-swatch" style="background:${s2.token ? `var(--inkflow-${s2.token}, ${s2.hex})` : s2.hex}"></span>`,
             { inkSwatch: String(i2) }
@@ -19404,11 +19467,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       this.sizes = group();
       this.sizes.classList.add("ink-sizes");
       const actions = group(
-        button5(opts2.undoTitle, icon2("undo"), { inkAction: "undo" }),
-        button5(opts2.clearTitle, icon2("clear"), { inkAction: "clear" })
+        button6(opts2.undoTitle, icon2("undo"), { inkAction: "undo" }),
+        button6(opts2.clearTitle, icon2("clear"), { inkAction: "clear" })
       );
       const toggles = group(
-        button5(
+        button6(
           "Draw with a mouse or a finger too (off: only a pen draws, so clicks and swipes still navigate)",
           icon2("fingers"),
           { inkToggle: "fingers" }
@@ -19416,7 +19479,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       );
       if (opts2.keep) {
         toggles.append(
-          button5(
+          button6(
             "Keep: save new strokes with the slide (off: they last for this talk only)",
             icon2("keep"),
             { inkToggle: "keep" }
@@ -19425,7 +19488,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       }
       if (opts2.close) {
         toggles.append(
-          button5("Leave ink mode (i)", icon2("close"), {
+          button6("Leave ink mode (i)", icon2("close"), {
             inkAction: "close"
           })
         );
@@ -19523,7 +19586,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       this.sizes.replaceChildren(
         ...sizes.map((size4, i2) => {
           const px = Math.max(3, Math.round(size4 / largest * 16));
-          const b2 = button5(
+          const b2 = button6(
             ["Thin", "Medium", "Thick"][i2] ?? `Size ${i2 + 1}`,
             `<span class="ink-dot ${tool}" style="width:${px}px;height:${tool === "highlighter" ? Math.max(3, Math.round(px / 2.5)) : px}px"></span>`,
             { inkSize: String(i2) }
@@ -21886,7 +21949,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   var status2 = null;
   var body2 = null;
   var ssh = null;
-  var button6 = document.getElementById("btn-share");
+  var button7 = document.getElementById("btn-share");
   function qrSvg(text) {
     const qr = qrcode_default(0, "M");
     qr.addData(text);
@@ -22289,8 +22352,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function setStatus(msg) {
     status2 = msg;
-    if (button6) {
-      button6.classList.toggle(
+    if (button7) {
+      button7.classList.toggle(
         "on",
         status2.sharing || Boolean(status2.online?.sharing)
       );
@@ -22313,7 +22376,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function initShare() {
     onMessage("share-status", setStatus);
-    button6?.addEventListener("click", openShare);
+    button7?.addEventListener("click", openShare);
   }
 
   // src/ts/editor/theme.ts

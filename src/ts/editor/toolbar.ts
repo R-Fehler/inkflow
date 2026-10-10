@@ -2,7 +2,6 @@
 // and the object commands (delete, duplicate, group, z-order) that
 // both the panel buttons and shortcuts trigger.
 
-import { maxStep } from "../shared/step";
 import {
     canTransform,
     canTypeInto,
@@ -16,7 +15,6 @@ import {
     selectAll,
     sendSvgOps,
     setZoom,
-    slideRoot,
     zoneName,
 } from "./canvas";
 import { insertChart } from "./chart";
@@ -38,6 +36,7 @@ import {
     newSlideLike,
 } from "./sorter";
 import { currentSlide, ed, emit, on, type Tool } from "./state";
+import { initStepButton, renderStepButton, setStep } from "./stepbutton";
 import { copyStyle, pasteStyle } from "./stylecopy";
 import { isEditingText } from "./textedit";
 import type { SvgOp } from "./types";
@@ -174,18 +173,6 @@ function toggleTheme(): void {
     const root = document.documentElement;
     root.dataset.theme = root.dataset.theme === "light" ? "" : "light";
     render();
-}
-
-function renderStepSelect(): void {
-    const sel = $("step-select") as HTMLSelectElement;
-    const svg = slideRoot();
-    const max = svg ? maxStep(svg) : 0;
-    sel.innerHTML = "";
-    sel.append(new Option("All objects", ""));
-    for (let i = 0; i <= max; i++)
-        sel.append(new Option(`Build step ${i}`, String(i)));
-    sel.value = ed.step == null ? "" : String(Math.min(ed.step, max));
-    sel.disabled = max === 0 && ed.step == null;
 }
 
 // The whole editor page, not the browser's own F11 full screen (which a
@@ -345,6 +332,12 @@ function onKey(e: KeyboardEvent): void {
     } else if (ed.cropMode && (key === "Escape" || key === "Enter")) {
         handled();
         setCropMode(false);
+    } else if (
+        key === "Escape" &&
+        ed.step != null &&
+        !document.body.classList.contains("anim-playing")
+    ) {
+        setStep(null);
     } else if (key === "Escape") {
         if (ed.tool !== "select") setTool("select");
         else if (ed.scope) enterGroup(null);
@@ -402,15 +395,9 @@ export function initToolbar(): void {
     $("btn-present").addEventListener("click", present);
     $("btn-fullscreen").addEventListener("click", toggleFullscreen);
     document.addEventListener("fullscreenchange", updateFullscreen);
-    $("step-select").addEventListener("change", (e) => {
-        const v = (e.target as HTMLSelectElement).value;
-        ed.step = v === "" ? null : Number(v);
-        document.body.classList.toggle("previewing", ed.step != null);
-        render();
-        emit("step");
-    });
+    initStepButton();
     document.addEventListener("keydown", onKey);
-    on("render", renderStepSelect);
+    on("render", renderStepButton);
     on("render", updateZoomLabel);
     on("zoom", updateZoomLabel);
     on("history", updateHistory);

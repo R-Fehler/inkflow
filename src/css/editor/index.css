@@ -160,12 +160,23 @@ textarea {
     font-variant-numeric: tabular-nums;
 }
 
-#step-select {
-    height: 30px;
-    background: var(--surface);
-    border: 1px solid var(--ui-line);
-    border-radius: 6px;
-    padding: 0 6px;
+#btn-step {
+    min-width: 6.2em;
+    font-variant-numeric: tabular-nums;
+}
+
+#btn-step.came-round {
+    animation: step-came-round 0.9s ease-out;
+}
+
+@keyframes step-came-round {
+    0% {
+        box-shadow: 0 0 0 0 color-mix(in srgb, var(--sel) 70%, transparent);
+        background: var(--sel-soft);
+    }
+    100% {
+        box-shadow: 0 0 0 10px transparent;
+    }
 }
 
 #conn {
@@ -683,7 +694,7 @@ body.previewing #paper {
 }
 
 body.previewing #canvas::after {
-    content: "Previewing a build step — choose “All objects” to edit";
+    content: "Previewing a step: click Steps on to the end (or Esc) to edit again";
     position: absolute;
     bottom: 10px;
     left: 50%;

@@ -13,6 +13,7 @@ import {
 import { render, slideRoot } from "./canvas";
 import { toast } from "./dom";
 import { ed, emit } from "./state";
+import { showStepLabel } from "./stepbutton";
 
 export { cueSteps } from "./animsteps";
 
@@ -63,8 +64,7 @@ function playRun(
 }
 
 function showStep(step: number | null): void {
-    const sel = document.getElementById("step-select") as HTMLSelectElement;
-    if (sel) sel.value = step == null ? "" : String(step);
+    showStepLabel(step);
     for (const row of document.querySelectorAll<HTMLElement>(
         ".anim-row[data-step]",
     )) {

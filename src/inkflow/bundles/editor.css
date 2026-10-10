@@ -238,7 +238,7 @@ body.compare-mode #btn-chart,
 body.compare-mode #btn-layout,
 body.compare-mode #btn-grid,
 body.compare-mode #btn-find,
-body.compare-mode #step-select,
+body.compare-mode #btn-step,
 body.compare-mode #zoom-in,
 body.compare-mode #zoom-out,
 body.compare-mode #zoom-fit,
@@ -1417,12 +1417,21 @@ textarea {
   min-width: 52px;
   font-variant-numeric: tabular-nums;
 }
-#step-select {
-  height: 30px;
-  background: var(--surface);
-  border: 1px solid var(--ui-line);
-  border-radius: 6px;
-  padding: 0 6px;
+#btn-step {
+  min-width: 6.2em;
+  font-variant-numeric: tabular-nums;
+}
+#btn-step.came-round {
+  animation: step-came-round 0.9s ease-out;
+}
+@keyframes step-came-round {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--sel) 70%, transparent);
+    background: var(--sel-soft);
+  }
+  100% {
+    box-shadow: 0 0 0 10px transparent;
+  }
 }
 #conn {
   width: 9px;
@@ -1843,7 +1852,7 @@ body.previewing #paper {
   pointer-events: none;
 }
 body.previewing #canvas::after {
-  content: "Previewing a build step \2014  choose \201c All objects\201d  to edit";
+  content: "Previewing a step: click Steps on to the end (or Esc) to edit again";
   position: absolute;
   bottom: 10px;
   left: 50%;
