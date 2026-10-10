@@ -157,6 +157,77 @@ def changes(repo: Repo) -> list[dict[str, object]]:
     return items
 
 
+COMMITTED = "committed"
+"""Tracked, no uncommitted changes: git can bring it back."""
+MODIFIED = "modified"
+"""Tracked with uncommitted changes: git has only its last committed version."""
+UNTRACKED = "untracked"
+"""Never committed: git cannot bring it back."""
+IGNORED = "ignored"
+"""Ignored by git: never committed either."""
+NO_REPO = "no-repo"
+"""The deck is not in a git repository."""
+
+
+def file_states(deck_dir: Path, paths: list[Path]) -> dict[Path, str]:
+    """What git could bring back of each file once it is deleted, by its
+    path as given: `COMMITTED`, `MODIFIED`, `UNTRACKED`, `IGNORED`, or
+    `NO_REPO` for every file when the deck is not in a repository (or git
+    is missing). A Git LFS file checked out as committed is committed."""
+    if not paths:
+        return {}
+    repo = open_repo(deck_dir)
+    if repo is None:
+        return dict.fromkeys(paths, NO_REPO)
+    try:
+        out = repo.git(
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--ignored",
+            "--untracked-files=all",
+            "--",
+            repo.scope or ".",
+        )
+    except GitError:
+        return dict.fromkeys(paths, NO_REPO)
+    codes: dict[str, str] = {}
+    entries = out.split("\0")
+    i = 0
+    while i < len(entries):
+        entry = entries[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        code, name = entry[:2], entry[3:]
+        if code[0] in "RC":
+            i += 1  # the rename's source path follows
+        codes[name] = code
+    folders = {name: code for name, code in codes.items() if name.endswith("/")}
+    root = repo.root.resolve()
+    states: dict[Path, str] = {}
+    for path in paths:
+        try:
+            rel = path.resolve().relative_to(root).as_posix()
+        except ValueError:
+            states[path] = NO_REPO
+            continue
+        code = codes.get(rel) or next(
+            (c for name, c in folders.items() if rel.startswith(name)), None
+        )
+        if code is None:
+            states[path] = COMMITTED
+        elif code == "??":
+            states[path] = UNTRACKED
+        elif code == "!!":
+            states[path] = IGNORED
+        elif code[0] == "A":
+            states[path] = UNTRACKED  # added, never committed
+        else:
+            states[path] = MODIFIED
+    return states
+
+
 def status(deck_dir: Path) -> dict[str, object]:
     if not available():
         return {"repo": False, "git": False}

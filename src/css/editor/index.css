@@ -2287,6 +2287,93 @@ body.offline #offline-banner {
     color: #e5a50a;
 }
 
+.files-row.template .files-uses {
+    font-style: italic;
+}
+
+/* What git could bring back of a file (deletetext.gitBadge). */
+.git-state {
+    flex: none;
+    padding: 0 6px;
+    border: 1px solid currentColor;
+    border-radius: 8px;
+    font-size: 11px;
+    line-height: 16px;
+    white-space: nowrap;
+}
+
+.git-state.ok {
+    color: var(--subtext);
+}
+
+.git-state.warn {
+    color: var(--yellow);
+}
+
+.git-state.lost {
+    color: var(--red);
+}
+
+/* Deleting from disk (deletedlg.ts). */
+.delete-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.delete-question {
+    margin: 0;
+    font-weight: 600;
+}
+
+.delete-files {
+    margin: 0;
+    padding-left: 18px;
+    max-height: 30vh;
+    overflow-y: auto;
+}
+
+.delete-files li {
+    margin: 2px 0;
+    overflow-wrap: anywhere;
+}
+
+.delete-files .git-state {
+    margin-left: 8px;
+}
+
+.delete-details:empty {
+    display: none;
+}
+
+.delete-line {
+    margin: 0 0 4px;
+}
+
+.delete-warning {
+    margin: 0 0 4px;
+    padding: 6px 10px;
+    border-left: 3px solid var(--yellow);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--yellow) 12%, transparent);
+}
+
+.delete-warning.ok {
+    border-left-color: var(--green);
+    background: color-mix(in srgb, var(--green) 10%, transparent);
+}
+
+.pbtn.primary.danger,
+.pbtn.primary.danger:hover:not(:disabled) {
+    background: var(--red);
+    border-color: var(--red);
+    color: var(--ui-bg);
+}
+
+[data-theme="light"] .pbtn.primary.danger {
+    color: #fff;
+}
+
 /* ── Grid view (all slides) ── */
 
 #grid-view {

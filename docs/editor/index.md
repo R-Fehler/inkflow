@@ -303,7 +303,8 @@ the section holding the slide you edit opens by itself).
   or collapsed section takes slides too.
 - The header's menu also has **Select all slides in section**, **Collapse all /
   Expand all**, **Remove section** (its slides join the section before it) and
-  **Remove section and its slides…** (after a confirmation).
+  **Remove section and its slides…** (after a confirmation, which can also
+  [delete their files](#files-the-deck-no-longer-uses)).
 
 Each of these is one step in the undo history, like any edit of the slide list.
 
@@ -1016,12 +1017,60 @@ names, so it changes with them, and its ink and `slide:` links follow; tick
 an `id=` of its own keeps it. Files other slides use too (a layout, a shared
 Markdown file) stay as they are, and the dialog lists them.
 
-**Files…** in the deck menu lists every file the deck can use, folder by folder,
-with how many references name it. Rename any of them from there; files nothing
-uses are marked *unused* and can be deleted (undo brings them back).
-
 References built in code (`Image(ASSETS / "x.png")`) cannot be followed; if
 `deck.py` still names the old path afterwards, the dialog says so.
+
+## Files the deck no longer uses
+
+Deleting a slide takes it out of `deck.py`; its drawing, Markdown and pictures
+stay on disk unless you ask for them to go. **Files…** in the deck menu lists
+every file the deck can use, folder by folder, each with how the deck uses it:
+
+- **N uses**: the deck reaches it. Reaching starts from `deck.py` (every
+  slide's drawing and its layouts, Markdown, notes, saved ink, the pictures,
+  videos and chart data of `zones=`, the overlays, `styles.css`) and goes on
+  through what those files name, never through a file the deck does not use.
+  Hidden slides count, so do layout copies the [slide master](#slide-master)
+  made. Inkscape preview layers are copies of a layout, not uses.
+- **unused**: nothing names it.
+- **only used by unused files**: only files the deck does not use name it, such
+  as the picture in a slide drawing whose slide was deleted. Hover to see which.
+- **unused template** (or **used by a template**): a layout or overlay no slide
+  uses, or a file only those name. They are kept as templates.
+
+In a git repository, each file also shows what git could bring back: **in git**
+(committed), **changed** (uncommitted changes: git has only the last committed
+version), **not in git** (never committed) or **ignored**.
+
+Rename any file from there. **Pick all unused** ticks the unused files and the
+ones only unused files name (not templates, which you can still tick), so one
+click removes a deleted slide's drawing together with its pictures.
+**Delete N files…** shows the files with their git state, and warns before
+anything goes:
+
+- *Not in git: 2 files (…) can't be restored from version control. Undo brings
+  them back only while this editor stays open.*
+- *Uncommitted changes in 1 file (…): git keeps only its last committed version.*
+- *This deck is not in a git repository: deleted files can only be brought back
+  with Undo while this editor is open.*
+- When git has every file: *All in git: Discard changes in the Git menu brings
+  them back, or its history once you commit.*
+
+The delete is one step: <kbd>Ctrl</kbd>+<kbd>Z</kbd> brings every file back, as
+long as the editor runs (its undo history is not kept on disk). A file the deck
+uses is never deleted, even when asked for.
+
+**Deleting slides** (<kbd>Delete</kbd> in the slide list or the grid, or
+**Remove section and its slides…**) asks in the same dialog, with **Also delete
+its files from disk** (off each time). Ticked, it lists exactly the files that
+would go, with their git state and the same warnings: those the deck reaches
+only through the deleted slides (their drawing, Markdown, notes, ink, and the
+pictures, data and diagrams only they show). Layouts and overlays always stay.
+<kbd>Enter</kbd> deletes, <kbd>Esc</kbd> cancels, and
+<kbd>Ctrl</kbd>+<kbd>Z</kbd> brings back the slides and their files in one step.
+
+From the command line: `inkflow files [--unused] [--json]` and `inkflow files
+clean [-n] [--templates]` (see [Claude Code](claude-code.md#files-the-deck-no-longer-uses)).
 
 ## Opening files in other programs
 

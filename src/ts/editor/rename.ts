@@ -8,8 +8,17 @@
 //
 // Also here: "Rename files…" for a slide (its drawing, Markdown, notes and
 // ink to one new name, the slide's id with them), and the Files view (every
-// file a deck can use, how often it is used, rename, delete the unused).
+// file a deck can use, how the deck uses it, what git could bring back of it;
+// rename, delete what the deck does not use).
 
+import { askDelete, planOf } from "./deletedlg";
+import {
+    type FileEntry,
+    gitBadge,
+    pickable,
+    plural,
+    useText,
+} from "./deletetext";
 import { closeDialog, openDialog } from "./dialog";
 import { h, toast } from "./dom";
 import { edit, request } from "./net";
@@ -26,10 +35,6 @@ interface Preview {
     links: number;
     shared: string[];
     warnings: string[];
-}
-
-function plural(n: number, word: string): string {
-    return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 /** The project-relative path of a file a panel names (or null). */
@@ -401,39 +406,65 @@ export function renameSlideFiles(deckIndex: number): void {
 
 // ── The Files view ──
 
-interface FileEntry {
-    path: string;
-    uses: number;
-    size: number;
-}
-
 function size(bytes: number): string {
     if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
     if (bytes >= 1e3) return `${Math.round(bytes / 1e3)} KB`;
     return `${bytes} B`;
 }
 
-/** Every file a deck can use, with how often it is used: rename, delete the unused. */
-export async function openFiles(): Promise<void> {
+/** Delete the picked files from disk: the server's dry run (each file with
+ * what git could bring back of it) in a dialog, then one undoable step. */
+async function deletePicked(paths: string[]): Promise<void> {
+    const dry = await request({ action: "delete-files", paths, dryRun: true });
+    const plan = planOf(dry);
+    if (!plan) {
+        toast(dry.error ?? "Cannot delete those files", "error");
+        void openFiles(new Set(paths));
+        return;
+    }
+    const answer = await askDelete({
+        title: "Delete files",
+        question: `Delete ${plural(plan.files.length, "file")} from disk?`,
+        confirm: "Delete",
+        plan,
+    });
+    if (!answer) {
+        void openFiles(new Set(paths));
+        return;
+    }
+    const r = await edit({ action: "delete-files", paths });
+    if (r.ok) toast(r.label ?? "Deleted", "ok");
+    void openFiles(r.ok ? new Set() : new Set(paths));
+}
+
+/** Every file a deck can use, how the deck uses it and what git could bring
+ * back of it: rename, delete what the deck does not use. */
+export async function openFiles(
+    initial: Set<string> = new Set(),
+): Promise<void> {
     const res = await request({ action: "files" });
     if (!res.ok) {
         toast(res.error ?? "Cannot list the deck's files", "error");
         return;
     }
     const files = (res.files as FileEntry[]) ?? [];
-    const unused = files.filter((f) => !f.uses);
-    const picked = new Set<string>();
+    const unused = files.filter((f) => pickable(f.state));
+    const picked = new Set(
+        [...initial].filter((p) =>
+            files.some((f) => f.path === p && f.state !== "used"),
+        ),
+    );
     const list = h("div", { class: "files-list" });
     const deleteBtn = h(
         "button",
         { type: "button", class: "pbtn", disabled: true },
-        "Delete unused…",
+        "Delete…",
     ) as HTMLButtonElement;
     const sync = () => {
         deleteBtn.disabled = !picked.size;
         deleteBtn.textContent = picked.size
             ? `Delete ${plural(picked.size, "file")}…`
-            : "Delete unused…";
+            : "Delete…";
     };
     let folder: string | null = null;
     for (const f of files) {
@@ -442,31 +473,45 @@ export async function openFiles(): Promise<void> {
             folder = dir;
             list.append(h("div", { class: "files-folder" }, `${dir || "."}/`));
         }
+        const used = f.state === "used";
         const check = h("input", {
             type: "checkbox",
-            disabled: f.uses > 0,
-            title: f.uses ? "In use" : "Pick it to delete",
+            disabled: used,
+            title: used ? "In use" : "Pick it to delete",
+            "data-path": f.path,
         }) as HTMLInputElement;
+        check.checked = picked.has(f.path);
         check.addEventListener("change", () => {
             if (check.checked) picked.add(f.path);
             else picked.delete(f.path);
             sync();
         });
+        const use = useText(f);
+        const badge = gitBadge(f.git);
         list.append(
             h(
                 "div",
-                { class: `files-row${f.uses ? "" : " unused"}` },
+                {
+                    class: `files-row${used ? "" : " unused"}${f.state === "template" ? " template" : ""}`,
+                    "data-state": f.state,
+                },
                 check,
                 h(
                     "code",
                     { class: "rename-code files-name", title: f.path },
                     f.path.split("/").pop() ?? f.path,
                 ),
-                h(
-                    "span",
-                    { class: "files-uses" },
-                    f.uses ? plural(f.uses, "use") : "unused",
-                ),
+                h("span", { class: "files-uses", title: use.title }, use.text),
+                badge
+                    ? h(
+                          "span",
+                          {
+                              class: `git-state ${badge.tone}`,
+                              title: badge.title,
+                          },
+                          badge.text,
+                      )
+                    : null,
                 h("span", { class: "files-size" }, size(f.size)),
                 h(
                     "button",
@@ -482,39 +527,27 @@ export async function openFiles(): Promise<void> {
             ),
         );
     }
-    deleteBtn.addEventListener("click", async () => {
-        const paths = [...picked];
-        if (
-            !window.confirm(
-                `Delete ${plural(paths.length, "file")} nothing uses?\n\n${paths.join("\n")}\n\nUndo brings them back.`,
-            )
-        ) {
-            return;
-        }
-        const r = await edit({ action: "delete-files", paths });
-        if (r.ok) {
-            toast(r.label ?? "Deleted", "ok");
-            void openFiles();
-        }
-    });
+    deleteBtn.addEventListener("click", () => void deletePicked([...picked]));
     const selectUnused = h(
         "button",
         {
             type: "button",
             class: "pbtn",
             disabled: !unused.length,
+            title: "Unused files and those only unused files name; not templates",
             onclick: () => {
-                for (const row of list.querySelectorAll<HTMLInputElement>(
-                    ".files-row.unused input",
-                )) {
-                    row.checked = true;
-                }
                 for (const f of unused) picked.add(f.path);
+                for (const box of list.querySelectorAll<HTMLInputElement>(
+                    "input[data-path]",
+                )) {
+                    box.checked = picked.has(box.dataset.path ?? "");
+                }
                 sync();
             },
         },
         "Pick all unused",
     );
+    sync();
     const body = h(
         "div",
         { class: "files-body" },
@@ -533,6 +566,6 @@ export async function openFiles(): Promise<void> {
     );
     openDialog("Files", body, {
         wide: true,
-        hint: "Pictures, videos, data, diagrams and slide files; a use is a reference in a slide, Markdown or deck.py",
+        hint: "Pictures, videos, data, diagrams and slide files; a use is a reference from deck.py or from a file the deck uses",
     });
 }

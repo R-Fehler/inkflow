@@ -213,3 +213,77 @@ def rename_request(
     except RemoteEditError as exc:
         raise click.ClickException(str(exc)) from exc
     report_rename(applied.result, dry_run=True)
+
+
+def _names(paths: list[str], limit: int = 4) -> str:
+    shown = ", ".join(paths[:limit])
+    return shown + (f" and {len(paths) - limit} more" if len(paths) > limit else "")
+
+
+def deletion_warnings(
+    deleted: list[dict[str, object]], repo: bool, undo: bool
+) -> list[tuple[str, str, str]]:
+    """What can bring back the files a step deletes, as (verb, words, style)
+    lines: the editor's delete dialog says the same. ``undo``: the step is in
+    an open editor's History (else nothing but git can restore them)."""
+    if not deleted:
+        return []
+    if not repo:
+        words = (
+            "deleted files come back only with Undo in the editor, while it is open."
+            if undo
+            else "deleted files cannot be brought back."
+        )
+        return [("Warning", f"this deck is not in a git repository: {words}", "yellow")]
+    lost = [str(d["path"]) for d in deleted if d.get("git") in ("untracked", "ignored")]
+    changed = [str(d["path"]) for d in deleted if d.get("git") == "modified"]
+    lines: list[tuple[str, str, str]] = []
+    if lost:
+        n = len(lost)
+        them = "it" if n == 1 else "them"
+        after = (
+            f"Undo in the editor brings {them} back only while it stays open."
+            if undo
+            else f"Nothing else can bring {them} back."
+        )
+        lines.append(
+            (
+                "Not in git",
+                f"{n} file{'' if n == 1 else 's'} ({_names(lost)}) can't be restored "
+                + f"from version control. {after}",
+                "yellow",
+            )
+        )
+    if changed:
+        n = len(changed)
+        lines.append(
+            (
+                "Uncommitted changes",
+                f"in {n} file{'' if n == 1 else 's'} ({_names(changed)}): git keeps "
+                + f"only {'its' if n == 1 else 'their'} last committed version.",
+                "yellow",
+            )
+        )
+    if not lines:
+        lines.append(
+            (
+                "In git",
+                "all of them: `git restore` (the editor's Git menu → Discard "
+                + "changes) brings them back.",
+                "dim",
+            )
+        )
+    return lines
+
+
+def report_deleted(result: dict[str, object], dry_run: bool, undo: bool) -> None:
+    """Print the files a step deletes (``deleted`` in its result, with what
+    git could bring back of each) when ``dry_run``, then the git warnings."""
+    deleted = cast("list[dict[str, object]]", result.get("deleted") or [])
+    if dry_run:
+        for d in deleted:
+            report("Would delete", f"{d['path']}  ({d.get('git')})", style="yellow")
+    for verb, words, style in deletion_warnings(
+        deleted, bool(result.get("repo")), undo
+    ):
+        report(verb, words, style=style)

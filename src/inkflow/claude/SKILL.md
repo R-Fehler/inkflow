@@ -60,6 +60,11 @@ Rename or move a deck's files with `inkflow mv OLD NEW` (`-n` to preview) and a
 slide's own files with `inkflow slide rename-files N NAME`, never by hand: every
 reference to the file is rewritten with it, which a plain `mv` would break.
 
+`inkflow files [--unused]` says which files the deck uses; delete what it does
+not with `inkflow files clean` (`-n` to preview, `--templates` for unused
+layouts), never with `rm`: it refuses used files and warns about files git
+cannot bring back.
+
 A deck must look the same on every machine: `inkflow fonts` says where each font
 comes from (`machine`/`generic`/`missing` are not portable); set fonts with
 `inkflow fonts set body|heading|mono FAMILY` (never a generic family first) and

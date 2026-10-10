@@ -175,6 +175,7 @@ commands:
         flags:
           -d, --deck=: Path to deck.py
           --keep-files: Leave the slide's files in place
+          -n, --dry-run: Print the files it would delete; change nothing
         completion:
           flag:
             deck: ["$files([\".py\"])"]
@@ -663,6 +664,26 @@ commands:
       positional:
         - ["$files"]
         - ["$files"]
+
+  - name: files
+    description: The deck's files and whether the deck uses them.
+    flags:
+      -d, --deck=: Path to deck.py
+      --unused: Only the files the deck does not use
+      --json: Print the list as JSON
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+    commands:
+      - name: clean
+        description: Delete the files the deck does not use.
+        flags:
+          -d, --deck=: Path to deck.py
+          -n, --dry-run: Print what would be deleted; delete nothing
+          --templates: Also delete layouts and overlays no slide uses
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
 
   - name: worktree
     description: Work on the deck in a separate git worktree, on its own branch.
