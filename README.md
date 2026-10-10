@@ -164,10 +164,16 @@ at the same time and see each other's changes live.
 
 - **Draw and arrange.** Shapes, text boxes that wrap, lines and arrows that stay attached to
   their shapes (straight, elbow or curved), smart guides, groups, copy-by-dragging and a
-  format painter. Pictures with crop; videos of any size and, with ffmpeg, any format.
-  Bigger diagrams open in [draw.io](https://www.drawio.com), kept as editable SVG.
+  format painter. Pictures with crop, figures straight from a PDF page (a paper backing
+  keeps a black-on-white plot readable on a dark slide); videos of any size and, with
+  ffmpeg, any format. Bigger diagrams open in [draw.io](https://www.drawio.com), kept as
+  editable SVG and drawn into the slide in the theme's font and colours.
 - **Charts from data.** Bar, line, area, scatter and pie charts plotted from a CSV kept in
-  the deck, edited in a spreadsheet-like grid with a live preview, drawn in the theme's colours.
+  the deck, edited in a spreadsheet-like grid with a live preview, drawn in the theme's
+  colours, with fixed axis ranges and a second axis when you need them.
+- **Draw with a pen.** Pressure-sensitive ink, highlighter and eraser, on the slide in the
+  editor or live while presenting; kept as plain vector paths in the deck, or gone when you
+  move on.
 - **Type on the slide.** Rich text with lists, tables, links and LaTeX formulas, saved as Markdown.
 - **Layouts and theme.** Start slides from a layout gallery, edit the shared layouts, and set
   the deck's colours and fonts in a theme dialog.
@@ -184,6 +190,12 @@ inkflow setup-desktop    # add Inkflow to your application menu
 ```
 
 See the [editor guide](https://ll-nick.github.io/inkflow/editor/) for everything it does.
+
+A coding agent gets the same deck through the command line: `inkflow outline` sums it up
+in a few lines per slide, `inkflow slide add/move/delete …` changes the slide list with
+every file it touches (an undoable step in the open editor), and `inkflow render --check`
+reports text that overflows its box or objects off the slide, with `--sheet` for all
+slides in one image ([Editing with Claude Code](https://ll-nick.github.io/inkflow/editor/claude-code/)).
 
 ## Quick start
 

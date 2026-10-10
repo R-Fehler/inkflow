@@ -99,7 +99,10 @@ src/
                                and zones.py (markdown reveals)
     zones.py          ::zone:: / ::step:: marker grammar, zone param extraction, and slide
                                assembly (parsed markdown -> per-zone TextBox/Media)
-    server.py         HTTP server, WebSocket server, file watcher, build pipeline
+    server.py         HTTP server, WebSocket server, file watcher, build pipeline;
+                               `load_deck` turns any failure in deck.py into `DeckError`
+                               (`deck.py:42: NameError: …` + the line), which the CLI's
+                               `_Group` prints as one error line instead of a traceback
     edit.py           launching external programs on source files: INKFLOW_EDIT_CMD*
                                resolution (extension > kind > default) for the presenter's
                                edit menu, and the editor's "Open" catalog (`open_choices`)
@@ -289,6 +292,9 @@ src/
                                `plan_preview` (the single answer to "what does this file
                                preview", shared by `sync`, `sync --check` and `verify`),
                                `PreviewRule` (which of the three overlay rules fired),
+                               `PreviewPlan.swept` (whether a whole-deck sync keeps a file
+                               current, and so whether verify may call it stale: a bare
+                               slide only once it carries the preview style block),
                                `sync_slides`; shared by the `sync` command and `init`
                                (run live after scaffolding)
     logging.py        unified log sink over stdlib logging: `logger`, shared Rich
