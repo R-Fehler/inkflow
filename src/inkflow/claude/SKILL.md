@@ -23,6 +23,12 @@ files, then each zone with where its text lives (`md` = the slide's `.md`,
 as deck.py writes it. Read it instead of opening every file; open only the
 files you change. `inkflow layouts` lists every layout with its zones.
 
+To place or size something against text, use the boxes the browser actually
+drew, not guesses: `inkflow render --boxes -s N` prints each element's box in
+slide units (`id  x,y wxh  kind  "text"`), each zone with its content's extent
+and free height, and each block of a zone's text (`zone-content/2  …  p`) with
+the extent of its text.
+
 ## What the author is looking at
 
 `inkflow context` prints the editor's current slide, build step and

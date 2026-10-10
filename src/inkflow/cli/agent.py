@@ -8,6 +8,7 @@ tie these together in a project.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import shutil
@@ -21,7 +22,7 @@ import click
 from inkflow.cli._common import deck_option, main, resolve_deck_path
 from inkflow.editor.context import CONTEXT_DIR, format_context, read_context
 from inkflow.logging import report
-from inkflow.render import render_slides, summary
+from inkflow.render import SlideBoxes, render_json, render_slides, summary
 
 # The prompt hook stays quiet once the editor has not reported for this long.
 _HOOK_MAX_AGE = 2 * 60 * 60
@@ -80,7 +81,13 @@ def context(deck_path: Path, as_json: bool, hook: bool) -> None:
     + "element ids, animations as deck.py writes them.",
 )
 @click.option("--json", "as_json", is_flag=True, help="Print the full structure.")
-def outline(deck_path: Path, number: int | None, as_json: bool) -> None:
+@click.option(
+    "--boxes",
+    is_flag=True,
+    help="With --slide: add every element's box as the browser draws it"
+    + " (`inkflow render --boxes`; needs Chromium).",
+)
+def outline(deck_path: Path, number: int | None, as_json: bool, boxes: bool) -> None:
     """Print what is on every slide, in a few lines each.
 
     For each slide: its number, id, title and position in deck.py's
@@ -93,6 +100,8 @@ def outline(deck_path: Path, number: int | None, as_json: bool) -> None:
     from inkflow.pipeline import process_deck
     from inkflow.server import load_deck
 
+    if boxes and number is None:
+        raise click.UsageError("--boxes needs --slide N")
     resolved = resolve_deck_path(deck_path)
     try:
         deck = load_deck(resolved)
@@ -111,6 +120,8 @@ def outline(deck_path: Path, number: int | None, as_json: bool) -> None:
             if not picked:
                 raise click.ClickException(f"no slide {number}")
             data = picked[0]
+            if boxes:
+                data["boxes"] = dataclasses.asdict(_boxes(resolved, number))
         indent = 1 if sys.stdout.isatty() else None
         click.echo(json.dumps(data, indent=indent, ensure_ascii=False))
         return
@@ -118,6 +129,21 @@ def outline(deck_path: Path, number: int | None, as_json: bool) -> None:
         click.echo(format_outline(result, number))
     except IndexError as exc:
         raise click.ClickException(f"no slide {number}") from exc
+    if boxes and number is not None:
+        click.echo("  boxes (as rendered, slide units):")
+        for line in _boxes(resolved, number).text().splitlines()[1:]:
+            click.echo(f"    {line}")
+
+
+def _boxes(deck_path: Path, number: int) -> SlideBoxes:
+    """One slide's rendered boxes (`inkflow render --boxes`)."""
+    try:
+        result = render_slides(
+            deck_path, [number], None, boxes=True, no_sandbox=_running_as_root()
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    return result.boxes[0]
 
 
 def _current_slide(project_dir: Path) -> int:
@@ -170,6 +196,14 @@ def _current_slide(project_dir: Path) -> int:
     show_default=True,
     help="Image scale relative to the slide's own size.",
 )
+@click.option(
+    "--boxes",
+    is_flag=True,
+    help="Print every element's rendered box in slide units (ids, zones with"
+    + " their content's extent and free space, each block of a zone's text);"
+    + " writes no images unless --output is given.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Print the result as JSON.")
 @click.option("--chromium", default=None, help="Path to a Chromium/Chrome binary.")
 @click.option(
     "--no-sandbox", "no_sandbox", is_flag=True, help="Pass --no-sandbox to Chromium."
@@ -183,6 +217,8 @@ def render(
     check: bool,
     output: str | None,
     scale: float,
+    boxes: bool,
+    as_json: bool,
     chromium: str | None,
     no_sandbox: bool,
 ) -> None:
@@ -197,9 +233,18 @@ def render(
     `--sheet` puts the slides on one contact sheet (16 per image at most).
     `--check` measures without writing images and exits 1 if anything other
     than a hint was found.
+
+    `--boxes` prints where the browser drew everything, in slide units, one
+    line per element (`id  x,y wxh  kind  "text"`): each element with an id,
+    each zone with the extent of its content and the space left in it, and
+    each block of a zone's text (paragraph, list, heading, code, table,
+    picture) with the extent of its text, so things can be placed against
+    real text instead of guessed sizes.
     """
     if check and sheet:
         raise click.UsageError("--check writes no images; drop --sheet or --check")
+    if boxes and sheet:
+        raise click.UsageError("--boxes measures slides one by one; drop --sheet")
     resolved = resolve_deck_path(deck_path)
     project_dir = resolved.parent
     numbers: list[int] | None
@@ -208,7 +253,8 @@ def render(
     else:
         numbers = list(slides) or [_current_slide(project_dir)]
     out: Path | None = None
-    if not check:
+    # --boxes alone writes no images; with --output it does both.
+    if not check and not (boxes and output is None):
         out = Path(output) if output else project_dir / CONTEXT_DIR / "render"
         if output is None:
             (project_dir / CONTEXT_DIR).mkdir(exist_ok=True)
@@ -225,9 +271,17 @@ def render(
             scale=scale,
             chromium=chromium,
             no_sandbox=no_sandbox or _running_as_root(),
+            boxes=boxes,
         )
     except (RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
+    if as_json:
+        click.echo(json.dumps(render_json(result), ensure_ascii=False))
+        if check and any(f.is_problem for f in result.findings):
+            sys.exit(1)
+        return
+    for slide_boxes in result.boxes:
+        click.echo(slide_boxes.text())
     for path in result.images:
         click.echo(str(path))
     for finding in result.findings:

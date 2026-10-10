@@ -518,6 +518,195 @@
     return new Measurer(svg2).run();
   }
 
+  // src/ts/render/boxes.ts
+  var BLOCK_KINDS = {
+    p: "p",
+    h1: "h1",
+    h2: "h2",
+    h3: "h3",
+    h4: "h4",
+    h5: "h5",
+    h6: "h6",
+    ul: "list",
+    ol: "list",
+    dl: "list",
+    pre: "code",
+    table: "table",
+    blockquote: "quote",
+    figure: "figure",
+    img: "image",
+    video: "video",
+    svg: "chart",
+    math: "math",
+    hr: "rule"
+  };
+  var round1 = (v) => Math.round(v * 10) / 10;
+  function toRect(b) {
+    return {
+      x: round1(b.left),
+      y: round1(b.top),
+      w: round1(b.right - b.left),
+      h: round1(b.bottom - b.top)
+    };
+  }
+  function blockKind(el) {
+    if (el.localName === "math" && el.getAttribute("display") !== "block")
+      return null;
+    return BLOCK_KINDS[el.localName] ?? null;
+  }
+  var BoxWalker = class {
+    constructor(svg2) {
+      this.svg = svg2;
+      const ctm = svg2.getScreenCTM();
+      this.toSlide = ctm ? DOMMatrix.fromMatrix(ctm).inverse() : new DOMMatrix();
+    }
+    svg;
+    out = [];
+    toSlide;
+    box(r) {
+      return mapBox(this.toSlide, r);
+    }
+    run() {
+      this.walk(this.svg, 1, null, 0);
+      return this.out;
+    }
+    walk(parent, opacity, listed, depth) {
+      for (const el of Array.from(parent.children)) {
+        if (el.namespaceURI !== SVG_NS || NOT_DRAWN.has(el.localName))
+          continue;
+        const style = getComputedStyle(el);
+        if (style.display === "none") continue;
+        const alpha = opacity * Number.parseFloat(style.opacity || "1");
+        const id = el.id;
+        let entry = null;
+        if (id && !id.startsWith("inkflow-")) {
+          entry = this.element(el, style, alpha, listed, depth);
+        }
+        const inner = entry ?? listed;
+        const innerDepth = entry ? depth + 1 : depth;
+        if (el.localName === "foreignObject") {
+          this.zoneBlocks(
+            el,
+            entry,
+            inner,
+            innerDepth
+          );
+          continue;
+        }
+        this.walk(el, alpha, inner, innerDepth);
+      }
+    }
+    element(el, style, alpha, listed, depth) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return null;
+      const entry = {
+        id: el.id,
+        kind: el.localName,
+        box: toRect(this.box(r)),
+        depth
+      };
+      if (listed) entry.parent = listed.id;
+      if (alpha < 0.02 || style.visibility === "hidden") entry.hidden = true;
+      const zone = el.id.startsWith("zone-");
+      if (el.localName === "foreignObject") {
+        const media = el.querySelector(":scope > img, :scope > video");
+        entry.kind = media ? "media" : "zone";
+      } else if (el.localName === "svg" && zone) {
+        entry.kind = "chart";
+      }
+      if (el.localName === "text" || entry.kind === "zone") {
+        const text = snippet(el.textContent ?? "");
+        if (text) entry.text = text;
+      }
+      this.out.push(entry);
+      return entry;
+    }
+    /** The blocks of a zone's text, each with the extent of its text, and
+     * the zone's content extent and free space. */
+    zoneBlocks(fo, zoneEntry, listed, depth) {
+      const content = fo.querySelector(
+        ":scope > .inkflow-wrapper > .inkflow-content"
+      );
+      if (!content) return;
+      const zoneId = zoneEntry?.id ?? fo.id;
+      let all = null;
+      let n = 0;
+      for (const block of blocksOf(content)) {
+        const style = getComputedStyle(block);
+        if (style.display === "none") continue;
+        const layout = block.getBoundingClientRect();
+        if (layout.width === 0 && layout.height === 0) continue;
+        const blockBox = this.box(layout);
+        const ink = this.inkOf(block) ?? blockBox;
+        all = union(all, ink);
+        n += 1;
+        const entry = {
+          id: `${zoneId}/${n}`,
+          kind: blockKind(block) ?? block.localName,
+          box: toRect(ink),
+          depth,
+          zone: zoneId,
+          block: toRect(blockBox)
+        };
+        if (listed) entry.parent = listed.id;
+        const text = snippet(block.textContent ?? "");
+        if (text) entry.text = text;
+        if (style.visibility === "hidden" || opacityOf(block, fo) < 0.02)
+          entry.hidden = true;
+        this.out.push(entry);
+      }
+      if (zoneEntry && all) {
+        zoneEntry.content = toRect(all);
+        zoneEntry.free = round1(zoneEntry.box.h - (all.bottom - all.top));
+      }
+    }
+    /** Where a block's text (and pictures) actually are: the union of its
+     * line boxes, not the full width a paragraph's box takes. */
+    inkOf(block) {
+      if (block.namespaceURI === SVG_NS || blockKind(block) === "image") {
+        return null;
+      }
+      let ink = null;
+      const range = document.createRange();
+      const walker = document.createTreeWalker(
+        block,
+        NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT
+      );
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (n.nodeType === Node.TEXT_NODE) {
+          if (!(n.textContent ?? "").trim()) continue;
+          range.selectNodeContents(n);
+          for (const r of Array.from(range.getClientRects())) {
+            if (r.width > 0 || r.height > 0)
+              ink = union(ink, this.box(r));
+          }
+        } else if (n instanceof Element && ["img", "video", "svg", "canvas"].includes(n.localName)) {
+          const r = n.getBoundingClientRect();
+          if (r.width > 0 || r.height > 0) ink = union(ink, this.box(r));
+        }
+      }
+      return ink;
+    }
+  };
+  function blocksOf(container) {
+    const out = [];
+    for (const child of Array.from(container.children)) {
+      if (blockKind(child)) out.push(child);
+      else if (child.children.length) out.push(...blocksOf(child));
+    }
+    return out;
+  }
+  function opacityOf(el, stop) {
+    let alpha = 1;
+    for (let e = el; e && e !== stop; e = e.parentElement) {
+      alpha *= Number.parseFloat(getComputedStyle(e).opacity || "1");
+    }
+    return alpha;
+  }
+  function measureBoxes(svg2) {
+    return new BoxWalker(svg2).run();
+  }
+
   // src/ts/render/main.ts
   var VIDEO_WAIT_MS = 3e3;
   var host = document.getElementById("slide");
@@ -573,4 +762,5 @@
     await frame();
     return svg ? measureSlide(svg) : [];
   })();
+  window.inkflowBoxes = () => svg ? measureBoxes(svg) : [];
 })();

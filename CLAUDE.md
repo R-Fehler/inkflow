@@ -123,6 +123,11 @@ src/
                                `render_comparison` (`inkflow compare --sheet`) shoots both
                                decks' differing slides in the same browser, each with its
                                own deck's page (`_page_template`), onto pair sheets
+                               `--boxes`: `window.inkflowBoxes()` (src/ts/render/boxes.ts)
+                               read back as `SlideBoxes` of `ElementBox` (every element
+                               with an id, zones with content extent + `free` height,
+                               `zone-x/N` text blocks with their text's extent), no PNG
+                               unless `-o`; `render_json` is `--json`
                                (`pair_sheet_layout`/`pair_sheet_html`, boxes outlined)
     cdp.py            minimal DevTools client over `websockets`: `Browser.launch`
                                (--remote-debugging-port=0, port read from the profile's
@@ -441,7 +446,9 @@ src/
                       text vs its foreignObject box, code blocks cut off, drawn
                       objects vs the viewBox — skipping clipped/masked content,
                       unpainted shapes and anything spanning the slide — and text
-                      below 1/80 of the slide height; all in slide units)
+                      below 1/80 of the slide height; all in slide units),
+                      boxes.ts (`--boxes`: each id'd element's box after
+                      transforms, zone content extent/free space, text blocks)
   css/                CSS source
     shared/           theme variables, animation keyframes, ink.css (the ink palette)
     presenter/        presenter partials including pv.css (sidebar panel)

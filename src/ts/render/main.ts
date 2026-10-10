@@ -5,11 +5,14 @@
 // that `inkflow render` reports, and the page is ready to be screenshot.
 
 import { applyStepInstant, maxStep } from "../shared/step";
+import { type BoxEntry, measureBoxes } from "./boxes";
 import { type Finding, measureSlide } from "./measure";
 
 declare global {
     interface Window {
         inkflowRendered?: Promise<Finding[]>;
+        /** Every element's box, for `inkflow render --boxes` (boxes.ts). */
+        inkflowBoxes?: () => BoxEntry[];
     }
 }
 
@@ -78,3 +81,5 @@ window.inkflowRendered = (async () => {
     await frame();
     return svg ? measureSlide(svg) : [];
 })();
+
+window.inkflowBoxes = () => (svg ? measureBoxes(svg) : []);

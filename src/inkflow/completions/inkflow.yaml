@@ -71,6 +71,7 @@ commands:
       -d, --deck=: Path to deck.py
       -s, --slide=: One slide (1-based) in detail
       --json: Print the full structure
+      --boxes: With --slide, every element's box as rendered
     completion:
       flag:
         deck: ["$files([\".py\"])"]
@@ -86,6 +87,8 @@ commands:
       --check: Only measure the layout; exit 1 on a problem
       -o, --output=: PNG file or directory
       --scale=: Image scale
+      --boxes: Print every element's rendered box (no images unless -o)
+      --json: Print the result as JSON
       --chromium=: Path to a Chromium/Chrome binary
       --no-sandbox: Pass --no-sandbox to Chromium
     completion:

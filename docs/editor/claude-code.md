@@ -53,7 +53,7 @@ right away.
 |---|---|
 | `inkflow outline` | Prints what is on every slide in a few lines each: its files and layout chain, each zone with where its text is written and how it starts, the animations and clicks. `--slide N` shows one slide in full (zone texts and boxes, canvas size, element ids to animate, animations as `deck.py` writes them); `--json` for the whole structure. Claude starts here instead of reading every file. |
 | `inkflow context` | Prints what the editor has selected right now (`--json` for the raw data). |
-| `inkflow render` | Writes PNGs of slides at any build step to `.inkflow/render/`, the editor's current slide by default (`--slide N`, `--all`, `--step S`), and reports layout problems. Claude looks at them to check its own work. `--sheet` puts the slides on one contact sheet; `--check` only measures (see below). |
+| `inkflow render` | Writes PNGs of slides at any build step to `.inkflow/render/`, the editor's current slide by default (`--slide N`, `--all`, `--step S`), and reports layout problems. Claude looks at them to check its own work. `--sheet` puts the slides on one contact sheet; `--check` only measures (see below). `--boxes` prints where the browser drew every element instead ([below](#placing-against-real-text)). |
 | `inkflow verify` | Checks the deck for authoring mistakes. |
 | `inkflow goto N` | Shows slide `N` in the editor open on this deck. |
 | `inkflow select ID…` | Selects elements by id in the editor open on this deck, so Claude can point at what it means. |
@@ -173,3 +173,31 @@ with problems. It is at most 1600 px wide, with up to 16 slides per image
 (`sheet-1.png`, `sheet-2.png`… for a longer deck), so one image shows the flow of
 the deck. Every render runs in a single browser, so `--all`, `--sheet` and
 `--check` take a few seconds for a whole deck.
+
+## Placing against real text
+
+The boxes in an SVG say where a zone *is*, not where its text ends. To size or
+line things up against what is really drawn, `inkflow render --boxes` prints
+every element's box as the browser renders it, in slide units after
+transforms, one line each (`--json` for everything):
+
+```text
+slide 2 (features): 1920x1080
+zone-title  80,60 1760x120  zone  "Features"  content 300.1x80, free 40
+  zone-title/1  80,63 300.1x80  h1  "Features"
+zone-content  80,220 1760x740  zone  "Draw in any SVG editor…"  content 1288.7x566.5, free 173.5
+  zone-content/1  80,224 1180x91.4  p  "Draw in any SVG editor…"
+  zone-content/2  80,342.8 1288.7x91.4  p  "Slides from Markdown…"
+box-svg  89,322.5 357.9x157.9  g
+  rect-svg  89,322.5 357.9x157.9  rect
+```
+
+Each element with an id is listed, nested under the listed element it is in. A
+zone shows the extent of its content and the height left free in it (negative
+when the text overflows); under it, each block of its text (paragraph, heading,
+list, code, table, picture) as `zone/N` with the extent of its *text*, not the
+full width its box takes. Only boxes are measured, no image is written unless
+`--output` is given, and it costs nothing noticeable on top of a render (about
+0.13 s per slide for the demo deck, browser start included). `inkflow outline
+--slide N --boxes` appends the same lines to a slide's outline.
+

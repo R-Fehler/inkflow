@@ -13,6 +13,7 @@ label with its number and id, so the whole deck is one image to look at.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.resources
 import json
 import math
@@ -21,6 +22,8 @@ from dataclasses import dataclass, field
 from html import escape as escape_html
 from pathlib import Path
 from typing import cast
+
+from typing_extensions import override
 
 from inkflow.cdp import Browser, Page
 from inkflow.editor.compare import (
@@ -146,6 +149,22 @@ def parse_findings(slide: int, slide_id: str, raw: object) -> list[Finding]:
     return found
 
 
+def render_json(result: RenderResult) -> dict[str, object]:
+    """`inkflow render --json`: images, findings (with their messages) and,
+    when measured, every slide's boxes."""
+    out: dict[str, object] = {
+        "slides": result.slides,
+        "images": [str(p) for p in result.images],
+        "findings": [
+            {**dataclasses.asdict(f), "problem": f.is_problem, "message": f.message()}
+            for f in result.findings
+        ],
+    }
+    if result.boxes:
+        out["boxes"] = [dataclasses.asdict(b) for b in result.boxes]
+    return out
+
+
 def summary(findings: list[Finding], slide_count: int) -> str:
     """One line closing a check: how many problems and hints in how many slides."""
     problems = sum(1 for f in findings if f.is_problem)
@@ -159,6 +178,116 @@ def summary(findings: list[Finding], slide_count: int) -> str:
     if hints:
         parts.append(f"{hints} hint" + ("" if hints == 1 else "s"))
     return f"{' and '.join(parts)} in {slides}"
+
+
+# ── boxes ─────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Rect:
+    """A box in slide units: corner and size."""
+
+    x: float
+    y: float
+    w: float
+    h: float
+
+    @override
+    def __str__(self) -> str:
+        return f"{self.x:g},{self.y:g} {self.w:g}x{self.h:g}"
+
+
+@dataclass(frozen=True)
+class ElementBox:
+    """Where the browser drew one element of a slide (`src/ts/render/boxes.ts`):
+    an element with an id, a zone, or one block of a zone's text."""
+
+    id: str
+    kind: str
+    box: Rect
+    depth: int = 0
+    parent: str | None = None
+    text: str = ""
+    zone: str | None = None
+    block: Rect | None = None
+    """A text block's layout box (``box`` is the extent of its text)."""
+    content: Rect | None = None
+    """A text zone's content extent."""
+    free: float | None = None
+    """A text zone's height minus its content's (negative: it overflows)."""
+    hidden: bool = False
+
+    def line(self) -> str:
+        parts = [f"{'  ' * self.depth}{self.id}", str(self.box), self.kind]
+        if self.text:
+            parts.append(f'"{self.text}"')
+        if self.content is not None and self.free is not None:
+            parts.append(
+                f"content {self.content.w:g}x{self.content.h:g}, free {self.free:g}"
+            )
+        if self.hidden:
+            parts.append("(hidden)")
+        return "  ".join(parts)
+
+
+@dataclass(frozen=True)
+class SlideBoxes:
+    slide: int
+    slide_id: str
+    width: int
+    height: int
+    elements: list[ElementBox]
+
+    def text(self) -> str:
+        head = f"slide {self.slide}"
+        if self.slide_id:
+            head += f" ({self.slide_id})"
+        head += f": {self.width}x{self.height}"
+        return "\n".join([head, *(e.line() for e in self.elements)])
+
+
+def _rect(raw: object) -> Rect | None:
+    if not isinstance(raw, dict):
+        return None
+    data = cast("dict[str, object]", raw)
+    values = [data.get(k) for k in ("x", "y", "w", "h")]
+    if not all(isinstance(v, int | float) for v in values):
+        return None
+    x, y, w, h = cast("list[float]", values)
+    return Rect(x, y, w, h)
+
+
+def parse_boxes(raw: object) -> list[ElementBox]:
+    """The boxes the render page measured, as `ElementBox`es (malformed ones
+    dropped)."""
+    if not isinstance(raw, list):
+        return []
+    out: list[ElementBox] = []
+    for item in cast("list[object]", raw):
+        if not isinstance(item, dict):
+            continue
+        data = cast("dict[str, object]", item)
+        ident, kind, box = data.get("id"), data.get("kind"), _rect(data.get("box"))
+        if not isinstance(ident, str) or not isinstance(kind, str) or box is None:
+            continue
+        depth, parent = data.get("depth"), data.get("parent")
+        text, zone, free = data.get("text"), data.get("zone"), data.get("free")
+        out.append(
+            ElementBox(
+                id=ident,
+                kind=kind,
+                box=box,
+                depth=depth if isinstance(depth, int) else 0,
+                parent=parent if isinstance(parent, str) else None,
+                text=text if isinstance(text, str) else "",
+                zone=zone if isinstance(zone, str) else None,
+                block=_rect(data.get("block")),
+                content=_rect(data.get("content")),
+                free=float(free) if isinstance(free, int | float) else None,
+                hidden=data.get("hidden") is True,
+            )
+        )
+    return out
 
 
 # ── contact sheet ─────────────────────────────────────────────────────────────
@@ -310,6 +439,7 @@ class RenderResult:
     images: list[Path] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     slides: list[int] = field(default_factory=list)
+    boxes: list[SlideBoxes] = field(default_factory=list)
 
 
 def render_slides(
@@ -322,6 +452,7 @@ def render_slides(
     scale: float = 1.0,
     chromium: str | None = None,
     no_sandbox: bool = False,
+    boxes: bool = False,
 ) -> RenderResult:
     """Render slides (1-based, as the presenter numbers them; ``None`` = all).
 
@@ -329,7 +460,8 @@ def render_slides(
     page with nothing else on it and measured. With an ``output``, it is also
     written as a PNG: ``output`` is the file for a single slide or a directory
     for several (``slide-N.png``); with ``sheet``, the slides go onto contact
-    sheets instead (`sheet_paths`). Without one, nothing is written.
+    sheets instead (`sheet_paths`). Without one, nothing is written. With
+    ``boxes``, every element's rendered box is read back too (`boxes`).
     """
     exe = chromium or find_chromium()
     if exe is None:
@@ -392,6 +524,9 @@ def render_slides(
             if raw is None:
                 logger.warning(f"slide {n}: the render page did not measure it")
             result.findings += parse_findings(n, slides[n - 1]["id"], raw)
+            if boxes:
+                measured = parse_boxes(page.evaluate("window.inkflowBoxes()"))
+                result.boxes.append(SlideBoxes(n, slides[n - 1]["id"], w, h, measured))
             if output is None:
                 continue
             png = page.screenshot(w, h)
