@@ -27,7 +27,15 @@ import {
     sitesFromCorners,
 } from "./connectors";
 import { h, svgEl, toast } from "./dom";
-import { attachableCell, attachableCells, cellShape } from "./drawioshapes";
+import {
+    attachableCell,
+    attachableCells,
+    cellShape,
+    isDiagramCell,
+    pageBox,
+    pageOffset,
+    shapesEditable,
+} from "./drawioshapes";
 import {
     type AttrPlan,
     apply,
@@ -83,6 +91,11 @@ export const hooks = {
     crop: (_el: SVGGraphicsElement): void => {},
     // Opens a draw.io diagram's editor; false when the picture is not one.
     diagram: (_el: SVGGraphicsElement): boolean => false,
+    // A diagram shape's label, to be edited (its panel's Label field).
+    cellLabel: (_el: SVGGraphicsElement): void => {},
+    // Shapes of this drawn diagram were edited in its source (`step`: the
+    // undo step): draw.io redraws its picture into that step.
+    diagramEdited: (_diagram: Element, _step: string): void => {},
     typeInto: (_el: SVGGraphicsElement): void => {},
     zoneMedia: (_zone: string): void => {},
     zoneText: (_zone: string): void => {},
@@ -273,6 +286,34 @@ export function clientToSlide(x: number, y: number): { x: number; y: number } {
 function measure(el: Element): { bbox: Box; ctm: DOMMatrix } | null {
     const g = el as SVGGraphicsElement;
     if (typeof g.getBBox !== "function") return null;
+    // A draw.io shape is its shape, not its label (whose frame spans the
+    // whole diagram), in the shape's own space.
+    if (isDiagramCell(el)) {
+        const shape = cellShape(el) as SVGGraphicsElement;
+        const a = shape.getScreenCTM?.();
+        const c = g.getScreenCTM();
+        if (shape !== el && a && c) {
+            const m = c.inverse().multiply(a);
+            const b = shape.getBBox();
+            const pts = [
+                [b.x, b.y],
+                [b.x + b.width, b.y],
+                [b.x, b.y + b.height],
+                [b.x + b.width, b.y + b.height],
+            ].map(([x, y]) => new DOMPoint(x, y).matrixTransform(m));
+            const xs = pts.map((p) => p.x);
+            const ys = pts.map((p) => p.y);
+            return {
+                bbox: {
+                    x: Math.min(...xs),
+                    y: Math.min(...ys),
+                    width: Math.max(...xs) - Math.min(...xs),
+                    height: Math.max(...ys) - Math.min(...ys),
+                },
+                ctm: c,
+            };
+        }
+    }
     if (el.localName === "svg" && el !== slideRoot()) {
         const s = el as SVGSVGElement;
         const ctm = (
@@ -425,10 +466,23 @@ export function isOwn(el: Element): boolean {
     );
 }
 
+// A shape of a drawn-in draw.io diagram whose shapes are edited here (its
+// "Edit shapes here"), on a diagram this slide may change.
+function editableCell(el: Element): boolean {
+    const diagram = el.closest("svg[data-drawio]");
+    return (
+        isDiagramCell(el) &&
+        !!diagram &&
+        shapesEditable(diagram) &&
+        canTransform(diagram)
+    );
+}
+
 export function selectable(el: Element): boolean {
     if (!el.hasAttribute("data-ink") || isLocked(el)) return false;
     const src = sourceOf(keyOf(el));
     if (!src) return false;
+    if (src.role === "diagram") return src.writable && editableCell(el);
     if (ed.layoutMode) return src.writable;
     return isOwn(el) || (el.hasAttribute("data-ink-top") && isZone(el));
 }
@@ -437,6 +491,7 @@ export function selectable(el: Element): boolean {
 export function canTransform(el: Element): boolean {
     const src = sourceOf(keyOf(el));
     if (!src?.writable) return false;
+    if (src.role === "diagram") return editableCell(el);
     return ed.layoutMode || isOwn(el);
 }
 
@@ -832,9 +887,12 @@ export function drawOverlay(): void {
         rh.dataset.handle = "rot";
         // A cropped picture's frame is kept unrotated (see planCrop).
         // (A drawn-in draw.io diagram is a nested <svg> too, but rotates.)
+        // (Nor do a diagram's shapes edited here: draw.io would not follow.)
         const frames = ed.selection.some(
             (s) =>
-                s.el.localName === "svg" && !s.el.hasAttribute("data-drawio"),
+                (s.el.localName === "svg" &&
+                    !s.el.hasAttribute("data-drawio")) ||
+                isDiagramCell(s.el),
         );
         if (!ed.cropMode && !frames) overlay.append(rh);
         for (const h of HANDLES) {
@@ -1478,6 +1536,10 @@ async function sendQueued(
     if (!slide) return false;
     let ok = true;
     plans = withConnectors(plans);
+    const cells = diagramPlans(plans);
+    plans = cells.plans;
+    // draw.io's redraw of an edited diagram joins this step.
+    if (cells.diagrams.size && !coalesce) coalesce = `diagram-${Date.now()}`;
     for (const [path, ops] of opsByFile(plans)) {
         const src = slide.sources?.find((s) => s.path === path);
         if (src && src.usedBy.length > 1 && ed.layoutMode) {
@@ -1497,6 +1559,10 @@ async function sendQueued(
         });
         ok = ok && result.ok;
         if (ids && result.ids) Object.assign(ids, result.ids);
+    }
+    if (ok && coalesce) {
+        for (const diagram of cells.diagrams)
+            hooks.diagramEdited(diagram, coalesce);
     }
     return ok;
 }
@@ -2132,10 +2198,29 @@ function onDoubleClick(e: MouseEvent): void {
         hooks.editText(text);
         return;
     }
+    // A diagram's shape: its label (a shape holding others is entered).
+    if (
+        isDiagramCell(el) &&
+        !el.querySelector('g[data-cell-kind="vertex"][data-ink]')
+    ) {
+        select([el]);
+        hooks.cellLabel(el);
+        return;
+    }
     if (el.localName === "g") {
         enterGroup(el as unknown as SVGGElement);
         const inner = pick(e.clientX, e.clientY);
         if (inner) select([inner]);
+        return;
+    }
+    // A diagram whose shapes are edited here is entered like a group (its
+    // draw.io layer under the pointer); others open in draw.io.
+    if (
+        el.hasAttribute("data-drawio") &&
+        shapesEditable(el) &&
+        canTransform(el)
+    ) {
+        enterDiagram(el, e.clientX, e.clientY);
         return;
     }
     // A draw.io diagram opens in draw.io; any other picture crops.
@@ -2149,6 +2234,82 @@ function onDoubleClick(e: MouseEvent): void {
     ) {
         hooks.crop(el);
     }
+}
+
+function enterDiagram(diagram: Element, x: number, y: number): void {
+    const layers = [
+        ...diagram.querySelectorAll<SVGGElement>(
+            'g[data-cell-kind="other"][data-ink]',
+        ),
+    ];
+    const under = document
+        .elementsFromPoint(x, y)
+        .map((hit) => layers.find((l) => l.contains(hit)))
+        .find((l) => !!l);
+    const layer = under ?? layers[0];
+    if (!layer) {
+        toast("This diagram has no shapes to edit here", "error");
+        return;
+    }
+    enterGroup(layer);
+    const inner = pick(x, y);
+    if (inner) select([inner]);
+    else toast("Click a shape of the diagram; Esc leaves it");
+}
+
+/**
+ * Plans on a diagram's shapes, as edits of the diagram's source
+ * (editor/drawioedit.py): a move or resize becomes the shape's new box on
+ * draw.io's page, a delete removes it; anything else is draw.io's to do.
+ */
+function diagramPlans(plans: { sel: Selected; ops: SvgOp[] }[]): {
+    plans: { sel: Selected; ops: SvgOp[] }[];
+    diagrams: Set<Element>;
+} {
+    const diagrams = new Set<Element>();
+    const out: { sel: Selected; ops: SvgOp[] }[] = [];
+    let refused = false;
+    for (const plan of plans) {
+        if (sourceOf(plan.sel.key)?.role !== "diagram") {
+            out.push(plan);
+            continue;
+        }
+        const el = plan.sel.el;
+        const diagram = el.closest("svg[data-drawio]");
+        const cell = el.getAttribute("data-cell-id");
+        if (!diagram || !cell) continue;
+        const ops: SvgOp[] = [];
+        let moved = false;
+        for (const op of plan.ops) {
+            if (op.kind === "delete") ops.push({ kind: "cell-delete", cell });
+            else if (String(op.kind).startsWith("cell-")) ops.push(op);
+            else if (geometryChanged([op])) moved = true;
+            else refused = true;
+        }
+        if (moved) {
+            const offset = pageOffset(diagram);
+            const box = offset ? pageBox(el, offset) : null;
+            if (offset && box) {
+                ops.push({
+                    kind: "cell-geometry",
+                    cell,
+                    ...box,
+                    offset: [offset.x, offset.y],
+                });
+            }
+        }
+        if (ops.length) {
+            out.push({ sel: plan.sel, ops });
+            diagrams.add(diagram);
+        }
+    }
+    if (refused) {
+        toast(
+            "That change to a diagram's shapes is made in draw.io (Edit diagram)",
+            "error",
+        );
+    }
+    return { plans: out, diagrams };
 }
 
 export function initCanvas(): void {

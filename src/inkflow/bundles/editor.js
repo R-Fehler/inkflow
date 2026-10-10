@@ -529,6 +529,69 @@
     }
     return cell;
   }
+  function shapesEditable(diagram) {
+    return diagram.getAttribute("inkflow:drawio-edit") === "shapes";
+  }
+  function isDiagramCell(el2) {
+    return el2.localName === "g" && el2.getAttribute("data-cell-kind") === "vertex" && el2.hasAttribute("data-ink") && !!el2.closest("svg[data-drawio]");
+  }
+  function median(values) {
+    const v = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(v.length / 2);
+    return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
+  }
+  function boxIn(el2, ref) {
+    const g = el2;
+    const from = g.getScreenCTM?.();
+    const to = ref.getScreenCTM?.();
+    if (!from || !to || typeof g.getBBox !== "function") return null;
+    const m = to.inverse().multiply(from);
+    const b = g.getBBox();
+    const pts = [
+      [b.x, b.y],
+      [b.x + b.width, b.y],
+      [b.x, b.y + b.height],
+      [b.x + b.width, b.y + b.height]
+    ].map(([x, y]) => new DOMPoint(x, y).matrixTransform(m));
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    return {
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      width: Math.max(...xs) - Math.min(...xs),
+      height: Math.max(...ys) - Math.min(...ys)
+    };
+  }
+  function pageOffset(diagram) {
+    const xs = [];
+    const ys = [];
+    for (const cell of diagram.querySelectorAll(
+      'g[data-cell-kind="vertex"][data-cell-geometry]'
+    )) {
+      const geo = (cell.getAttribute("data-cell-geometry") ?? "").split(/\s+/).map(Number);
+      const b = boxIn(cellShape(cell), cell);
+      if (!b || geo.length !== 4 || geo.some((v) => !Number.isFinite(v)))
+        continue;
+      xs.push(b.x - geo[0]);
+      ys.push(b.y - geo[1]);
+    }
+    return xs.length ? { x: median(xs), y: median(ys) } : null;
+  }
+  function pageBox(cell, offset) {
+    const parent = cell.parentElement;
+    const b = parent ? boxIn(cellShape(cell), parent) : null;
+    if (!b) return null;
+    const r = (v) => Math.round(v * 100) / 100;
+    return {
+      x: r(b.x - offset.x),
+      y: r(b.y - offset.y),
+      width: r(b.width),
+      height: r(b.height)
+    };
+  }
+  function drawnBox(cell, root2) {
+    return boxIn(cellShape(cell), root2);
+  }
 
   // src/ts/editor/geom.ts
   var IDENTITY = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
@@ -1211,6 +1274,13 @@
     },
     // Opens a draw.io diagram's editor; false when the picture is not one.
     diagram: (_el) => false,
+    // A diagram shape's label, to be edited (its panel's Label field).
+    cellLabel: (_el) => {
+    },
+    // Shapes of this drawn diagram were edited in its source (`step`: the
+    // undo step): draw.io redraws its picture into that step.
+    diagramEdited: (_diagram, _step) => {
+    },
     typeInto: (_el) => {
     },
     zoneMedia: (_zone) => {
@@ -1366,6 +1436,32 @@
   function measure(el2) {
     const g = el2;
     if (typeof g.getBBox !== "function") return null;
+    if (isDiagramCell(el2)) {
+      const shape = cellShape(el2);
+      const a = shape.getScreenCTM?.();
+      const c = g.getScreenCTM();
+      if (shape !== el2 && a && c) {
+        const m = c.inverse().multiply(a);
+        const b2 = shape.getBBox();
+        const pts = [
+          [b2.x, b2.y],
+          [b2.x + b2.width, b2.y],
+          [b2.x, b2.y + b2.height],
+          [b2.x + b2.width, b2.y + b2.height]
+        ].map(([x, y]) => new DOMPoint(x, y).matrixTransform(m));
+        const xs = pts.map((p) => p.x);
+        const ys = pts.map((p) => p.y);
+        return {
+          bbox: {
+            x: Math.min(...xs),
+            y: Math.min(...ys),
+            width: Math.max(...xs) - Math.min(...xs),
+            height: Math.max(...ys) - Math.min(...ys)
+          },
+          ctm: c
+        };
+      }
+    }
     if (el2.localName === "svg" && el2 !== slideRoot()) {
       const s = el2;
       const ctm2 = el2.parentElement?.getScreenCTM?.();
@@ -1483,16 +1579,22 @@
     const slide = currentSlide();
     return !!src && src.role === "slide" && !!slide && !slide.srcShared && src.writable;
   }
+  function editableCell(el2) {
+    const diagram = el2.closest("svg[data-drawio]");
+    return isDiagramCell(el2) && !!diagram && shapesEditable(diagram) && canTransform(diagram);
+  }
   function selectable(el2) {
     if (!el2.hasAttribute("data-ink") || isLocked(el2)) return false;
     const src = sourceOf(keyOf(el2));
     if (!src) return false;
+    if (src.role === "diagram") return src.writable && editableCell(el2);
     if (ed.layoutMode) return src.writable;
     return isOwn(el2) || el2.hasAttribute("data-ink-top") && isZone(el2);
   }
   function canTransform(el2) {
     const src = sourceOf(keyOf(el2));
     if (!src?.writable) return false;
+    if (src.role === "diagram") return editableCell(el2);
     return ed.layoutMode || isOwn(el2);
   }
   function pick(x, y) {
@@ -1796,7 +1898,7 @@
       });
       rh.dataset.handle = "rot";
       const frames = ed.selection.some(
-        (s) => s.el.localName === "svg" && !s.el.hasAttribute("data-drawio")
+        (s) => s.el.localName === "svg" && !s.el.hasAttribute("data-drawio") || isDiagramCell(s.el)
       );
       if (!ed.cropMode && !frames) overlay.append(rh);
       for (const h2 of HANDLES) {
@@ -2261,6 +2363,9 @@
     if (!slide) return false;
     let ok = true;
     plans = withConnectors(plans);
+    const cells = diagramPlans(plans);
+    plans = cells.plans;
+    if (cells.diagrams.size && !coalesce) coalesce = `diagram-${Date.now()}`;
     for (const [path, ops] of opsByFile(plans)) {
       const src = slide.sources?.find((s) => s.path === path);
       if (src && src.usedBy.length > 1 && ed.layoutMode) {
@@ -2279,6 +2384,10 @@
       });
       ok = ok && result.ok;
       if (ids && result.ids) Object.assign(ids, result.ids);
+    }
+    if (ok && coalesce) {
+      for (const diagram of cells.diagrams)
+        hooks.diagramEdited(diagram, coalesce);
     }
     return ok;
   }
@@ -2795,16 +2904,88 @@
       hooks.editText(text);
       return;
     }
+    if (isDiagramCell(el2) && !el2.querySelector('g[data-cell-kind="vertex"][data-ink]')) {
+      select([el2]);
+      hooks.cellLabel(el2);
+      return;
+    }
     if (el2.localName === "g") {
       enterGroup(el2);
       const inner = pick(e.clientX, e.clientY);
       if (inner) select([inner]);
       return;
     }
+    if (el2.hasAttribute("data-drawio") && shapesEditable(el2) && canTransform(el2)) {
+      enterDiagram(el2, e.clientX, e.clientY);
+      return;
+    }
     if (canTransform(el2) && hooks.diagram(el2)) return;
     if (canTransform(el2) && (el2.localName === "image" || el2.localName === "svg" && [...el2.children].some((c) => c.localName === "image"))) {
       hooks.crop(el2);
     }
+  }
+  function enterDiagram(diagram, x, y) {
+    const layers = [
+      ...diagram.querySelectorAll(
+        'g[data-cell-kind="other"][data-ink]'
+      )
+    ];
+    const under = document.elementsFromPoint(x, y).map((hit) => layers.find((l) => l.contains(hit))).find((l) => !!l);
+    const layer2 = under ?? layers[0];
+    if (!layer2) {
+      toast("This diagram has no shapes to edit here", "error");
+      return;
+    }
+    enterGroup(layer2);
+    const inner = pick(x, y);
+    if (inner) select([inner]);
+    else toast("Click a shape of the diagram; Esc leaves it");
+  }
+  function diagramPlans(plans) {
+    const diagrams = /* @__PURE__ */ new Set();
+    const out = [];
+    let refused = false;
+    for (const plan of plans) {
+      if (sourceOf(plan.sel.key)?.role !== "diagram") {
+        out.push(plan);
+        continue;
+      }
+      const el2 = plan.sel.el;
+      const diagram = el2.closest("svg[data-drawio]");
+      const cell = el2.getAttribute("data-cell-id");
+      if (!diagram || !cell) continue;
+      const ops = [];
+      let moved = false;
+      for (const op of plan.ops) {
+        if (op.kind === "delete") ops.push({ kind: "cell-delete", cell });
+        else if (String(op.kind).startsWith("cell-")) ops.push(op);
+        else if (geometryChanged([op])) moved = true;
+        else refused = true;
+      }
+      if (moved) {
+        const offset = pageOffset(diagram);
+        const box = offset ? pageBox(el2, offset) : null;
+        if (offset && box) {
+          ops.push({
+            kind: "cell-geometry",
+            cell,
+            ...box,
+            offset: [offset.x, offset.y]
+          });
+        }
+      }
+      if (ops.length) {
+        out.push({ sel: plan.sel, ops });
+        diagrams.add(diagram);
+      }
+    }
+    if (refused) {
+      toast(
+        "That change to a diagram's shapes is made in draw.io (Edit diagram)",
+        "error"
+      );
+    }
+    return { plans: out, diagrams };
   }
   function initCanvas() {
     paper.addEventListener("pointerdown", onPointerDown);
@@ -5455,15 +5636,251 @@
     window.addEventListener("message", onMessage);
   }
   function followArrows(id, step) {
-    const rendered = () => {
-      off("render", rendered);
+    const rendered2 = () => {
+      off("render", rendered2);
       window.clearTimeout(give);
       const stale = connectorsTo(id).filter(isStale);
       if (stale.length)
         void rerouteConnectors(stale, "Re-route arrows", step);
     };
-    const give = window.setTimeout(() => off("render", rendered), 1e4);
-    on("render", rendered);
+    const give = window.setTimeout(() => off("render", rendered2), 1e4);
+    on("render", rendered2);
+  }
+  var redraws = /* @__PURE__ */ new Map();
+  var redrawCount = 0;
+  function diagramEdited(diagram, step) {
+    const id = diagram.getAttribute("id");
+    if (!id) return;
+    const n2 = ++redrawCount;
+    window.clearTimeout(timers.get(id));
+    redraws.set(id, n2);
+    timers.set(
+      id,
+      window.setTimeout(() => void redraw(id, step, n2), 600)
+    );
+  }
+  var timers = /* @__PURE__ */ new Map();
+  function drawnById(id) {
+    return slideRoot()?.querySelector(
+      `svg[data-drawio][id="${CSS.escape(id)}"]`
+    ) ?? null;
+  }
+  function rendered(ms = 4e3) {
+    return new Promise((resolve) => {
+      const done = () => {
+        off("render", done);
+        window.clearTimeout(give);
+        resolve();
+      };
+      const give = window.setTimeout(done, ms);
+      on("render", done);
+    });
+  }
+  async function redraw(id, step, n2) {
+    const latest = () => redraws.get(id) === n2;
+    await rendered(1500);
+    const diagram = drawnById(id);
+    const path = diagram?.getAttribute("data-drawio");
+    if (!diagram || !path || !latest()) return;
+    const res = await request({ action: "drawio-load", path });
+    if (!res.ok || !latest()) return;
+    let svg;
+    try {
+      svg = await renderDiagram(String(res.xml ?? ""), String(res.url));
+    } catch (err) {
+      if (latest()) {
+        toast(
+          `${err instanceof Error ? err.message : String(err)}: the shape changed, and draw.io's own arrows follow it the next time draw.io opens the diagram`,
+          "error"
+        );
+      }
+      return;
+    }
+    const now = drawnById(id);
+    const src = now ? sourceOf(keyOf(now)) : null;
+    const box = now ? alignedBox(now, svg) : null;
+    if (!now || !src || !box || !latest()) return;
+    const result = await edit(
+      {
+        action: "drawio-save",
+        path,
+        svg,
+        expect: res.hash,
+        image: {
+          file: src.path,
+          hash: src.hash,
+          loc: now.getAttribute("data-ink") ?? ""
+        },
+        box,
+        coalesce: step
+      },
+      { retrying: true }
+    );
+    if (result.ok) {
+      redraws.delete(id);
+      followArrows(id, step);
+    }
+  }
+  function alignedBox(diagram, svgText) {
+    const holder = h("div", {
+      style: "position:fixed;left:-30000px;top:0;visibility:hidden",
+      "aria-hidden": "true"
+    });
+    holder.innerHTML = svgText;
+    document.body.append(holder);
+    try {
+      const fresh = holder.querySelector("svg");
+      const oldRoot = diagram.querySelector(":scope > g");
+      const newRoot = fresh?.querySelector(":scope > g");
+      if (!fresh || !oldRoot || !newRoot) return null;
+      const dx = [];
+      const dy = [];
+      for (const cell of diagram.querySelectorAll(
+        'g[data-cell-kind="vertex"][data-cell-id]'
+      )) {
+        const id = cell.getAttribute("data-cell-id") ?? "";
+        const other = newRoot.querySelector(
+          `g[data-cell-id="${CSS.escape(id)}"]`
+        );
+        const a = drawnBox(cell, oldRoot);
+        const b = other ? drawnBox(other, newRoot) : null;
+        if (!a || !b) continue;
+        dx.push(b.x - a.x);
+        dy.push(b.y - a.y);
+      }
+      const vbOld = diagram.viewBox.baseVal;
+      const vbNew = fresh.viewBox.baseVal;
+      if (!dx.length || !vbOld?.width || !vbNew?.width) return null;
+      const num2 = (name2) => Number.parseFloat(diagram.getAttribute(name2) ?? "0") || 0;
+      const sx = num2("width") / vbOld.width;
+      const sy = num2("height") / vbOld.height;
+      const r = (v) => Math.round(v * 100) / 100;
+      return {
+        x: r(num2("x") + (vbNew.x - vbOld.x - median(dx)) * sx),
+        y: r(num2("y") + (vbNew.y - vbOld.y - median(dy)) * sy),
+        width: r(vbNew.width * sx),
+        height: r(vbNew.height * sy)
+      };
+    } finally {
+      holder.remove();
+    }
+  }
+  var renderer = null;
+  var renderQueue = Promise.resolve();
+  function closeRenderer() {
+    renderer?.frame.remove();
+    renderer = null;
+  }
+  function hiddenFrame(base2) {
+    if (renderer && renderer.base === base2) {
+      window.clearTimeout(renderer.closeTimer);
+      renderer.closeTimer = window.setTimeout(closeRenderer, 18e4);
+      return renderer;
+    }
+    closeRenderer();
+    const origin = new URL(base2).origin;
+    const params = new URLSearchParams({
+      embed: "1",
+      proto: "json",
+      configure: "1",
+      spin: "0"
+    });
+    const frame = h("iframe", {
+      src: `${base2}${base2.includes("?") ? "&" : "?"}${params}`,
+      title: "draw.io (drawing the diagram)",
+      "aria-hidden": "true",
+      tabindex: "-1",
+      style: "position:fixed;left:-30000px;top:0;width:1200px;height:800px;border:0"
+    });
+    frame.inert = true;
+    const ready = new Promise((resolve, reject) => {
+      const give = window.setTimeout(() => {
+        window.removeEventListener("message", onMessage);
+        reject(new Error("draw.io did not load"));
+      }, 2e4);
+      const onMessage = (e) => {
+        if (e.source !== frame.contentWindow || e.origin !== origin) return;
+        const msg = parseMessage(e.data);
+        if (msg?.event === "configure") {
+          frame.contentWindow?.postMessage(
+            JSON.stringify({
+              action: "configure",
+              config: { compressXml: false }
+            }),
+            origin
+          );
+        } else if (msg?.event === "init") {
+          window.clearTimeout(give);
+          window.removeEventListener("message", onMessage);
+          resolve();
+        }
+      };
+      window.addEventListener("message", onMessage);
+    });
+    document.body.append(frame);
+    renderer = {
+      base: base2,
+      frame,
+      origin,
+      ready,
+      closeTimer: window.setTimeout(closeRenderer, 18e4)
+    };
+    ready.catch(() => closeRenderer());
+    return renderer;
+  }
+  function parseMessage(data) {
+    try {
+      return JSON.parse(String(data));
+    } catch {
+      return null;
+    }
+  }
+  function renderDiagram(xml, base2) {
+    const run = renderQueue.then(async () => {
+      let origin;
+      try {
+        origin = new URL(base2).origin;
+      } catch {
+        throw new Error(`INKFLOW_DRAWIO_URL is not a web address: ${base2}`);
+      }
+      const local = /^https?:\/\/(localhost|127\.|\[::1\])/.test(origin);
+      if (!navigator.onLine && !local)
+        throw new Error("This computer is offline");
+      const r = hiddenFrame(base2);
+      await r.ready;
+      return new Promise((resolve, reject) => {
+        const post = (msg) => r.frame.contentWindow?.postMessage(
+          JSON.stringify(msg),
+          r.origin
+        );
+        const finish = () => {
+          window.clearTimeout(give);
+          window.removeEventListener("message", onMessage);
+          if (document.activeElement === r.frame) r.frame.blur();
+        };
+        const give = window.setTimeout(() => {
+          finish();
+          reject(new Error("draw.io did not draw the diagram"));
+        }, 2e4);
+        const onMessage = (e) => {
+          if (e.source !== r.frame.contentWindow || e.origin !== r.origin)
+            return;
+          const msg = parseMessage(e.data);
+          if (msg?.event === "load") {
+            post({ action: "export", format: "xmlsvg", spin: "0" });
+          } else if (msg?.event === "export") {
+            finish();
+            const svg = decodeSvg(String(msg.data ?? ""));
+            if (svg) resolve(svg);
+            else reject(new Error("draw.io sent no SVG"));
+          }
+        };
+        window.addEventListener("message", onMessage);
+        post({ action: "load", xml, autosave: 0 });
+      });
+    });
+    renderQueue = run.catch(() => void 0);
+    return run;
   }
   function offerDesktop(target, why) {
     openDialog(
@@ -6591,8 +7008,107 @@
       label4
     );
   }
+  function focusCellLabel(_el) {
+    const area2 = panel.querySelector(".cell-label");
+    area2?.focus();
+    area2?.select();
+  }
+  function tokenHex(token) {
+    const probe = h("span", { style: `color: var(--inkflow-${token})` });
+    (slideRoot()?.parentElement ?? document.body).append(probe);
+    const hex = rgbToHex(getComputedStyle(probe).color);
+    probe.remove();
+    return hex;
+  }
+  function cellColorRow(label4, current, pick2) {
+    const swatches = h("div", { class: "swatches" });
+    for (const t of ed.model?.colorTokens ?? []) {
+      swatches.append(
+        h("button", {
+          type: "button",
+          class: "swatch",
+          title: `${t} (as its colour now)`,
+          style: `background: var(--inkflow-${t})`,
+          onclick: () => pick2(tokenHex(t))
+        })
+      );
+    }
+    const custom = h("input", {
+      type: "color",
+      value: current,
+      title: "Custom colour"
+    });
+    custom.addEventListener("change", () => pick2(custom.value));
+    swatches.append(custom);
+    return row2(label4, swatches);
+  }
+  function renderCellPanel(sel) {
+    const el2 = sel.el;
+    const cell = el2.getAttribute("data-cell-id") ?? "";
+    const themed = el2.closest("svg[data-drawio]")?.getAttribute("data-drawio-mode") === "themed";
+    const send = (op, label4) => void sendSvgOps([{ sel, ops: [op] }], label4);
+    const style = (key, value, label4) => send({ kind: "cell-style", cell, key, value }, label4);
+    const painted2 = cellShape(el2).querySelector(
+      "rect, ellipse, path, polygon, circle"
+    );
+    const look = painted2 ? getComputedStyle(painted2) : null;
+    const hex = (v) => v && v !== "none" ? rgbToHex(v) : "#ffffff";
+    const area2 = h("textarea", {
+      class: "cell-label",
+      rows: 2,
+      spellcheck: "true"
+    });
+    area2.value = cellLabel(el2);
+    area2.addEventListener(
+      "change",
+      () => send({ kind: "cell-label", cell, text: area2.value }, "Shape label")
+    );
+    area2.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) area2.blur();
+    });
+    panel.append(
+      section(
+        "draw.io shape",
+        row2("Id", h("code", {}, el2.getAttribute("id") ?? "")),
+        row2("Label", area2),
+        cellColorRow(
+          "Fill",
+          hex(look?.fill),
+          (v) => style("fillColor", v, "Shape fill")
+        ),
+        cellColorRow(
+          "Line",
+          hex(look?.stroke),
+          (v) => style("strokeColor", v, "Shape line")
+        ),
+        row2(
+          "Line width",
+          numberInput(
+            parseFloat(look?.strokeWidth ?? "1") || 1,
+            (v) => style("strokeWidth", v, "Shape line width")
+          )
+        ),
+        h(
+          "p",
+          { class: "hint" },
+          `Changes go into the diagram's draw.io source, and draw.io redraws it (its arrows follow).${themed ? " In the deck's theme, colours show as the nearest theme colour." : ""} Copying, grouping, rotating and stacking shapes stay in draw.io. Esc leaves the diagram.`
+        ),
+        h(
+          "div",
+          { class: "btn-row" },
+          button("Leave the diagram", "Esc", () => enterGroup(null))
+        )
+      )
+    );
+    panel.append(geometrySection([sel]));
+    panel.append(elementAnimations(sel));
+  }
   function renderObjectPanel(sel) {
     const el2 = sel.el;
+    if (isDiagramCell(el2)) {
+      renderCellPanel(sel);
+      return;
+    }
     const src = sourceOf(sel.key);
     const zone = isZone(el2);
     const movable = canTransform(el2);
@@ -7206,6 +7722,7 @@
         )
       ),
       showAsRow(sel, diagramMode(svg)),
+      editShapesRow(sel, svg),
       row2(
         "Fit",
         selectInput(
@@ -7229,6 +7746,40 @@
             "Diagram fit"
           )
         )
+      )
+    );
+  }
+  function editShapesRow(sel, svg) {
+    const on2 = shapesEditable(svg);
+    const box = h("input", { type: "checkbox" });
+    box.checked = on2;
+    box.addEventListener("change", () => {
+      void sendSvgOps(
+        [
+          {
+            sel,
+            ops: [
+              {
+                kind: "attrs",
+                loc: sel.loc,
+                set: {
+                  "inkflow:drawio-edit": box.checked ? "shapes" : null
+                }
+              }
+            ]
+          }
+        ],
+        box.checked ? "Edit diagram shapes here" : "Edit diagram in draw.io"
+      );
+    });
+    return h(
+      "div",
+      {},
+      h("label", { class: "check-row" }, box, " Edit shapes here"),
+      h(
+        "p",
+        { class: "hint" },
+        on2 ? "Double-click the diagram to select its shapes: move, resize, relabel, recolour or delete them here. draw.io redraws the diagram after each change (it needs to load, like Edit diagram)." : "Double-click opens draw.io. Turn this on to edit the diagram's shapes on the slide instead; the diagram stays a draw.io diagram."
       )
     );
   }
@@ -7655,7 +8206,7 @@
   }
   function renderProps() {
     const active3 = document.activeElement;
-    if (active3 && panel.contains(active3) && active3.localName !== "button") {
+    if (active3 && panel.contains(active3) && typingIn(active3)) {
       refreshOnBlur = true;
       return;
     }
@@ -7666,6 +8217,13 @@
     else renderMultiPanel();
   }
   var refreshOnBlur = false;
+  function typingIn(el2) {
+    if (el2.localName === "textarea" || el2.isContentEditable)
+      return true;
+    if (el2.localName !== "input") return false;
+    const type = el2.type;
+    return !["checkbox", "radio", "range", "button", "color"].includes(type);
+  }
   function initProps() {
     on("selection", renderProps);
     on("render", renderProps);
@@ -11672,6 +12230,8 @@ Continue?`)) return null;
       editDiagram(sel);
       return true;
     };
+    hooks.diagramEdited = diagramEdited;
+    hooks.cellLabel = focusCellLabel;
     initCanvas();
     initInsert();
     initSorter();

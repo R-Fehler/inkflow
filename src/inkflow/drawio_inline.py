@@ -25,7 +25,9 @@ from __future__ import annotations
 import colorsys
 import copy
 import re
+from collections.abc import Callable
 from enum import StrEnum
+from pathlib import Path
 
 from lxml import etree
 
@@ -50,6 +52,9 @@ class DiagramMode(StrEnum):
 
 
 _HREFS = ("href", f"{{{ns.XLINK}}}href")
+DRAWN_GEOMETRY = "data-drawn-geometry"
+"""On a shape of the diagram's picture moved by the editor before draw.io
+redrew it: the box its drawing shows (it is under a transform until then)."""
 
 
 def diagram_mode(image: SvgElement) -> DiagramMode:
@@ -60,8 +65,17 @@ def diagram_mode(image: SvgElement) -> DiagramMode:
         return DiagramMode.PICTURE
 
 
-def inline_diagrams(root: SvgElement, roots: AssetRoots) -> SvgElement:
-    """Replace each draw.io picture asked to be drawn inline (see module doc)."""
+def inline_diagrams(
+    root: SvgElement,
+    roots: AssetRoots,
+    register: Callable[[Path], int] | None = None,
+) -> SvgElement:
+    """Replace each draw.io picture asked to be drawn inline (see module doc).
+
+    ``register`` (the editor's source table) numbers the diagram file, and its
+    shapes get locators into it (``<key>:#<cell id>``): the editor edits them
+    there, in the diagram's source (editor/drawioedit.py).
+    """
     taken = {i for el in root.iter() if (i := el.get("id"))}
     for image in list(root.iter(f"{{{ns.SVG}}}image")):
         mode = diagram_mode(image)
@@ -84,7 +98,8 @@ def inline_diagrams(root: SvgElement, roots: AssetRoots) -> SvgElement:
             path.name.removesuffix(".drawio.svg"), taken
         )
         taken.add(prefix)
-        drawn = _drawn(image, diagram, prefix, href, mode)
+        key = register(path) if register is not None else None
+        drawn = _drawn(image, diagram, prefix, href, mode, key)
         parent = image.getparent()
         if parent is not None:
             parent.replace(image, drawn)
@@ -107,6 +122,7 @@ def _drawn(
     prefix: str,
     href: str,
     mode: DiagramMode,
+    key: int | None = None,
 ) -> SvgElement:
     svg = image.makeelement(f"{{{ns.SVG}}}svg", {})
     for name, value in image.attrib.items():
@@ -140,7 +156,7 @@ def _drawn(
     for kid in diagram:
         svg.append(copy.deepcopy(kid))
     _rename_ids(svg, diagram.get("id"), prefix)
-    _mark_cells(svg, diagram.get("content"))
+    _mark_cells(svg, diagram.get("content"), key)
     themed = mode is DiagramMode.THEMED
     for el in svg.iterdescendants():
         if is_element(el):
@@ -148,17 +164,36 @@ def _drawn(
     return svg
 
 
-def _mark_cells(svg: SvgElement, content: str | None) -> None:
+def _mark_cells(svg: SvgElement, content: str | None, key: int | None) -> None:
     """``data-cell-kind`` on each cell: the editor attaches arrows to shapes
-    (vertices), never to draw.io's own arrows, their labels or the layers."""
+    (vertices), never to draw.io's own arrows, their labels or the layers.
+
+    A shape also gets ``data-cell-geometry``, the box (in the source's page
+    coordinates) its drawing shows: the editor measures where draw.io put
+    the page on the picture from it. With ``key``, shapes get locators.
+    """
     try:
         known = cells(content) if content else {}
     except (DrawioError, etree.XMLSyntaxError):
         known = {}
     for el in svg.iterdescendants():
-        if is_element(el) and (cell_id := el.get("data-cell-id")) is not None:
-            cell = known.get(cell_id)
-            el.set("data-cell-kind", cell.kind if cell else "other")
+        if not is_element(el) or (cell_id := el.get("data-cell-id")) is None:
+            continue
+        cell = known.get(cell_id)
+        el.set("data-cell-kind", cell.kind if cell else "other")
+        if cell is not None and cell.kind == "other" and cell.parent is not None:
+            # A layer: the group the editor enters to edit the shapes on it.
+            if key is not None:
+                el.set(INK, f"{key}:#{cell_id}")
+            continue
+        if cell is None or cell.kind != "vertex" or cell.box is None:
+            continue
+        # A shape moved on the slide but not yet redrawn by draw.io still
+        # shows its old box, under a transform (editor/drawioedit.py).
+        drawn = el.get(DRAWN_GEOMETRY) or " ".join(f"{v:g}" for v in cell.box)
+        el.set("data-cell-geometry", drawn)
+        if key is not None:
+            el.set(INK, f"{key}:#{cell_id}")
 
 
 def _size(diagram: SvgElement) -> tuple[float, float] | None:

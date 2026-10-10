@@ -574,7 +574,8 @@ class SlideSvg:
             )
 
     def inline_diagrams(self, roots: AssetRoots) -> None:
-        self.root = inline_diagrams(self.root, roots)
+        register = self.sources.key if self.sources is not None else None
+        self.root = inline_diagrams(self.root, roots, register)
 
     def empty_zones(self) -> list[EmptyZone]:
         zones: list[EmptyZone] = []

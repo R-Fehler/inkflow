@@ -92,7 +92,9 @@ better ask the author to open it in draw.io (double-click it in the editor).
 `<image>`, the build draws the diagram into the slide instead of its picture;
 each draw.io cell is then an element named `<image id>-<cell id>` that
 `animations=[...]` can target (`FadeIn("flow-client")`) and a connector can
-attach to (`inkflow:connect-end="flow-client:left"`).
+attach to (`inkflow:connect-end="flow-client:left"`). Change a diagram's
+shapes in its `<mxGraphModel>` (geometry, `value`, `style`), never in the
+picture alone: draw.io redraws the picture from the source.
 
 ## Text boxes, colours and links
 
