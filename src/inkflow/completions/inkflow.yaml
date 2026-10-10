@@ -44,6 +44,7 @@ commands:
       --port=: Port
       --ws-port=: Also open the old separate WebSocket port (deprecated)
       --share: Share on the network with editor and view links
+      --share-online: Share online through your relay, end-to-end encrypted
       --allow-host=: Also answer to this host name
       --tls=: Serve HTTPS with this certificate and key
     completion:
@@ -58,6 +59,7 @@ commands:
       --port=: Port
       --ws-port=: Also open the old separate WebSocket port (deprecated)
       --share: Share on the network with editor and view links
+      --share-online: Share online through your relay, end-to-end encrypted
       --allow-host=: Also answer to this host name
       --tls=: Serve HTTPS with this certificate and key
       --no-open: Do not open the editor in a browser on start
@@ -694,6 +696,32 @@ commands:
         completion:
           flag:
             deck: ["$files([\".py\"])"]
+
+  - name: relay
+    description: Run the relay for sharing online, or set one up.
+    flags:
+      --host=: Listen here
+      --port=: Listen here
+      --access-token=: Hosts must present this to open rooms
+      --max-guests=: Guests per room
+    commands:
+      - name: deploy
+        description: Put the relay on a hosting platform.
+        commands:
+          - name: cloudflare
+            description: Deploy the relay to your Cloudflare account and use it.
+            flags:
+              --name=: The Worker's name
+              --no-token: Deploy without an access token
+
+      - name: set
+        description: Share online through the relay at URL.
+        flags:
+          --token=: The relay's access token
+          --forget: Set no relay
+
+      - name: show
+        description: The relay set, and whether it answers.
 
   - name: setup-claude
     description: Install the Claude Code prompt hook and inkflow skill.

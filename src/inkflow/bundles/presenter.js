@@ -3456,6 +3456,22 @@
     return `${scheme}://${loc.host || "localhost"}${WS_PATH}`;
   }
   var SENT_AWAY = 4001;
+  function relay() {
+    try {
+      if (window.parent !== window) {
+        return window.parent.__inkflowRelay;
+      }
+    } catch {
+    }
+    return void 0;
+  }
+  function openSocket() {
+    const online = relay();
+    if (!online) return new WebSocket(socketUrl(location));
+    const sock = online.openSocket();
+    window.addEventListener("pagehide", () => sock.close(1001, "page left"));
+    return sock;
+  }
 
   // src/ts/shared/morph-math.ts
   var INTERPOLATED_ATTRIBUTES = [
@@ -5173,7 +5189,7 @@
   }
   function connectWS(wsPort, authoritative) {
     if (!wsPort) return;
-    state.ws = new WebSocket(socketUrl(location));
+    state.ws = openSocket();
     let firstPositionPending = false;
     state.ws.onopen = () => {
       wsDot.className = "connected";

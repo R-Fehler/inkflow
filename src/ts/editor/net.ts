@@ -5,7 +5,7 @@
 import { applyDeckStyles } from "../shared/deck-styles";
 import type { SlideData } from "../shared/types";
 import { setDeckCanvas } from "../shared/viewbox";
-import { SENT_AWAY, socketUrl } from "../shared/wsurl";
+import { openSocket, SENT_AWAY } from "../shared/wsurl";
 import type { Person } from "./collab";
 import { presenceConnected, setPeople, welcome } from "./collab";
 import { toast } from "./dom";
@@ -70,7 +70,7 @@ export function whenConnected(): Promise<void> {
 // `port` only says the page is served; the socket is on the page's own
 // address (a share link's, an SSH tunnel's), at /_inkflow/ws.
 export function connect(port: number): void {
-    const sock = new WebSocket(socketUrl(location));
+    const sock = openSocket();
     ws = sock;
     sock.onopen = () => {
         presenceConnected();

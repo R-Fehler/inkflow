@@ -1259,6 +1259,22 @@
     return `${scheme}://${loc.host || "localhost"}${WS_PATH}`;
   }
   var SENT_AWAY = 4001;
+  function relay() {
+    try {
+      if (window.parent !== window) {
+        return window.parent.__inkflowRelay;
+      }
+    } catch {
+    }
+    return void 0;
+  }
+  function openSocket() {
+    const online = relay();
+    if (!online) return new WebSocket(socketUrl(location));
+    const sock = online.openSocket();
+    window.addEventListener("pagehide", () => sock.close(1001, "page left"));
+    return sock;
+  }
 
   // src/ts/shared/identity.ts
   var NAME_KEY = "inkflow-name";
@@ -5090,7 +5106,7 @@ Undo brings them back.`
     return new Promise((resolve) => waiting.push(resolve));
   }
   function connect(port) {
-    const sock = new WebSocket(socketUrl(location));
+    const sock = openSocket();
     ws = sock;
     sock.onopen = () => {
       presenceConnected();

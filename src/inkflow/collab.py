@@ -62,6 +62,9 @@ class Client:
     """``data-ink`` locators of what is selected on that slide."""
     editing: str | None = None
     """A zone or text being typed into, if any."""
+    online: bool = False
+    """Came through the relay (``online.host``), not to this server's port:
+    sharing online and on the network start and stop separately."""
 
     @property
     def author(self) -> str:
@@ -82,6 +85,7 @@ class Client:
             "slide": self.slide,
             "selection": self.selection,
             "editing": self.editing,
+            "online": self.online,
         }
 
 

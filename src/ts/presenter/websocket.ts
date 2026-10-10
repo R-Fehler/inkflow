@@ -8,7 +8,7 @@ import type {
     TransitionData,
     WsMessage,
 } from "../shared/types";
-import { SENT_AWAY, socketUrl } from "../shared/wsurl";
+import { openSocket, SENT_AWAY } from "../shared/wsurl";
 import { applyIncomingInk, inkSaveResult, requestInk } from "./ink";
 import { renderPv, renderPvNext, updatePvInfo } from "./pv";
 import { state } from "./state";
@@ -241,7 +241,7 @@ export function connectWS(wsPort: number | null, authoritative: boolean): void {
     if (!wsPort) return;
     // The page's own address: a LAN link or an SSH tunnel reaches the same
     // server the page came from.
-    state.ws = new WebSocket(socketUrl(location));
+    state.ws = openSocket();
 
     // Set in onopen (which fires before any message): true only while this
     // connection still owes the server's stale connect-time push a discard.

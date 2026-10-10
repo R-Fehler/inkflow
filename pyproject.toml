@@ -37,6 +37,9 @@ dependencies = [
 # PDF figures without system tools. PyMuPDF is AGPL-3.0 (or commercial, by
 # Artifex): optional, so inkflow itself stays MIT (see inkflow/pdf.py).
 pdf = ["pymupdf>=1.24"]
+online = [
+    "cryptography>=42",
+]
 
 [project.urls]
 Homepage = "https://ll-nick.github.io/inkflow"
@@ -48,6 +51,7 @@ inkflow = "inkflow.cli:main"
 [dependency-groups]
 dev = [
   "basedpyright>=1.39.5",
+  "cryptography>=42",
   "deptry>=0.25.1",
   "lxml-stubs>=0.5",
   "pytest>=9.0.3",
