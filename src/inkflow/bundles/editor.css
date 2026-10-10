@@ -1074,10 +1074,13 @@ body.offline #conn {
   justify-content: center;
   min-width: 0;
   min-height: 0;
+  touch-action: none;
 }
 #canvas.zoomed {
   overflow: auto;
-  display: block;
+  display: grid;
+  place-content: start;
+  place-items: start;
   padding: 24px;
 }
 #canvas.drop {
@@ -1240,9 +1243,6 @@ body.previewing #canvas::after {
   padding: 4px 12px;
   border-radius: 12px;
   font-size: 12px;
-}
-#canvas.zoomed #paper {
-  margin: 0 auto;
 }
 .hidden-note {
   display: flex;

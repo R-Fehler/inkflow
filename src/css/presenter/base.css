@@ -31,6 +31,9 @@ body {
     min-height: 0;
     min-width: 0;
     overflow: hidden;
+    /* Pinch and swipes on the stage are the presenter's (zoom.ts,
+       keyboard.ts), not the browser's page zoom or scroll. */
+    touch-action: none;
 }
 
 #stage {

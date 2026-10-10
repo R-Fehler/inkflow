@@ -971,7 +971,7 @@
       }
       const inv = ctm.inverse();
       const unitsPerPx = Math.hypot(inv.a, inv.b);
-      const at = new DOMPoint(e2.clientX, e2.clientY).matrixTransform(inv);
+      const at2 = new DOMPoint(e2.clientX, e2.clientY).matrixTransform(inv);
       if (tool === "eraser") {
         const cursor = document.createElementNS(
           SVG_NS,
@@ -979,8 +979,8 @@
         );
         cursor.setAttribute("class", "inkflow-eraser-cursor");
         cursor.setAttribute("r", String(ERASER_RADIUS_PX * unitsPerPx));
-        cursor.setAttribute("cx", String(at.x));
-        cursor.setAttribute("cy", String(at.y));
+        cursor.setAttribute("cx", String(at2.x));
+        cursor.setAttribute("cy", String(at2.y));
         cursor.setAttribute("stroke-width", String(1.5 * unitsPerPx));
         svg.appendChild(cursor);
         this.gesture = {
@@ -1012,7 +1012,7 @@
         inv,
         minDist: 0.4 * unitsPerPx,
         live,
-        points: [[at.x, at.y, simulate ? 0.5 : e2.pressure]],
+        points: [[at2.x, at2.y, simulate ? 0.5 : e2.pressure]],
         predicted: [],
         sent: 0,
         path
@@ -1065,9 +1065,9 @@
     erase(clientX, clientY) {
       const g2 = this.gesture;
       if (g2?.kind !== "erase") return;
-      const at = new DOMPoint(clientX, clientY).matrixTransform(g2.inv);
-      g2.cursor.setAttribute("cx", String(at.x));
-      g2.cursor.setAttribute("cy", String(at.y));
+      const at2 = new DOMPoint(clientX, clientY).matrixTransform(g2.inv);
+      g2.cursor.setAttribute("cx", String(at2.x));
+      g2.cursor.setAttribute("cy", String(at2.y));
       const a2 = new DOMPoint(g2.last.x, g2.last.y);
       const b2 = new DOMPoint(clientX, clientY);
       g2.last = { x: clientX, y: clientY };
@@ -1557,6 +1557,501 @@
     return makeCubicBezier(points);
   }
 
+  // src/ts/shared/gestures.ts
+  var DELTA_LINE = 1;
+  var DELTA_PAGE = 2;
+  var LINE_PX = 40;
+  var PAGE_PX = 800;
+  function wheelPixels(delta, mode, pagePx = PAGE_PX) {
+    if (mode === DELTA_LINE) return delta * LINE_PX;
+    if (mode === DELTA_PAGE) return delta * pagePx;
+    return delta;
+  }
+  var PINCH_PER_PX = 0.01;
+  var MAX_WHEEL_STEP = Math.log(1.2);
+  function wheelZoomLog(deltaY, deltaMode) {
+    const z = -wheelPixels(deltaY, deltaMode) * PINCH_PER_PX;
+    return Math.min(Math.max(z, -MAX_WHEEL_STEP), MAX_WHEEL_STEP);
+  }
+  function midpoint(a2, b2) {
+    return { x: (a2.x + b2.x) / 2, y: (a2.y + b2.y) / 2 };
+  }
+  function distance(a2, b2) {
+    return Math.hypot(a2.x - b2.x, a2.y - b2.y);
+  }
+  var TOUCH_DEFAULTS = {
+    windowMs: 200,
+    slopPx: 10,
+    tapMs: 300,
+    doubleTapMs: 350,
+    doubleTapPx: 30
+  };
+  var TouchTracker = class {
+    opts;
+    phase = "idle";
+    fingers = /* @__PURE__ */ new Map();
+    first = null;
+    moved = false;
+    committed = false;
+    pair = null;
+    last = null;
+    lastTap = null;
+    // This sequence had a second finger: nothing it does is a swipe or tap.
+    multi = false;
+    constructor(opts = {}) {
+      this.opts = { ...TOUCH_DEFAULTS, ...opts };
+    }
+    // Fingers are down and at least one of them is the gesture's (a pinch,
+    // or one left over from it): clicks and swipes are not the page's.
+    get claimed() {
+      return this.phase === "pinch" || this.phase === "spent";
+    }
+    get pinching() {
+      return this.phase === "pinch";
+    }
+    // The sequence in progress has had more than one finger.
+    get multiTouch() {
+      return this.multi;
+    }
+    get active() {
+      return this.phase !== "idle";
+    }
+    // The single finger's id while one finger acts alone.
+    get single() {
+      return this.phase === "single" ? this.first?.id ?? null : null;
+    }
+    get isCommitted() {
+      return this.committed;
+    }
+    has(id) {
+      return this.fingers.has(id);
+    }
+    down(id, at2, t2) {
+      const finger = { id, start: at2, at: at2, t0: t2 };
+      if (this.phase === "idle") {
+        this.fingers.clear();
+        this.fingers.set(id, finger);
+        this.first = finger;
+        this.moved = false;
+        this.committed = false;
+        this.multi = false;
+        this.phase = "single";
+        return { pass: true };
+      }
+      this.fingers.set(id, finger);
+      this.multi = true;
+      if (this.phase === "single" && this.first) {
+        if (this.committed) return { pass: false };
+        this.lastTap = null;
+        this.startPinch(this.first.id, id);
+        return { pass: false, cancelSingle: true, pinchStart: true };
+      }
+      if (this.phase === "spent" && this.fingers.size === 2) {
+        const other = [...this.fingers.keys()].find((k2) => k2 !== id);
+        if (other !== void 0) {
+          this.startPinch(other, id);
+          return { pass: false, pinchStart: true };
+        }
+      }
+      return { pass: false };
+    }
+    startPinch(a2, b2) {
+      this.phase = "pinch";
+      this.pair = [a2, b2];
+      this.last = this.measure();
+    }
+    measure() {
+      if (!this.pair) return null;
+      const a2 = this.fingers.get(this.pair[0]);
+      const b2 = this.fingers.get(this.pair[1]);
+      if (!a2 || !b2) return null;
+      return { mid: midpoint(a2.at, b2.at), dist: distance(a2.at, b2.at) };
+    }
+    move(id, at2, t2) {
+      const f2 = this.fingers.get(id);
+      if (!f2) return { pass: true };
+      f2.at = at2;
+      if (this.phase === "single" && f2 === this.first) {
+        if (!this.moved && distance(at2, f2.start) > this.opts.slopPx)
+          this.moved = true;
+        return { pass: true, commit: this.tryCommit(t2) };
+      }
+      if (this.phase === "pinch" && this.pair?.includes(id)) {
+        const now = this.measure();
+        const before = this.last;
+        if (!now || !before) return { pass: false };
+        this.last = now;
+        const scale = before.dist > 0 && now.dist > 0 ? now.dist / before.dist : 1;
+        return {
+          pass: false,
+          pinch: { scale, from: before.mid, to: now.mid }
+        };
+      }
+      return { pass: false };
+    }
+    // Time passing with no event: a finger that moved past the slop early
+    // commits once the window is over, even if it then holds still.
+    tick(t2) {
+      return { pass: true, commit: this.tryCommit(t2) };
+    }
+    tryCommit(t2) {
+      if (this.phase !== "single" || this.committed || !this.first)
+        return false;
+      if (!this.moved || t2 - this.first.t0 < this.opts.windowMs) return false;
+      this.committed = true;
+      return true;
+    }
+    // `cancelled`: the browser took the pointer back (pointercancel).
+    up(id, at2, t2, cancelled = false) {
+      const f2 = this.fingers.get(id);
+      if (!f2) return { pass: true };
+      f2.at = at2;
+      this.fingers.delete(id);
+      if (this.phase === "single" && f2 === this.first) {
+        const release = !this.committed;
+        if (this.fingers.size) {
+          this.phase = "spent";
+          this.first = null;
+        } else this.reset();
+        const verdict = {
+          pass: true,
+          release,
+          moved: this.moved
+        };
+        if (!cancelled && !this.moved && distance(at2, f2.start) <= this.opts.slopPx && t2 - f2.t0 <= this.opts.tapMs) {
+          verdict.tap = f2.start;
+          const prev = this.lastTap;
+          if (prev && t2 - prev.t <= this.opts.doubleTapMs && distance(prev.at, f2.start) <= this.opts.doubleTapPx) {
+            verdict.doubleTap = f2.start;
+            this.lastTap = null;
+          } else {
+            this.lastTap = { at: f2.start, t: t2 };
+          }
+        } else {
+          this.lastTap = null;
+        }
+        return verdict;
+      }
+      const ended = this.phase === "pinch" && !!this.pair?.includes(id);
+      if (ended) {
+        this.phase = "spent";
+        this.pair = null;
+        this.last = null;
+      }
+      if (this.fingers.size === 0) this.reset();
+      return ended ? { pass: false, pinchEnd: true } : { pass: false };
+    }
+    reset() {
+      this.phase = "idle";
+      this.fingers.clear();
+      this.first = null;
+      this.pair = null;
+      this.last = null;
+      this.committed = false;
+    }
+  };
+
+  // src/ts/shared/gesturepad.ts
+  var CLICK_AFTER_MS = 400;
+  var PALM_MS2 = 1500;
+  var WHEEL_END_MS = 160;
+  function at(e2) {
+    return { x: e2.clientX, y: e2.clientY };
+  }
+  function replica(type, src, pos = src) {
+    return new PointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      pointerId: src.pointerId,
+      pointerType: src.pointerType,
+      isPrimary: src.isPrimary,
+      clientX: pos.clientX,
+      clientY: pos.clientY,
+      screenX: pos.screenX,
+      screenY: pos.screenY,
+      width: pos.width,
+      height: pos.height,
+      pressure: type === "pointerup" ? 0 : pos.pressure || 0.5,
+      button: type === "pointermove" ? -1 : 0,
+      buttons: type === "pointerup" ? 0 : 1,
+      ctrlKey: pos.ctrlKey,
+      shiftKey: pos.shiftKey,
+      altKey: pos.altKey,
+      metaKey: pos.metaKey
+    });
+  }
+  function stop(e2) {
+    e2.stopImmediatePropagation();
+    if (e2.cancelable) e2.preventDefault();
+  }
+  var GesturePad = class {
+    touch;
+    host;
+    // Touch pointers in the current sequence.
+    ours = /* @__PURE__ */ new Set();
+    deferred = null;
+    replaying = false;
+    timer = 0;
+    clicksAfter = -Infinity;
+    penNear = -Infinity;
+    pensDown = /* @__PURE__ */ new Set();
+    // This frame's batch.
+    frame = 0;
+    zoomLog = 0;
+    from = null;
+    to = null;
+    source = "wheel";
+    panX = 0;
+    panY = 0;
+    wheelTimer = 0;
+    safariScale = 1;
+    constructor(host, tracker = new TouchTracker()) {
+      this.host = host;
+      this.touch = tracker;
+      const opts = { capture: true };
+      window.addEventListener("pointerdown", (e2) => this.down(e2), opts);
+      window.addEventListener("pointermove", (e2) => this.move(e2), opts);
+      window.addEventListener("pointerup", (e2) => this.up(e2, false), opts);
+      window.addEventListener("pointercancel", (e2) => this.up(e2, true), opts);
+      window.addEventListener("click", (e2) => this.claimClick(e2), opts);
+      window.addEventListener("dblclick", (e2) => this.claimClick(e2), opts);
+      const s2 = host.surface;
+      s2.addEventListener("wheel", (e2) => this.wheel(e2), { passive: false });
+      s2.addEventListener("gesturestart", (e2) => this.gesture(e2, "start"));
+      s2.addEventListener("gesturechange", (e2) => this.gesture(e2, "change"));
+      s2.addEventListener("gestureend", (e2) => this.gesture(e2, "end"));
+    }
+    // The touch sequence in progress (or the one that just ended) had a
+    // second finger: it is no swipe and no tap.
+    get multiTouch() {
+      return this.touch.multiTouch;
+    }
+    // Two fingers are zooming, or one is left over from them.
+    get claimed() {
+      return this.touch.claimed;
+    }
+    // ── Touch ──
+    palm() {
+      return this.pensDown.size > 0 || performance.now() - this.penNear < PALM_MS2;
+    }
+    down(e2) {
+      if (e2.pointerType === "pen") {
+        this.penNear = performance.now();
+        this.pensDown.add(e2.pointerId);
+        return;
+      }
+      if (e2.pointerType !== "touch" || this.replaying) return;
+      const target = e2.target;
+      if (!target || !this.host.surface.contains(target)) return;
+      if (!this.touch.active) {
+        if (this.palm() || this.host.accepts?.(e2) === false) return;
+      }
+      const v2 = this.touch.down(e2.pointerId, at(e2), performance.now());
+      this.ours.add(e2.pointerId);
+      if (v2.cancelSingle) this.rollback();
+      if (v2.pinchStart) {
+        this.source = "pinch";
+        this.clicksAfter = Infinity;
+      }
+      if (!v2.pass) {
+        stop(e2);
+        return;
+      }
+      if (this.host.defer?.(e2)) {
+        this.deferred = { target, down: e2, last: e2 };
+        stop(e2);
+        clearTimeout(this.timer);
+        this.timer = window.setTimeout(
+          () => this.tick(),
+          this.touch.opts.windowMs + 10
+        );
+      }
+    }
+    rollback() {
+      if (this.deferred) {
+        this.deferred = null;
+        clearTimeout(this.timer);
+      } else {
+        this.host.cancelSingle?.();
+      }
+    }
+    move(e2) {
+      if (e2.pointerType === "pen") {
+        this.penNear = performance.now();
+        return;
+      }
+      if (this.replaying || !this.ours.has(e2.pointerId)) return;
+      const v2 = this.touch.move(e2.pointerId, at(e2), performance.now());
+      this.queuePinch(v2);
+      if (!v2.pass) {
+        stop(e2);
+        return;
+      }
+      const d2 = this.deferred;
+      if (d2 && d2.down.pointerId === e2.pointerId) {
+        if (v2.commit) {
+          this.replayDown();
+        } else {
+          d2.last = e2;
+          stop(e2);
+        }
+      }
+    }
+    tick() {
+      const d2 = this.deferred;
+      if (!d2) return;
+      const v2 = this.touch.tick(performance.now());
+      if (!v2.commit) {
+        return;
+      }
+      this.replayDown();
+      this.replay(replica("pointermove", d2.down, d2.last), d2.target);
+    }
+    replayDown() {
+      const d2 = this.deferred;
+      if (!d2) return;
+      this.deferred = null;
+      clearTimeout(this.timer);
+      this.replay(replica("pointerdown", d2.down), d2.target);
+    }
+    replay(e2, target) {
+      const aim = target.isConnected ? target : document.elementFromPoint(e2.clientX, e2.clientY);
+      if (!aim) return;
+      this.replaying = true;
+      try {
+        aim.dispatchEvent(e2);
+      } finally {
+        this.replaying = false;
+      }
+    }
+    up(e2, cancelled) {
+      if (e2.pointerType === "pen") {
+        this.penNear = performance.now();
+        this.pensDown.delete(e2.pointerId);
+        return;
+      }
+      if (this.replaying || !this.ours.has(e2.pointerId)) return;
+      const v2 = this.touch.up(
+        e2.pointerId,
+        at(e2),
+        performance.now(),
+        cancelled
+      );
+      this.ours.delete(e2.pointerId);
+      if (!this.touch.active) this.ours.clear();
+      if (v2.pinchEnd) {
+        this.flush();
+        this.host.zoomEnd?.("pinch");
+      }
+      if (this.touch.multiTouch) {
+        this.clicksAfter = this.touch.active ? Infinity : performance.now() + CLICK_AFTER_MS;
+      }
+      if (!v2.pass) {
+        stop(e2);
+        return;
+      }
+      const d2 = this.deferred;
+      if (d2 && d2.down.pointerId === e2.pointerId) {
+        if (cancelled) {
+          this.deferred = null;
+          clearTimeout(this.timer);
+          stop(e2);
+          return;
+        }
+        this.replayDown();
+        if (v2.moved)
+          this.replay(replica("pointermove", d2.down, e2), d2.target);
+      }
+      if (v2.doubleTap) {
+        this.host.doubleTap?.(v2.doubleTap, e2.target);
+      }
+    }
+    claimClick(e2) {
+      if (this.touch.claimed || performance.now() < this.clicksAfter) {
+        e2.stopImmediatePropagation();
+        e2.preventDefault();
+      }
+    }
+    // ── Wheel and Safari gestures ──
+    wheel(e2) {
+      if (this.host.acceptsWheel?.(e2) === false) return;
+      if (e2.ctrlKey || e2.metaKey) {
+        e2.preventDefault();
+        this.zoomLog += wheelZoomLog(e2.deltaY, e2.deltaMode);
+        this.source = "wheel";
+        this.from = at(e2);
+        this.to = at(e2);
+        clearTimeout(this.wheelTimer);
+        this.wheelTimer = window.setTimeout(() => {
+          this.flush();
+          this.host.zoomEnd?.("wheel");
+        }, WHEEL_END_MS);
+        this.schedule();
+        return;
+      }
+      if (!this.host.pan || !this.host.canPan?.(e2)) return;
+      e2.preventDefault();
+      const page = this.host.surface.clientHeight || void 0;
+      this.panX += wheelPixels(e2.deltaX, e2.deltaMode, page);
+      this.panY += wheelPixels(e2.deltaY, e2.deltaMode, page);
+      this.schedule();
+    }
+    gesture(raw, phase) {
+      const e2 = raw;
+      e2.preventDefault();
+      if (this.touch.active) return;
+      if (phase === "start") {
+        this.safariScale = 1;
+        return;
+      }
+      if (phase === "end") {
+        this.flush();
+        this.host.zoomEnd?.("gesture");
+        return;
+      }
+      if (!(e2.scale > 0)) return;
+      this.zoomLog += Math.log(e2.scale / this.safariScale);
+      this.safariScale = e2.scale;
+      this.source = "gesture";
+      this.from = at(e2);
+      this.to = at(e2);
+      this.schedule();
+    }
+    // ── Frames ──
+    queuePinch(v2) {
+      if (!v2.pinch) return;
+      this.zoomLog += Math.log(v2.pinch.scale);
+      this.from ??= v2.pinch.from;
+      this.to = v2.pinch.to;
+      this.source = "pinch";
+      this.schedule();
+    }
+    schedule() {
+      if (this.frame) return;
+      this.frame = requestAnimationFrame(() => this.flush());
+    }
+    // Apply this frame's batch now.
+    flush() {
+      if (this.frame) cancelAnimationFrame(this.frame);
+      this.frame = 0;
+      const log = this.zoomLog;
+      const from = this.from;
+      const to = this.to;
+      const dx = this.panX;
+      const dy = this.panY;
+      this.zoomLog = 0;
+      this.from = null;
+      this.to = null;
+      this.panX = 0;
+      this.panY = 0;
+      if (from && to && (log !== 0 || from.x !== to.x || from.y !== to.y)) {
+        this.host.zoom(Math.exp(log), from, to, this.source);
+      }
+      if (dx || dy) this.host.pan?.(dx, dy);
+    }
+  };
+
   // src/ts/shared/viewbox.ts
   var deckCanvas = { w: 1920, h: 1080 };
   function parseViewBox(attr, fallback = `0 0 ${deckCanvas.w} ${deckCanvas.h}`) {
@@ -1657,7 +2152,6 @@
   var stageWrap = document.getElementById("stage-wrap");
   var indicator = document.getElementById("zoom-indicator");
   var LIMITS = { minScale: 1, maxScale: 8 };
-  var WHEEL_STEP = 1.0015;
   var KEY_ZOOM_STEP = 1.4;
   var KEY_ANIM_MS = 140;
   var RESET_ANIM_MS = 240;
@@ -1783,6 +2277,37 @@
     );
     animateCameraTo(target, KEY_ANIM_MS);
   }
+  function zoomAbout(factor, from, to) {
+    flushPendingNav();
+    cancelAnim();
+    if (!ensureBase() || !camera || !baseViewBox) return;
+    const focus = clientToUser(from.x, from.y);
+    if (!focus) return;
+    camera = zoomAt(camera, baseViewBox, factor, focus, LIMITS);
+    applyCamera();
+    if (from.x === to.x && from.y === to.y) return;
+    const a2 = clientToUser(from.x, from.y);
+    const b2 = clientToUser(to.x, to.y);
+    if (!a2 || !b2) return;
+    camera = panBy(camera, baseViewBox, a2.ux - b2.ux, a2.uy - b2.uy);
+    applyCamera();
+  }
+  function panPixels(dx, dy) {
+    if (!camera || !baseViewBox) return;
+    const inv = currentSvg()?.getScreenCTM()?.inverse();
+    if (!inv) return;
+    const units = Math.hypot(inv.a, inv.b);
+    camera = panBy(camera, baseViewBox, dx * units, dy * units);
+    applyCamera();
+  }
+  var touchCancels = [];
+  function onTouchCancel(fn) {
+    touchCancels.push(fn);
+  }
+  var gestures = null;
+  function multiTouch() {
+    return gestures?.multiTouch ?? false;
+  }
   function overGrid(target) {
     return Boolean(target?.closest?.("#overview"));
   }
@@ -1801,22 +2326,18 @@
   window.addEventListener("blur", () => setArmed(false));
   if (stageWrap) {
     const wrap = stageWrap;
-    wrap.addEventListener(
-      "wheel",
-      (e2) => {
-        if (!isCameraGesture(e2) || overGrid(e2.target)) return;
-        e2.preventDefault();
-        flushPendingNav();
-        cancelAnim();
-        if (!ensureBase() || !camera || !baseViewBox) return;
-        const focus = clientToUser(e2.clientX, e2.clientY);
-        if (!focus) return;
-        const factor = Math.min(Math.max(WHEEL_STEP ** -e2.deltaY, 0.2), 5);
-        camera = zoomAt(camera, baseViewBox, factor, focus, LIMITS);
-        applyCamera();
+    gestures = new GesturePad({
+      surface: wrap,
+      accepts: (e2) => !overGrid(e2.target) && !e2.target.closest?.(".ink-palette"),
+      acceptsWheel: (e2) => !overGrid(e2.target),
+      cancelSingle: () => {
+        for (const fn of touchCancels) fn();
       },
-      { passive: false }
-    );
+      zoom: zoomAbout,
+      canPan: () => cameraIsZoomed(),
+      pan: panPixels,
+      doubleTap: smoothResetCamera
+    });
     wrap.addEventListener("pointerdown", (e2) => {
       if (!isCameraGesture(e2) || overGrid(e2.target)) return;
       flushPendingNav();
@@ -1865,6 +2386,7 @@
   var active = false;
   var palette = null;
   var pad = null;
+  onTouchCancel(() => pad?.cancel());
   var send = () => {
   };
   var saving = false;
@@ -2735,8 +3257,8 @@
   }
   function updateStatus() {
     const infoHtml = `<span class="slide-current">${state.slideIndex + 1}</span> / ${state.slides.length}`;
-    const at = sectionPosition(state.slides, state.slideIndex);
-    slideInfo.title = at ? `${at.name}: ${at.at} of ${at.of}` : "";
+    const at2 = sectionPosition(state.slides, state.slideIndex);
+    slideInfo.title = at2 ? `${at2.name}: ${at2.at} of ${at2.of}` : "";
     const ringHtml = buildStepRing(state.step, maxStep2());
     slideInfo.innerHTML = infoHtml;
     stepInfo.innerHTML = ringHtml;
@@ -2804,10 +3326,10 @@
     pvSlideInfo.innerHTML = `<span class="slide-current">${total ? state.slideIndex + 1 : "\u2013"}</span> / ${total || "\u2013"}`;
     pvStepRing.innerHTML = buildStepRing(state.step, maxStep2());
     if (pvSection) {
-      const at = sectionPosition(state.slides, state.slideIndex);
-      pvSection.hidden = !at;
-      pvSection.textContent = at ? `\xA7 ${at.name} \xB7 ${at.at}/${at.of}` : "";
-      pvSection.title = at ? `Section \u201C${at.name}\u201D: slide ${at.at} of ${at.of}` : "";
+      const at2 = sectionPosition(state.slides, state.slideIndex);
+      pvSection.hidden = !at2;
+      pvSection.textContent = at2 ? `\xA7 ${at2.name} \xB7 ${at2.at}/${at2.of}` : "";
+      pvSection.title = at2 ? `Section \u201C${at2.name}\u201D: slide ${at2.at} of ${at2.of}` : "";
     }
   }
   function _scalePvNext() {
@@ -3102,10 +3624,10 @@
       }
       index += arity;
       const origin = current2;
-      const at = (i2) => relative ? { x: origin.x + args[i2], y: origin.y + args[i2 + 1] } : { x: args[i2], y: args[i2 + 1] };
+      const at2 = (i2) => relative ? { x: origin.x + args[i2], y: origin.y + args[i2 + 1] } : { x: args[i2], y: args[i2 + 1] };
       switch (upper) {
         case "M": {
-          const end = at(0);
+          const end = at2(0);
           segments.push({ type: "M", points: [end] });
           current2 = end;
           subpathStart = end;
@@ -3113,7 +3635,7 @@
           break;
         }
         case "L": {
-          const end = at(0);
+          const end = at2(0);
           segments.push({ type: "L", points: [end] });
           current2 = end;
           break;
@@ -3137,7 +3659,7 @@
           break;
         }
         case "C": {
-          const points = [at(0), at(2), at(4)];
+          const points = [at2(0), at2(2), at2(4)];
           segments.push({ type: "C", points });
           current2 = points[2];
           previousCubicControl = points[1];
@@ -3145,15 +3667,15 @@
         }
         case "S": {
           const control1 = previousCubicControl && (previousCommand === "C" || previousCommand === "S") ? reflect(origin, previousCubicControl) : origin;
-          const points = [control1, at(0), at(2)];
+          const points = [control1, at2(0), at2(2)];
           segments.push({ type: "C", points });
           current2 = points[2];
           previousCubicControl = points[1];
           break;
         }
         case "Q": {
-          const control = at(0);
-          const end = at(2);
+          const control = at2(0);
+          const end = at2(2);
           segments.push({
             type: "C",
             points: cubicFromQuadratic(origin, control, end)
@@ -3164,7 +3686,7 @@
         }
         case "T": {
           const control = previousQuadraticControl && (previousCommand === "Q" || previousCommand === "T") ? reflect(origin, previousQuadraticControl) : origin;
-          const end = at(0);
+          const end = at2(0);
           segments.push({
             type: "C",
             points: cubicFromQuadratic(origin, control, end)
@@ -4862,6 +5384,18 @@
     currentPath = null;
     currentPoints = [];
   }
+  function abortDraw() {
+    if (!isDrawing) return;
+    isDrawing = false;
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    currentPath?.remove();
+    currentPath = null;
+    currentPoints = [];
+  }
+  onTouchCancel(abortDraw);
   function toggleLaser() {
     state._laserMode = !state._laserMode;
     document.body.classList.toggle("laser-mode", state._laserMode);
@@ -5408,7 +5942,7 @@
       { passive: false }
     );
     stageEl.addEventListener("touchend", (e2) => {
-      if (e2.changedTouches.length !== 1) return;
+      if (e2.changedTouches.length !== 1 || multiTouch()) return;
       const dx = e2.changedTouches[0].clientX - startX;
       const dy = e2.changedTouches[0].clientY - startY;
       if (Math.abs(dx) > SWIPE_MIN_PX && Math.abs(dx) > Math.abs(dy)) {

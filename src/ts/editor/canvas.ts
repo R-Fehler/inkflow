@@ -7,6 +7,7 @@
 // attribute plan to the server, which writes it into that source file. The
 // rebuild that follows replaces the DOM with the authoritative render.
 
+import { scrollCorrection, ZoomAnchor } from "../shared/gestures";
 import { applyStepInstant } from "../shared/step";
 import { parseViewBox } from "../shared/viewbox";
 import {
@@ -140,6 +141,11 @@ export function layoutPaper(): void {
     overlay.setAttribute("height", String(ph));
     overlay.setAttribute("viewBox", `0 0 ${pw} ${ph}`);
     canvas.classList.toggle("zoomed", ed.zoom > 0);
+    // Room to scroll the paper half out of view (see zoomTo).
+    canvas.style.padding =
+        ed.zoom > 0
+            ? `${Math.round(canvas.clientHeight / 2)}px ${Math.round(canvas.clientWidth / 2)}px`
+            : "";
     drawOverlay();
 }
 
@@ -2063,7 +2069,11 @@ function onPointerDown(e: PointerEvent): void {
     if (!handle && ed.tool !== "select") {
         if (hooks.toolDown(e, pt)) return;
     }
-    paper.setPointerCapture(e.pointerId);
+    try {
+        paper.setPointerCapture(e.pointerId);
+    } catch {
+        // A touch replayed as it lifts (editor/touchzoom.ts): no capture.
+    }
     e.preventDefault();
     ed.interacting = true;
     let clickTarget: SVGGraphicsElement | null = null;
@@ -2183,7 +2193,11 @@ function textUnder(x: number, y: number): SVGGraphicsElement | null {
 function onDoubleClick(e: MouseEvent): void {
     if (hooks.editingHost()?.contains(e.target as Node)) return;
     const el = pick(e.clientX, e.clientY);
-    if (!el) return;
+    if (!el) {
+        // Nothing here: double-clicking the slide's empty area fits it.
+        if (ed.tool === "select") setZoom(0);
+        return;
+    }
     if (canTypeInto(el)) {
         hooks.typeInto(el);
         return;
@@ -2351,28 +2365,73 @@ export function initCanvas(): void {
         }
     });
     new ResizeObserver(() => layoutPaper()).observe(canvas);
-    canvas.addEventListener(
-        "wheel",
-        (e) => {
-            if (!(e.ctrlKey || e.metaKey)) return;
-            e.preventDefault();
-            setZoom(scale() * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
-        },
-        { passive: false },
-    );
-    // Clicking the grey area around the slide clears the selection.
+    // Clicking the grey area around the slide clears the selection;
+    // double-clicking it fits the slide.
     canvas.addEventListener("pointerdown", (e) => {
         if (e.target === canvas) {
             enterGroup(null);
             clearSelection();
         }
     });
+    canvas.addEventListener("dblclick", (e) => {
+        if (e.target === canvas) setZoom(0);
+    });
     on("model", render);
     on("rerender", render);
 }
 
-export function setZoom(z: number): void {
-    ed.zoom = z <= 0 ? 0 : Math.max(0.05, Math.min(z, 8));
+export const MIN_ZOOM = 0.05;
+export const MAX_ZOOM = 8;
+
+function clampZoom(z: number): number {
+    return z <= 0 ? 0 : Math.max(MIN_ZOOM, Math.min(z, MAX_ZOOM));
+}
+
+// Zoom to `z` (0: fit) keeping the slide point under `about` in place; by
+// default the one at the canvas's centre (the zoom buttons and keys).
+export function setZoom(z: number, about?: Pt): void {
+    const c = canvas.getBoundingClientRect();
+    const at = about ?? { x: c.left + c.width / 2, y: c.top + c.height / 2 };
+    anchor.reset();
+    zoomTo(clampZoom(z), at, at);
+}
+
+// Zoom by `factor` about client point `from`, then scroll so the slide point
+// that was under `from` sits under `to` (a pinch's midpoint pans as it
+// zooms). One call per frame of a gesture; zoomEnded() when it is over.
+export function zoomAbout(factor: number, from: Pt, to: Pt): void {
+    zoomTo(clampZoom(scale() * factor), from, to);
+}
+
+export function zoomEnded(): void {
+    anchor.reset();
+}
+
+const anchor = new ZoomAnchor();
+
+// The paper is laid out at the new size and the canvas scrolled by however
+// far the anchored slide point landed from where it belongs. While zoomed,
+// the canvas is padded by half its size on every side (layoutPaper), so the
+// paper can sit off-centre and a zoom about any point over it holds that
+// point; the slide still always covers the canvas's centre, so scrolling
+// never loses it.
+function zoomTo(z: number, from: Pt, to: Pt): void {
+    const p =
+        z > 0 && slideRoot()
+            ? anchor.point(from, (c) => clientToSlide(c.x, c.y))
+            : null;
+    ed.zoom = z;
     layoutPaper();
+    if (p) {
+        const m = rootCTM();
+        const now = {
+            x: m.a * p.x + m.c * p.y + m.e,
+            y: m.b * p.x + m.d * p.y + m.f,
+        };
+        const fix = scrollCorrection(now, to);
+        if (fix.x) canvas.scrollLeft += fix.x;
+        if (fix.y) canvas.scrollTop += fix.y;
+        anchor.settle(to, p);
+    } else anchor.reset();
     emit("zoom");
 }

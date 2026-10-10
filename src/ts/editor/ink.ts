@@ -25,6 +25,23 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 // The pen tool is picked on purpose, so a mouse draws with it by default.
 let settings: InkSettings = loadSettings(SETTINGS_KEY, true);
+let pad: InkPad | null = null;
+
+// The pen tool is on and a finger draws with it (not only a pen).
+export function fingersDraw(): boolean {
+    return penActive() && settings.fingers;
+}
+
+// A second finger made the touch a pinch: drop the stroke the first began
+// (nothing was sent yet; a stroke is saved when it ends).
+export function cancelStroke(): void {
+    pad?.cancel();
+}
+
+function penActive(): boolean {
+    return ed.tool === "pen" && ed.step == null && !ed.richEditing;
+}
+
 // Strokes sent but not yet back from a rebuild, by id.
 const pending = new Map<string, { deckIndex: number; stroke: InkStroke }>();
 
@@ -123,9 +140,9 @@ export function initInk(): void {
     palette.el.hidden = true;
     document.body.appendChild(palette.el);
 
-    new InkPad({
+    pad = new InkPad({
         surface: paper,
-        active: () => ed.tool === "pen" && ed.step == null && !ed.richEditing,
+        active: penActive,
         fingers: () => settings.fingers,
         tool: () => settings.tool,
         svg: () => (currentSlide()?.ink ? slideRoot() : null),
