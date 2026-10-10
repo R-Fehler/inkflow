@@ -1040,10 +1040,13 @@ body.guest .open-with {
   border-top: 1px solid var(--ui-line);
   font-size: 14px;
 }
-.share-dialog h3.share-section:first-child {
+.share-dialog > h3.share-section:first-child {
   margin-top: 0;
   padding-top: 0;
   border-top: 0;
+}
+.share-relay a {
+  color: var(--blue);
 }
 .share-relay-fields {
   display: flex;
@@ -2769,6 +2772,8 @@ body.offline #offline-banner {
 }
 .dialog-body input[type=text],
 .dialog-body input[type=number],
+.dialog-body input[type=url],
+.dialog-body input[type=password],
 .dialog-body select {
   height: 28px;
   background: var(--ui-bg);

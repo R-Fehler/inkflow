@@ -424,10 +424,14 @@ body.guest .open-with {
     font-size: 14px;
 }
 
-.share-dialog h3.share-section:first-child {
+.share-dialog > h3.share-section:first-child {
     margin-top: 0;
     padding-top: 0;
     border-top: 0;
+}
+
+.share-relay a {
+    color: var(--blue);
 }
 
 .share-relay-fields {

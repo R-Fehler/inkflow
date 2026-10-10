@@ -1779,6 +1779,8 @@ body.offline #offline-banner {
 
 .dialog-body input[type="text"],
 .dialog-body input[type="number"],
+.dialog-body input[type="url"],
+.dialog-body input[type="password"],
 .dialog-body select {
     height: 28px;
     background: var(--ui-bg);
