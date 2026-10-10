@@ -80,3 +80,45 @@ export function withPage(ref: string, page: number): string {
     const file = ref.replace(/#.*$/, "");
     return page > 1 ? `${file}#page=${page}` : file;
 }
+
+/** A project file's path as its folder, its name without the extension, and
+ * the extension (``.drawio.svg`` is one: a diagram stays a diagram). */
+export function splitFileName(rel: string): {
+    folder: string;
+    stem: string;
+    ext: string;
+} {
+    const cut = rel.lastIndexOf("/");
+    const folder = cut < 0 ? "" : rel.slice(0, cut);
+    const name = rel.slice(cut + 1);
+    const drawio = /\.drawio\.svg$/i.exec(name);
+    const dot = name.lastIndexOf(".");
+    const ext = drawio ? drawio[0] : dot > 0 ? name.slice(dot) : "";
+    return { folder, stem: name.slice(0, name.length - ext.length), ext };
+}
+
+/** ``folder/stem.ext`` from the rename dialog's fields (slashes trimmed). */
+export function joinFileName(
+    folder: string,
+    stem: string,
+    ext: string,
+): string {
+    const dir = folder
+        .trim()
+        .replace(/\\/g, "/")
+        .replace(/^\/+|\/+$/g, "");
+    const name = `${stem.trim()}${ext}`;
+    return dir ? `${dir}/${name}` : name;
+}
+
+/** A path the model gives (absolute, or relative to the project) as one
+ * relative to the project, or null when it is outside it. */
+export function projectRel(path: string, projectDir: string): string | null {
+    if (!path) return null;
+    if (!path.startsWith("/") && !/^[a-z]:[\\/]/i.test(path)) {
+        return path.split("/").includes("..") ? null : path;
+    }
+    const root = projectDir.replace(/[\\/]+$/, "");
+    if (!path.startsWith(`${root}/`)) return null;
+    return path.slice(root.length + 1);
+}

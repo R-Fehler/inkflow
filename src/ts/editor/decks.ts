@@ -7,6 +7,7 @@ import { closeDialog, openDialog } from "./dialog";
 import { clear, h, toast } from "./dom";
 import { folderPicker, type Places } from "./folderpicker";
 import { request, stopReconnecting, whenConnected } from "./net";
+import { openFiles } from "./rename";
 import { menuItem, showMenu } from "./sorter";
 import { ed, on } from "./state";
 
@@ -87,6 +88,12 @@ async function openMenu(): Promise<void> {
             item.title = dir;
             menu.append(item);
         }
+    }
+    if (ed.model) {
+        menu.append(
+            h("div", { class: "menu-sep" }),
+            menuItem("Files…", () => void openFiles()),
+        );
     }
     menu.append(
         h("div", { class: "menu-sep" }),

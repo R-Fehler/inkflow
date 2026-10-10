@@ -15,6 +15,7 @@ import {
 import { clear, h, icon, toast } from "./dom";
 import { openGallery } from "./gallery";
 import { edit } from "./net";
+import { renameSlideFiles } from "./rename";
 import {
     dropOnHeader,
     dropOnSlide,
@@ -502,6 +503,9 @@ export function openSlideMenu(x: number, y: number, i: number): void {
             () => void toggleHidden(i),
             !editable,
         ),
+    );
+    menu.append(
+        menuItem("Rename files…", () => renameSlideFiles(i), !editable),
     );
     menu.append(menuItem("Delete", () => void deleteSlide(i), !editable));
     menu.append(
