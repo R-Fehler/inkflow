@@ -139,7 +139,12 @@ def _boxes(deck_path: Path, number: int) -> SlideBoxes:
     """One slide's rendered boxes (`inkflow render --boxes`)."""
     try:
         result = render_slides(
-            deck_path, [number], None, boxes=True, no_sandbox=_running_as_root()
+            deck_path,
+            [number],
+            None,
+            boxes=True,
+            contrast=False,
+            no_sandbox=_running_as_root(),
         )
     except (RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -203,6 +208,12 @@ def _current_slide(project_dir: Path) -> int:
     + " their content's extent and free space, each block of a zone's text);"
     + " writes no images unless --output is given.",
 )
+@click.option(
+    "--no-contrast",
+    "no_contrast",
+    is_flag=True,
+    help="Skip the text contrast check (two more screenshots per slide).",
+)
 @click.option("--json", "as_json", is_flag=True, help="Print the result as JSON.")
 @click.option("--chromium", default=None, help="Path to a Chromium/Chrome binary.")
 @click.option(
@@ -218,6 +229,7 @@ def render(
     output: str | None,
     scale: float,
     boxes: bool,
+    no_contrast: bool,
     as_json: bool,
     chromium: str | None,
     no_sandbox: bool,
@@ -228,7 +240,9 @@ def render(
     open in the visual editor (or the first). Prints the path of every image
     written, which is what an agent reads back to check its own edits, then
     one line per layout problem: text that overflows its zone, a code block cut
-    off, an object outside the slide, text too small to read (a hint).
+    off, an object outside the slide, text too small to read (a hint), text
+    whose contrast with what is behind it is below 3:1 (between 3:1 and 4.5:1
+    for text under 24px on a 1080px slide: a hint).
 
     `--sheet` puts the slides on one contact sheet (16 per image at most).
     `--check` measures without writing images and exits 1 if anything other
@@ -272,6 +286,7 @@ def render(
             chromium=chromium,
             no_sandbox=no_sandbox or _running_as_root(),
             boxes=boxes,
+            contrast=not no_contrast,
         )
     except (RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

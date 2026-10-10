@@ -13,6 +13,7 @@ label with its number and id, so the whole deck is one image to look at.
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 import importlib.resources
 import json
@@ -62,7 +63,7 @@ class Finding:
 
     slide: int
     slide_id: str
-    kind: str  # overflow | clipped | outside | small-text
+    kind: str  # overflow | clipped | outside | small-text | contrast
     target: str
     top: int = 0
     right: int = 0
@@ -72,10 +73,19 @@ class Finding:
     size: float = 0.0
     minimum: float = 0.0
     text: str = ""
+    ratio: float = 0.0
+    """Contrast: the text's ratio against what is behind it, and the one it
+    needs (WCAG: 4.5:1, or 3:1 for large text)."""
+    needs: float = 0.0
+    color: str = ""
+    background: str = ""
 
     @property
     def is_problem(self) -> bool:
-        """Small text is a hint; everything else is something to fix."""
+        """Small text and normal-size text between 3:1 and 4.5:1 are hints;
+        everything else is something to fix."""
+        if self.kind == "contrast":
+            return self.ratio < 3
         return self.kind != "small-text"
 
     def _sides(self) -> list[str]:
@@ -100,6 +110,13 @@ class Finding:
             said = f"lies {getattr(self, side)}px outside the slide ({side})"
         elif self.kind == "outside":
             said = f"lies outside the slide by {self._reach()}"
+        elif self.kind == "contrast":
+            said = (
+                f"contrast {self.ratio:g}:1 against its background"
+                + f" (needs {self.needs:g}:1): {self.color} on {self.background}"
+            )
+            if self.text:
+                said += f' "{self.text}"'
         else:
             said = f"text {self.size:g}px tall is likely too small to read"
             if self.minimum:
@@ -120,7 +137,7 @@ def parse_findings(slide: int, slide_id: str, raw: object) -> list[Finding]:
         data = cast("dict[str, object]", item)
         kind = data.get("kind")
         target = data.get("target")
-        if kind not in ("overflow", "clipped", "outside", "small-text"):
+        if kind not in ("overflow", "clipped", "outside", "small-text", "contrast"):
             continue
         if not isinstance(target, str):
             continue
@@ -144,6 +161,10 @@ def parse_findings(slide: int, slide_id: str, raw: object) -> list[Finding]:
                 size=number("size"),
                 minimum=number("min"),
                 text=text if isinstance(text, str) else "",
+                ratio=number("ratio"),
+                needs=number("needs"),
+                color=str(data.get("color") or ""),
+                background=str(data.get("background") or ""),
             )
         )
     return found
@@ -453,6 +474,7 @@ def render_slides(
     chromium: str | None = None,
     no_sandbox: bool = False,
     boxes: bool = False,
+    contrast: bool = True,
 ) -> RenderResult:
     """Render slides (1-based, as the presenter numbers them; ``None`` = all).
 
@@ -462,6 +484,7 @@ def render_slides(
     for several (``slide-N.png``); with ``sheet``, the slides go onto contact
     sheets instead (`sheet_paths`). Without one, nothing is written. With
     ``boxes``, every element's rendered box is read back too (`boxes`).
+    With ``contrast``, text is checked against what is behind it (`_contrast`).
     """
     exe = chromium or find_chromium()
     if exe is None:
@@ -527,9 +550,11 @@ def render_slides(
             if boxes:
                 measured = parse_boxes(page.evaluate("window.inkflowBoxes()"))
                 result.boxes.append(SlideBoxes(n, slides[n - 1]["id"], w, h, measured))
-            if output is None:
+            png = page.screenshot(w, h) if output is not None else None
+            if contrast:
+                result.findings += _contrast(page, n, slides[n - 1]["id"], w, h, png)
+            if png is None:
                 continue
-            png = page.screenshot(w, h)
             if sheet:
                 shots[n] = f"thumb-{n}.png"
                 (Path(tmp) / shots[n]).write_bytes(png)
@@ -551,6 +576,26 @@ def render_slides(
                 shots,
             )
     return result
+
+
+def _contrast(
+    page: Page, n: int, slide_id: str, w: int, h: int, shown: bytes | None
+) -> list[Finding]:
+    """Text whose contrast with what is behind it is too low
+    (src/ts/render/contrast.ts): the slide is shot as shown and with its
+    text's paint made transparent, and the page compares the two."""
+    shown_b64 = (
+        base64.b64encode(shown).decode("ascii")
+        if shown is not None
+        else page.screenshot_base64(w, h, fast=True)
+    )
+    if not page.evaluate("window.inkflowHideText()"):
+        return []  # no text
+    hidden_b64 = page.screenshot_base64(w, h, fast=True)
+    raw = page.evaluate(
+        f"window.inkflowContrast({json.dumps(shown_b64)}, {json.dumps(hidden_b64)})"
+    )
+    return parse_findings(n, slide_id, raw)
 
 
 def _write_sheets(

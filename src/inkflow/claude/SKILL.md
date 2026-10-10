@@ -262,14 +262,18 @@ a branch", don't touch their deck:
 2. `inkflow render --check` measures every slide in a browser, without images,
    and prints one line per layout problem (`slide 3 (intro): #zone-content:
    text overflows its zone by 120px (bottom)`; also code blocks cut off,
-   objects outside the slide, text too small to read), exit 1 on a problem.
-   Fix what it reports: shorten text, enlarge the zone, or move the object.
+   objects outside the slide, text too small to read, and text whose
+   contrast with the pixels behind it is too low: `contrast 2.1:1 against
+   its background (needs 4.5:1): #777777 on #8a8a8a`), exit 1 on a problem.
+   Fix what it reports: shorten text, enlarge the zone, move the object, or
+   use a theme colour that stands out from what is behind the text (check
+   both `mode`s if the deck may be shown in either).
 3. `inkflow render --sheet` writes one contact-sheet PNG of all slides
    (labelled with number and id) to `.inkflow/render/sheet.png`: read it to
    check flow and consistency. `inkflow render` writes one PNG per slide (the
    editor's current slide by default; `--slide N`, `--all`, `--step S`) and
-   prints the same findings. Overlapping objects and low contrast are only
-   visible in the images: look before you report back.
+   prints the same findings. Overlapping objects are only visible in the
+   images: look before you report back.
 4. On a branch or in a worktree, `inkflow compare main .` lists the slides
    your work changed compared with main (`~` changed, with the files; `+`
    added; `-` removed; `↕` moved); `--sheet` writes them side by side

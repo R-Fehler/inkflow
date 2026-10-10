@@ -88,6 +88,7 @@ commands:
       -o, --output=: PNG file or directory
       --scale=: Image scale
       --boxes: Print every element's rendered box (no images unless -o)
+      --no-contrast: Skip the text contrast check
       --json: Print the result as JSON
       --chromium=: Path to a Chromium/Chrome binary
       --no-sandbox: Pass --no-sandbox to Chromium

@@ -154,6 +154,7 @@ slide 3 (interface): #zone-content: code block is cut off by 528px (right)
 slide 8 (morph): #logo: lies 40px outside the slide (right)
 slide 8 (morph): #lost: lies entirely outside the slide (right), so it is not shown
 slide 3 (interface): #zone-content: text 10px tall is likely too small to read (below 13.5px): "tiny footnote"
+slide 1 (title): #subtitle: contrast 2.4:1 against its background (needs 3:1): #8839ef on #203341 "Your editor, your style."
 ```
 
 Lengths are in slide units, the numbers in the SVG. A zone's text is compared
@@ -161,6 +162,18 @@ with the zone's box; a drawn object with the slide's edges, except a background
 or a band spanning the whole slide, and anything clipped on purpose (a crop, a
 media zone). Small text (below 1/80 of the slide's height) is a hint, the rest
 are problems.
+
+**Contrast** is measured against what is really behind each piece of text, in
+the rendered slide: the slide is shot once as shown and once with its text made
+transparent, and the background is read where the letters are. So text over a
+photo, a gradient or a coloured box is judged by the pixels behind it, in the
+deck's colour mode and with its theme's colours. The worst tenth of those pixels
+decides, so a light patch behind white letters is found but a few anti-aliased
+edges are not; a thick outline of another colour (a halo) is what the text is
+read against, and a text shadow counts where it helps. Below 3:1 is a problem
+for any text; between 3:1 and 4.5:1 is a hint for text smaller than 24px on a
+1080px-tall slide (18.66px bold), the WCAG size for large text. The check takes
+two more screenshots per slide (about 0.2 s); `--no-contrast` skips it.
 
 ```bash
 inkflow render --check            # every slide, no images; exit 1 on a problem

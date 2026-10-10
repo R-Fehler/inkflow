@@ -310,7 +310,9 @@ def _size(png: Path) -> tuple[int, int]:
 @needs_chromium
 def test_render_measures_and_writes_pngs(broken: Path, tmp_path: Path) -> None:
     out = tmp_path / "out"
-    result = render_slides(broken / "deck.py", None, out, scale=0.5, no_sandbox=True)
+    result = render_slides(
+        broken / "deck.py", None, out, scale=0.5, no_sandbox=True, contrast=False
+    )
     assert [p.name for p in result.images] == ["slide-1.png", "slide-2.png"]
     assert _size(result.images[0]) == (960, 540)
     by_slide = {(f.slide, f.kind, f.target) for f in result.findings}

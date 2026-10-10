@@ -128,6 +128,12 @@ src/
                                with an id, zones with content extent + `free` height,
                                `zone-x/N` text blocks with their text's extent), no PNG
                                unless `-o`; `render_json` is `--json`
+                               contrast (default on, `--no-contrast`): `_contrast` shoots
+                               the slide as shown and after `window.inkflowHideText()`
+                               (fast PNGs, `Page.screenshot_base64`), and
+                               `window.inkflowContrast(shown, hidden)` returns `contrast`
+                               findings (`ratio`/`needs`/`color`/`background`; below 3:1
+                               a problem, 3–4.5:1 for small text a hint)
                                (`pair_sheet_layout`/`pair_sheet_html`, boxes outlined)
     cdp.py            minimal DevTools client over `websockets`: `Browser.launch`
                                (--remote-debugging-port=0, port read from the profile's
@@ -449,6 +455,9 @@ src/
                       below 1/80 of the slide height; all in slide units),
                       boxes.ts (`--boxes`: each id'd element's box after
                       transforms, zone content extent/free space, text blocks)
+                      contrast.ts (each text run vs the hidden-text shot's pixels
+                      where its glyphs are, worst tenth decides; halo strokes,
+                      shadows that help, alpha blended; pure WCAG maths tested)
   css/                CSS source
     shared/           theme variables, animation keyframes, ink.css (the ink palette)
     presenter/        presenter partials including pv.css (sidebar panel)

@@ -6,6 +6,7 @@
 
 import { applyStepInstant, maxStep } from "../shared/step";
 import { type BoxEntry, measureBoxes } from "./boxes";
+import { type ContrastFinding, checkContrast, hideText } from "./contrast";
 import { type Finding, measureSlide } from "./measure";
 
 declare global {
@@ -13,6 +14,13 @@ declare global {
         inkflowRendered?: Promise<Finding[]>;
         /** Every element's box, for `inkflow render --boxes` (boxes.ts). */
         inkflowBoxes?: () => BoxEntry[];
+        /** Text contrast (contrast.ts): hide the text for the background
+         * shot, then compare both shots (base64 PNGs). */
+        inkflowHideText?: () => number;
+        inkflowContrast?: (
+            shown: string,
+            hidden: string,
+        ) => Promise<ContrastFinding[]>;
     }
 }
 
@@ -83,3 +91,6 @@ window.inkflowRendered = (async () => {
 })();
 
 window.inkflowBoxes = () => (svg ? measureBoxes(svg) : []);
+window.inkflowHideText = () => (svg ? hideText(svg) : 0);
+window.inkflowContrast = (shown, hidden) =>
+    checkContrast(shown, hidden, host.getBoundingClientRect().width);
