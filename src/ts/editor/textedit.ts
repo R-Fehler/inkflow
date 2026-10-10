@@ -11,10 +11,11 @@
 // cannot make that round trip (code, images, step reveals) opens its source in a pane under the slide instead,
 // where the slide re-renders live as you type.
 
+import { showConflict } from "./conflict";
 import { clear, h, icon, toast } from "./dom";
-import { edit, request } from "./net";
+import { edit, newerBuild, request } from "./net";
 import { htmlToMarkdown, sameMarkdown, Unsupported } from "./richtext";
-import { currentSlide, ed, emit } from "./state";
+import { currentSlide, ed, emit, off, on } from "./state";
 
 const layer = document.getElementById("text-layer")!;
 const dock = document.getElementById("zone-dock")!;
@@ -60,6 +61,23 @@ function linesOf(el: Element): string[] {
     if (!spans.length || loose) return [el.textContent ?? ""];
     return spans.map((s) => s.textContent ?? "");
 }
+
+// After a refusal: whether the newer build still shows the zone as this
+// person last saw it (someone changed something else) — then saving again
+// overwrites no one's text.
+async function zoneUnchanged(
+    refused: number | undefined,
+    deckIndex: number,
+    zone: string,
+    seen: string,
+): Promise<boolean> {
+    if (!(await newerBuild(refused))) return false;
+    const now = ed.model?.slides[deckIndex]?.zoneText?.[zone];
+    return now != null && sameMarkdown(now, seen);
+}
+
+// A write refused because its file changed meanwhile (see session.py).
+const CHANGED = /changed (on disk|.* meanwhile)/;
 
 export function editSvgText(
     el: SVGGraphicsElement,
@@ -110,6 +128,10 @@ export function editSvgText(
     autosize();
     area.focus();
     area.select();
+    // What the typing began from: someone else's change to the file while
+    // this box is open is not overwritten (the request is refused instead).
+    const startHash = hash();
+    const startBuild = ed.model?.build;
     active = {
         commit: async () => {
             el.style.visibility = "";
@@ -119,13 +141,22 @@ export function editSvgText(
             if (lines.length === 1 && !el.querySelector("tspan")) {
                 el.textContent = lines[0];
             }
-            await edit({
+            const request = {
                 action: "svg",
                 file: sourcePath,
-                hash: hash(),
+                hash: startHash,
                 ops: [{ kind: "text", loc, lines }],
                 label: "Edit text",
-            });
+                ...(startBuild != null ? { baseBuild: startBuild } : {}),
+            };
+            const result = await edit(request);
+            if (
+                !result.ok &&
+                (result.stale || CHANGED.test(result.error ?? ""))
+            ) {
+                // Someone else's edit got there first: keep this typing.
+                showConflict(result.error ?? "", lines.join("\n"), null);
+            }
         },
         cancel: () => {
             el.style.visibility = "";
@@ -179,6 +210,24 @@ function prefixLines(area: HTMLTextAreaElement, prefix: string): void {
     area.focus();
 }
 
+// "Use mine instead" in the conflict box: this person's text over theirs,
+// on purpose, against the newer build.
+async function putBack(
+    deckIndex: number,
+    zone: string,
+    text: string,
+    origin: unknown,
+): Promise<boolean> {
+    const result = await edit({
+        action: "zone-text",
+        slide: deckIndex,
+        zone,
+        text,
+        origin,
+    });
+    return result.ok;
+}
+
 export function editZoneText(zone: string): void {
     void finishTextEdit();
     const slide = currentSlide();
@@ -198,11 +247,23 @@ export function editZoneText(zone: string): void {
     let sent = original;
     let timer = 0;
     const coalesce = `zone-${deckIndex}-${zone}-${Date.now()}`;
+    // The build this typing is against: the one it began on, then each
+    // newer one that shows exactly what was sent (this person's own writes).
+    // Someone else's change to the zone meanwhile is refused, not overwritten.
+    let base = ed.model?.build;
+    const follow = () => {
+        const now = ed.model?.slides[deckIndex]?.zoneText?.[zone];
+        if (ed.model?.build != null && now != null && sameMarkdown(now, sent)) {
+            base = ed.model.build;
+        }
+    };
+    on("model", follow);
     const send = async () => {
         window.clearTimeout(timer);
         if (area.value === sent) return;
         const before = sent;
         sent = area.value;
+        const refused = base;
         const result = await edit(
             {
                 action: "zone-text",
@@ -211,14 +272,41 @@ export function editZoneText(zone: string): void {
                 text: area.value,
                 origin,
                 coalesce,
+                ...(base != null ? { baseBuild: base } : {}),
             },
-            { retrying: true },
+            { retrying: true, quietStale: true },
         );
+        if (
+            !result.ok &&
+            result.stale &&
+            (await zoneUnchanged(refused, deckIndex, zone, before))
+        ) {
+            // Something else in the deck changed (another zone, deck.py),
+            // not this zone: carry on against the newer build.
+            base = ed.model?.build;
+            sent = before;
+            void send();
+            return;
+        }
+        if (!result.ok && result.stale) {
+            // Someone else changed this text meanwhile: stop saving over
+            // it; this typing goes to the conflict box, theirs stays.
+            const mine = area.value;
+            stopped = true;
+            void finishTextEdit();
+            showConflict(result.error ?? "", mine, () =>
+                putBack(deckIndex, zone, mine, origin),
+            );
+            return;
+        }
         if (!result.ok) {
             sent = before;
-            timer = window.setTimeout(() => void send(), 800);
+            timer = window.setTimeout(() => {
+                if (!stopped) void send();
+            }, 800);
         }
     };
+    let stopped = false;
     area.addEventListener("input", () => {
         window.clearTimeout(timer);
         timer = window.setTimeout(() => void send(), 450);
@@ -277,9 +365,11 @@ export function editZoneText(zone: string): void {
     active = {
         commit: async () => {
             await send();
+            off("model", follow);
         },
         cancel: () => {
             window.clearTimeout(timer);
+            off("model", follow);
             if (sent !== original) {
                 // Escape restores what the zone said when editing began.
                 area.value = original;
@@ -370,6 +460,9 @@ function editZoneRich(zone: string, el: Element, opts: ZoneEditOpts): boolean {
 
     const fo = el as SVGGraphicsElement;
     const deckIndex = slide.deckIndex;
+    // Someone else's change to this zone while it is being typed into is
+    // refused on saving (the typing goes to the conflict box), never lost.
+    const startBuild = ed.model?.build;
     ed.richEditing = true;
     richHost = content;
     fo.classList.add("rich-editing");
@@ -437,15 +530,35 @@ function editZoneRich(zone: string, el: Element, opts: ZoneEditOpts): boolean {
                 return;
             }
             if (!md.trim() && removeEmptyBox(fo, zone, deckIndex)) return;
-            const result = await edit({
-                action: "zone-text",
-                slide: deckIndex,
-                zone,
-                text: md,
-                origin,
-                svg: grow,
-            });
+            const save = (base: number | undefined) =>
+                edit(
+                    {
+                        action: "zone-text",
+                        slide: deckIndex,
+                        zone,
+                        text: md,
+                        origin,
+                        svg: grow,
+                        ...(base != null ? { baseBuild: base } : {}),
+                    },
+                    { quietStale: true },
+                );
+            let result = await save(startBuild);
+            if (
+                !result.ok &&
+                result.stale &&
+                (await zoneUnchanged(startBuild, deckIndex, zone, start))
+            ) {
+                // The deck changed elsewhere, this zone did not: save again
+                // against the newer build.
+                result = await save(ed.model?.build);
+            }
             if (!result.ok) emit("rerender");
+            if (!result.ok && result.stale) {
+                showConflict(result.error ?? "", md, () =>
+                    putBack(deckIndex, zone, md, origin),
+                );
+            }
         },
         cancel: () => {
             cleanup();

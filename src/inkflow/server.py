@@ -8,17 +8,18 @@ import functools
 import importlib.resources
 import importlib.util
 import io
-import ipaddress
 import json
 import os
 import re
 import socket
+import ssl
 import sys
 import time
 import traceback
 import webbrowser
 import zipfile
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from html import escape as escape_html
 from pathlib import Path
 from typing import Literal, TypedDict, cast
@@ -35,9 +36,26 @@ from watchfiles import (
 )
 from websockets.asyncio.server import ServerConnection
 from websockets.asyncio.server import serve as ws_serve
+from websockets.http11 import Request as WsRequest
+from websockets.http11 import Response as WsResponse
 
 from inkflow import instances
+from inkflow.access import (
+    TOKEN_PARAM,
+    WS_PATH,
+    Access,
+    Role,
+    enter_page,
+    is_loopback_name,
+    lan_addresses,
+    page,
+    parse_request,
+    peer_host,
+    redacted,
+    split_host,
+)
 from inkflow.assets import MIME_TYPES, AssetRoots, is_local_ref, rewrite_references
+from inkflow.collab import Client, People
 from inkflow.edit import (
     NO_EDIT_COMMANDS,
     EditCommands,
@@ -68,6 +86,9 @@ from inkflow.os_compat import install_shutdown_handler, raw_keypresses
 from inkflow.pipeline import SlideData, process_deck, resolve_transitions
 from inkflow.titles import resolve_deck_title
 from inkflow.tui import LiveUI
+from inkflow.wsbridge import Bridge
+
+DEFAULT_PORT = 7777
 
 # ── Shared mutable state ──────────────────────────────────────────────────────
 
@@ -134,6 +155,24 @@ _editor: EditorState = {
     "failed_hash": None,
     "compare": None,
 }
+
+
+class _Share:
+    """Who may connect (``access.Access``), who is connected
+    (``collab.People``), and the listener sharing turns on and off."""
+
+    access: Access
+    people: People
+    rebind: Callable[[bool], Awaitable[None]] | None
+    """Set while serving: listen on the LAN (True) or this machine only."""
+
+    def __init__(self) -> None:
+        self.access = Access(DEFAULT_PORT)
+        self.people = People()
+        self.rebind = None
+
+
+_share = _Share()
 
 
 # ── Deck loader ───────────────────────────────────────────────────────────────
@@ -217,6 +256,12 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         # Collected, not printed, so records reach the TUI/browser without racing the
         # Live display. Floored at the lower surface level, then filtered per surface.
         with collect_logs(min(levels.console, levels.browser)) as entries:
+            # The files as this build reads them: a page's write to one that
+            # changed since its build is refused (several people editing).
+            session = _editor["session"]
+            build_id = (
+                await asyncio.to_thread(session.snapshot) if session is not None else 0
+            )
             deck_hash = file_hash(deck_path.read_bytes())
             deck = await asyncio.to_thread(load_deck, deck_path)
             project_dir = deck_path.parent
@@ -229,6 +274,7 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
                 deck_path,
             )
             model = await asyncio.to_thread(build_model, deck, deck_path, edit_slides)
+            model["build"] = build_id
             roots = AssetRoots(project_dir, deck.theme.asset_dir())
             slides = [_versioned(_without_edit(s), roots) for s in edit_slides]
             transitions = resolve_transitions(deck)
@@ -294,7 +340,7 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
                 }
             )
         )
-        await _send_editors(_model_message())
+        await _send_editors(_model_message)
         hub = _editor["compare"]
         if hub is not None:
             await hub.live_built(
@@ -318,16 +364,19 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         ui.refresh()
 
 
-def _model_message() -> dict[str, object]:
+def _history_state(client: Client | None) -> dict[str, object]:
+    """Undo/Redo for one person: their own steps (see ``History``)."""
     session = _editor["session"]
+    if session is None:
+        return {"canUndo": False, "canRedo": False}
+    return session.history_state(client.author if client else "owner")
+
+
+def _model_message(client: Client | None = None) -> dict[str, object]:
     return {
         "type": "editor-model",
         "model": _editor["model"],
-        "history": {
-            "canUndo": bool(session and session.history.done),
-            "canRedo": bool(session and session.history.undone),
-            **(session.history_labels() if session else {}),
-        },
+        "history": _history_state(client),
     }
 
 
@@ -353,11 +402,15 @@ def _without_edit(slide: SlideData) -> SlideData:
 # ── WebSocket broadcast ───────────────────────────────────────────────────────
 
 
-async def _send_editors(payload: dict[str, object]) -> None:
-    msg = json.dumps(payload)
+async def _send_editors(
+    payload: dict[str, object] | Callable[[Client | None], dict[str, object]],
+) -> None:
+    """To every editor page: one message, or one per person (a callable
+    given each one's client, for what differs: their undo history)."""
     for ws in list(_editor["clients"]):
+        msg = payload(_share.people.get(ws)) if callable(payload) else payload
         try:
-            await ws.send(msg)
+            await ws.send(json.dumps(msg))
         except Exception:
             _editor["clients"].discard(ws)
 
@@ -372,6 +425,23 @@ async def broadcast(msg: str, sender: ServerConnection | None = None) -> None:
         except Exception:
             dead.add(ws)
     _state["ws_clients"] -= dead
+
+
+async def _send_owners(payload: dict[str, object]) -> None:
+    """To the owner's editor pages (the Share dialog)."""
+    msg = json.dumps(payload)
+    for ws in list(_editor["clients"]):
+        client = _share.people.get(ws)
+        if client is not None and client.role == "owner":
+            with contextlib.suppress(Exception):
+                await ws.send(msg)
+
+
+async def _broadcast_presence() -> None:
+    """Everyone's page, slide and selection, to everyone with a page open."""
+    people = _share.people.listing()
+    await broadcast(json.dumps({"type": "presence", "people": people}))
+    await _send_owners(_share_status())
 
 
 NotifyStyle = Literal["green", "yellow", "red"]
@@ -392,6 +462,77 @@ async def notify(
         await broadcast(payload)
     else:
         await target.send(payload)
+
+
+# ── Sharing ───────────────────────────────────────────────────────────────────
+
+
+def _share_status() -> dict[str, object]:
+    """What the owner's Share dialog shows."""
+    access = _share.access
+    return {
+        "type": "share-status",
+        "sharing": access.sharing,
+        "links": access.links(lan_addresses()) if access.sharing else [],
+        "names": sorted(
+            {n for n in access.names if n.endswith(".local")} | access.allow_hosts
+        ),
+        "port": access.port,
+        "people": _share.people.listing(),
+    }
+
+
+async def _disconnect(
+    which: Callable[[Client], bool], reason: str, code: int = 4001
+) -> int:
+    """Close every guest connection ``which`` picks (one the owner sent away,
+    or every guest of links that stopped working); their pages say why and
+    stop reconnecting."""
+    gone = 0
+    for conn, client in _share.people.items():
+        if client.role != "owner" and which(client):
+            gone += 1
+            with contextlib.suppress(Exception):
+                await cast("ServerConnection", conn).close(code, reason)
+    return gone
+
+
+async def _handle_share(websocket: ServerConnection, msg: dict[str, object]) -> None:
+    """The owner's Share dialog: status, on/off, new links, disconnect."""
+    op = msg.get("op")
+    access = _share.access
+    error: str | None = None
+    try:
+        if op == "on" and not access.sharing:
+            access.sharing = True
+            if _share.rebind is not None:
+                await _share.rebind(True)
+            logger.info("sharing on")
+        elif op == "off" and access.sharing:
+            access.sharing = False
+            if _share.rebind is not None:
+                await _share.rebind(False)
+            _ = await _disconnect(lambda _c: True, "sharing stopped")
+            logger.info("sharing off")
+        elif op == "rotate":
+            access.rotate()
+            gone = await _disconnect(lambda _c: True, "new links")
+            logger.info(f"new share links ({gone} guests disconnected)")
+        elif op == "kick":
+            target = str(msg.get("id") or "")
+            _ = await _disconnect(lambda c: c.id == target, "disconnected by the owner")
+    except OSError as exc:
+        access.sharing = False
+        error = f"cannot listen on the network: {exc}"
+        if _share.rebind is not None:
+            with contextlib.suppress(OSError):
+                await _share.rebind(False)
+    reply = _share_status()
+    if error:
+        reply["error"] = error
+    await websocket.send(json.dumps(reply))
+    if op in ("on", "off", "rotate"):
+        await _send_owners(_share_status())
 
 
 # ── WebSocket handler ─────────────────────────────────────────────────────────
@@ -441,16 +582,9 @@ def _resolve_edit_request(
 
 
 def _is_loopback(websocket: ServerConnection) -> bool:
-    address = cast("object", websocket.remote_address)
-    host = (
-        cast("tuple[object, ...]", address)[0]
-        if isinstance(address, tuple)
-        else address
-    )
-    try:
-        return ipaddress.ip_address(str(host)).is_loopback
-    except ValueError:
-        return False
+    """Whether a connection is the owner's (see ``access.Access.is_owner``)."""
+    client = _share.people.get(websocket)
+    return client is not None and client.role == "owner"
 
 
 async def _handle_edit_op(
@@ -458,14 +592,21 @@ async def _handle_edit_op(
 ) -> None:
     """Apply one editor request and answer the sender with its result."""
     request_id = msg.get("id")
-    # Whether the request comes from this machine (opening a program is only
-    # for a local page); decided here, overriding anything the client sent.
-    msg["_local"] = _is_loopback(websocket)
-    # What "Take this slide" takes comes from the compare view's other side,
-    # never from the page.
-    msg.pop("_take", None)
+    client = _share.people.get(websocket)
+    # Who asks is decided here, from the connection, never by the page: keys
+    # starting with "_" are the server's (whether a program may open on this
+    # machine's screen, whose undo history the step joins).
+    for key in [k for k in msg if k.startswith("_")]:
+        del msg[key]
+    role: Role = client.role if client is not None else "viewer"
+    msg["_local"] = role == "owner"
+    msg["_role"] = role
+    msg["_author"] = client.author if client is not None else "owner"
+    msg["_name"] = client.name if client is not None else ""
     hub = _editor["compare"]
     try:
+        if role not in ("owner", "editor"):
+            raise EditError("this link is view-only")
         if msg.get("action") == "compare-take":
             if hub is None:
                 raise EditError("no comparison is open")
@@ -475,26 +616,32 @@ async def _handle_edit_op(
                 raise EditError(str(exc)) from exc
         result = await asyncio.to_thread(session.apply, msg, _editor["deck"])
     except EditError as exc:
-        result = {"ok": False, "error": str(exc)}
+        result = {"ok": False, "error": str(exc), **exc.extra}
     except Exception as exc:
         logger.exception("editor request failed")
         result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
     await websocket.send(
         json.dumps({"type": "edit-result", "id": request_id, **result})
     )
-    if result.get("ok") and result.get("changes") and msg.get("agent"):
-        # An agent's edit (``inkflow slide``): every open editor says so and
-        # offers to undo that very step.
-        await _send_editors(
-            {
-                "type": "agent-edit",
+    if result.get("ok") and (
+        result.get("changes") or msg.get("action") in ("undo", "redo")
+    ):
+        # Everyone's Undo/Redo may have changed (a step of theirs is now
+        # blocked, or free again); an agent's edit (``inkflow slide``) also
+        # says so, with an undo of that very step for the owner's pages.
+        agent = bool(msg.get("agent")) and bool(result.get("changes"))
+        author = msg["_author"]
+
+        def per_person(c: Client | None) -> dict[str, object]:
+            return {
+                "type": "agent-edit" if agent else "history",
                 "label": result.get("label"),
                 "step": result.get("step"),
-                **session.history_labels(),
-                "canUndo": bool(session.history.done),
-                "canRedo": bool(session.history.undone),
+                "mine": (c.author if c is not None else "owner") == author,
+                **_history_state(c),
             }
-        )
+
+        await _send_editors(per_person)
     if session.switch_to is not None and _editor["switch"] is not None:
         _editor["switch"].set()
     if session.quit_requested and _editor["shutdown"] is not None:
@@ -528,17 +675,56 @@ async def _handle_compare(websocket: ServerConnection, msg: dict[str, object]) -
     await websocket.send(json.dumps(reply))
 
 
+_OWNER_ONLY = frozenset({"edit", "editor-context", "editor-command", "share"})
+"""Messages only the owner's pages and programs send: opening a program on
+this machine, the agents' context file and commands, and sharing itself."""
+_EDITORS = frozenset({"edit-op", "compare-open", "compare-close", "compare-sources"})
+
+
+def allowed(role: Role, msg: dict[str, object]) -> bool:
+    """Whether ``role`` may send this message at all."""
+    kind = msg.get("type")
+    if kind in _OWNER_ONLY:
+        return role == "owner"
+    if kind in _EDITORS or (kind == "hello" and msg.get("role") == "editor"):
+        return role in ("owner", "editor")
+    if role == "viewer":
+        # A viewer follows: it moves no one else's slide and draws on no one
+        # else's screen (it may ask for the ink already drawn).
+        if kind == "nav":
+            return False
+        if kind == "ink":
+            return msg.get("op") == "request"
+    return True
+
+
 def make_ws_handler(
     ui: LiveUI,
     edit_commands: EditCommands,
     session: EditorSession | None = None,
 ) -> Callable[[ServerConnection], Awaitable[None]]:
     async def handler(websocket: ServerConnection) -> None:
+        client = _share.people.get(websocket)
+        if client is None:
+            # Not admitted at the door (cannot happen through the listeners).
+            await websocket.close(4003, "not admitted")
+            return
         _state["ws_clients"].add(websocket)
         logger.debug(f"client connected ({len(_state['ws_clients'])} total)")
         ui.refresh()
         try:
             pos = _state["position"]
+            await websocket.send(
+                json.dumps(
+                    {
+                        "type": "welcome",
+                        "id": client.id,
+                        "role": client.role,
+                        "color": client.color,
+                        "name": client.name,
+                    }
+                )
+            )
             await websocket.send(
                 json.dumps(
                     {
@@ -557,6 +743,19 @@ def make_ws_handler(
                     continue
                 msg = cast(dict[str, object], parsed)
                 msg_type = msg.get("type")
+                if not allowed(client.role, msg):
+                    if msg_type == "edit-op":
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "edit-result",
+                                    "id": msg.get("id"),
+                                    "ok": False,
+                                    "error": "this link is view-only",
+                                }
+                            )
+                        )
+                    continue
                 if msg_type == "sync-request":
                     # A client that just switched into a receiving sync mode asks
                     # for the current position. Reply to it alone, not a broadcast.
@@ -591,16 +790,26 @@ def make_ws_handler(
                     # server holds none of it, every other window draws it.
                     # Saving goes through the session (edit-op "ink") instead.
                     await broadcast(json.dumps(msg), sender=websocket)
+                elif msg_type == "presence":
+                    if _share.people.update(websocket, msg):
+                        await _broadcast_presence()
                 elif msg_type == "hello" and msg.get("role") == "editor":
                     _editor["clients"].add(websocket)
                     if _editor["model"] is not None:
-                        await websocket.send(json.dumps(_model_message()))
+                        await websocket.send(json.dumps(_model_message(client)))
+                    await websocket.send(
+                        json.dumps(
+                            {"type": "presence", "people": _share.people.listing()}
+                        )
+                    )
                 elif msg_type == "edit-op" and session is not None:
                     await _handle_edit_op(websocket, msg, session)
                 elif msg_type == "build-status":
                     await websocket.send(json.dumps(_build_status()))
                 elif msg_type in ("compare-open", "compare-close", "compare-sources"):
                     await _handle_compare(websocket, msg)
+                elif msg_type == "share":
+                    await _handle_share(websocket, msg)
                 elif msg_type == "editor-context" and session is not None:
                     raw_context: object = msg.get("context")
                     context: object = raw_context
@@ -628,6 +837,9 @@ def make_ws_handler(
             _editor["clients"].discard(websocket)
             if _editor["compare"] is not None:
                 _editor["compare"].close(websocket)
+            left = _share.people.leave(websocket)
+            if left is not None and left.page:
+                await _broadcast_presence()
             logger.debug(f"client disconnected ({len(_state['ws_clients'])} total)")
             ui.refresh()
 
@@ -886,41 +1098,155 @@ def _export_download(
     return _read_export, path
 
 
+_HTML_HEADERS = (
+    b"Cache-Control: no-store\r\n"
+    # Never inside another site's frame (a click on the editor that its user
+    # did not mean), and no share token in a Referer.
+    + b"X-Frame-Options: SAMEORIGIN\r\n"
+    + b"Content-Security-Policy: frame-ancestors 'self'\r\n"
+    + b"Referrer-Policy: no-referrer\r\n"
+)
+
+
+async def _respond(
+    writer: asyncio.StreamWriter,
+    status: str,
+    body: bytes,
+    content_type: str = "text/html; charset=utf-8",
+    extra: bytes = b"",
+) -> None:
+    writer.write(
+        f"HTTP/1.1 {status}\r\n".encode()
+        + f"Content-Type: {content_type}\r\n".encode()
+        + _HTML_HEADERS
+        + extra
+        + b"Connection: close\r\n"
+        + f"Content-Length: {len(body)}\r\n\r\n".encode()
+        + body
+    )
+    await writer.drain()
+
+
+async def _refuse(
+    writer: asyncio.StreamWriter, status: str, title: str, text: str
+) -> None:
+    await _respond(writer, status, page(title, text))
+
+
+_VIEW_ONLY = (
+    "This link shows the presentation only. Ask the person sharing the deck "
+    + "for an editor link to change it."
+)
+
+
+def _probe_body() -> bytes:
+    session = _editor["session"]
+    return json.dumps(
+        {
+            "pid": os.getpid(),
+            "deck": str(session.deck_path)
+            if session is not None and session.has_deck
+            else None,
+        }
+    ).encode()
+
+
 def make_http_handler(
     ws_port: int,
     project_dir: Path | None = None,
     edit_commands: EditCommands = NO_EDIT_COMMANDS,
+    bridge: Bridge | None = None,
 ) -> _StreamHandler:
+    """The server's one port: pages, pictures, downloads, and (handed to
+    ``bridge``) the WebSocket at ``/_inkflow/ws``. ``ws_port`` is what the
+    pages are told (they connect to their own address; it only says the
+    deck is served)."""
+
     async def handler(
         reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
+        handed_off = False
         try:
-            raw = await asyncio.wait_for(reader.read(4096), timeout=10)
-            request_line = raw.split(b"\r\n", 1)[0].decode(errors="replace")
-            parts = request_line.split(" ", 2)
-            request_path = parts[1] if len(parts) >= 2 else "/"
+            try:
+                raw = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=10)
+            except (
+                asyncio.IncompleteReadError,
+                asyncio.LimitOverrunError,
+                TimeoutError,
+            ):
+                return
+            request = parse_request(raw)
+            if request is None:
+                await _refuse(writer, "400 Bad Request", "Bad request", "")
+                return
+            access = _share.access
+            if not access.host_ok(request.host):
+                # A name this machine does not answer to: a page whose name
+                # was pointed at this machine (DNS rebinding).
+                await _refuse(
+                    writer,
+                    "403 Forbidden",
+                    "Unknown host name",
+                    "This inkflow server answers to its own names and addresses "
+                    + "only (add one with --allow-host).",
+                )
+                return
+            peer = peer_host(cast("object", writer.get_extra_info("peername")))
+            role, token = access.admit(peer, request)
+            request_path = request.target
+            path = request.path
 
-            if request_path == instances.PROBE_PATH:
+            if path == WS_PATH:
+                if not access.origin_ok(request.headers.get("origin"), request.host):
+                    # Another site's page opening a socket to this server.
+                    await _refuse(writer, "403 Forbidden", "Forbidden", "")
+                    return
+                if role is None:
+                    await _refuse(writer, "401 Unauthorized", "Not shared", "")
+                    return
+                if bridge is None or not request.is_websocket:
+                    await _refuse(writer, "400 Bad Request", "Bad request", "")
+                    return
+                connection = bridge.adopt(writer, raw)
+                _ = _share.people.join(connection, role, token, peer)
+                handed_off = True
+                return
+
+            if role is None:
+                logger.debug(f"refused {peer}: no valid share link")
+                await _refuse(
+                    writer,
+                    "401 Unauthorized",
+                    "This deck is not shared with you",
+                    "Open the link the person sharing it gave you. A link stops "
+                    + "working when they make new ones or stop sharing.",
+                )
+                return
+            if token is not None and TOKEN_PARAM in request.query:
+                # A share link: the cookie keeps the guest in; the page moves
+                # on to the same address without the token.
+                logger.info(f"guest joined as {role} with {redacted(token)}")
+                await _respond(
+                    writer,
+                    "200 OK",
+                    enter_page(request.without_token()),
+                    extra=f"Set-Cookie: {access.set_cookie(token)}\r\n".encode(),
+                )
+                return
+            editor_only = _is_editor_path(request_path) or path.startswith(
+                ("/_export/", "/_cmp/")
+            )
+            if editor_only and role == "viewer":
+                await _refuse(writer, "403 Forbidden", "View-only link", _VIEW_ONLY)
+                return
+
+            if path == instances.PROBE_PATH:
                 # Who is serving here (see instances.py): another inkflow
                 # opening a deck asks before starting a second server for it.
-                session = _editor["session"]
-                body = json.dumps(
-                    {
-                        "pid": os.getpid(),
-                        "deck": str(session.deck_path)
-                        if session is not None and session.has_deck
-                        else None,
-                    }
-                ).encode()
-                writer.write(
-                    b"HTTP/1.1 200 OK\r\n"
-                    + b"Content-Type: application/json\r\n"
-                    + b"Cache-Control: no-store\r\n"
-                    + b"Connection: close\r\n"
-                    + f"Content-Length: {len(body)}\r\n\r\n".encode()
-                    + body
-                )
-                await writer.drain()
+                if role != "owner":
+                    await _refuse(writer, "404 Not Found", "Not found", "")
+                    return
+                await _respond(writer, "200 OK", _probe_body(), "application/json")
                 return
 
             font = shipped_font_file(request_path)
@@ -943,18 +1269,13 @@ def make_http_handler(
             download = _export_download(request_path)
             if download is not None:
                 name, mime, body = await asyncio.to_thread(*download)
-                header = (
-                    b"HTTP/1.1 200 OK\r\n"
-                    + f"Content-Type: {mime}\r\n".encode()
-                    + f'Content-Disposition: attachment; filename="{name}"\r\n'.encode()
-                    + b"Cache-Control: no-store\r\n"
-                    + b"Connection: close\r\n"
-                    + b"Content-Length: "
-                    + str(len(body)).encode()
-                    + b"\r\n\r\n"
+                await _respond(
+                    writer,
+                    "200 OK",
+                    body,
+                    mime,
+                    f'Content-Disposition: attachment; filename="{name}"\r\n'.encode(),
                 )
-                writer.write(header + body)
-                await writer.drain()
                 return
 
             hub = _editor["compare"]
@@ -962,11 +1283,7 @@ def make_http_handler(
                 # A compared deck's picture, inside that deck's own roots.
                 compared = hub.asset(request_path)
                 if compared is None:
-                    writer.write(
-                        b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n"
-                        + b"Content-Length: 0\r\n\r\n"
-                    )
-                    await writer.drain()
+                    await _respond(writer, "404 Not Found", b"")
                 else:
                     await _send_file(writer, compared, _range_header(raw))
                 return
@@ -981,44 +1298,37 @@ def make_http_handler(
             session = _editor["session"]
             starting = session is not None and not session.has_deck
             # The start page (no deck yet) is the editor's, at any path.
+            if starting and role != "owner":
+                await _refuse(
+                    writer, "404 Not Found", "No deck open", "Nothing is shared yet."
+                )
+                return
             if _is_editor_path(request_path) or starting:
                 body = build_editor_html(_state, _editor, ws_port)
             else:
-                body = build_html(_state, ws_port, edit_commands)
-            header = (
-                b"HTTP/1.1 200 OK\r\n"
-                + b"Content-Type: text/html; charset=utf-8\r\n"
-                + b"Cache-Control: no-store\r\n"
-                + b"Connection: close\r\n"
-                + b"Content-Length: "
-                + str(len(body)).encode()
-                + b"\r\n\r\n"
-            )
-            writer.write(header + body)
-
-            await writer.drain()
+                # Opening a source file in a program is the owner's alone.
+                body = build_html(
+                    _state,
+                    ws_port,
+                    edit_commands if role == "owner" else NO_EDIT_COMMANDS,
+                )
+            await _respond(writer, "200 OK", body)
         except Exception:
             # File sink only, never the TUI. The client still gets the 500 body below.
             logger.exception("error handling HTTP request")
             body = traceback.format_exc().encode()
-            try:
-                header = (
-                    b"HTTP/1.1 500 Internal Server Error\r\n"
-                    + b"Content-Type: text/plain; charset=utf-8\r\n"
-                    + b"Cache-Control: no-store\r\n"
-                    + b"Connection: close\r\n"
-                    + b"Content-Length: "
-                    + str(len(body)).encode()
-                    + b"\r\n\r\n"
-                )
-                writer.write(header + body)
-                await writer.drain()
-            except Exception:
-                pass
-        finally:
-            writer.close()
             with contextlib.suppress(Exception):
-                await writer.wait_closed()
+                await _respond(
+                    writer,
+                    "500 Internal Server Error",
+                    body,
+                    "text/plain; charset=utf-8",
+                )
+        finally:
+            if not handed_off:
+                writer.close()
+                with contextlib.suppress(Exception):
+                    await writer.wait_closed()
 
     return handler
 
@@ -1089,7 +1399,7 @@ def _open_browser(url: str) -> None:
 
 async def _read_keys(
     deck_path: Path | None,
-    host: str,
+    base: str,
     http_port: int,
     ui: LiveUI,
     lock: asyncio.Lock,
@@ -1107,9 +1417,9 @@ async def _read_keys(
                 shutdown.set()
                 return
             elif ch == "o":
-                _open_browser(f"http://{host}:{http_port}")
+                _open_browser(f"{base}:{http_port}")
             elif ch == "e":
-                _open_browser(f"http://{host}:{http_port}/edit")
+                _open_browser(f"{base}:{http_port}/edit")
             elif ch == "r" and deck_path is not None:
                 async with lock:
                     await rebuild(deck_path, ui, levels)
@@ -1118,8 +1428,6 @@ async def _read_keys(
 
 
 # ── Ports ─────────────────────────────────────────────────────────────────────
-
-DEFAULT_PORT = 7777
 
 
 def _port_free(host: str, port: int) -> bool:
@@ -1153,46 +1461,88 @@ def _port_free(host: str, port: int) -> bool:
     return True
 
 
-def pick_ports(host: str, port: int | None, ws_port: int | None) -> tuple[int, int]:
-    """The HTTP and WebSocket ports to serve on.
-
-    Explicit ports are used as given (a clash is then reported as before).
-    Unset ones take the first free pair from 7777 up, so a second
-    ``inkflow edit`` for another deck simply comes up next to the first.
-    """
-    if port is not None and ws_port is not None:
-        return port, ws_port
-    if port is not None:
-        ws = port + 1
-        while not _port_free(host, ws):
-            ws += 1
-        return port, ws
-    candidate = DEFAULT_PORT
-    for _ in range(200):
-        ws = ws_port if ws_port is not None else candidate + 1
-        if (
-            candidate != ws
-            and _port_free(host, candidate)
-            and (ws_port is not None or _port_free(host, ws))
-        ):
-            return candidate, ws
-        candidate += 2 if ws_port is None else 1
-    return DEFAULT_PORT, ws_port if ws_port is not None else DEFAULT_PORT + 1
-
-
 # ── Public entry point ────────────────────────────────────────────────────────
+
+
+def pick_port(host: str, port: int | None) -> int:
+    """The port to serve on: as given, else the first free one from 7777 up,
+    so a second ``inkflow edit`` for another deck comes up next to the first."""
+    if port is not None:
+        return port
+    for candidate in range(DEFAULT_PORT, DEFAULT_PORT + 200):
+        if _port_free(host, candidate):
+            return candidate
+    return DEFAULT_PORT
+
+
+@dataclass(frozen=True)
+class Sharing:
+    """How a server is shared (``inkflow edit --share``)."""
+
+    share: bool = False
+    """Share links work from the start (and the server listens on the LAN)."""
+    allow_hosts: tuple[str, ...] = ()
+    """More names to answer to: a reverse proxy's, a tailnet name."""
+    tls: tuple[Path, Path] | None = None
+    """Certificate and key: HTTPS and WSS on the one port."""
+
+
+def _local_host(host: str) -> str:
+    """Where the server listens while not shared."""
+    return host if is_loopback_name(split_host(host)[0]) else "localhost"
+
+
+Hosts = str | list[str] | None
+"""What ``asyncio.start_server`` listens on (None: every interface)."""
+
+
+def _lan_host(host: str) -> Hosts:
+    """Where it listens while shared: every interface (None), or the address
+    asked for (a VPN's, say) and this machine's own name too, so the owner's
+    pages and commands still reach it as the owner."""
+    name = split_host(host)[0]
+    if is_loopback_name(name) or name in ("", "0.0.0.0", "::"):
+        return None
+    return [host, "localhost"]
+
+
+def _shares(host: str) -> bool:
+    """Whether a ``--host`` lets other machines in (so it shares)."""
+    return not is_loopback_name(split_host(host)[0])
+
+
+def share_lines(access: Access, port: int) -> list[str]:
+    """What the terminal says about sharing: the two links per address, the
+    mDNS name, and how to reach the server through SSH instead."""
+    if not access.sharing:
+        return []
+    lines: list[str] = []
+    links = access.links(lan_addresses())
+    for link in links:
+        lines += [f"edit  {link['editor']}", f"view  {link['view']}"]
+    names = {n for n in access.names if n.endswith(".local")} | access.allow_hosts
+    for name in sorted(names):
+        lines.append(f"also  {access.scheme}://{name}:{port} (same ?k= links)")
+    if not links:
+        lines.append("no network address found: use --host <address>")
+    lines.append(
+        f"ssh   ssh -L {port}:localhost:{port} <you>@<this machine>, "
+        + f"then http://localhost:{port}/edit (as the owner)"
+    )
+    return lines
 
 
 async def serve(
     deck_path: Path | None,
     host: str,
     http_port: int,
-    ws_port: int,
+    ws_port: int | None,
     levels: Levels,
     open_path: str | None = None,
     exporters: Exporters | None = None,
     quit_when_idle: float | None = None,
     auto_ports: bool = False,
+    sharing: Sharing | None = None,
 ) -> None:
     """Run the server until quit. ``open_path`` (e.g. ``"/edit"``) opens a
     browser on that page once the first build is done; ``exporters`` enable
@@ -1201,12 +1551,26 @@ async def serve(
     ``quit_when_idle`` (seconds) it stops once no page has been connected for
     that long (a server started without a terminal to stop it from).
 
-    ``auto_ports``: the ports came from ``pick_ports``, not the user, so one
-    taken in the meantime (another inkflow starting at the same moment, say
-    an agent's server for its worktree) means picking the next free pair.
+    One port carries everything: pages, pictures and the WebSocket
+    (``/_inkflow/ws``). ``ws_port`` additionally opens the old separate
+    WebSocket port (deprecated; for scripts that still use it).
 
-    When the editor opens another deck (or creates one), the servers close and
-    start again on the same ports for that deck; open pages reconnect to it."""
+    ``auto_ports``: the port came from ``pick_port``, not the user, so one
+    taken in the meantime (another inkflow starting at the same moment, say
+    an agent's server for its worktree) means picking the next free one.
+
+    ``sharing``: share links (``--share``); a non-loopback ``host`` shares
+    too, since other machines can reach it.
+
+    When the editor opens another deck (or creates one), the server closes and
+    starts again on the same port for that deck; open pages reconnect to it."""
+    sharing = sharing or Sharing()
+    _share.access = Access(
+        http_port,
+        allow_hosts={h.lower() for h in sharing.allow_hosts},
+        tls=sharing.tls is not None,
+        sharing=sharing.share or _shares(host),
+    )
     retries = 5 if auto_ports else 0
     while True:
         try:
@@ -1219,13 +1583,15 @@ async def serve(
                 open_path,
                 exporters,
                 quit_when_idle,
+                sharing.tls,
             )
         except _PortBusy as busy:
             if retries <= 0:
                 report("Error", busy.message, style="red")
                 return
             retries -= 1
-            http_port, ws_port = pick_ports(host, None, None)
+            http_port = pick_port(host, None)
+            _share.access.port = http_port
             continue
         if next_deck is None:
             return
@@ -1263,15 +1629,124 @@ async def _quit_when_idle(shutdown: asyncio.Event, delay: float) -> None:
             return
 
 
+@contextlib.asynccontextmanager
+async def listening(
+    ui: LiveUI,
+    session: EditorSession | None,
+    host: str = "127.0.0.1",
+    port: int = 0,
+    edit_commands: EditCommands = NO_EDIT_COMMANDS,
+) -> AsyncGenerator[int]:
+    """The one port as ``serve`` opens it (pages, files, the WebSocket at
+    ``/_inkflow/ws``), without the terminal UI, watcher or keyboard: for
+    tests and for embedding. Yields the port it listens on."""
+    project_dir = (
+        session.project_dir if session is not None and session.has_deck else None
+    )
+    bridge = Bridge(
+        make_ws_handler(ui, edit_commands, session),
+        max_size=80 * 1024 * 1024,
+        forget=_share.people.leave,
+    )
+    handlers: list[_StreamHandler] = []
+
+    async def http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await handlers[0](reader, writer)
+
+    listener = await asyncio.start_server(http, host, port)
+    actual = cast("tuple[str, int]", listener.sockets[0].getsockname())[1]
+    handlers.append(make_http_handler(actual, project_dir, edit_commands, bridge))
+    try:
+        yield actual
+    finally:
+        listener.close()
+        await bridge.shutdown()
+
+
+class Listener:
+    """The HTTP port's listening socket, which sharing moves between this
+    machine only and the network without dropping a connection: closing a
+    listening socket leaves the connections it accepted open."""
+
+    def __init__(
+        self, handler: _StreamHandler, port: int, tls: ssl.SSLContext | None
+    ) -> None:
+        self._handler: _StreamHandler = handler
+        self._port: int = port
+        self._tls: ssl.SSLContext | None = tls
+        self.server: asyncio.Server | None = None
+        self.host: Hosts = None
+
+    async def open(self, host: Hosts) -> None:
+        self.server = await asyncio.start_server(
+            self._handler, host, self._port, ssl=self._tls
+        )
+        self.host = host
+
+    async def move(self, host: Hosts) -> None:
+        """Listen on ``host`` instead (None: every interface)."""
+        if self.server is not None and host == self.host:
+            return
+        previous = self.host
+        self.close()
+        try:
+            await self.open(host)
+        except OSError:
+            await self.open(previous)
+            raise
+
+    def close(self) -> None:
+        if self.server is not None:
+            self.server.close()
+            self.server = None
+
+
+def _ws_check(port: int) -> Callable[[ServerConnection, WsRequest], WsResponse | None]:
+    """The door of the old separate WebSocket port: the same checks as the
+    one port's (host, origin of the HTTP port's pages, who)."""
+
+    def check(connection: ServerConnection, request: WsRequest) -> WsResponse | None:
+        headers = request.headers
+        parsed = parse_request(
+            f"GET {request.path} HTTP/1.1\r\n".encode()
+            + b"".join(
+                f"{k}: {v}\r\n".encode("latin-1", "replace")
+                for k, v in headers.raw_items()
+            )
+        )
+        access = _share.access
+        if parsed is None or not access.host_ok(parsed.host):
+            return connection.respond(403, "Unknown host name\n")
+        if not access.origin_ok(parsed.headers.get("origin"), parsed.host, port=port):
+            return connection.respond(403, "Forbidden\n")
+        peer = peer_host(cast("object", connection.remote_address))
+        role, token = access.admit(peer, parsed)
+        if role is None:
+            return connection.respond(401, "Not shared\n")
+        _ = _share.people.join(connection, role, token, peer)
+        return None
+
+    return check
+
+
+def _tls_context(tls: tuple[Path, Path] | None) -> ssl.SSLContext | None:
+    if tls is None:
+        return None
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(str(tls[0]), str(tls[1]))
+    return context
+
+
 async def _serve_deck(
     deck_path: Path | None,
     host: str,
     http_port: int,
-    ws_port: int,
+    ws_port: int | None,
     levels: Levels,
     open_path: str | None,
     exporters: Exporters | None,
     quit_when_idle: float | None = None,
+    tls: tuple[Path, Path] | None = None,
 ) -> Path | None:
     """Serve one deck until quit (None) or until the editor opens another
     (its deck.py). Without a deck, only the editor's start page is served:
@@ -1282,15 +1757,28 @@ async def _serve_deck(
     switch = asyncio.Event()
     _editor["switch"] = switch
     _editor["shutdown"] = shutdown
+    access = _share.access
+    scheme = access.scheme
+    local_host = _local_host(host)
+    # Where this machine's own pages and commands reach it (as the owner).
+    browse_host = local_host
 
     loop = asyncio.get_running_loop()
     uninstall_shutdown_handler = install_shutdown_handler(loop, shutdown)
+    bridge: Bridge | None = None
+    listener: Listener | None = None
 
     try:
         edit_commands = resolve_edit_commands()
         session = EditorSession(deck_path, exporters)
         session.edit_commands = edit_commands
-        session.server = {"host": host, "port": http_port, "wsPort": ws_port}
+        session.server = {
+            "host": browse_host,
+            "port": http_port,
+            "wsPath": WS_PATH,
+            "wsPort": ws_port if ws_port is not None else http_port,
+            "tls": tls is not None,
+        }
         _editor["session"] = session
         _editor["compare"] = CompareHub(deck_path, load_deck) if deck_path else None
         project_dir = deck_path.parent if deck_path else None
@@ -1298,52 +1786,79 @@ async def _serve_deck(
             projects.remember(deck_path)
         else:
             _state["title"] = "Inkflow"
-        http_handler = make_http_handler(ws_port, project_dir, edit_commands)
+        ui_ref: list[LiveUI] = []
+
+        def handler_for_ws() -> Callable[[ServerConnection], Awaitable[None]]:
+            return make_ws_handler(ui_ref[0], edit_commands, session)
+
+        async def ws_entry(connection: ServerConnection) -> None:
+            await handler_for_ws()(connection)
+
+        # Image uploads from the editor arrive as base64 frames.
+        bridge = Bridge(ws_entry, max_size=80 * 1024 * 1024, forget=_share.people.leave)
+        http_handler = make_http_handler(http_port, project_dir, edit_commands, bridge)
+        listener = Listener(http_handler, http_port, _tls_context(tls))
         # Bind before the Live UI so port conflicts fail fast with a clean message
         try:
-            http_server = await asyncio.start_server(http_handler, host, http_port)
+            await listener.open(_lan_host(host) if access.sharing else local_host)
         except OSError as e:
             if e.errno == errno.EADDRINUSE:
                 raise _PortBusy(
                     f"port {http_port} in use — pass --port to use another"
                 ) from e
             raise
+
+        async def rebind(shared: bool) -> None:
+            assert listener is not None
+            await listener.move(_lan_host(host) if shared else local_host)
+            ui_ref[0].set_share(share_lines(access, http_port))
+
+        _share.rebind = rebind
         # Other inkflow processes find this server (and its deck) here.
         instances.register(
             instances.Instance(
                 pid=os.getpid(),
-                host=host,
+                host=browse_host,
                 port=http_port,
-                ws_port=ws_port,
+                ws_port=ws_port if ws_port is not None else http_port,
                 deck=str(deck_path.resolve()) if deck_path else None,
+                tls=tls is not None,
             )
         )
+        for line in share_lines(access, http_port):
+            console.print(f"[bold]Sharing[/bold]  {line}", highlight=False)
 
         with Live(Text(""), console=console, auto_refresh=False) as live:
             ui = LiveUI(
                 live,
-                host,
+                browse_host,
                 http_port,
                 project_dir or Path.home(),
                 get_clients=lambda: len(_state["ws_clients"]),
+                scheme=scheme,
             )
+            ui.set_share(share_lines(access, http_port))
+            ui_ref.append(ui)
             try:
-                async with (
-                    http_server,
-                    ws_serve(
-                        make_ws_handler(ui, edit_commands, session),
-                        host,
-                        ws_port,
-                        # Image uploads from the editor arrive as base64 frames.
-                        max_size=80 * 1024 * 1024,
-                    ),
-                ):
+                async with contextlib.AsyncExitStack() as stack:
+                    if ws_port is not None:
+                        _ = await stack.enter_async_context(
+                            ws_serve(
+                                make_ws_handler(ui, edit_commands, session),
+                                local_host,
+                                ws_port,
+                                process_request=_ws_check(http_port),
+                                max_size=80 * 1024 * 1024,
+                                ssl=_tls_context(tls),
+                            )
+                        )
                     if deck_path is not None:
                         await rebuild(deck_path, ui, levels)
                     if open_path is not None:
-                        _open_browser(f"http://{host}:{http_port}{open_path}")
+                        _open_browser(
+                            f"{scheme}://{browse_host}:{http_port}{open_path}"
+                        )
                     tasks = [
-                        asyncio.create_task(http_server.serve_forever()),
                         *(
                             [
                                 asyncio.create_task(
@@ -1365,7 +1880,7 @@ async def _serve_deck(
                         asyncio.create_task(
                             _read_keys(
                                 deck_path,
-                                host,
+                                f"{scheme}://{browse_host}",
                                 http_port,
                                 ui,
                                 rebuild_lock,
@@ -1380,8 +1895,10 @@ async def _serve_deck(
                     ]
                     _ = await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
                     for t in [*tasks, *waits]:
-                        t.cancel()
-                    await asyncio.gather(*tasks, return_exceptions=True)
+                        _ = t.cancel()
+                    _ = await asyncio.gather(*tasks, return_exceptions=True)
+                    listener.close()
+                    await bridge.shutdown()
             except OSError as e:
                 if e.errno == errno.EADDRINUSE:
                     raise _PortBusy(
@@ -1390,6 +1907,11 @@ async def _serve_deck(
                 raise
     finally:
         uninstall_shutdown_handler()
+        if listener is not None:
+            listener.close()
+        if bridge is not None:
+            await bridge.shutdown()
+        _share.rebind = None
         if _editor["compare"] is not None:
             _editor["compare"].close_all()
             _editor["compare"] = None

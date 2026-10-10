@@ -15,12 +15,10 @@ from typing import cast
 
 import pytest
 from click.testing import CliRunner, Result
-from websockets.asyncio.server import serve as ws_serve
 from websockets.sync.client import connect
 
 from inkflow import instances, server
 from inkflow.cli import main
-from inkflow.edit import NO_EDIT_COMMANDS
 from inkflow.editor.session import EditError, EditorSession
 from inkflow.editor.svgops import file_hash
 from inkflow.logging import resolve_levels
@@ -279,11 +277,8 @@ def served(
     async def run() -> None:
         server._editor["session"] = session  # pyright: ignore[reportPrivateUsage]
         await server.rebuild(deck_path, ui, levels)
-        handler = server.make_ws_handler(ui, NO_EDIT_COMMANDS, session)
-        async with ws_serve(handler, "127.0.0.1", 0) as ws:
-            port.append(
-                cast("tuple[str, int]", next(iter(ws.sockets)).getsockname())[1]
-            )
+        async with server.listening(ui, session) as bound:
+            port.append(bound)
             watch = asyncio.create_task(
                 server._watch(deck_path, ui, asyncio.Lock(), levels)  # pyright: ignore[reportPrivateUsage]
             )
@@ -295,7 +290,9 @@ def served(
     thread = threading.Thread(target=lambda: loop.run_until_complete(run()))
     thread.start()
     assert started.wait(20)
-    record = instances.Instance(os.getpid(), "127.0.0.1", 0, port[0], str(deck_path))
+    record = instances.Instance(
+        os.getpid(), "127.0.0.1", port[0], port[0], str(deck_path)
+    )
 
     def serving(_deck: Path, _exclude_pid: int | None = None) -> instances.Instance:
         return record
@@ -319,7 +316,9 @@ def test_through_the_server_the_edit_is_an_undoable_agent_step(
     project: Path, served: tuple[EditorSession, int]
 ) -> None:
     session, port = served
-    with connect(f"ws://127.0.0.1:{port}", proxy=None, max_size=None) as editor:
+    with connect(
+        f"ws://127.0.0.1:{port}/_inkflow/ws", proxy=None, max_size=None
+    ) as editor:
         editor.send(json.dumps({"type": "hello", "role": "editor"}))
         out = _ok(project, "delete", "2")
         assert "Ctrl+Z in the editor" in out

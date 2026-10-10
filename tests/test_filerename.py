@@ -615,7 +615,9 @@ def test_mv_through_the_server_is_an_undoable_agent_step(
     project: Path, served: tuple[EditorSession, int]
 ) -> None:
     session, port = served
-    with connect(f"ws://127.0.0.1:{port}", proxy=None, max_size=None) as editor:
+    with connect(
+        f"ws://127.0.0.1:{port}/_inkflow/ws", proxy=None, max_size=None
+    ) as editor:
         editor.send(json.dumps({"type": "hello", "role": "editor"}))
         result = _cli(
             project, "mv", str(project / "data/sales.csv"), "data/revenue.csv"

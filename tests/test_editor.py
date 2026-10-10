@@ -1695,10 +1695,18 @@ def test_open_file_lists_programs_and_launches_only_locally(
 
     monkeypatch.setattr("inkflow.editor.session.open_with", fake_open)
     session = EditorSession(project / "deck.py")
-    out = session.apply({"action": "open-apps", "path": "deck.py"}, None)
+    with pytest.raises(EditError, match="this machine"):
+        session.apply({"action": "open-apps", "path": "deck.py"}, None)
+    out = session.apply(
+        {"action": "open-apps", "path": "deck.py", "_local": True}, None
+    )
     apps = cast("list[dict[str, str]]", out["apps"])
     assert apps[0]["id"] == "code" and apps[-1]["id"] == "system"
-    svg: dict[str, object] = {"action": "open-apps", "path": "slides/drawing.svg"}
+    svg: dict[str, object] = {
+        "action": "open-apps",
+        "path": "slides/drawing.svg",
+        "_local": True,
+    }
     svg_apps = cast("list[dict[str, str]]", session.apply(svg, None)["apps"])
     assert svg_apps[0]["label"] == "Inkscape"
 
@@ -2054,18 +2062,19 @@ class TestTransfer:
         assert 'href="../assets/pic-2.png"' in svg_path.read_text()
 
 
-def test_pick_ports_skips_busy_ones() -> None:
+def test_pick_port_skips_busy_ones(monkeypatch: pytest.MonkeyPatch) -> None:
     import socket
 
-    from inkflow.server import pick_ports
+    from inkflow import server
 
     with socket.socket() as busy:
         busy.bind(("localhost", 0))
         busy.listen()
         port = cast("int", busy.getsockname()[1])
-        assert pick_ports("localhost", port, 9) == (port, 9)
-        http, ws = pick_ports("localhost", port, None)
-        assert http == port and ws != port
+        # Given, a port is used as given (a clash is reported when binding).
+        assert server.pick_port("localhost", port) == port
+        monkeypatch.setattr(server, "DEFAULT_PORT", port)
+        assert server.pick_port("localhost", None) != port
 
 
 def test_a_port_taken_on_ipv6_only_is_busy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2090,8 +2099,7 @@ def test_a_port_taken_on_ipv6_only_is_busy(monkeypatch: pytest.MonkeyPatch) -> N
         port = cast("int", busy.getsockname()[1])
         assert not server._port_free("localhost", port)  # pyright: ignore[reportPrivateUsage]
         monkeypatch.setattr(server, "DEFAULT_PORT", port)
-        http, ws = server.pick_ports("localhost", None, None)
-        assert http != port and ws != port
+        assert server.pick_port("localhost", None) != port
 
 
 def test_layout_previews_cover_every_layout(project: Path) -> None:

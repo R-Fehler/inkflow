@@ -41,6 +41,9 @@ export const ed = {
     canRedo: false,
     undoLabel: null as string | null, // what Undo would take back ("Move slide")
     redoLabel: null as string | null,
+    // Someone else's later edit to the same files keeps Undo from taking
+    // this person's last step back (their name), else null.
+    undoBlockedBy: null as string | null,
     slideSelection: new Set<number>(), // deck indices picked in the slide list
     focus: "canvas" as "canvas" | "sorter", // where Delete / copy apply
     error: null as string | null,

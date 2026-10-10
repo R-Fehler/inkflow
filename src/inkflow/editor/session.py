@@ -20,10 +20,11 @@ import secrets
 import shutil
 import sys
 import tempfile
+import threading
 import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Protocol, cast
 
 from lxml import etree
@@ -181,7 +182,12 @@ _MEDIA_ACTIONS = frozenset(
 
 
 class EditError(Exception):
-    """A request that cannot be applied; the message is shown to the user."""
+    """A request that cannot be applied; the message is shown to the user.
+    ``extra`` rides along in the refusal (``stale``: the page was behind)."""
+
+    def __init__(self, message: str, **extra: object) -> None:
+        super().__init__(message)
+        self.extra: dict[str, object] = extra
 
 
 @dataclass
@@ -220,6 +226,10 @@ def _prune_empty(paths: list[Path], root: Path) -> None:
             folder = folder.parent
 
 
+OWNER = "owner"
+"""The author of the owner's steps: their pages and their agents' commands."""
+
+
 @dataclass
 class _Step:
     label: str
@@ -232,11 +242,30 @@ class _Step:
     moves: list[_Move] = field(default_factory=list)
     prune: Path | None = None
     """The project folder, for a step that removes the folders it empties."""
+    author: str = OWNER
+    """Whose step it is: only they undo it (see ``History``)."""
+    name: str = ""
+    """Their display name when they made it, for "Ana changed … after you"."""
+
+    def paths(self) -> set[Path]:
+        """Every file the step wrote, moved or copied to."""
+        out = {c.path for c in self.changes}
+        for m in self.moves:
+            out.add(m.dst)
+            if not m.copy:
+                out.add(m.src)
+        return out
 
 
 @dataclass
 class History:
-    """Undo/redo over whole-file snapshots of the files each step wrote."""
+    """Undo/redo over whole-file snapshots of the files each step wrote.
+
+    Shared by everyone editing the deck, but each person undoes their own
+    steps: Undo takes back the author's most recent step, provided no later
+    step (anyone's) wrote one of its files; Redo puts back the author's last
+    undone step if its files are still as the undo left them. The steps of
+    others in between stay as they are."""
 
     done: list[_Step] = field(default_factory=list)
     undone: list[_Step] = field(default_factory=list)
@@ -251,6 +280,7 @@ class History:
             step.coalesce is not None
             and last is not None
             and last.coalesce == step.coalesce
+            and last.author == step.author
         ):
             befores = {c.path: c.before for c in last.changes}
             merged = [
@@ -261,13 +291,22 @@ class History:
                 c for c in last.changes if c.path not in {m.path for m in merged}
             ]
             self.done[-1] = _Step(
-                last.label, merged, step.coalesce, step.seq, [*last.moves, *step.moves]
+                last.label,
+                merged,
+                step.coalesce,
+                step.seq,
+                [*last.moves, *step.moves],
+                author=step.author,
+                name=step.name,
             )
-            self.undone.clear()
+            self._forget_redo(step.author)
             return
         self.done.append(step)
         del self.done[: -self.limit]
-        self.undone.clear()
+        self._forget_redo(step.author)
+
+    def _forget_redo(self, author: str) -> None:
+        self.undone = [s for s in self.undone if s.author != author]
 
     def _swap(self, step: _Step, forward: bool) -> None:
         moves = [
@@ -321,24 +360,134 @@ class History:
             ]
             _prune_empty(left, step.prune)
 
-    def undo(self, seq: int | None = None) -> _Step:
-        """Undo the last step; with ``seq``, only when that is the step."""
-        if not self.done:
+    def last_of(self, author: str) -> _Step | None:
+        return next((s for s in reversed(self.done) if s.author == author), None)
+
+    def blocker(self, step: _Step) -> _Step | None:
+        """The first later step that wrote one of ``step``'s files: while it
+        stands, ``step`` cannot be undone."""
+        index = self.done.index(step)
+        paths = step.paths()
+        return next((s for s in self.done[index + 1 :] if s.paths() & paths), None)
+
+    def undo(self, seq: int | None = None, author: str = OWNER) -> _Step:
+        """Undo the author's last step; with ``seq``, only when that is it."""
+        step = self.last_of(author)
+        if step is None:
             raise EditError("nothing to undo")
-        step = self.done[-1]
         if seq is not None and step.seq != seq:
             raise EditError("other edits came after that one: undo them first (Ctrl+Z)")
+        later = self.blocker(step)
+        if later is not None:
+            touched = sorted(p.name for p in later.paths() & step.paths())
+            who = later.name or ("someone" if later.author != OWNER else "the owner")
+            raise EditError(
+                f"{who} changed {', '.join(touched)} after you: "
+                + "your edit cannot be undone without theirs",
+                blocked=True,
+            )
         self._swap(step, forward=False)
-        self.undone.append(self.done.pop())
+        self.done.remove(step)
+        self.undone.append(step)
         return step
 
-    def redo(self) -> _Step:
-        if not self.undone:
+    def redo(self, author: str = OWNER) -> _Step:
+        step = next((s for s in reversed(self.undone) if s.author == author), None)
+        if step is None:
             raise EditError("nothing to redo")
-        step = self.undone[-1]
-        self._swap(step, forward=True)
-        self.done.append(self.undone.pop())
+        try:
+            self._swap(step, forward=True)
+        except EditError as exc:
+            raise EditError(
+                "the files changed since you undid that edit; cannot redo it",
+                blocked=True,
+            ) from exc
+        self.undone.remove(step)
+        self.done.append(step)
         return step
+
+    def drop(self, step: _Step) -> None:
+        """Take back a step just recorded (a refused batch): its files
+        restored, no redo left behind."""
+        self._swap(step, forward=False)
+        self.done.remove(step)
+
+    def state(self, author: str) -> dict[str, object]:
+        """What the author's Undo and Redo buttons say."""
+        last = self.last_of(author)
+        redo = next((s for s in reversed(self.undone) if s.author == author), None)
+        blocked = self.blocker(last) if last is not None else None
+        return {
+            "canUndo": last is not None,
+            "canRedo": redo is not None,
+            "undoLabel": last.label if last else None,
+            "redoLabel": redo.label if redo else None,
+            "undoBlockedBy": (blocked.name or "someone") if blocked else None,
+        }
+
+
+def _role(msg: dict[str, object]) -> str:
+    """Who sent a request, as the server set it (``_role``); a request
+    applied directly (a command on this machine) is the owner's when it says
+    ``_local``."""
+    role = msg.get("_role")
+    if role in ("owner", "editor", "viewer"):
+        return cast("str", role)
+    return "owner" if msg.get("_local") is True else "viewer"
+
+
+_UNLOCKED = frozenset(
+    {
+        "export",
+        "upload",
+        "upload-chunk",
+        "media-info",
+        "convert-plan",
+        "convert-status",
+        "system-pick",
+        "pdf-pages",
+        "pdf-page",
+        "math",
+        "chart-preview",
+        "layout-previews",
+        "find",
+        "browse",
+    }
+)
+"""Requests that write nothing the History holds and may take a while (a
+PDF export, a dialog on the owner's screen): they do not wait for, or hold
+up, the others."""
+
+
+_GUEST_REFUSED_SUFFIXES = frozenset(
+    {
+        ".py",
+        ".pyc",
+        ".pyw",
+        ".pth",
+        ".so",
+        ".dll",
+        ".dylib",
+        ".exe",
+        ".sh",
+        ".bash",
+        ".bat",
+        ".cmd",
+        ".ps1",
+        ".command",
+        ".desktop",
+        ".lnk",
+        ".toml",
+        ".lock",
+        ".cfg",
+        ".ini",
+    }
+)
+"""What a guest's edit never writes (``EditorSession._guest_writes``):
+code, and the project's settings (pyproject.toml, uv.lock, mise.toml…)."""
+_GUEST_REFUSED_NAMES = frozenset(
+    {"makefile", "justfile", "requirements.txt", "package.json", "dockerfile"}
+)
 
 
 def _do_moves(moves: list[tuple[Path, Path]]) -> None:
@@ -537,6 +686,12 @@ class EditorSession:
     """Files arriving in chunks (no size limit)."""
     conversions: media.Conversions
     """ffmpeg conversions running in the background."""
+    build_id: int
+    """The last ``snapshot()`` (the build the server is making or made)."""
+    snapshots: dict[int, dict[str, tuple[int, int]]]
+    """Each recent build's view of the project: file -> (mtime, size)."""
+    last_writer: dict[Path, tuple[str, str, str]]
+    """Who last wrote each file through the History: (author, name, hash)."""
 
     def __init__(
         self, deck_path: Path | None, exporters: Exporters | None = None
@@ -552,6 +707,11 @@ class EditorSession:
         self.conversions = media.Conversions(self.project_dir)
         self.history = History()
         self.built_hash = None
+        self.build_id = 0
+        self.snapshots = {}
+        self.last_writer = {}
+        self._lock: threading.RLock = threading.RLock()
+        self._who: threading.local = threading.local()
         self.shape_deck_hash = None
         self.server = {}
         self.exports = {}
@@ -559,15 +719,46 @@ class EditorSession:
     # ── Entry point ──
 
     def apply(self, msg: dict[str, object], deck: Deck | None) -> dict[str, object]:
+        """One request, as one undoable step of its author (``_author``, set
+        by the server from the connection: the owner's pages and agents are
+        ``"owner"``, each guest their own). Requests that write are applied
+        one at a time, whoever sends them."""
+        outer = getattr(self._who, "author", None)
+        outer_name = getattr(self._who, "name", "")
+        author = msg.get("_author")
+        name = msg.get("_name")
+        # A request made inside another (a shape command's own actions) is
+        # the same person's.
+        self._who.author = (
+            author if isinstance(author, str) and author else outer or OWNER
+        )
+        self._who.name = name if isinstance(name, str) else outer_name
+        try:
+            if msg.get("action") in _UNLOCKED:
+                return self._apply(msg, deck)
+            with self._lock:
+                return self._apply(msg, deck)
+        finally:
+            self._who.author = outer
+            self._who.name = outer_name
+
+    @property
+    def author(self) -> str:
+        """Whose request is being applied (on this thread)."""
+        return getattr(self._who, "author", None) or OWNER
+
+    def _apply(self, msg: dict[str, object], deck: Deck | None) -> dict[str, object]:
         action = msg.get("action")
         if not self.has_deck and action not in _PROJECT_ACTIONS:
             raise EditError("open or create a deck first")
         if action == "undo":
             seq = msg.get("step")
-            step = self.history.undo(seq if isinstance(seq, int) else None)
+            step = self.history.undo(seq if isinstance(seq, int) else None, self.author)
+            self._wrote(step, undo=True)
             return self._result(step, undo=True)
         if action == "redo":
-            step = self.history.redo()
+            step = self.history.redo(self.author)
+            self._wrote(step)
             return self._result(step)
         if action == "upload":
             return self._upload(msg)
@@ -580,6 +771,13 @@ class EditorSession:
                 if isinstance(refs, list)
                 else []
             )
+            if _role(msg) != "owner":
+                # A guest copies pictures, not hidden files (.env, .git/…).
+                names = [
+                    n
+                    for n in names
+                    if not any(p.startswith(".") for p in PurePosixPath(n).parts)
+                ]
             return {"ok": True, "files": export_assets(self.project_dir, names)}
         if action == "math":
             return self._math(msg)
@@ -594,6 +792,7 @@ class EditorSession:
         if action in _PROJECT_ACTIONS:
             return self._project(msg, deck)
         if action == "open-apps":
+            self._local_only(msg, "open files in programs")
             path = self._openable(msg)
             apps = open_choices(path, self.edit_commands)
             return {"ok": True, "apps": [{"id": a.id, "label": a.label} for a in apps]}
@@ -694,12 +893,145 @@ class EditorSession:
         if isinstance(agent, str) and agent.strip():
             # Made by an agent through the CLI: the editor says so ("Agent: …").
             label = f"Agent: {agent.strip()}"
+        base = msg.get("baseBuild")
+        if isinstance(base, int) and not isinstance(base, bool):
+            self._check_fresh(txn, base)
+        if _role(msg) != "owner":
+            self._guest_writes(txn)
         step = txn.commit(label)
         coalesce = msg.get("coalesce")
         step.coalesce = coalesce if isinstance(coalesce, str) else None
         if step.changes or step.moves:
-            self.history.record(step)
+            self._record(step)
         return {**self._result(step), **extra}
+
+    # ── Several people at once ──
+
+    def _guest_writes(self, txn: _Txn) -> None:
+        """A guest (a share link's editor) writes the deck's own files only:
+        never code this machine runs (a Python module beside deck.py, a
+        script, the project's dependencies) or anything in a hidden folder
+        (the repository's own files among them). deck.py itself is written
+        only through the editor's own edits of it."""
+        root = self.project_dir.resolve()
+        deck_py = self.deck_path.resolve()
+        paths = set(txn.staged)
+        for move in txn.moves:
+            paths |= {move.dst} if move.copy else {move.src, move.dst}
+        for path in sorted(paths):
+            if path == deck_py:
+                continue
+            rel = path.relative_to(root) if path.is_relative_to(root) else path
+            if (
+                any(part.startswith(".") for part in rel.parts)
+                or path.suffix.lower() in _GUEST_REFUSED_SUFFIXES
+                or path.name.lower() in _GUEST_REFUSED_NAMES
+            ):
+                raise EditError(
+                    f"only an editor on this machine can write {rel.as_posix()}"
+                )
+
+    def _record(self, step: _Step) -> None:
+        """Add a step to the History as the current author's."""
+        step.author = self.author
+        step.name = getattr(self._who, "name", "") or ""
+        self.history.record(step)
+        self._wrote(step)
+
+    def _wrote(self, step: _Step, undo: bool = False) -> None:
+        """Remember who last wrote each of the step's files (an undo or redo
+        writes them as whoever asked for it)."""
+        name = getattr(self._who, "name", "") or step.name
+        for change in step.changes:
+            data = change.before if undo else change.after
+            digest = file_hash(data) if data is not None else ""
+            self.last_writer[change.path.resolve()] = (self.author, name, digest)
+
+    def snapshot(self) -> int:
+        """Record the project's files as a build is about to read them; the
+        number goes into that build's model, and a page's requests name it
+        (``baseBuild``) so a write to a file changed since is refused."""
+        with self._lock:
+            files: dict[str, tuple[int, int]] = {}
+            root = self.project_dir
+            for folder, dirs, names in os.walk(root):
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if not d.startswith(".")
+                    and d not in ("build", "node_modules", "__pycache__")
+                ]
+                for name in names:
+                    path = Path(folder, name)
+                    with contextlib.suppress(OSError):
+                        st = path.stat()
+                        files[str(path.resolve())] = (st.st_mtime_ns, st.st_size)
+                if len(files) > 20000:
+                    break
+            self.build_id += 1
+            self.snapshots[self.build_id] = files
+            for old in [k for k in self.snapshots if k <= self.build_id - 30]:
+                del self.snapshots[old]
+            return self.build_id
+
+    def _refuse_if_theirs(self, path: Path, data: bytes) -> None:
+        """A file that is not as the page saw it: when someone else's edit
+        made it so (not this person's own, still rebuilding), say whose."""
+        writer = self.last_writer.get(path.resolve())
+        if (
+            writer is not None
+            and writer[0] != self.author
+            and writer[2] == file_hash(data)
+        ):
+            who = writer[1] or ("the owner" if writer[0] == OWNER else "someone")
+            raise EditError(
+                f"{who} changed {self._deck_rel(path)} meanwhile; the editor "
+                + "now shows their version",
+                stale=True,
+                by=who,
+                path=self._deck_rel(path),
+            )
+
+    def _check_fresh(self, txn: _Txn, base: int) -> None:
+        """Refuse a write to a file that changed since the build the page
+        shows (``base``), unless the change was the same person's own (their
+        earlier edit, not rebuilt yet). deck.py counts even when only read:
+        slide numbers in the request are that build's."""
+        snapshot = self.snapshots.get(base)
+        if snapshot is None:
+            raise EditError(
+                "the editor was out of date; it now shows the deck as it is",
+                stale=True,
+            )
+        paths = {
+            path for path, data in txn.staged.items() if txn.originals.get(path) != data
+        }
+        for move in txn.moves:
+            paths |= {move.dst} if move.copy else {move.src, move.dst}
+        paths.add(self.deck_path.resolve())
+        for path in sorted(paths):
+            try:
+                st = path.stat()
+                now: tuple[int, int] | None = (st.st_mtime_ns, st.st_size)
+            except OSError:
+                now = None
+            if now == snapshot.get(str(path)):
+                continue
+            current = file_hash(path.read_bytes()) if now is not None else ""
+            writer = self.last_writer.get(path)
+            if writer is not None and writer[2] == current and writer[0] == self.author:
+                continue  # the person's own edit, still rebuilding
+            if writer is not None and writer[2] == current:
+                who = writer[1] or ("the owner" if writer[0] == OWNER else "someone")
+            else:
+                who = "someone (outside the editor)"
+            raise EditError(
+                f"{who} changed {self._deck_rel(path)} meanwhile; the editor "
+                + "now shows their version",
+                stale=True,
+                by=who,
+                path=self._deck_rel(path),
+            )
 
     def _result(self, step: _Step, undo: bool = False) -> dict[str, object]:
         hashes: dict[str, str] = {}
@@ -712,17 +1044,19 @@ class EditorSession:
             "hashes": hashes,
             "changes": self._changes(step, undo),
             "step": step.seq,
-            "canUndo": bool(self.history.done),
-            "canRedo": bool(self.history.undone),
-            **self.history_labels(),
+            **self.history_state(self.author),
         }
 
-    def history_labels(self) -> dict[str, str | None]:
+    def history_state(self, author: str = OWNER) -> dict[str, object]:
+        """What one person's Undo and Redo would do now (``History.state``)."""
+        return self.history.state(author)
+
+    def history_labels(self, author: str = OWNER) -> dict[str, str | None]:
         """What Undo and Redo would do now, for the editor's buttons."""
-        done, undone = self.history.done, self.history.undone
+        state = self.history.state(author)
         return {
-            "undoLabel": done[-1].label if done else None,
-            "redoLabel": undone[-1].label if undone else None,
+            "undoLabel": cast("str | None", state["undoLabel"]),
+            "redoLabel": cast("str | None", state["redoLabel"]),
         }
 
     def _changes(self, step: _Step, undo: bool) -> list[dict[str, str]]:
@@ -795,6 +1129,7 @@ class EditorSession:
             and self.built_hash is not None
             and file_hash(data) not in (self.built_hash, self.shape_deck_hash)
         ):
+            self._refuse_if_theirs(self.deck_path.resolve(), data)
             raise EditError("deck.py changed since the last build; try again")
         return DeckSource(data.decode("utf-8"))
 
@@ -820,6 +1155,7 @@ class EditorSession:
         data = txn.read(path)
         expected = msg.get("hash")
         if isinstance(expected, str) and expected and file_hash(data) != expected:
+            self._refuse_if_theirs(path, data)
             raise EditError(f"{path.name} changed on disk; wait for the reload")
         if drawio.is_drawio_path(path):
             # A diagram's shapes, edited in its source (editor/drawioedit.py).
@@ -1415,7 +1751,7 @@ class EditorSession:
                 txn = _Txn(self.project_dir)
                 txn.write(path, text.encode("utf-8"))
                 step = txn.commit("Refresh Inkscape preview")
-                self.history.record(step)
+                self._record(step)
                 result = self._result(step)
         error = open_with(path, app)
         if error is not None:
@@ -1442,7 +1778,11 @@ class EditorSession:
         path = Path(raw)
         path = (path if path.is_absolute() else self.project_dir / path).resolve()
         inside = path.is_relative_to(self.project_dir.resolve())
-        if not path.is_file() or not (inside or msg.get("_local") is True):
+        if not inside and msg.get("_local") is not True:
+            raise EditError(
+                "only an editor on this machine can use files outside the deck"
+            )
+        if not path.is_file():
             raise EditError(f"no video at {raw}")
         return path
 
@@ -1517,7 +1857,8 @@ class EditorSession:
                     "out": rel[plan.out],
                 }
             if action == "convert":
-                self._local_only(msg, "run ffmpeg")
+                # A guest converts a video in the deck (one they uploaded):
+                # _media_file keeps them to the deck's own files.
                 plan, info = self._plan(msg)
                 duration = info.get("duration")
                 job = self.conversions.start(
@@ -1562,6 +1903,10 @@ class EditorSession:
             return {"ok": True, "git": gitops.status(self.project_dir)}
         if op == "status":
             return {"ok": True, "git": gitops.status(self.project_dir)}
+        if op not in ("log", "branches"):
+            # Commits run the repository's hooks; the rest rewrites the
+            # owner's working copy.
+            self._local_only(msg, f"use git ({op})")
         repo = gitops.open_repo(self.project_dir)
         if repo is None:
             raise EditError("this deck is not in a git repository")
@@ -1675,7 +2020,7 @@ class EditorSession:
         result: dict[str, object] = {"ok": True}
         if changes:
             step = _Step(f"Publish on {publish.HOST_NAMES[kind]}", changes)
-            self.history.record(step)
+            self._record(step)
             result = self._result(step)
         return {
             **result,
@@ -1798,6 +2143,15 @@ class EditorSession:
     def _project(self, msg: dict[str, object], deck: Deck | None) -> dict[str, object]:
         action = msg.get("action")
         try:
+            if action == "project-info" and msg.get("_local") is not True:
+                return {
+                    "ok": True,
+                    **projects.new_deck_info(
+                        self.deck_path if self.has_deck else None, deck
+                    ),
+                    "places": [],
+                    "recent": [],
+                }
             if action == "project-info":
                 return {
                     "ok": True,
@@ -2294,7 +2648,7 @@ class EditorSession:
             if ok and after != before and inside:
                 step.changes.append(_Change(lock.resolve(), before, after))
         if step.changes or step.moves:
-            self.history.record(step)
+            self._record(step)
         result = self._result(step)
         changed = (
             [c.path for c in step.changes] + [m.dst for m in step.moves] + list(outside)
@@ -2386,8 +2740,7 @@ class EditorSession:
         except (EditError, ValueError, OSError) as exc:
             done = self.history.done
             if done and done[-1].coalesce == key:
-                self.history.undo()
-                self.history.undone.pop()
+                self.history.drop(done[-1])
             raise EditError(str(exc)) from exc
         finally:
             self.shape_deck_hash = None
@@ -2405,9 +2758,7 @@ class EditorSession:
                 "hashes": {},
                 "changes": [],
                 "step": 0,
-                "canUndo": bool(done),
-                "canRedo": bool(self.history.undone),
-                **self.history_labels(),
+                **self.history_state(self.author),
             }
         result["shapes"] = outcome.reports
         result["created"] = outcome.created
@@ -3082,7 +3433,10 @@ class EditorSession:
     ) -> str:
         # Set by the server from the connection, never by the page: an audience
         # screen on another machine sees the ink but never writes the deck.
-        self._local_only(msg, "save ink")
+        # Set by the server from the connection: an audience screen (a view
+        # link, or a page the server cannot place) never writes files.
+        if _role(msg) not in ("owner", "editor"):
+            raise EditError("only an editor (or a page on this machine) can save ink")
         slide, slide_id = self._ink_slide(deck, msg)
         path = ink_path(slide, slide_id, self.project_dir)
         data = txn.read_optional(path)
@@ -3484,10 +3838,6 @@ class EditorSession:
         default where the ``inkflow build`` / ``export`` commands put it, and a
         download token is handed back for the browser.
         """
-        if self.exporters is None:
-            raise EditError("export is not available here; use inkflow build / export")
-        build_static_html = self.exporters.html
-        build_pdf = self.exporters.pdf
         fmt = msg.get("format")
         raw = msg.get("output")
         stem = self.deck_path.stem
@@ -3507,6 +3857,16 @@ class EditorSession:
             or out in self.project_dir.resolve().parents
         ):
             raise EditError("pick an output inside the project, not the project itself")
+        if msg.get("_local") is not True and not out.is_relative_to(
+            self.project_dir.resolve()
+        ):
+            raise EditError(
+                "only an editor on this machine can export outside the deck"
+            )
+        if self.exporters is None:
+            raise EditError("export is not available here; use inkflow build / export")
+        build_static_html = self.exporters.html
+        build_pdf = self.exporters.pdf
         try:
             if fmt == "html":
                 build_static_html(self.deck_path, out, inline_assets=False)

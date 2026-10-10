@@ -223,8 +223,13 @@ function updateHistory(): void {
     const redoBtn = $("btn-redo") as HTMLButtonElement;
     undoBtn.disabled = !ed.canUndo;
     redoBtn.disabled = !ed.canRedo;
-    // Named after the step, so an agent's edit reads "Undo Agent: …".
+    // Named after the step, so an agent's edit reads "Undo Agent: …"; each
+    // person undoes their own steps only.
     undoBtn.title = historyTitle("Undo", ed.canUndo && ed.undoLabel, "Ctrl+Z");
+    if (ed.canUndo && ed.undoBlockedBy) {
+        undoBtn.title += ` — ${ed.undoBlockedBy} changed the same file after you`;
+    }
+    undoBtn.classList.toggle("blocked", !!(ed.canUndo && ed.undoBlockedBy));
     redoBtn.title = historyTitle(
         "Redo",
         ed.canRedo && ed.redoLabel,

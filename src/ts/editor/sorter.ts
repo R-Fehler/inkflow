@@ -337,6 +337,7 @@ export function renderSorter(): void {
     }
     thumbs.end();
     list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+    emit("sorter");
 }
 
 function initListDrop(): void {

@@ -21,6 +21,7 @@ import click
 
 from inkflow.cli._common import deck_option, main, resolve_deck_path
 from inkflow.editor.context import CONTEXT_DIR, format_context, read_context
+from inkflow.instances import WS_PATH
 from inkflow.logging import report
 from inkflow.render import SlideBoxes, render_json, render_slides, summary
 
@@ -327,38 +328,45 @@ def _running_as_root() -> bool:
     return hasattr(os, "geteuid") and os.geteuid() == 0
 
 
-def _send(ws_port: int, host: str, payload: dict[str, object]) -> None:
+def _send(url: str, payload: dict[str, object]) -> None:
     from websockets.sync.client import connect
 
+    from inkflow.instances import loopback_tls
+
     try:
-        with connect(f"ws://{host}:{ws_port}", open_timeout=3) as ws:
+        tls = loopback_tls() if url.startswith("wss:") else None
+        with connect(url, open_timeout=3, proxy=None, ssl=tls) as ws:
             ws.send(json.dumps(payload))
     except OSError as exc:
         raise click.ClickException(
-            f"no inkflow server on ws://{host}:{ws_port} ({exc}); "
-            + "start one with `inkflow edit`"
+            f"no inkflow server at {url} ({exc}); start one with `inkflow edit`"
         ) from exc
 
 
-_ws_port_option = click.option(
+_port_option = click.option(
+    "--port",
     "--ws-port",
+    "port",
     type=int,
     default=None,
-    help="The server's WebSocket port [default: the one editing this deck, else 7778]",
+    help="The server's port [default: the one editing this deck, else 7777]",
 )
 
 
-def _editor_ws_port(deck_path: Path, ws_port: int | None) -> int:
-    """The WebSocket port of the editor open on this deck, from its context."""
-    if ws_port is not None:
-        return ws_port
+def _editor_url(deck_path: Path, port: int | None, host: str) -> str:
+    """The WebSocket of the editor open on this deck, from its context: on
+    the server's one port (or the old separate one it was started with)."""
     data = read_context(deck_path.resolve().parent) or {}
-    server = data.get("server")
-    if isinstance(server, dict):
-        port = cast("dict[str, object]", server).get("wsPort")
-        if isinstance(port, int):
-            return port
-    return 7778
+    raw = data.get("server")
+    server = cast("dict[str, object]", raw) if isinstance(raw, dict) else {}
+    scheme = "wss" if server.get("tls") is True else "ws"
+    if port is None:
+        found = server.get("port")
+        port = found if isinstance(found, int) else 7777
+        legacy = server.get("wsPort")
+        if not isinstance(server.get("wsPath"), str) and isinstance(legacy, int):
+            return f"{scheme}://{host}:{legacy}"  # a server before one port
+    return f"{scheme}://{host}:{port}{WS_PATH}"
 
 
 _host_option = click.option("--host", default="localhost", show_default=True)
@@ -367,40 +375,34 @@ _host_option = click.option("--host", default="localhost", show_default=True)
 @main.command()
 @click.argument("slide")
 @deck_option
-@_ws_port_option
+@_port_option
 @_host_option
-def goto(slide: str, deck_path: Path, ws_port: int | None, host: str) -> None:
+def goto(slide: str, deck_path: Path, port: int | None, host: str) -> None:
     """Show SLIDE (a number, 1-based, or an id) in every editor open on the deck."""
-    port = _editor_ws_port(deck_path, ws_port)
+    url = _editor_url(deck_path, port, host)
     number = _number(deck_path, slide)
-    _send(port, host, {"type": "editor-command", "command": "goto", "slide": number})
+    _send(url, {"type": "editor-command", "command": "goto", "slide": number})
 
 
 @main.command("select")
 @click.argument("ids", nargs=-1, required=True)
 @click.option("--slide", default=None, help="Go to this slide (number or id) first.")
 @deck_option
-@_ws_port_option
+@_port_option
 @_host_option
 def select_cmd(
     ids: tuple[str, ...],
     slide: str | None,
     deck_path: Path,
-    ws_port: int | None,
+    port: int | None,
     host: str,
 ) -> None:
     """Select elements by id in every editor open on the deck."""
-    port = _editor_ws_port(deck_path, ws_port)
+    url = _editor_url(deck_path, port, host)
     if slide is not None:
         number = _number(deck_path, slide)
-        _send(
-            port, host, {"type": "editor-command", "command": "goto", "slide": number}
-        )
-    _send(
-        port,
-        host,
-        {"type": "editor-command", "command": "select", "ids": list(ids)},
-    )
+        _send(url, {"type": "editor-command", "command": "goto", "slide": number})
+    _send(url, {"type": "editor-command", "command": "select", "ids": list(ids)})
 
 
 def _hook_command(project_dir: Path) -> str:

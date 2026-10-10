@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote
 
@@ -13,43 +14,91 @@ from inkflow.cli._common import deck_option, main, resolve_deck_path
 from inkflow.editor.session import Exporters
 from inkflow.export import build_pdf, build_static_html
 from inkflow.logging import Levels, report
-from inkflow.server import DEFAULT_PORT, open_browser, pick_ports
+from inkflow.server import DEFAULT_PORT, Sharing, open_browser, pick_port
 from inkflow.server import serve as _serve
 from inkflow.sizes import PageSize
 
 # The editor's Export dialog runs the same builds as the commands below.
 EXPORTERS = Exporters(html=build_static_html, pdf=build_pdf)
 
-
-@main.command()
-@deck_option
-@click.option(
+_host_option = click.option(
     "--host",
     default="localhost",
     show_default=True,
-    help="Bind address",
+    help="Bind address. Any other than this machine's own (127.0.0.1, "
+    + "localhost) shares the deck, as --share does.",
 )
+_ws_port_option = click.option(
+    "--ws-port",
+    type=int,
+    default=None,
+    help="Deprecated: the WebSocket is on the HTTP port (/_inkflow/ws). Given, "
+    + "it is also opened on this port, on this machine only.",
+)
+
+
+def _share_options(f: Callable[..., None]) -> Callable[..., None]:
+    f = click.option(
+        "--tls",
+        nargs=2,
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        default=None,
+        metavar="CERT KEY",
+        help="Serve HTTPS (and WSS) with this certificate and key, such as "
+        + "`tailscale cert` makes.",
+    )(f)
+    f = click.option(
+        "--allow-host",
+        "allow_hosts",
+        multiple=True,
+        metavar="NAME",
+        help="Also answer to this host name (a reverse proxy's, a VPN name); "
+        + "requests naming any other host are refused. Repeatable.",
+    )(f)
+    return click.option(
+        "--share",
+        is_flag=True,
+        help="Share on the local network (or VPN): listen on every interface "
+        + "(or --host) and print an editor link and a view link for each "
+        + "address. Without it only this machine can connect.",
+    )(f)
+
+
+def _sharing(
+    share: bool, allow_hosts: tuple[str, ...], tls: tuple[Path, Path] | None
+) -> Sharing:
+    return Sharing(share=share, allow_hosts=allow_hosts, tls=tls or None)
+
+
+@main.command()
+@deck_option
+@_host_option
 @click.option(
     "--port",
     type=int,
     default=None,
-    help="HTTP port [default: 7777, or the next free one]",
+    help="Port [default: 7777, or the next free one]",
 )
-@click.option(
-    "--ws-port",
-    type=int,
-    default=None,
-    help="WebSocket port [default: the HTTP port + 1, or the next free one]",
-)
+@_ws_port_option
+@_share_options
 @click.pass_obj
 def serve(
-    levels: Levels, deck_path: Path, host: str, port: int | None, ws_port: int | None
+    levels: Levels,
+    deck_path: Path,
+    host: str,
+    port: int | None,
+    ws_port: int | None,
+    share: bool,
+    allow_hosts: tuple[str, ...],
+    tls: tuple[Path, Path] | None,
 ) -> None:
     """Start the presentation server with live reload.
 
     Serves the deck at `http://{host}:{port}` and pushes slide updates over a
     WebSocket whenever a source file changes, swapping content in place without a
-    full page reload. Use `--host 0.0.0.0` to expose the server on all interfaces.
+    full page reload. Only this machine can connect, unless `--share`: then
+    the server also listens on the network and prints a view link (and an
+    editor link) for each address; other machines need one of them.
 
     Keyboard shortcuts in the terminal:
 
@@ -61,8 +110,8 @@ def serve(
     resolved = resolve_deck_path(deck_path)
     if _already_served(resolved, "/", open_it=False):
         return
-    auto = port is None and ws_port is None
-    port, ws_port = _ports(host, port, ws_port)
+    auto = port is None
+    port = _port(host, port)
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(
             _serve(
@@ -73,17 +122,18 @@ def serve(
                 levels,
                 exporters=EXPORTERS,
                 auto_ports=auto,
+                sharing=_sharing(share, allow_hosts, tls),
             )
         )
 
 
-def _ports(host: str, port: int | None, ws_port: int | None) -> tuple[int, int]:
-    """The ports to serve on; says so when the default ones are taken (another
+def _port(host: str, port: int | None) -> int:
+    """The port to serve on; says so when the default one is taken (another
     deck's server, such as the author's editor while an agent previews its
     worktree), since the address is then not the usual one."""
-    picked = pick_ports(host, port, ws_port)
-    if port is None and picked[0] != DEFAULT_PORT:
-        report("Ports", f"{DEFAULT_PORT} is taken: using {picked[0]} (and {picked[1]})")
+    picked = pick_port(host, port)
+    if port is None and picked != DEFAULT_PORT:
+        report("Port", f"{DEFAULT_PORT} is taken: using {picked}")
     return picked
 
 
@@ -102,24 +152,15 @@ def _already_served(deck_py: Path, path: str, *, open_it: bool) -> bool:
 
 @main.command()
 @deck_option
-@click.option(
-    "--host",
-    default="localhost",
-    show_default=True,
-    help="Bind address",
-)
+@_host_option
 @click.option(
     "--port",
     type=int,
     default=None,
-    help="HTTP port [default: 7777, or the next free one]",
+    help="Port [default: 7777, or the next free one]",
 )
-@click.option(
-    "--ws-port",
-    type=int,
-    default=None,
-    help="WebSocket port [default: the HTTP port + 1, or the next free one]",
-)
+@_ws_port_option
+@_share_options
 @click.option(
     "--no-open",
     "no_open",
@@ -158,6 +199,9 @@ def edit(
     host: str,
     port: int | None,
     ws_port: int | None,
+    share: bool,
+    allow_hosts: tuple[str, ...],
+    tls: tuple[Path, Path] | None,
     no_open: bool,
     start: bool,
     quit_when_idle: float | None,
@@ -181,6 +225,13 @@ def edit(
     One server per deck: if another inkflow already has the deck open, this
     opens its editor instead of starting a second server for the same files.
 
+    Share the deck with people on the same network (or VPN) with `--share`:
+    each address gets an editor link and a view link (the editor's Share…
+    button shows them too, with QR codes, and turns sharing on and off).
+    From another machine over SSH, forward the port instead:
+    `ssh -L 7777:localhost:7777 you@this-machine`, run `inkflow edit
+    --no-open` here, and open `http://localhost:7777/edit` there.
+
     Keyboard shortcuts in the terminal are those of `serve`, plus `e` to open the
     editor again.
     """
@@ -199,8 +250,8 @@ def edit(
         if _already_served(resolved, page, open_it=not no_open):
             return
     open_path = None if no_open else page
-    auto = port is None and ws_port is None
-    port, ws_port = _ports(host, port, ws_port)
+    auto = port is None
+    port = _port(host, port)
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(
             _serve(
@@ -213,6 +264,7 @@ def edit(
                 exporters=EXPORTERS,
                 quit_when_idle=quit_when_idle,
                 auto_ports=auto,
+                sharing=_sharing(share, allow_hosts, tls),
             )
         )
 
