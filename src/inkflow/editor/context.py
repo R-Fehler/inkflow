@@ -71,37 +71,38 @@ def _fmt_box(box: object) -> str:
 
 def format_context(context: dict[str, object], *, max_age: float | None = None) -> str:
     """Plain text an agent can act on. Empty when the context is older than
-    ``max_age`` seconds (the editor was closed long ago)."""
+    ``max_age`` seconds (the editor was closed long ago).
+
+    The prompt hook adds this to every message, so it stays a few lines.
+    """
     updated = context.get("updatedAt")
     age = time.time() - float(cast("float", updated)) if updated else None
     if max_age is not None and (age is None or age > max_age):
         return ""
     slide = cast("dict[str, object]", context.get("slide") or {})
-    lines = ["inkflow editor context (what the author is looking at right now):"]
+    head = "inkflow editor, what the author sees now:"
+    lines: list[str] = []
     if slide:
-        number = slide.get("number")
-        total = slide.get("total")
         title = slide.get("title") or slide.get("id") or ""
-        lines.append(f"- slide {number}/{total}: {title} (id: {slide.get('id')})")
-        for label, key in (
-            ("slide SVG", "svg"),
-            ("markdown", "md"),
-            ("notes", "notes"),
-        ):
-            value = slide.get(key)
-            if value:
-                lines.append(f"  {label}: {value}")
-        lines.append(
-            f"  deck.py: slides[{slide.get('deckIndex')}] in Deck(slides=[...])"
+        head += (
+            f' slide {slide.get("number")}/{slide.get("total")} "{title}"'
+            + f" (id {slide.get('id')}, deck.py slides[{slide.get('deckIndex')}])"
         )
+        files = [
+            f"{label} {slide[label]}"
+            for label in ("svg", "md", "notes")
+            if slide.get(label)
+        ]
+        if files:
+            lines.append("  " + ", ".join(files))
     step = context.get("step")
     if step:
-        lines.append(f"- previewing animation step {step}")
+        head += f", previewing step {step}"
     if context.get("layoutMode"):
-        lines.append("- editing in layout mode (changes affect every slide on it)")
+        head += ", in layout mode (edits change every slide on the layout)"
     selection = context.get("selection")
     if isinstance(selection, list) and selection:
-        lines.append("- selected:")
+        lines.append("selected:")
         for item in cast("list[object]", selection):
             if not isinstance(item, dict):
                 continue
@@ -114,5 +115,5 @@ def format_context(context: dict[str, object], *, max_age: float | None = None) 
             snippet = f' "{str(text)[:80]}"' if text else ""
             lines.append(f"  - {kind}{ident}{where}{_fmt_box(sel.get('box'))}{snippet}")
     else:
-        lines.append("- nothing selected")
-    return "\n".join(lines)
+        head += "; nothing selected"
+    return "\n".join([head, *lines])

@@ -567,14 +567,17 @@ def discover_assets(
     Order: builtin → theme → local.
     """
     sources: list[tuple[str, Path]] = []
+    seen: set[Path] = set()
 
     for label, base in (
         ("builtin", builtin_theme_dir()),
         ("theme", theme.asset_dir() if theme is not None else None),
         ("local", project_dir),
     ):
-        if base is None:
+        # The built-in theme's asset dir is the built-in dir: list it once.
+        if base is None or base.resolve() in seen:
             continue
+        seen.add(base.resolve())
         directory = base / kind
         if directory.is_dir():
             sources.extend((label, p) for p in sorted(directory.glob("*.svg")))

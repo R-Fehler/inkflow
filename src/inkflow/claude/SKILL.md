@@ -12,6 +12,17 @@ author's editor within a moment, and whatever they change there is already on
 disk when you read it. Re-read a file before editing it, since the author may
 have just changed it.
 
+## Start with `inkflow outline`
+
+`inkflow outline` prints the whole deck in a few lines per slide: number, id,
+position in deck.py (`slides[i]`), its SVG/layout chain, `.md` and notes
+files, then each zone with where its text lives (`md` = the slide's `.md`,
+`deck.py` = `zones={...}`, `empty`) and the animations and clicks.
+`inkflow outline -s N` adds full zone texts, zone boxes and the canvas size
+(to place shapes), the element ids animations can target, and each animation
+as deck.py writes it. Read it instead of opening every file; open only the
+files you change. `inkflow layouts` lists every layout with its zones.
+
 ## What the author is looking at
 
 `inkflow context` prints the editor's current slide, build step and
@@ -47,6 +58,45 @@ Colours: prefer the theme's classes over hex values so slides follow dark and
 light mode: `class="inkflow-fill-accent"`, `inkflow-stroke-text`, and so on
 for `bg surface border text text-muted accent accent-fg code-bg code-text red
 orange yellow green teal blue purple pink grey`.
+
+## Common tasks
+
+- **Add a slide with text on a layout**: write `slides/<id>.md` and put
+  `Slide("<layout>", md="<id>.md")` where it belongs in `slides=[...]` (the
+  `.md` name becomes the slide id; no SVG needed). A leading `# Title` fills
+  the title zone, the text after it the default zone (`content`), and a
+  `::<zone>::` line starts another zone:
+
+  ```markdown
+  # Before and after
+
+  ::left::
+
+  - Slides in a binary file
+
+  ::right::
+
+  - Plain text in git
+  ```
+
+  Layouts: `content`, `two-cols` (left, right), `three-cols`, `comparison`,
+  `media-left`/`media-right` (content, media), `quote`, `section`, `center`,
+  `cover`, `end`… (`inkflow layouts` for all of them and their zones).
+- **Reorder or hide**: move the `Slide(...)` within `slides=[...]`;
+  `visible=False` hides it and keeps it. Slide numbers (`outline`,
+  `render -s`, `goto`) count visible slides only.
+- **Reveal on click**: in Markdown, a `::step::` line shows what follows on the
+  next click; inside `::steps::` … `::steps end::` each list item comes on its
+  own click. Drawn elements: `animations=[...]` (below).
+- **Picture**: on a layout with a `media` zone,
+  `zones={"media": Image("assets/photo.jpg")}`; in Markdown,
+  `![alt](../assets/photo.jpg)` (relative to the `.md`).
+- **Light/dark and colours**: `Deck(mode=ColorMode.LIGHT)` (or `DARK`). Token
+  overrides go in `styles.css` between `/* inkflow:theme */` and
+  `/* /inkflow:theme */` (add both lines if missing):
+  `:root { --inkflow-accent: #e8590c; }` for dark mode,
+  `:root[data-theme="light"] { --inkflow-accent: #c2410c; }` for light.
+  After changing `mode`, run `inkflow sync` (refreshes Inkscape previews).
 
 ## Animations and transitions (deck.py)
 
