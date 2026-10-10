@@ -24,6 +24,7 @@ from inkflow.content import (
 from inkflow.drawio_inline import inline_diagrams
 from inkflow.editor.provenance import INK, stamper
 from inkflow.enums import AnimationKind, ColorMode, Direction, Trigger
+from inkflow.ink import compose_ink, ink_path
 from inkflow.layout import (
     AssetKind,
     resolve_chain,
@@ -86,6 +87,9 @@ class SlideEditInfo(TypedDict):
     """Filled zone name → where its content was written: ``deck`` (the slide's
     ``zones=``), ``md`` (that zone's own section of the Markdown file) or
     ``md-file`` (several Markdown sections merged into a default zone)."""
+    ink: str
+    """Absolute path of the slide's ink file, where the editor's pen writes;
+    it need not exist yet."""
 
 
 class SlideData(TypedDict):
@@ -573,6 +577,17 @@ class SlideSvg:
                 ],
             )
 
+    def compose_ink(self, path: Path, roots: AssetRoots, slide_id: str) -> None:
+        if not path.is_file():
+            return
+        try:
+            ink = self._read(path, roots)
+        except ValueError as exc:
+            # A broken ink file loses the drawing, never the slide.
+            logger.warning(f"{slide_id}: ink not shown: {exc}")
+            return
+        self.root = compose_ink(self.root, ink)
+
     def inline_diagrams(self, roots: AssetRoots) -> None:
         register = self.sources.key if self.sources is not None else None
         self.root = inline_diagrams(self.root, roots, register)
@@ -724,6 +739,10 @@ def process_slide(
     doc = SlideSvg.read(src, ctx.assets, sources)
     doc.compose_ancestors(chain, ctx.assets)
     doc.compose_overlays(overlay_chains, ctx.assets)
+    # Above the overlays (it was drawn on the slide as shown), and before
+    # annotation, so a cue can reveal a stroke like any other element.
+    ink = ink_path(slide, slide_id, ctx.project_dir)
+    doc.compose_ink(ink, ctx.assets, slide_id)
     # Before annotation, so animations can target a diagram's shapes.
     doc.inline_diagrams(ctx.assets)
     for zone_id in doc.duplicate_zone_ids():
@@ -780,6 +799,7 @@ def process_slide(
             "sources": [str(p) for p in sources.paths],
             "emptyZones": doc.empty_zones(),
             "zoneOrigins": zone_origins,
+            "ink": str(ink),
         }
     doc.prune_zones()
     doc.resolve_links()

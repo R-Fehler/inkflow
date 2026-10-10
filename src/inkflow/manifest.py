@@ -220,6 +220,10 @@ class Slide:
     """When ``False``, the slide is excluded from the presentation entirely."""
     font_size: int | None = None
     """Per-slide base font size in px. ``None`` inherits ``Deck.font_size``."""
+    ink: str | None = None
+    """The SVG file holding this slide's saved pen drawing (ink), painted on top of
+    everything else, overlays included. A path relative to the project. ``None``
+    uses ``ink/<slide id>.svg``; a missing file means the slide has no ink."""
 
 
 @dataclass

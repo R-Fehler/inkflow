@@ -454,6 +454,11 @@ def make_ws_handler(
                     if msg.get("snap"):
                         position_msg["snap"] = True
                     await broadcast(json.dumps(position_msg), sender=websocket)
+                elif msg_type == "ink":
+                    # Ink drawn without "Keep" is relayed like a position: the
+                    # server holds none of it, every other window draws it.
+                    # Saving goes through the session (edit-op "ink") instead.
+                    await broadcast(json.dumps(msg), sender=websocket)
                 elif msg_type == "hello" and msg.get("role") == "editor":
                     _editor["clients"].add(websocket)
                     if _editor["model"] is not None:
