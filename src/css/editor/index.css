@@ -806,7 +806,7 @@ body.previewing #canvas::after {
     cursor: pointer;
 }
 
-.pbtn:hover {
+.pbtn:hover:not(:disabled) {
     border-color: var(--sel);
 }
 
@@ -1915,6 +1915,13 @@ body.offline #offline-banner {
     background: var(--sel);
     border-color: var(--sel);
     color: #fff;
+}
+
+/* A panel button that does not apply here (Take this slide on an unchanged
+   slide, Merge with nothing to merge) must not look like it would. */
+.pbtn:disabled {
+    opacity: 0.45;
+    cursor: default;
 }
 
 .export-status {

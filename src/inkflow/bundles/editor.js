@@ -12478,6 +12478,25 @@ ${area2.value.slice(pos)}`;
     ];
   }
 
+  // src/ts/editor/gitnotice.ts
+  var NOTICE_KEY = "inkflow-git-undo-notice";
+  var noticeShown = false;
+  function undoNoticeDue() {
+    try {
+      return sessionStorage.getItem(NOTICE_KEY) !== "1" && !noticeShown;
+    } catch {
+      return !noticeShown;
+    }
+  }
+  function undoNoticeShown() {
+    noticeShown = true;
+    try {
+      sessionStorage.setItem(NOTICE_KEY, "1");
+    } catch {
+    }
+  }
+  var UNDO_NOTICE = "Note: git changes the deck's files on disk, so the editor's undo and redo history is cleared afterwards (Ctrl+Z cannot go back past this point). You are told this once per session.";
+
   // src/ts/editor/compare.ts
   var view2 = document.getElementById("compare-view");
   var model = null;
@@ -13198,11 +13217,14 @@ Ctrl+Z takes it back.` : `Insert ${other.label}'s slide into the working copy?`;
     }
   }
   async function merging(branch) {
-    if (!confirm(
-      `Merge ${branch} into the working copy's branch? Commit or discard your own changes first; git refuses a merge that would overwrite them.`
-    )) {
+    const notice = undoNoticeDue();
+    const question = `Merge ${branch} into the working copy's branch? Commit or discard your own changes first; git refuses a merge that would overwrite them.`;
+    if (!confirm(notice ? `${question}
+
+${UNDO_NOTICE}` : question)) {
       return;
     }
+    if (notice) undoNoticeShown();
     view2.classList.add("busy");
     const res = await mergeBranch(branch, request);
     view2.classList.remove("busy");
@@ -14132,23 +14154,6 @@ Decks: new, open, recent` : "Decks";
     "restore",
     "create-branch"
   ]);
-  var NOTICE_KEY = "inkflow-git-undo-notice";
-  var noticeShown = false;
-  function undoNoticeDue() {
-    try {
-      return sessionStorage.getItem(NOTICE_KEY) !== "1" && !noticeShown;
-    } catch {
-      return !noticeShown;
-    }
-  }
-  function undoNoticeShown() {
-    noticeShown = true;
-    try {
-      sessionStorage.setItem(NOTICE_KEY, "1");
-    } catch {
-    }
-  }
-  var UNDO_NOTICE = "Note: git changes the deck's files on disk, so the editor's undo and redo history is cleared afterwards (Ctrl+Z cannot go back past this point). You are told this once per session.";
   async function git(op, args = {}, question = "") {
     const notice = REWRITES.has(op) && undoNoticeDue();
     if (question || notice) {

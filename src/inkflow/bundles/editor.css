@@ -1353,7 +1353,7 @@ body.previewing #canvas::after {
   border-radius: 5px;
   cursor: pointer;
 }
-.pbtn:hover {
+.pbtn:hover:not(:disabled) {
   border-color: var(--sel);
 }
 .pbtn.on {
@@ -2283,6 +2283,10 @@ body.offline #offline-banner {
   background: var(--sel);
   border-color: var(--sel);
   color: #fff;
+}
+.pbtn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .export-status {
   display: flex;

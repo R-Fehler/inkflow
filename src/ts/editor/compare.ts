@@ -41,6 +41,7 @@ import {
 import { closeDialog, dialogOpen, openDialog } from "./dialog";
 import { clear, h, toast } from "./dom";
 import { folderPicker } from "./folderpicker";
+import { UNDO_NOTICE, undoNoticeDue, undoNoticeShown } from "./gitnotice";
 import {
     edit,
     onConnect,
@@ -906,13 +907,12 @@ async function taking(): Promise<void> {
 }
 
 async function merging(branch: string): Promise<void> {
-    if (
-        !confirm(
-            `Merge ${branch} into the working copy's branch? Commit or discard your own changes first; git refuses a merge that would overwrite them.`,
-        )
-    ) {
+    const notice = undoNoticeDue();
+    const question = `Merge ${branch} into the working copy's branch? Commit or discard your own changes first; git refuses a merge that would overwrite them.`;
+    if (!confirm(notice ? `${question}\n\n${UNDO_NOTICE}` : question)) {
         return;
     }
+    if (notice) undoNoticeShown();
     view.classList.add("busy");
     const res = await mergeBranch(branch, request);
     view.classList.remove("busy");
