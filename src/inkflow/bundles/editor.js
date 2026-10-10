@@ -14039,7 +14039,27 @@ Decks: new, open, recent` : "Decks";
     if (bytes > 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
     return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
   }
+  function printOptions() {
+    const deck = ed.model?.deckSize;
+    if (!deck?.print) return null;
+    const marks = h("input", { type: "checkbox" });
+    const line = h(
+      "div",
+      { class: "export-print" },
+      h("p", { class: "hint" }, `Page: ${deck.label}, at its final size.`),
+      h(
+        "label",
+        {
+          title: "For a print shop that asks for bleed: the background runs 3 mm past each edge, and the corners are marked where to cut"
+        },
+        marks,
+        " 3 mm bleed and crop marks"
+      )
+    );
+    return { line, marks };
+  }
   function option(f2, stem) {
+    const print = f2.format === "pdf" ? printOptions() : null;
     const output = h("input", {
       type: "text",
       placeholder: f2.placeholder(stem),
@@ -14055,7 +14075,8 @@ Decks: new, open, recent` : "Decks";
       const result = await request({
         action: "export",
         format: f2.format,
-        output: output.value.trim() || null
+        output: output.value.trim() || null,
+        printMarks: print?.marks.checked ?? false
       });
       go.disabled = false;
       if (!result.ok) {
@@ -14081,7 +14102,8 @@ Decks: new, open, recent` : "Decks";
         "div",
         { class: "export-text" },
         h("strong", {}, f2.title),
-        h("p", { class: "hint" }, f2.text)
+        h("p", { class: "hint" }, f2.text),
+        print?.line ?? null
       ),
       h("div", { class: "export-row" }, output, go),
       status2

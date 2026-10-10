@@ -1902,6 +1902,14 @@ body.offline #offline-banner {
     margin: 4px 0 8px;
 }
 
+.export-print label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    cursor: pointer;
+}
+
 .export-row {
     display: flex;
     gap: 6px;

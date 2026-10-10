@@ -115,6 +115,7 @@ from inkflow.logging import logger
 from inkflow.manifest import Chart, Deck, Image, Inline, Slide, TextBox, Video
 from inkflow.ns import INKFLOW_SHOW_SHAPE
 from inkflow.pipeline import resolve_slide_src, slide_ids
+from inkflow.sizes import PageSize
 from inkflow.svgio import parse_svg_file
 from inkflow.sync import build_context, plan_preview
 from inkflow.transitions import Transition
@@ -323,7 +324,9 @@ class PdfBuilder(Protocol):
         output: Path,
         chromium: str | None = None,
         no_sandbox: bool = False,
-        size: tuple[int, int] | None = None,
+        size: PageSize | str | tuple[float, float] | None = None,
+        bleed: str | float | None = None,
+        crop_marks: bool = False,
     ) -> None: ...
 
 
@@ -2767,7 +2770,15 @@ class EditorSession:
                 if out.suffix.lower() != ".pdf":
                     out = out.with_suffix(".pdf")
                 root = hasattr(os, "geteuid") and os.geteuid() == 0
-                build_pdf(self.deck_path, out, no_sandbox=root)
+                # Print marks, for a print shop that asks for them: 3 mm bleed.
+                marks = bool(msg.get("printMarks"))
+                build_pdf(
+                    self.deck_path,
+                    out,
+                    no_sandbox=root,
+                    bleed="3mm" if marks else None,
+                    crop_marks=marks,
+                )
                 result = out
         except (RuntimeError, ValueError, OSError) as exc:
             raise EditError(str(exc)) from exc

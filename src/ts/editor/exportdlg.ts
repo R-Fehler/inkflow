@@ -38,7 +38,29 @@ function size(bytes: number): string {
     return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
 }
 
+// For a print deck (a poster): the page it prints on, and print marks.
+function printOptions(): { line: HTMLElement; marks: HTMLInputElement } | null {
+    const deck = ed.model?.deckSize;
+    if (!deck?.print) return null;
+    const marks = h("input", { type: "checkbox" }) as HTMLInputElement;
+    const line = h(
+        "div",
+        { class: "export-print" },
+        h("p", { class: "hint" }, `Page: ${deck.label}, at its final size.`),
+        h(
+            "label",
+            {
+                title: "For a print shop that asks for bleed: the background runs 3 mm past each edge, and the corners are marked where to cut",
+            },
+            marks,
+            " 3 mm bleed and crop marks",
+        ),
+    );
+    return { line, marks };
+}
+
 function option(f: (typeof FORMATS)[number], stem: string): HTMLElement {
+    const print = f.format === "pdf" ? printOptions() : null;
     const output = h("input", {
         type: "text",
         placeholder: f.placeholder(stem),
@@ -56,6 +78,7 @@ function option(f: (typeof FORMATS)[number], stem: string): HTMLElement {
             action: "export",
             format: f.format,
             output: output.value.trim() || null,
+            printMarks: print?.marks.checked ?? false,
         });
         go.disabled = false;
         if (!result.ok) {
@@ -86,6 +109,7 @@ function option(f: (typeof FORMATS)[number], stem: string): HTMLElement {
             { class: "export-text" },
             h("strong", {}, f.title),
             h("p", { class: "hint" }, f.text),
+            print?.line ?? null,
         ),
         h("div", { class: "export-row" }, output, go),
         status,
