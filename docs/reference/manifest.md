@@ -12,6 +12,7 @@ from inkflow import (
     TextBox,
     Chart,
     Overlay,
+    PageSize,
     Align,
     VAlign,
     Inline,
@@ -23,6 +24,8 @@ For the implemented animation and transition types,
 see the [Animations](animations.md) and [Transitions](transitions.md) reference pages.
 
 ::: inkflow.manifest.Deck
+
+::: inkflow.sizes.PageSize
 
 ::: inkflow.manifest.Slide
 

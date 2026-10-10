@@ -180,6 +180,13 @@ The built-in theme ships eighteen layouts, usable by bare name in any deck:
 Two more exist as building blocks: `base` is the parentless background,
 and `numbered` adds the slide-number zones.
 
+Four poster layouts are drawn on the A paper sizes' canvas (3179 x 4494
+portrait, 4494 x 3179 landscape), for a deck with `Deck(size="a0")` or another
+A size: `poster-3col` and `poster-2col` (portrait), `poster-landscape-3col` and
+`poster-landscape-4col`. Their zones are title, authors, affiliations, logos,
+col-1…col-4, references and contact, on the building blocks `poster-base` and
+`poster-landscape-base`. See [Posters and page sizes](../authoring/posters.md).
+
 ```python
 Slide("cover", md="title")
 Slide("two-cols", md="compare")

@@ -39,6 +39,7 @@ from inkflow.layout import (
 )
 from inkflow.logging import console, logger, report
 from inkflow.pipeline import resolve_slide_src
+from inkflow.sizes import PageSize
 from inkflow.svg import with_namespaces
 from inkflow.svgio import parse_svg_file
 from inkflow.themes import Theme
@@ -325,15 +326,19 @@ def add_slide(output: Path, parent: str | None, deck_path: Path, no_deck: bool) 
 
     OUTPUT is the path for the new SVG file. With `-p`/`--parent`, the slide is
     wired to that layout (bare name, 'local:foo', 'theme:foo', 'builtin:foo', or a
-    relative path) and given preview layers. Without it, a blank slide is created.
+    relative path) and given preview layers. Without it, a blank slide is created
+    at the deck's size (`Deck(size=...)`, 16:9 without one or without a deck).
     """
+    project_dir: Path | None = None
+    theme = None
+    canvas = PageSize.WIDESCREEN.canvas
     if parent is not None and not no_deck:
         project = Project.load(deck_path)
-        project_dir: Path | None = project.dir
+        project_dir = project.dir
         theme = project.theme
-    else:
-        project_dir = None
-        theme = None
+        canvas = project.deck.effective_size.canvas
+    elif not no_deck and deck_path.exists():
+        canvas = Project.load(deck_path).deck.effective_size.canvas
 
     output_path = output.resolve()
     if output_path.exists():
@@ -341,7 +346,7 @@ def add_slide(output: Path, parent: str | None, deck_path: Path, no_deck: bool) 
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        create_slide(parent, output_path, project_dir, theme)
+        create_slide(parent, output_path, project_dir, theme, canvas)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 

@@ -38,9 +38,20 @@ export interface InkStroke extends StrokeStyle {
 
 export const HIGHLIGHTER_OPACITY = 0.35;
 
-// Slides are authored at 1920 units wide; sizes are given in those and scaled
-// to the canvas actually drawn on, so a preset looks the same on any slide.
+// Sizes are given for a 1920 x 1080 slide and scaled to the canvas actually
+// drawn on, by the larger of the two ratios: a slide is shown fitted to a
+// screen, so a preset looks the same on screen on a 16:9 slide, a phone-shaped
+// one or an A0 poster (shown at a quarter of its width's scale).
 export const REFERENCE_WIDTH = 1920;
+export const REFERENCE_HEIGHT = 1080;
+
+/** How much larger than on a 1920 x 1080 slide a stroke is drawn on a view
+ * `width` x `height` slide units (0 or less: not known). */
+export function inkScale(width: number, height = 0): number {
+    const w = width > 0 ? width / REFERENCE_WIDTH : 0;
+    const h = height > 0 ? height / REFERENCE_HEIGHT : 0;
+    return Math.max(w, h) || 1;
+}
 export const PEN_SIZES = [3, 6, 12];
 export const HIGHLIGHTER_SIZES = [20, 36, 60];
 

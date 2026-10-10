@@ -37,6 +37,16 @@ const LABELS: Record<string, [string, string]> = {
     fact: ["Big number", "One number or claim"],
     quote: ["Quote", "A pull quote with attribution"],
     end: ["Closing", "The last slide"],
+    "poster-3col": ["Poster, three columns", "Title band, sections, footer"],
+    "poster-2col": ["Poster, two columns", "Title band, sections, footer"],
+    "poster-landscape-3col": [
+        "Landscape poster, three columns",
+        "Title band, sections, footer",
+    ],
+    "poster-landscape-4col": [
+        "Landscape poster, four columns",
+        "Title band, sections, footer",
+    ],
 };
 
 const root = document.getElementById("gallery")!;
@@ -63,6 +73,7 @@ function thumbnail(p: Preview): HTMLElement {
     const svg = box.querySelector("svg");
     if (svg) {
         const vb = parseViewBox(svg.getAttribute("viewBox"));
+        box.style.aspectRatio = `${vb.w} / ${vb.h}`;
         svg.setAttribute("width", "100%");
         svg.setAttribute("height", "100%");
         svg.querySelectorAll(".anim-pending").forEach((el) => {

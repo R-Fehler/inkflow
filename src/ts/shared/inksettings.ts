@@ -5,9 +5,9 @@
 import {
     HIGHLIGHTER_SIZES,
     type InkTool,
+    inkScale,
     PEN_SIZES,
     type PenTool,
-    REFERENCE_WIDTH,
     type StrokeStyle,
     SWATCHES,
 } from "./ink";
@@ -98,15 +98,17 @@ export function sizesOf(tool: PenTool): number[] {
     return tool === "highlighter" ? HIGHLIGHTER_SIZES : PEN_SIZES;
 }
 
-// The style a new stroke gets. `width` is the width of the slide area on
-// screen in slide units (the viewBox, which the zoom camera narrows), so a
-// stroke has the same width on screen however far in it is drawn.
+// The style a new stroke gets. `width` and `height` are the size of the slide
+// area on screen in slide units (the viewBox, which the zoom camera narrows),
+// so a stroke has the same width on screen however far in it is drawn, and on
+// a slide of any shape (`inkScale`).
 // `tokenColor` resolves a theme token to its current colour, or null.
 export function styleFor(
     s: InkSettings,
     tool: PenTool,
     width: number,
     tokenColor: (token: string) => string | null,
+    height = 0,
 ): StrokeStyle {
     const t = s[tool];
     const swatch = t.swatch === null ? null : SWATCHES[t.swatch];
@@ -117,9 +119,7 @@ export function styleFor(
         tool,
         fill: normalizeHex(fill) ?? "#000000",
         token: swatch?.token ?? null,
-        size:
-            (sizesOf(tool)[t.size] * (width > 0 ? width : REFERENCE_WIDTH)) /
-            REFERENCE_WIDTH,
+        size: sizesOf(tool)[t.size] * inkScale(width, height),
     };
 }
 

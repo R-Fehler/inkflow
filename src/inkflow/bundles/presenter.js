@@ -558,6 +558,12 @@
   // src/ts/shared/ink.ts
   var HIGHLIGHTER_OPACITY = 0.35;
   var REFERENCE_WIDTH = 1920;
+  var REFERENCE_HEIGHT = 1080;
+  function inkScale(width, height = 0) {
+    const w2 = width > 0 ? width / REFERENCE_WIDTH : 0;
+    const h2 = height > 0 ? height / REFERENCE_HEIGHT : 0;
+    return Math.max(w2, h2) || 1;
+  }
   var PEN_SIZES = [3, 6, 12];
   var HIGHLIGHTER_SIZES = [20, 36, 60];
   var SWATCHES = [
@@ -1152,7 +1158,7 @@
   function sizesOf(tool) {
     return tool === "highlighter" ? HIGHLIGHTER_SIZES : PEN_SIZES;
   }
-  function styleFor(s2, tool, width, tokenColor2) {
+  function styleFor(s2, tool, width, tokenColor2, height = 0) {
     const t2 = s2[tool];
     const swatch = t2.swatch === null ? null : SWATCHES[t2.swatch];
     const fill = swatch ? swatch.token && tokenColor2(swatch.token) || swatch.hex : t2.custom;
@@ -1160,7 +1166,7 @@
       tool,
       fill: normalizeHex(fill) ?? "#000000",
       token: swatch?.token ?? null,
-      size: sizesOf(tool)[t2.size] * (width > 0 ? width : REFERENCE_WIDTH) / REFERENCE_WIDTH
+      size: sizesOf(tool)[t2.size] * inkScale(width, height)
     };
   }
   function normalizeHex(color) {
@@ -1552,8 +1558,8 @@
   }
 
   // src/ts/shared/viewbox.ts
-  var DEFAULT_VIEWBOX = "0 0 1920 1080";
-  function parseViewBox(attr, fallback = DEFAULT_VIEWBOX) {
+  var deckCanvas = { w: 1920, h: 1080 };
+  function parseViewBox(attr, fallback = `0 0 ${deckCanvas.w} ${deckCanvas.h}`) {
     const parts = (attr ?? "").trim().split(/[\s,]+/).map(Number);
     const valid = parts.length === 4 && parts.every((n2) => Number.isFinite(n2)) && parts[2] > 0 && parts[3] > 0;
     const [x2, y2, w2, h2] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
@@ -2140,7 +2146,13 @@
       tool: () => settings.tool,
       allows: (e2) => !isCameraGesture(e2) && !overviewEl?.classList.contains("visible") && !e2.target.closest(".ink-palette"),
       svg: slideSvg,
-      style: (tool, svg) => styleFor(settings, tool, svg.viewBox.baseVal.width, tokenColor),
+      style: (tool, svg) => styleFor(
+        settings,
+        tool,
+        svg.viewBox.baseVal.width,
+        tokenColor,
+        svg.viewBox.baseVal.height
+      ),
       *erasables(svg) {
         yield* svg.querySelectorAll(
           ".inkflow-live-ink [data-held] path[id]"
@@ -4950,7 +4962,9 @@
     svg.style.width = `${vb.w}px`;
     svg.style.height = `${vb.h}px`;
     const scale = Math.min(thumb.clientWidth / vb.w, thumb.clientHeight / vb.h);
-    svg.style.transform = `scale(${scale})`;
+    const dx = (thumb.clientWidth - vb.w * scale) / 2;
+    const dy = (thumb.clientHeight - vb.h * scale) / 2;
+    svg.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
   }
   function computeCols() {
     const cols = getComputedStyle(overviewGrid).gridTemplateColumns.split(" ").length;
@@ -4963,8 +4977,9 @@
     const availH = overview.clientHeight - parseFloat(getComputedStyle(overview).paddingTop) - parseFloat(getComputedStyle(overview).paddingBottom);
     const [vbW, vbH] = firstSlideViewBox();
     const ratio = vbH / vbW;
-    let cols = n2;
-    for (let c2 = 1; c2 <= n2; c2++) {
+    const most = Math.max(n2, 8);
+    let cols = most;
+    for (let c2 = 1; c2 <= most; c2++) {
       const thumbW = (availW - (c2 - 1) * gap) / c2;
       const rows = Math.ceil(n2 / c2);
       if (rows * (thumbW * ratio + gap) - gap <= availH) {

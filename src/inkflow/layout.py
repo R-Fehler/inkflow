@@ -26,7 +26,13 @@ from inkflow.ns import (
     INKFLOW_OVERLAY_SRC,
     INKFLOW_PARENT,
 )
-from inkflow.svg import compose_with_ancestors, ensure_defs, with_namespaces
+from inkflow.sizes import PageSize, same_aspect
+from inkflow.svg import (
+    canvas_size,
+    compose_with_ancestors,
+    ensure_defs,
+    with_namespaces,
+)
 from inkflow.svgio import SvgElement, parse_svg_file
 
 if TYPE_CHECKING:
@@ -425,19 +431,22 @@ def create_slide(
     output_path: Path,
     project_dir: Path | None,
     theme: Theme | None,
+    canvas: tuple[float, float] = (1920, 1080),
 ) -> None:
     """Create a minimal slide SVG, optionally wired to a layout parent.
 
     With ``parent_str`` set, resolves the parent, records ``inkflow:parent``, and
-    injects ancestor layout layers for editor preview. With ``parent_str`` None,
-    writes a blank slide carrying no parent.
+    injects ancestor layout layers for editor preview; the slide takes the
+    parent's size. With ``parent_str`` None, writes a blank slide of ``canvas``
+    (the deck's `PageSize.canvas`) carrying no parent.
 
     Raises ValueError if a given parent string cannot be resolved.
     """
+    w, h = (f"{v:g}" for v in canvas)
     if parent_str is None:
         blank = (
             f'<svg xmlns="{ns.SVG}"\n'
-            f'     viewBox="0 0 1920 1080" width="1920" height="1080">\n'
+            f'     viewBox="0 0 {w} {h}" width="{w}" height="{h}">\n'
             f"</svg>\n"
         )
         output_path.write_text(blank, encoding="utf-8")
@@ -445,7 +454,7 @@ def create_slide(
 
     parent_abs = resolve_parent_path(parent_str, output_path.parent, project_dir, theme)
 
-    view_box, width, height = "0 0 1920 1080", "1920", "1080"
+    view_box, width, height = f"0 0 {w} {h}", w, h
     if parent_abs.exists():
         root = parse_svg_file(parent_abs)
         view_box = root.get("viewBox", view_box)
@@ -597,6 +606,33 @@ def discover_layouts(
 ) -> list[tuple[str, Path]]:
     """Return (source_label, path) pairs from every available layout directory."""
     return discover_assets(AssetKind.LAYOUT, project_dir, theme)
+
+
+def layout_canvas(path: Path) -> tuple[float, float] | None:
+    """A layout's drawing size (`svg.canvas_size`), or ``None`` if unreadable."""
+    try:
+        return canvas_size(parse_svg_file(path))
+    except Exception:
+        return None
+
+
+def layouts_for(
+    layouts: list[tuple[str, Path]], size: PageSize
+) -> list[tuple[str, Path]]:
+    """The layouts to offer a deck of ``size``: the built-in ones drawn in its
+    shape (a poster deck gets the poster layouts, a 16:9 deck the 16:9 ones)
+    and every layout of the project's and the theme's own, whatever its shape.
+    When no built-in layout has its shape (a letter-sized deck), all are."""
+    builtin = [entry for entry in layouts if entry[0] == "builtin"]
+    fitting = {
+        path
+        for _, path in builtin
+        if (canvas := layout_canvas(path)) is not None
+        and same_aspect(canvas, size.canvas)
+    }
+    if not fitting:
+        return layouts
+    return [e for e in layouts if e[0] != "builtin" or e[1] in fitting]
 
 
 def discover_overlays(

@@ -23,6 +23,17 @@ files, then each zone with where its text lives (`md` = the slide's `.md`,
 as deck.py writes it. Read it instead of opening every file; open only the
 files you change. `inkflow layouts` lists every layout with its zones.
 
+## Posters and page sizes
+
+A deck may be a poster or any other size: `Deck(size="a0")` (also `"a1"`,
+`"a0-landscape"`, `"9:16"`, `PageSize.mm(600, 900)`; the header of
+`inkflow outline` shows it). New slides take its canvas (A sizes: 3179x4494
+units). Posters use the `poster-*` layouts (zones `title`, `authors`,
+`affiliations`, `logos`, `col-1`… , `references`, `contact`); on a print deck
+`inkflow render --check` reports text too small to read on paper (in pt) and
+pictures under 150 dpi at their printed size; `inkflow export` writes the PDF
+at the printed size.
+
 ## What the author is looking at
 
 `inkflow context` prints the editor's current slide, build step and
@@ -252,7 +263,8 @@ a branch", don't touch their deck:
 
 ## Check your work
 
-1. `inkflow verify` for authoring mistakes (missing ids, zones, layouts).
+1. `inkflow verify` for authoring mistakes (missing ids, zones, layouts,
+   slides of another shape than the deck's size).
 2. `inkflow render --check` measures every slide in a browser, without images,
    and prints one line per layout problem (`slide 3 (intro): #zone-content:
    text overflows its zone by 120px (bottom)`; also code blocks cut off,

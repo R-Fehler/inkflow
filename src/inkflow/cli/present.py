@@ -15,6 +15,7 @@ from inkflow.export import build_pdf, build_static_html
 from inkflow.logging import Levels, report
 from inkflow.server import DEFAULT_PORT, open_browser, pick_ports
 from inkflow.server import serve as _serve
+from inkflow.sizes import PageSize
 
 # The editor's Export dialog runs the same builds as the commands below.
 EXPORTERS = Exporters(html=build_static_html, pdf=build_pdf)
@@ -277,8 +278,22 @@ def build_cmd(deck_path: Path, output: str | None, inline_assets: bool) -> None:
 @click.option(
     "--size",
     default=None,
-    metavar="WxH",
-    help="Override PDF page size, e.g. 1280x720. Auto-detected from slides if not set.",
+    metavar="SIZE",
+    help="Page size for every page: a0, a1-landscape, letter, 841x1189mm, "
+    + "36x48in or 1920x1080 (px). Default: the deck's size, else each slide's own.",
+)
+@click.option(
+    "--bleed",
+    default=None,
+    metavar="LENGTH",
+    help="Print the background this far past each trimmed edge, for a print "
+    + "shop that asks for bleed (3mm, 0.125in; a bare number is mm).",
+)
+@click.option(
+    "--crop-marks",
+    "crop_marks",
+    is_flag=True,
+    help="Mark each page's corners outside the bleed, where it is to be cut.",
 )
 def export_cmd(
     deck_path: Path,
@@ -286,8 +301,16 @@ def export_cmd(
     chromium: str | None,
     no_sandbox: bool,
     size: str | None,
+    bleed: str | None,
+    crop_marks: bool,
 ) -> None:
     """Export a PDF via headless Chromium — one page per slide, no animations.
+
+    Each page is the deck's size (`Deck(size="a0")`): a poster prints at its
+    final size, as vector text and graphics. A deck without a size prints each
+    slide at its own: an SVG's `width`/`height` in mm, cm or inches (an Inkscape
+    A0 page), else its viewBox at 1 unit = 1 px. `--size` prints every slide on
+    one sheet instead, scaled to fit (a poster drawn for A0 prints on A1).
 
     Requires a Chromium-based browser on the system; point `--chromium` at it if
     it is not auto-detected. Pass `--no-sandbox` when running as root or in
@@ -295,22 +318,19 @@ def export_cmd(
     """
     resolved = resolve_deck_path(deck_path)
     out = Path(output).resolve() if output else resolved.with_suffix(".pdf")
-    parsed_size: tuple[int, int] | None = None
-    if size is not None:
-        try:
-            parts = size.lower().split("x")
-            parsed_size = (int(parts[0]), int(parts[1]))
-        except (ValueError, IndexError):
-            raise click.ClickException(
-                f"--size must be WxH (e.g. 1920x1080), got: {size!r}"
-            ) from None
+    try:
+        sheet = PageSize(size) if size is not None else None
+    except ValueError as exc:
+        raise click.ClickException(f"--size: {exc}") from None
     try:
         build_pdf(
             resolved,
             out,
             chromium,
             no_sandbox or (hasattr(os, "geteuid") and os.geteuid() == 0),
-            size=parsed_size,
+            size=sheet,
+            bleed=bleed,
+            crop_marks=crop_marks,
         )
     except (RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

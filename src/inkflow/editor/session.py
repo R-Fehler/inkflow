@@ -34,7 +34,6 @@ from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
 from inkflow.assets import AssetRoots
 from inkflow.charts import (
-    ZONE_TEXT_SCALE,
     ChartError,
     ResolvedChart,
     Table,
@@ -116,6 +115,7 @@ from inkflow.logging import logger
 from inkflow.manifest import Chart, Deck, Image, Inline, Slide, TextBox, Video
 from inkflow.ns import INKFLOW_SHOW_SHAPE
 from inkflow.pipeline import resolve_slide_src, slide_ids
+from inkflow.sizes import PageSize
 from inkflow.svgio import parse_svg_file
 from inkflow.sync import build_context, plan_preview
 from inkflow.transitions import Transition
@@ -324,7 +324,9 @@ class PdfBuilder(Protocol):
         output: Path,
         chromium: str | None = None,
         no_sandbox: bool = False,
-        size: tuple[int, int] | None = None,
+        size: PageSize | str | tuple[float, float] | None = None,
+        bleed: str | float | None = None,
+        crop_marks: bool = False,
     ) -> None: ...
 
 
@@ -958,7 +960,8 @@ class EditorSession:
             if slide is not None and slide.font_size is not None
             else deck.effective_font_size
         )
-        root = render(resolved, width, height, zone, size * ZONE_TEXT_SCALE)
+        scale = deck.effective_size.chart_text_scale
+        root = render(resolved, width, height, zone, size * scale)
         return {"ok": True, "svg": etree.tostring(root, encoding="unicode")}
 
     def _chart_data(self, msg: dict[str, object], deck: Deck) -> dict[str, object]:
@@ -1527,6 +1530,7 @@ class EditorSession:
                     git=msg.get("git") is not False,
                     lfs=msg.get("lfs") is not False,
                     current=self.deck_path if self.has_deck else None,
+                    size=str(msg["size"]) if msg.get("size") else None,
                 )
             else:
                 deck_py = projects.deck_file(str(msg.get("path") or ""))
@@ -2335,7 +2339,7 @@ class EditorSession:
             box = view_box(parse_svg_file(src))
         except (OSError, ValueError):
             box = None
-        return box or (0.0, 0.0, 1920.0, 1080.0)
+        return box or (0.0, 0.0, *deck.effective_size.canvas)
 
     def _ink(
         self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
@@ -2466,7 +2470,9 @@ class EditorSession:
         # create_slide resolves the parent and injects the Inkscape preview
         # layers; it writes to disk, so its file only becomes the transaction's.
         try:
-            create_slide(parent, path, self.project_dir, deck.theme)
+            create_slide(
+                parent, path, self.project_dir, deck.theme, deck.effective_size.canvas
+            )
             # Layout layers and theme colours, so it looks right in Inkscape.
             text = self._inkscape_preview(path, deck)
             data = text.encode("utf-8") if text is not None else path.read_bytes()
@@ -2765,7 +2771,15 @@ class EditorSession:
                 if out.suffix.lower() != ".pdf":
                     out = out.with_suffix(".pdf")
                 root = hasattr(os, "geteuid") and os.geteuid() == 0
-                build_pdf(self.deck_path, out, no_sandbox=root)
+                # Print marks, for a print shop that asks for them: 3 mm bleed.
+                marks = bool(msg.get("printMarks"))
+                build_pdf(
+                    self.deck_path,
+                    out,
+                    no_sandbox=root,
+                    bleed="3mm" if marks else None,
+                    crop_marks=marks,
+                )
                 result = out
         except (RuntimeError, ValueError, OSError) as exc:
             raise EditError(str(exc)) from exc

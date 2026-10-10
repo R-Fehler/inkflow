@@ -110,6 +110,10 @@ class DeckOutline:
     mode: str
     transition: str
     overlays: list[str]
+    size: str | None = None
+    """The deck's ``Deck(size=)`` (``a0``, ``16:9``), ``None`` when it sets none."""
+    page: str | None = None
+    """The printed page that size names (``A0 portrait (841 x 1189 mm)``)."""
 
 
 def _rel(path: str | Path | None, project_dir: Path) -> str | None:
@@ -375,10 +379,13 @@ def build_outline(deck: Deck, deck_path: Path, slides: list[SlideData]) -> DeckO
     return DeckOutline(
         deck=deck_path.name,
         slides=out,
-        canvas=canvas,
+        canvas=canvas
+        or ([_num(v) for v in deck.effective_size.canvas] if deck.size else None),
         mode=str(deck.effective_mode),
         transition=_code(deck.effective_transition),
         overlays=[o.src for o in deck.effective_overlays],
+        size=str(deck.size) if deck.size is not None else None,
+        page=deck.effective_size.label if deck.size is not None else None,
     )
 
 
@@ -496,7 +503,12 @@ def format_outline(outline: DeckOutline, number: int | None = None) -> str:
     head = f"{outline.deck}: {shown} slides"
     if hidden:
         head += f" (+{hidden} hidden)"
-    head += f", {_size(outline.canvas)}, mode {outline.mode}"
+    if outline.size is not None:
+        head += f", size {outline.size}: {outline.page}, canvas"
+    head += (
+        f" {_size(outline.canvas)}" if outline.size else f", {_size(outline.canvas)}"
+    )
+    head += f", mode {outline.mode}"
     head += f", transition {outline.transition}"
     head += ", overlays " + (", ".join(outline.overlays) or "none")
     lines = [

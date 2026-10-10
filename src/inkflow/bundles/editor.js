@@ -222,8 +222,11 @@
   }
 
   // src/ts/shared/viewbox.ts
-  var DEFAULT_VIEWBOX = "0 0 1920 1080";
-  function parseViewBox(attr, fallback = DEFAULT_VIEWBOX) {
+  var deckCanvas = { w: 1920, h: 1080 };
+  function setDeckCanvas(w2, h3) {
+    if (w2 > 0 && h3 > 0) deckCanvas = { w: w2, h: h3 };
+  }
+  function parseViewBox(attr, fallback = `0 0 ${deckCanvas.w} ${deckCanvas.h}`) {
     const parts = (attr ?? "").trim().split(/[\s,]+/).map(Number);
     const valid = parts.length === 4 && parts.every((n3) => Number.isFinite(n3)) && parts[2] > 0 && parts[3] > 0;
     const [x2, y2, w2, h3] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
@@ -1109,6 +1112,13 @@
   var commandHandler = () => {
   };
   var pendingSlides = null;
+  function applyDeckSize(model2) {
+    const size3 = model2.deckSize;
+    if (!size3) return;
+    const [w2, h3] = size3.canvas;
+    setDeckCanvas(w2, h3);
+    document.documentElement.style.setProperty("--deck-ar", `${w2} / ${h3}`);
+  }
   function onCommand(fn) {
     commandHandler = fn;
   }
@@ -1175,6 +1185,7 @@
             pendingSlides = null;
           }
           ed.model = msg.model;
+          applyDeckSize(ed.model);
           ed.rebuilt = true;
           if (msg.history) {
             setHistory(msg.history);
@@ -1388,7 +1399,7 @@
   function viewBoxSize() {
     const svg = slideRoot();
     const vb = parseViewBox(svg?.getAttribute("viewBox") ?? null);
-    return { w: vb.w || 1920, h: vb.h || 1080 };
+    return { w: vb.w, h: vb.h };
   }
   function scale() {
     const { w: w2, h: h3 } = viewBoxSize();
@@ -1590,7 +1601,7 @@
   function slideSize() {
     const svg = slideRoot();
     const vb = parseViewBox(svg?.getAttribute("viewBox") ?? null);
-    return { x: vb.x, y: vb.y, width: vb.w || 1920, height: vb.h || 1080 };
+    return { x: vb.x, y: vb.y, width: vb.w, height: vb.h };
   }
   var GEOM_ATTRS = [
     "x",
@@ -3437,7 +3448,17 @@
     center: ["Centered", "One centered block"],
     fact: ["Big number", "One number or claim"],
     quote: ["Quote", "A pull quote with attribution"],
-    end: ["Closing", "The last slide"]
+    end: ["Closing", "The last slide"],
+    "poster-3col": ["Poster, three columns", "Title band, sections, footer"],
+    "poster-2col": ["Poster, two columns", "Title band, sections, footer"],
+    "poster-landscape-3col": [
+      "Landscape poster, three columns",
+      "Title band, sections, footer"
+    ],
+    "poster-landscape-4col": [
+      "Landscape poster, four columns",
+      "Title band, sections, footer"
+    ]
   };
   var root = document.getElementById("gallery");
   var cache = null;
@@ -3460,6 +3481,7 @@
     const svg = box.querySelector("svg");
     if (svg) {
       const vb = parseViewBox(svg.getAttribute("viewBox"));
+      box.style.aspectRatio = `${vb.w} / ${vb.h}`;
       svg.setAttribute("width", "100%");
       svg.setAttribute("height", "100%");
       svg.querySelectorAll(".anim-pending").forEach((el2) => {
@@ -3704,6 +3726,7 @@
         svg.setAttribute("height", "100%");
         svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
         svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
+        box.style.aspectRatio = `${vb.w} / ${vb.h}`;
         svg.querySelectorAll(".anim-pending").forEach((el2) => {
           el2.classList.remove("anim-pending");
         });
@@ -5208,10 +5231,24 @@
     }
     return true;
   }
+  function drawScale() {
+    const vb = slideRoot()?.viewBox.baseVal;
+    const short = vb && vb.width > 0 ? Math.min(vb.width, vb.height) : 1080;
+    return Math.max(1, Math.round(short / 1080 * 10) / 10);
+  }
+  function textScale() {
+    return (ed.model?.deckSize?.fontSize ?? 36) / 36;
+  }
   var SHAPE_STYLE = {
-    rect: 'class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:4"',
-    ellipse: 'class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:4"',
-    line: 'class="inkflow-stroke-text" style="fill:none;stroke-width:6;stroke-linecap:round"'
+    get rect() {
+      return `class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:${fmt(4 * drawScale())}"`;
+    },
+    get ellipse() {
+      return `class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:${fmt(4 * drawScale())}"`;
+    },
+    get line() {
+      return `class="inkflow-stroke-text" style="fill:none;stroke-width:${fmt(6 * drawScale())};stroke-linecap:round"`;
+    }
   };
   function shapeXml(tool, a2, b2) {
     const x2 = Math.min(a2.x, b2.x);
@@ -5220,13 +5257,13 @@
     const h3 = Math.abs(b2.y - a2.y);
     switch (tool) {
       case "rect":
-        return `<rect x="${fmt(x2)}" y="${fmt(y2)}" width="${fmt(w2)}" height="${fmt(h3)}" rx="16" ${SHAPE_STYLE.rect}/>`;
+        return `<rect x="${fmt(x2)}" y="${fmt(y2)}" width="${fmt(w2)}" height="${fmt(h3)}" rx="${fmt(16 * drawScale())}" ${SHAPE_STYLE.rect}/>`;
       default:
         return `<ellipse cx="${fmt(x2 + w2 / 2)}" cy="${fmt(y2 + h3 / 2)}" rx="${fmt(w2 / 2)}" ry="${fmt(h3 / 2)}" ${SHAPE_STYLE.ellipse}/>`;
     }
   }
   function textXml(p2) {
-    return `<text x="${fmt(p2.x)}" y="${fmt(p2.y)}" class="inkflow-fill-text" style="font-size:56px;font-family:var(--inkflow-body-font, sans-serif)">Text</text>`;
+    return `<text x="${fmt(p2.x)}" y="${fmt(p2.y)}" class="inkflow-fill-text" style="font-size:${fmt(56 * textScale())}px;font-family:var(--inkflow-body-font, sans-serif)">Text</text>`;
   }
   var draft = null;
   function drawDraft(tool, a2, b2, ends) {
@@ -5417,11 +5454,12 @@
       height: Math.abs(b2.y - a2.y)
     };
     if (box.width < 40 || box.height < 20) {
+      const k2 = textScale();
       box = {
         x: a2.x,
-        y: a2.y - 40,
-        width: Math.max(300, Math.min(900, vw - a2.x - 60)),
-        height: 100
+        y: a2.y - 40 * k2,
+        width: Math.max(300 * k2, Math.min(900 * k2, vw - a2.x - 60 * k2)),
+        height: 100 * k2
       };
     }
     const plain2 = ed.layoutMode || !ed.model?.deckEditable && !slide.md;
@@ -13709,11 +13747,27 @@ Decks: new, open, recent` : "Decks";
       nameEdited = true;
       update();
     });
+    let titleEdited = false;
     title2.addEventListener("input", () => {
+      titleEdited = true;
       if (!nameEdited) name2.value = slug(title2.value);
       update();
     });
     let look = data.themes.some((t2) => t2.id === "current") ? "current" : "starter";
+    const size3 = h(
+      "select",
+      {},
+      ...(data.posterSizes ?? []).map(
+        (s2) => h("option", { value: s2.id }, s2.label)
+      )
+    );
+    const sizeRow = h(
+      "label",
+      { class: "field inline poster-size" },
+      h("span", { class: "field-label" }, "Paper size"),
+      size3
+    );
+    sizeRow.hidden = true;
     const looks = h(
       "div",
       { class: "look-list" },
@@ -13726,6 +13780,12 @@ Decks: new, open, recent` : "Decks";
         radio.checked = t2.id === look;
         radio.addEventListener("change", () => {
           look = t2.id;
+          sizeRow.hidden = look !== "poster";
+          if (look === "poster" && !titleEdited) {
+            title2.value = "My poster";
+            if (!nameEdited) name2.value = slug(title2.value);
+            update();
+          }
         });
         return h(
           "label",
@@ -13793,6 +13853,7 @@ Decks: new, open, recent` : "Decks";
         path: join(folder.path, name2.value.trim()),
         title: title2.value,
         theme: look,
+        size: look === "poster" ? size3.value : null,
         git: !folder.repo && git2.checked,
         lfs: lfs.checked
       });
@@ -13820,7 +13881,7 @@ Decks: new, open, recent` : "Decks";
           "div",
           { class: "field" },
           h("span", { class: "field-label" }, "Look"),
-          looks
+          h("div", {}, looks, sizeRow)
         ),
         h(
           "div",
@@ -13955,7 +14016,7 @@ Decks: new, open, recent` : "Decks";
           // picker since counts.
           action(
             "New deck\u2026",
-            "Start from one of four looks",
+            "Start from one of five looks",
             async () => {
               const fresh = await info2();
               if (fresh) newDeckDialog(fresh);
@@ -14011,7 +14072,27 @@ Decks: new, open, recent` : "Decks";
     if (bytes > 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
     return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
   }
+  function printOptions() {
+    const deck = ed.model?.deckSize;
+    if (!deck?.print) return null;
+    const marks = h("input", { type: "checkbox" });
+    const line = h(
+      "div",
+      { class: "export-print" },
+      h("p", { class: "hint" }, `Page: ${deck.label}, at its final size.`),
+      h(
+        "label",
+        {
+          title: "For a print shop that asks for bleed: the background runs 3 mm past each edge, and the corners are marked where to cut"
+        },
+        marks,
+        " 3 mm bleed and crop marks"
+      )
+    );
+    return { line, marks };
+  }
   function option(f2, stem) {
+    const print = f2.format === "pdf" ? printOptions() : null;
     const output = h("input", {
       type: "text",
       placeholder: f2.placeholder(stem),
@@ -14027,7 +14108,8 @@ Decks: new, open, recent` : "Decks";
       const result = await request({
         action: "export",
         format: f2.format,
-        output: output.value.trim() || null
+        output: output.value.trim() || null,
+        printMarks: print?.marks.checked ?? false
       });
       go.disabled = false;
       if (!result.ok) {
@@ -14053,7 +14135,8 @@ Decks: new, open, recent` : "Decks";
         "div",
         { class: "export-text" },
         h("strong", {}, f2.title),
-        h("p", { class: "hint" }, f2.text)
+        h("p", { class: "hint" }, f2.text),
+        print?.line ?? null
       ),
       h("div", { class: "export-row" }, output, go),
       status2
@@ -15227,6 +15310,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   // src/ts/shared/ink.ts
   var HIGHLIGHTER_OPACITY = 0.35;
   var REFERENCE_WIDTH = 1920;
+  var REFERENCE_HEIGHT = 1080;
+  function inkScale(width, height = 0) {
+    const w2 = width > 0 ? width / REFERENCE_WIDTH : 0;
+    const h3 = height > 0 ? height / REFERENCE_HEIGHT : 0;
+    return Math.max(w2, h3) || 1;
+  }
   var PEN_SIZES = [3, 6, 12];
   var HIGHLIGHTER_SIZES = [20, 36, 60];
   var SWATCHES = [
@@ -15744,7 +15833,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   function sizesOf(tool) {
     return tool === "highlighter" ? HIGHLIGHTER_SIZES : PEN_SIZES;
   }
-  function styleFor(s2, tool, width, tokenColor2) {
+  function styleFor(s2, tool, width, tokenColor2, height = 0) {
     const t2 = s2[tool];
     const swatch = t2.swatch === null ? null : SWATCHES[t2.swatch];
     const fill = swatch ? swatch.token && tokenColor2(swatch.token) || swatch.hex : t2.custom;
@@ -15752,7 +15841,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       tool,
       fill: normalizeHex(fill) ?? "#000000",
       token: swatch?.token ?? null,
-      size: sizesOf(tool)[t2.size] * (width > 0 ? width : REFERENCE_WIDTH) / REFERENCE_WIDTH
+      size: sizesOf(tool)[t2.size] * inkScale(width, height)
     };
   }
   function normalizeHex(color) {
@@ -16087,7 +16176,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       fingers: () => settings.fingers,
       tool: () => settings.tool,
       svg: () => currentSlide()?.ink ? slideRoot() : null,
-      style: (tool, svg) => styleFor(settings, tool, svg.viewBox.baseVal.width, tokenColor),
+      style: (tool, svg) => styleFor(
+        settings,
+        tool,
+        svg.viewBox.baseVal.width,
+        tokenColor,
+        svg.viewBox.baseVal.height
+      ),
       *erasables(svg) {
         yield* svg.querySelectorAll(
           ".inkflow-ink path[id], .inkflow-live-ink path[id]"

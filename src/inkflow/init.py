@@ -5,6 +5,8 @@ from importlib.metadata import PackageNotFoundError, version
 from importlib.resources import files
 from pathlib import Path
 
+from inkflow.sizes import PageSize
+
 _DECK_PY = """\
 from inkflow import Deck, Slide, animations
 
@@ -94,6 +96,71 @@ def scaffold(target: Path) -> None:
 
     (target / "deck.py").write_text(_DECK_PY, encoding="utf-8")
     write_pyproject(target)
+
+
+_POSTER_DECK_PY = """\
+from inkflow import Deck, Image, Slide
+
+
+def main() -> Deck:
+    return Deck(
+        title="My Poster",
+        # The printed page: a0 (841 x 1189 mm), a1, a0-landscape, letter, or
+        # PageSize.mm(...). The A sizes share one canvas, so this poster prints
+        # at any of them, its text in proportion.
+        size="{size}",
+        slides=[
+            # One page: the poster layout's zones filled from slides/poster.md
+            # (::authors::, ::col-1::, ::references::, ...).
+            Slide(
+                "{layout}",
+                md="poster",
+                zones={{"logos": Image("figures/logo.svg")}},
+            ),
+        ],
+    )
+"""
+
+# Copied from src/inkflow/templates/poster/ into a new poster project.
+_POSTER_FILES = {
+    "poster.md": "slides/poster.md",
+    "figures/method.svg": "figures/method.svg",
+    "figures/logo.svg": "figures/logo.svg",
+    "data/results.csv": "data/results.csv",
+}
+
+
+def poster_layout(size: PageSize) -> str:
+    """The built-in poster layout for a sheet of ``size``: three columns
+    portrait or landscape (the template's three sections)."""
+    w, h = size.canvas
+    return "poster-landscape-3col" if w > h else "poster-3col"
+
+
+def scaffold_poster(target: Path, size: str = "a0") -> PageSize:
+    """Create a conference poster project in ``target``: one page on a
+    built-in poster layout, its sections in ``slides/poster.md``, a chart
+    from ``data/results.csv`` and a figure and a logo in ``figures/``.
+
+    Raises ValueError for a size that is not a paper size."""
+    sheet = PageSize(size)
+    if not sheet.is_print:
+        raise ValueError(
+            "a poster is printed: give a paper size such as a0 or a1-landscape, "
+            + f"not {size!r}"
+        )
+    templates = files("inkflow").joinpath("templates", "poster")
+    target.mkdir(parents=True, exist_ok=True)
+    for name, dest in _POSTER_FILES.items():
+        path = target / dest
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(templates.joinpath(name).read_text(encoding="utf-8"))
+    (target / "deck.py").write_text(
+        _POSTER_DECK_PY.format(size=str(sheet), layout=poster_layout(sheet)),
+        encoding="utf-8",
+    )
+    write_pyproject(target)
+    return sheet
 
 
 def write_pyproject(target: Path) -> None:

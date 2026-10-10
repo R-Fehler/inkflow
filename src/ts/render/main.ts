@@ -5,7 +5,12 @@
 // that `inkflow render` reports, and the page is ready to be screenshot.
 
 import { applyStepInstant, maxStep } from "../shared/step";
-import { type Finding, measureSlide } from "./measure";
+import {
+    type Finding,
+    isVector,
+    measureSlide,
+    type NaturalSizes,
+} from "./measure";
 
 declare global {
     interface Window {
@@ -63,6 +68,39 @@ function settleCss(): void {
     }
 }
 
+/** Pixel sizes of the slide's raster pictures, for the print resolution
+ * check: an SVG `<image>` does not tell, so each is loaded as an `<img>`. */
+async function naturalSizes(root: SVGSVGElement): Promise<NaturalSizes> {
+    const sizes: NaturalSizes = new Map();
+    const urls = new Set<string>();
+    for (const el of Array.from(root.querySelectorAll("image"))) {
+        const href = el.href.baseVal;
+        if (href && !isVector(href))
+            urls.add(new URL(href, document.baseURI).href);
+    }
+    for (const img of Array.from(root.querySelectorAll("img"))) {
+        if (img.naturalWidth > 0) {
+            sizes.set(img.currentSrc || img.src, {
+                w: img.naturalWidth,
+                h: img.naturalHeight,
+            });
+        }
+    }
+    await Promise.all(
+        Array.from(urls, async (url) => {
+            const img = new Image();
+            img.src = url;
+            try {
+                await img.decode();
+                sizes.set(url, { w: img.naturalWidth, h: img.naturalHeight });
+            } catch {
+                // Not a picture this browser reads: nothing to check.
+            }
+        }),
+    );
+    return sizes;
+}
+
 function frame(): Promise<void> {
     return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
@@ -76,5 +114,11 @@ window.inkflowRendered = (async () => {
     settleCss();
     await frame();
     await frame();
-    return svg ? measureSlide(svg) : [];
+    if (!svg) return [];
+    const print = __RENDER_PRINT__;
+    return measureSlide(
+        svg,
+        print,
+        print ? await naturalSizes(svg) : new Map(),
+    );
 })();

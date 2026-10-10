@@ -1,12 +1,14 @@
 """Decks as projects: creating a new deck from the editor, browsing for a
 folder to put it in, and remembering the decks recently opened.
 
-A new deck is what ``inkflow init`` makes, in one of four looks:
+A new deck is what ``inkflow init`` makes, in one of five looks:
 
 - ``starter``: the built-in theme and the three starter slides;
 - ``showcase``: the built-in theme, one slide per built-in layout;
 - ``example``: the starter slides in the inkflow example look (the footer logo
   overlay and its styles, as in inkflow's own demo deck);
+- ``poster``: a conference poster (``inkflow init --poster``): one page on a
+  built-in poster layout, at a paper size (``POSTER_SIZES``);
 - ``current``: the open deck's look. Its ``deck.py`` is kept whole (theme,
   overlays, mode, transitions, its own classes) with the slide list replaced by
   the starter slides, and its styles, scripts, layouts, overlays and fonts are
@@ -39,6 +41,7 @@ from inkflow.editor.deckedit import DeckEditError, DeckSource
 from inkflow.enums import ColorMode
 from inkflow.logging import logger
 from inkflow.manifest import Deck
+from inkflow.sizes import PageSize
 
 THEMES: list[dict[str, str]] = [
     {
@@ -61,7 +64,16 @@ THEMES: list[dict[str, str]] = [
         "label": "Layout showcase",
         "description": "The built-in theme, one slide for each built-in layout",
     },
+    {
+        "id": "poster",
+        "label": "Poster",
+        "description": "A conference poster: title band, three columns, a chart "
+        + "and a figure; exports as a PDF at its printed size",
+    },
 ]
+
+# The sizes the new-deck dialog offers a poster in (any PageSize works).
+POSTER_SIZES = ("a0", "a1", "a2", "a0-landscape", "a1-landscape", "a2-landscape")
 
 # What a deck's look is made of, besides deck.py.
 _LOOK_FILES = ("styles.css", "scripts.js")
@@ -160,6 +172,7 @@ def new_deck_info(deck_path: Path | None, deck: Deck | None) -> dict[str, object
         "home": str(Path.home()),
         "current": str(project_dir),
         "themes": [t for t in THEMES if t["id"] != "current" or can_reuse],
+        "posterSizes": [{"id": s, "label": PageSize(s).label} for s in POSTER_SIZES],
         "git": gitops.available(),
         "lfs": lfs_rules.available(),
     }
@@ -183,10 +196,12 @@ def create_deck(
     git: bool,
     lfs: bool = True,
     current: Path | None = None,
+    size: str | None = None,
 ) -> Path:
     """Make a new deck in ``target``; returns its deck.py. Its
     ``.gitattributes`` sends media through Git LFS, or (``lfs=False``) records
-    that the deck uses git alone."""
+    that the deck uses git alone. ``size`` is a poster's paper size (``a0``
+    when not given)."""
     target = target.expanduser()
     if not target.is_absolute():
         raise ProjectError("give the new deck's folder as a full path")
@@ -205,6 +220,11 @@ def create_deck(
     try:
         if theme == "showcase":
             _showcase(target)
+        elif theme == "poster":
+            try:
+                init.scaffold_poster(target, size or "a0")
+            except ValueError as exc:
+                raise ProjectError(str(exc)) from exc
         else:
             init.scaffold(target)
         if theme == "example":

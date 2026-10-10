@@ -566,7 +566,7 @@ def _replace_with_media(
 
 
 def _replace_with_chart(
-    el: SvgElement, zone_id: str, font_size: int, item: ResolvedChart
+    el: SvgElement, zone_id: str, font_size: float, item: ResolvedChart
 ) -> None:
     """Draw a chart into the zone's box: a nested ``<svg>`` in its place, whose
     user units are the zone's, so the chart is laid out for its real size."""
@@ -576,7 +576,7 @@ def _replace_with_chart(
         _parse_dimension(rect.width),
         _parse_dimension(rect.height),
         zone_id.removeprefix("zone-"),
-        font_size * ZONE_TEXT_SCALE,
+        font_size,
     )
     _swap_zone(el, chart, rect, zone_id)
 
@@ -586,7 +586,10 @@ def substitute_content(
     content: Mapping[str, TextBox | Media | ResolvedChart],
     font_size: int = 36,
     dark_mode: bool = True,
+    chart_scale: float = ZONE_TEXT_SCALE,
 ) -> SvgElement:
+    """Fill each zone with its content. A chart's text is ``chart_scale`` of
+    the body text ``font_size`` (`PageSize.chart_text_scale`)."""
     for zone_id, item in content.items():
         el = root.find(f'.//*[@id="{zone_id}"]')
         if el is None:
@@ -596,7 +599,7 @@ def substitute_content(
         if isinstance(item, TextBox):
             _replace_with_foreignobject(el, zone_id, font_size, item)
         elif isinstance(item, ResolvedChart):
-            _replace_with_chart(el, zone_id, font_size, item)
+            _replace_with_chart(el, zone_id, font_size * chart_scale, item)
         else:
             _replace_with_media(el, root, zone_id, dark_mode, item)
 

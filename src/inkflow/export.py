@@ -10,6 +10,7 @@ import tempfile
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from functools import partial
 from html import escape as escape_html
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +19,7 @@ from typing import cast
 
 from typing_extensions import override
 
+from inkflow import ns
 from inkflow.assets import (
     MIME_TYPES,
     REFERENCE_PATTERNS,
@@ -31,8 +33,12 @@ from inkflow.fonts import embed_fonts_css_subsetted
 from inkflow.loaders import load_deck_scripts, load_deck_styles
 from inkflow.logging import logger
 from inkflow.manifest import Deck
+from inkflow.pdfboxes import PageBoxes, set_page_boxes
 from inkflow.pipeline import SlideData, process_deck, resolve_transitions
 from inkflow.server import State, build_html, load_deck
+from inkflow.sizes import PageSize, parse_view_box, physical_length_pt
+from inkflow.svg import canvas_size
+from inkflow.svgio import SvgElement, parse_svg, serialize_svg
 from inkflow.titles import resolve_deck_title
 
 # ── build ─────────────────────────────────────────────────────────────────────
@@ -202,10 +208,263 @@ def _inline_assets(slides: list[SlideData], roots: AssetRoots, out_dir: Path) ->
 
 def slide_dimensions(svg_str: str) -> tuple[int, int]:
     """Extract slide width and height from an SVG viewBox, falling back to 1920x1080."""
-    m = re.search(r'viewBox="[\d.]+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)"', svg_str)
+    m = re.search(r'viewBox="[-\d.]+\s+[-\d.]+\s+([\d.]+)\s+([\d.]+)"', svg_str)
     if m:
         return int(float(m.group(1))), int(float(m.group(2)))
     return 1920, 1080
+
+
+MM_PT = 72 / 25.4
+
+
+@dataclass(frozen=True)
+class PdfPage:
+    """One page of a PDF export: the trimmed page (the finished sheet) in
+    points, the slide's canvas drawn onto it, and the bleed around it."""
+
+    width: float
+    """Trimmed page width, in points."""
+    height: float
+    canvas: tuple[float, float]
+    """The slide's ``viewBox`` width and height, fitted onto the page."""
+    bleed: float = 0.0
+    """Printed past each trimmed edge, in points (the background carries on)."""
+    marks: bool = False
+    """Crop marks in a margin outside the bleed."""
+
+    @property
+    def margin(self) -> float:
+        """From the paper's edge to the trimmed page, in points."""
+        return self.bleed + (_mark_gap(self.bleed) + _MARK_LEN if self.marks else 0)
+
+    @property
+    def paper(self) -> tuple[float, float]:
+        """The whole sheet Chromium prints, in points."""
+        return self.width + 2 * self.margin, self.height + 2 * self.margin
+
+    @property
+    def key(self) -> tuple[float, ...]:
+        return (
+            round(self.width, 2),
+            round(self.height, 2),
+            round(self.bleed, 2),
+            float(self.marks),
+        )
+
+
+_MARK_LEN = 14.17  # 5 mm: how long a crop mark is
+_MARK_WIDTH = 0.5  # pt
+
+
+def _mark_gap(bleed: float) -> float:
+    """Crop marks start this far from the trimmed edge: past the bleed, so a
+    cut a little off the line never shows them (at least 3 mm)."""
+    return max(bleed, 3 * MM_PT)
+
+
+def parse_bleed(value: str | float | None) -> float:
+    """A bleed as given (``3mm``, ``0.125in``, ``9pt``, or a number of mm), in
+    points."""
+    if value is None or value == "":
+        return 0.0
+    if isinstance(value, (int, float)):
+        points = float(value) * MM_PT
+    else:
+        text = value.strip().lower()
+        if re.fullmatch(r"\d+(\.\d+)?", text):
+            text += "mm"
+        found = physical_length_pt(text)
+        if found is None:
+            raise ValueError(
+                f"bleed must be a length such as 3mm or 0.125in, not {value!r}"
+            )
+        points = found
+    if not 0 <= points <= 72:
+        raise ValueError("bleed must be between 0 and 1 inch (25.4 mm)")
+    return points
+
+
+def pdf_pages(
+    slides: list[SlideData],
+    deck: Deck,
+    size: PageSize | None = None,
+    bleed: float = 0.0,
+    marks: bool = False,
+) -> list[PdfPage]:
+    """The page each slide prints on.
+
+    ``size`` (``inkflow export --size``) or else the deck's own size gives
+    every page that sheet, each slide fitted onto it (a slide of another shape
+    is letterboxed). A deck without a size prints each slide at its own: the
+    ``width``/``height`` of its SVG when given in a unit of length (``841mm``,
+    as Inkscape writes an A0 page), else its viewBox at 1 unit = 1 CSS px.
+    """
+    sheet = size if size is not None else deck.size
+    pages: list[PdfPage] = []
+    for slide in slides:
+        canvas = _canvas(slide["svg"])
+        if sheet is not None:
+            w, h = PageSize(sheet).page_pt
+        else:
+            w, h = _own_page(slide["svg"], canvas)
+        pages.append(PdfPage(w, h, canvas, bleed, marks))
+    return pages
+
+
+def _root_attrs(svg: str) -> dict[str, str]:
+    head = re.match(r"\s*(?:<\?xml[^>]*\?>\s*)?<svg\b([^>]*)>", svg)
+    if head is None:
+        return {}
+    return {
+        m.group(1): m.group(3)
+        for m in re.finditer(r'([\w:-]+)\s*=\s*(["\'])(.*?)\2', head.group(1))
+    }
+
+
+def _canvas(svg: str) -> tuple[float, float]:
+    attrs = _root_attrs(svg)
+    box = parse_view_box(attrs.get("viewBox"))
+    if box is not None:
+        return box[2], box[3]
+    w, h = slide_dimensions(svg)
+    return float(w), float(h)
+
+
+def is_paper_svg(svg: str) -> bool:
+    """Whether an SVG is drawn on paper: its ``width`` or ``height`` is a
+    length in mm, cm, in, pt or pc (an Inkscape A0 page)."""
+    attrs = _root_attrs(svg)
+    return any(
+        physical_length_pt(attrs.get(a)) is not None for a in ("width", "height")
+    )
+
+
+def _own_page(svg: str, canvas: tuple[float, float]) -> tuple[float, float]:
+    """A slide's page from its own SVG: physical width/height, else its canvas
+    in CSS px."""
+    attrs = _root_attrs(svg)
+    w = physical_length_pt(attrs.get("width"))
+    h = physical_length_pt(attrs.get("height"))
+    if w is not None and h is not None:
+        return w, h
+    if w is not None:  # one length given: the other from the canvas's shape
+        return w, w * canvas[1] / canvas[0]
+    if h is not None:
+        return h * canvas[0] / canvas[1], h
+    return canvas[0] * 0.75, canvas[1] * 0.75
+
+
+def _pt(value: float) -> str:
+    return f"{round(value, 3):g}pt"
+
+
+def _size(width: float, height: float) -> str:
+    return f"width: {_pt(width)}; height: {_pt(height)};"
+
+
+def _box(offset: float, width: float, height: float) -> str:
+    return f"left: {_pt(offset)}; top: {_pt(offset)}; {_size(width, height)}"
+
+
+def _page_css(pages: list[PdfPage]) -> tuple[str, list[str]]:
+    """The CSS for every distinct page size, and each slide's page class.
+
+    Every size is a named ``@page`` and each slide's box names it with
+    ``page:``, which Chromium honours page by page, so a deck of mixed sizes
+    prints each slide on its own sheet."""
+    names: dict[tuple[float, ...], str] = {}
+    css: list[str] = ["@page { margin: 0; }"]
+    classes: list[str] = []
+    for page in pages:
+        name = names.get(page.key)
+        if name is None:
+            name = f"p{len(names)}"
+            names[page.key] = name
+            pw, ph = page.paper
+            m, b = page.margin, page.bleed
+            box = _box(m - b, page.width + 2 * b, page.height + 2 * b)
+            css += [
+                f"@page {name} {{ size: {_pt(pw)} {_pt(ph)}; margin: 0; }}",
+                f".slide.{name} {{ page: {name}; {_size(pw, ph)} }}",
+                f".slide.{name} > .bleed {{ {box} }}",
+                f".slide.{name} .trim {{ {_box(b, page.width, page.height)} }}",
+            ]
+        classes.append(name)
+    return "\n".join(css), classes
+
+
+def _crop_marks(page: PdfPage) -> str:
+    """Crop marks at the trimmed page's corners, in the margin past the bleed."""
+    pw, ph = page.paper
+    m = page.margin
+    gap, length = _mark_gap(page.bleed), _MARK_LEN
+    lines: list[str] = []
+
+    def line(x1: float, y1: float, x2: float, y2: float) -> str:
+        return f'<line x1="{x1:.3f}" y1="{y1:.3f}" x2="{x2:.3f}" y2="{y2:.3f}"/>'
+
+    for x in (m, m + page.width):
+        for y in (m, m + page.height):
+            sx = -1 if x == m else 1
+            sy = -1 if y == m else 1
+            # Beside the corner along each edge, never inside the bleed.
+            lines.append(line(x + sx * gap, y, x + sx * (gap + length), y))
+            lines.append(line(x, y + sy * gap, x, y + sy * (gap + length)))
+    attrs = " ".join(
+        [
+            'class="marks"',
+            'xmlns="http://www.w3.org/2000/svg"',
+            f'viewBox="0 0 {pw:.3f} {ph:.3f}"',
+            'stroke="#000"',
+            f'stroke-width="{_MARK_WIDTH}"',
+        ]
+    )
+    return f"<svg {attrs}>{''.join(lines)}</svg>"
+
+
+def extend_backgrounds(svg: str, bleed_units: float) -> str:
+    """The slide with each picture or rectangle that covers the whole canvas
+    (a background) grown by ``bleed_units`` on every side, so it runs on into
+    the bleed instead of stopping at the trimmed edge."""
+    if bleed_units <= 0:
+        return svg
+    root = parse_svg(svg)
+    canvas = canvas_size(root)
+    box = parse_view_box(root.get("viewBox"))
+    if canvas is None:
+        return svg
+    x0, y0 = (box[0], box[1]) if box is not None else (0.0, 0.0)
+    w, h = canvas
+    for el in root.iter(f"{{{ns.SVG}}}rect", f"{{{ns.SVG}}}image"):
+        if _transformed(el, root):
+            continue
+        try:
+            geo = [float(el.get(a, "0")) for a in ("x", "y", "width", "height")]
+        except ValueError:
+            continue
+        if not (
+            abs(geo[0] - x0) < 0.5
+            and abs(geo[1] - y0) < 0.5
+            and abs(geo[2] - w) < 0.5
+            and abs(geo[3] - h) < 0.5
+        ):
+            continue
+        el.set("x", f"{x0 - bleed_units:g}")
+        el.set("y", f"{y0 - bleed_units:g}")
+        el.set("width", f"{w + 2 * bleed_units:g}")
+        el.set("height", f"{h + 2 * bleed_units:g}")
+        if el.tag == f"{{{ns.SVG}}}image" and not el.get("preserveAspectRatio"):
+            el.set("preserveAspectRatio", "xMidYMid slice")
+    return serialize_svg(root)
+
+
+def _transformed(el: SvgElement, root: SvgElement) -> bool:
+    node: SvgElement | None = el
+    while node is not None and node is not root:
+        if node.get("transform") or node.tag == f"{{{ns.SVG}}}svg":
+            return node is not el or bool(node.get("transform"))
+        node = node.getparent()
+    return False
 
 
 def build_pdf(
@@ -213,14 +472,24 @@ def build_pdf(
     output: Path,
     chromium: str | None = None,
     no_sandbox: bool = False,
-    size: tuple[int, int] | None = None,
+    size: PageSize | str | tuple[float, float] | None = None,
+    bleed: str | float | None = None,
+    crop_marks: bool = False,
 ) -> None:
+    """Print the deck to a PDF, one page per slide (`pdf_pages` decides each
+    page's size). ``size`` overrides the deck's (a `PageSize`, its name, or a
+    ``(width, height)`` in px); ``bleed`` (``3mm``) prints the background past
+    each trimmed edge and ``crop_marks`` marks the corners outside it."""
     exe = chromium or find_chromium()
     if exe is None:
         raise RuntimeError(
             "Chromium not found. Install chromium or google-chrome,"
             + " or pass --chromium PATH."
         )
+    if isinstance(size, tuple):
+        size = PageSize.px(*size)
+    sheet = PageSize(size) if size is not None else None
+    bleed_pt = parse_bleed(bleed)
 
     deck = load_deck(deck_path)
     project_dir = deck_path.parent
@@ -235,12 +504,9 @@ def build_pdf(
         if font_css:
             styles_css = (font_css + "\n" + styles_css).strip()
 
-    w, h = size if size is not None else slide_dimensions(slides[0]["svg"])
-    dim_css = (
-        f"@page {{ size: {w}px {h}px; margin: 0; }}\n"
-        f".slide {{ width: {w}px; height: {h}px; }}"
-    )
-    styles_css = f"{dim_css}\n{styles_css}".strip()
+    pages = pdf_pages(slides, deck, sheet, bleed_pt, crop_marks)
+    page_css, classes = _page_css(pages)
+    styles_css = f"{page_css}\n{styles_css}".strip()
 
     pkg = importlib.resources.files("inkflow")
     template = pkg.joinpath("pdf.html").read_text(encoding="utf-8")
@@ -249,7 +515,10 @@ def build_pdf(
 
     with tempfile.TemporaryDirectory() as tmp:
         copy_assets(slides, asset_roots(deck, project_dir), Path(tmp))
-        slides_html = "\n".join(f'<div class="slide">{s["svg"]}</div>' for s in slides)
+        slides_html = "\n".join(
+            _slide_html(s["svg"], page, name)
+            for s, page, name in zip(slides, pages, classes, strict=True)
+        )
         html = (
             template.replace("/* __STYLES__ */", styles_css)
             .replace("__DATA_THEME__", data_theme)
@@ -273,6 +542,25 @@ def build_pdf(
             if no_sandbox:
                 cmd.insert(1, "--no-sandbox")
             _run_chromium(cmd, target, b"%PDF")
+    # Chromium writes page sizes on a grid of about 1/75 in: the exact sizes,
+    # and the trim and bleed boxes when there is bleed.
+    set_page_boxes(
+        target, [PageBoxes(*page.paper, page.margin, page.bleed) for page in pages]
+    )
+
+
+def _slide_html(svg: str, page: PdfPage, name: str) -> str:
+    bleed_class = ""
+    if page.bleed > 0:
+        cw, ch = page.canvas
+        scale = min(page.width / cw, page.height / ch)  # points per unit
+        svg = extend_backgrounds(svg, page.bleed / scale)
+        bleed_class = " bled"
+    marks = _crop_marks(page) if page.marks else ""
+    return (
+        f'<div class="slide {name}{bleed_class}"><div class="bleed">'
+        f'<div class="trim">{svg}</div></div>{marks}</div>'
+    )
 
 
 @contextmanager

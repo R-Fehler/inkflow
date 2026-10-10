@@ -81,7 +81,11 @@ The **deck ▾** button next to the logo names the open deck and manages decks:
       starter slides;
     - *Inkflow example* is the same in the look of inkflow's demo deck (the logo
       footer overlay);
-    - *Layout showcase* has one slide for each built-in layout, to start from.
+    - *Layout showcase* has one slide for each built-in layout, to start from;
+    - *Poster* is a conference poster (`inkflow init --poster`): one page on a
+      built-in poster layout with example sections, a chart and a figure, at the
+      **Paper size** picked below it (A0 to A2, portrait or landscape). See
+      [Posters and page sizes](../authoring/posters.md).
 
     When the open deck is in a git repository, the new deck goes into a new folder
     next to it, in the same repository. Anywhere else, browse to any folder on
@@ -692,6 +696,12 @@ them selectable; changes then go to the layout or overlay file, and the editor
 reminds you how many slides that affects. Built-in and theme layouts are not part
 of your project and stay read-only.
 
+The layout gallery offers the built-in layouts drawn in the deck's shape
+([`Deck(size=...)`](../authoring/posters.md#sizes)): a poster deck gets the
+poster layouts, a 16:9 deck the 16:9 ones. The project's own layouts are
+always offered. New slides, shapes and text take the deck's canvas, and the
+slide list's thumbnails its shape.
+
 ## The properties panel
 
 - **Nothing selected:** the slide's title, layout, font size, visibility, its
@@ -761,7 +771,9 @@ the result next to `deck.py` (the path can be changed):
 | PDF | `inkflow export` | one page per slide (needs Chromium or Chrome) |
 
 Each result can also be downloaded straight from the dialog (the web page as a
-`.zip`).
+`.zip`). For a print deck (a poster) the PDF option names the page it prints on
+(*A0 portrait (841 x 1189 mm)*) and offers **3 mm bleed and crop marks** for a
+print shop that asks for them.
 
 ## Keyboard
 

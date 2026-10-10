@@ -177,11 +177,28 @@ export async function insertXml(
 
 // ── Shape tools ──
 
+// Strokes and text are sized for a 1080-high slide and grow with a larger
+// canvas (a poster's is 3179 wide), so a new shape reads the same on any deck.
+function drawScale(): number {
+    const vb = slideRoot()?.viewBox.baseVal;
+    const short = vb && vb.width > 0 ? Math.min(vb.width, vb.height) : 1080;
+    return Math.max(1, Math.round((short / 1080) * 10) / 10);
+}
+
+function textScale(): number {
+    return (ed.model?.deckSize?.fontSize ?? 36) / 36;
+}
+
 const SHAPE_STYLE = {
-    rect: 'class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:4"',
-    ellipse:
-        'class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:4"',
-    line: 'class="inkflow-stroke-text" style="fill:none;stroke-width:6;stroke-linecap:round"',
+    get rect() {
+        return `class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:${fmt(4 * drawScale())}"`;
+    },
+    get ellipse() {
+        return `class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:${fmt(4 * drawScale())}"`;
+    },
+    get line() {
+        return `class="inkflow-stroke-text" style="fill:none;stroke-width:${fmt(6 * drawScale())};stroke-linecap:round"`;
+    },
 };
 
 function shapeXml(
@@ -195,14 +212,14 @@ function shapeXml(
     const h = Math.abs(b.y - a.y);
     switch (tool) {
         case "rect":
-            return `<rect x="${fmt(x)}" y="${fmt(y)}" width="${fmt(w)}" height="${fmt(h)}" rx="16" ${SHAPE_STYLE.rect}/>`;
+            return `<rect x="${fmt(x)}" y="${fmt(y)}" width="${fmt(w)}" height="${fmt(h)}" rx="${fmt(16 * drawScale())}" ${SHAPE_STYLE.rect}/>`;
         default:
             return `<ellipse cx="${fmt(x + w / 2)}" cy="${fmt(y + h / 2)}" rx="${fmt(w / 2)}" ry="${fmt(h / 2)}" ${SHAPE_STYLE.ellipse}/>`;
     }
 }
 
 function textXml(p: { x: number; y: number }): string {
-    return `<text x="${fmt(p.x)}" y="${fmt(p.y)}" class="inkflow-fill-text" style="font-size:56px;font-family:var(--inkflow-body-font, sans-serif)">Text</text>`;
+    return `<text x="${fmt(p.x)}" y="${fmt(p.y)}" class="inkflow-fill-text" style="font-size:${fmt(56 * textScale())}px;font-family:var(--inkflow-body-font, sans-serif)">Text</text>`;
 }
 
 let draft: SVGElement | null = null;
@@ -447,11 +464,12 @@ async function insertTextBox(
     };
     if (box.width < 40 || box.height < 20) {
         // A click: a box from there to near the slide's right edge.
+        const k = textScale();
         box = {
             x: a.x,
-            y: a.y - 40,
-            width: Math.max(300, Math.min(900, vw - a.x - 60)),
-            height: 100,
+            y: a.y - 40 * k,
+            width: Math.max(300 * k, Math.min(900 * k, vw - a.x - 60 * k)),
+            height: 100 * k,
         };
     }
     const plain = ed.layoutMode || (!ed.model?.deckEditable && !slide.md);

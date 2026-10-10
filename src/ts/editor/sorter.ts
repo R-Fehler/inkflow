@@ -119,6 +119,8 @@ export class Thumbs {
             svg.setAttribute("height", "100%");
             svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
             svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
+            // A slide of another shape than the deck's keeps its own.
+            box.style.aspectRatio = `${vb.w} / ${vb.h}`;
             // Thumbnails show the slide's final state, not its first build step.
             svg.querySelectorAll(".anim-pending").forEach((el) => {
                 el.classList.remove("anim-pending");
