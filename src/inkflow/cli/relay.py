@@ -142,7 +142,14 @@ def set_cmd(url: str | None, token: str | None, forget: bool) -> None:
 
 
 @relay.command("show")
-def show_cmd() -> None:
+@click.option(
+    "--token",
+    "show_token",
+    is_flag=True,
+    help="Print the access token itself, and the `inkflow relay set` command "
+    + "that lets someone else share through this relay.",
+)
+def show_cmd(show_token: bool) -> None:
     """The relay sharing online goes through, and whether it answers."""
     configured = relay_config.load()
     if configured is None:
@@ -152,7 +159,16 @@ def show_cmd() -> None:
         )
         return
     click.echo(f"relay: {configured.url}")
-    click.echo(f"token: {'set' if configured.token else 'none'}")
+    if show_token and configured.token:
+        click.echo(f"token: {configured.token}")
+        click.echo(
+            "for someone else: inkflow relay set "
+            + f"{configured.url} --token {configured.token}"
+        )
+    else:
+        click.echo(
+            f"token: {'set (--token prints it)' if configured.token else 'none'}"
+        )
     if os.environ.get("INKFLOW_RELAY_URL"):
         click.echo("(from INKFLOW_RELAY_URL)")
     problem = check_relay(configured.url)

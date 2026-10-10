@@ -830,6 +830,36 @@ def test_the_relay_is_kept_in_the_user_config(
     assert config.load() is None
 
 
+def test_relay_show_prints_the_token_only_when_asked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from click.testing import CliRunner
+
+    from inkflow.cli import main
+    from inkflow.cli import relay as relay_cli
+    from inkflow.online import config
+
+    monkeypatch.delenv("INKFLOW_RELAY_URL", raising=False)
+    monkeypatch.setattr(config, "_file", lambda: tmp_path / "relay.json")
+
+    def answers(_url: str) -> None:
+        return None
+
+    monkeypatch.setattr(relay_cli, "check_relay", answers)
+    _ = config.save("https://relay.example.org", "s3cret-token")
+    hidden = CliRunner().invoke(main, ["relay", "show"])
+    assert hidden.exit_code == 0, hidden.output
+    assert "s3cret-token" not in hidden.output
+    assert "--token prints it" in hidden.output
+    shown = CliRunner().invoke(main, ["relay", "show", "--token"])
+    assert shown.exit_code == 0, shown.output
+    assert "token: s3cret-token" in shown.output
+    assert (
+        "inkflow relay set https://relay.example.org --token s3cret-token"
+        in shown.output
+    )
+
+
 def test_deploying_to_cloudflare_stages_the_worker_and_its_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

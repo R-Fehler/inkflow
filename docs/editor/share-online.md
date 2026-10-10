@@ -101,6 +101,21 @@ address (and the token, if the relay has one) with
 `inkflow relay set https://inkflow-relay.ada.workers.dev --token TOKEN`, or
 in the editor's **Share…** dialog under **Online**.
 
+The token is not printed after a deploy that worked; inkflow keeps it in its
+settings file (`relay.json` in `~/.config/inkflow/` on Linux,
+`~/Library/Application Support/inkflow/` on macOS,
+`%LOCALAPPDATA%\inkflow\inkflow\` on Windows). To see it, for a new computer or a
+teammate who should share through the same relay:
+
+```bash
+inkflow relay show --token
+```
+
+prints the token and the whole `inkflow relay set … --token …` command to run
+there. Lost it everywhere? Run `inkflow relay deploy cloudflare` on a computer
+whose inkflow has no relay set: it deploys again with a new token, and
+everyone else then needs the new one.
+
 ## Sharing
 
 1. Open the deck in the editor (`inkflow edit`).

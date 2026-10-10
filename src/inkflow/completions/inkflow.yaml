@@ -727,6 +727,8 @@ commands:
 
       - name: show
         description: The relay set, and whether it answers.
+        flags:
+          --token: Print the access token and the set command for someone else
 
   - name: setup-claude
     description: Install the Claude Code prompt hook and inkflow skill.
