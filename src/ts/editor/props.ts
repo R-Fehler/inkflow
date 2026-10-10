@@ -1379,7 +1379,7 @@ function renderObjectPanel(sel: Selected): void {
                     h(
                         "p",
                         { class: "hint" },
-                        `In ${src.rel}${src.role !== "slide" || currentSlide()?.srcShared ? ` · shared by ${src.usedBy.length} slide${src.usedBy.length === 1 ? "" : "s"}` : ""}`,
+                        `In ${src.rel}${(src.role !== "slide" && src.role !== "ink") || currentSlide()?.srcShared ? ` · shared by ${src.usedBy.length} slide${src.usedBy.length === 1 ? "" : "s"}` : ""}`,
                     ),
                     openButton(src.path),
                 ),

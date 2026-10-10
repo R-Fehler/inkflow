@@ -4,6 +4,7 @@ import {
     editMenuSetActive,
     toggleMenu as toggleEditMenu,
 } from "./edit";
+import { inkActive, inkKey, toggleInk } from "./ink";
 import { toggleLaser } from "./laser";
 import {
     advance,
@@ -68,6 +69,18 @@ document
     .getElementById("btn-overview")!
     .addEventListener("click", toggleOverview);
 document.getElementById("btn-presenter")!.addEventListener("click", togglePv);
+document.getElementById("btn-ink")!.addEventListener("click", switchInk);
+
+// Ink and the laser both draw with the pointer: one at a time.
+function switchInk(): void {
+    if (!inkActive() && state._laserMode) toggleLaser();
+    toggleInk();
+}
+
+function switchLaser(): void {
+    if (!state._laserMode && inkActive()) toggleInk();
+    toggleLaser();
+}
 document.getElementById("mhud-theme")!.addEventListener("click", toggleTheme);
 document
     .getElementById("mhud-fullscreen")!
@@ -139,7 +152,8 @@ const KEYBINDINGS: Record<
     E: { action: backToEditor },
     f: { action: toggleFullscreen },
     b: { action: () => toggleCurtain("black") },
-    ".": { action: toggleLaser },
+    ".": { action: switchLaser },
+    i: { action: switchInk },
     w: { action: () => toggleCurtain("white") },
     "+": { action: () => keyZoom("in") },
     "=": { action: () => keyZoom("in") },
@@ -252,6 +266,9 @@ document.addEventListener("keydown", (e) => {
         hideLogs();
         return;
     }
+
+    // Ink mode's own keys (Ctrl+Z, Escape) come before the bindings.
+    if (inkKey(e)) return;
 
     const binding = KEYBINDINGS[e.key];
     if (binding) {

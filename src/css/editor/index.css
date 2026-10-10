@@ -1,5 +1,6 @@
 @import "../shared/theme-vars.css";
 @import "../shared/animations.css";
+@import "../shared/ink.css";
 
 /* inkflow visual editor. Chrome colours come from theme-vars (the presenter's
    palette); the slide itself is styled by the deck's own CSS (__STYLES__). */
@@ -341,6 +342,20 @@ body.offline #conn {
     inset: 0;
     pointer-events: none;
     overflow: visible;
+}
+
+/* The pen tool's palette (shared/ink.css), over the canvas under the
+   toolbar; and the paper takes pen input instead of selecting. */
+.ink-palette.editor-ink {
+    position: fixed;
+    top: 56px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30;
+}
+
+body[data-tool="pen"] #paper {
+    cursor: crosshair;
 }
 
 body[data-tool="select"] #paper {

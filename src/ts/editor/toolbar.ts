@@ -238,6 +238,7 @@ const TOOL_KEYS: Record<string, Tool> = {
     a: "arrow",
     e: "elbow",
     c: "curve",
+    p: "pen",
 };
 
 function onKey(e: KeyboardEvent): void {

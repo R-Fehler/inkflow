@@ -64,6 +64,20 @@
     fill: var(--inkflow-grey);
 }
 
+/* Pen ink (inkflow/ink.py): a highlighter tints what it covers, like a marker
+   on paper, instead of painting over it. On a light slide it multiplies; on a
+   dark one multiply darkens it to nothing and plain opacity mixes it into a
+   muddy brown, so it screens (only ever lightens: light text stays readable)
+   at a stronger opacity than the file's 0.35. */
+.inkflow-highlighter {
+    fill-opacity: 0.55;
+    mix-blend-mode: screen;
+}
+[data-theme="light"] .inkflow-highlighter {
+    fill-opacity: 0.35;
+    mix-blend-mode: multiply;
+}
+
 /* ── SVG element stroke utilities ─────────────────────────────────────────── */
 
 .inkflow-stroke-bg {

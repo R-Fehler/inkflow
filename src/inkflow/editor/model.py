@@ -38,8 +38,9 @@ class SourceInfo(TypedDict):
     hash: str
     role: str
     """``slide`` (the slide's own src), ``layout`` (an ancestor), ``overlay``,
-    or ``diagram`` (a draw.io diagram drawn into the slide, whose shapes the
-    editor edits in its source: editor/drawioedit.py)."""
+    ``diagram`` (a draw.io diagram drawn into the slide, whose shapes the
+    editor edits in its source: editor/drawioedit.py) or ``ink`` (the slide's
+    saved pen drawing, see inkflow/ink.py)."""
     writable: bool
     """Inside the project and not an installed package (theme/built-in)."""
     usedBy: list[int]
@@ -287,6 +288,15 @@ def build_model(
                         }
                     )
                 _mark_overlays(sources)
+                ink = Path(edit["ink"])
+                for info in sources:
+                    if Path(info["path"]) == ink:
+                        info["role"] = "ink"
+                entry["ink"] = {
+                    "path": str(ink),
+                    "rel": _rel(ink, project_dir),
+                    "exists": ink.is_file(),
+                }
                 entry["sources"] = sources
                 entry["emptyZones"] = edit["emptyZones"]
                 entry["zoneOrigins"] = edit["zoneOrigins"]

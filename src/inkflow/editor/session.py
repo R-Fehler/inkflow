@@ -10,6 +10,7 @@ editor and an agent editing the same files stay in step.
 
 from __future__ import annotations
 
+import ast
 import base64
 import dataclasses
 import os
@@ -86,6 +87,14 @@ from inkflow.editor.transfer import (
 )
 from inkflow.enums import ColorMode, MediaFit
 from inkflow.fonts import font_index
+from inkflow.ink import (
+    InkError,
+    Stroke,
+    add_strokes,
+    erase_strokes,
+    ink_path,
+    view_box,
+)
 from inkflow.layout import (
     create_slide,
     discover_layouts,
@@ -97,6 +106,7 @@ from inkflow.logging import logger
 from inkflow.manifest import Chart, Deck, Image, Inline, Slide, TextBox, Video
 from inkflow.ns import INKFLOW_SHOW_SHAPE
 from inkflow.pipeline import resolve_slide_src, slide_ids
+from inkflow.svgio import parse_svg_file
 from inkflow.sync import build_context, plan_preview
 from inkflow.transitions import Transition
 from inkflow.zones import remove_zone_section, replace_zone_text, zone_spans
@@ -212,7 +222,8 @@ class _Txn:
     """The files one request writes, staged in memory until commit."""
 
     project_dir: Path
-    staged: dict[Path, bytes]
+    staged: dict[Path, bytes | None]
+    """New contents by path; None deletes the file."""
     originals: dict[Path, bytes | None]
 
     def __init__(self, project_dir: Path) -> None:
@@ -221,17 +232,22 @@ class _Txn:
         self.originals = {}
 
     def read(self, path: Path) -> bytes:
+        data = self.read_optional(path)
+        if data is None:
+            raise EditError(f"{path.name} does not exist")
+        return data
+
+    def read_optional(self, path: Path) -> bytes | None:
+        """The file as this request left it, or None when there is none."""
         path = self._check(path)
         if path in self.staged:
             return self.staged[path]
         if path not in self.originals:
             self.originals[path] = path.read_bytes() if path.exists() else None
-        data = self.originals[path]
-        if data is None:
-            raise EditError(f"{path.name} does not exist")
-        return data
+        return self.originals[path]
 
-    def write(self, path: Path, data: bytes) -> None:
+    def write(self, path: Path, data: bytes | None) -> None:
+        """Stage new contents for ``path``; None deletes it."""
         path = self._check(path)
         if path not in self.originals:
             self.originals[path] = path.read_bytes() if path.exists() else None
@@ -250,8 +266,10 @@ class _Txn:
             if self.originals[path] != data
         ]
         for change in changes:
+            if change.after is None:
+                change.path.unlink(missing_ok=True)
+                continue
             change.path.parent.mkdir(parents=True, exist_ok=True)
-            assert change.after is not None
             change.path.write_bytes(change.after)
         return _Step(label, changes)
 
@@ -433,6 +451,7 @@ class EditorSession:
             "paste-objects": self._paste_objects,
             "drawio-save": self._drawio_save,
             "drawio-new": self._drawio_new,
+            "ink": self._ink,
         }.get(cast("str", action))
         if handler is None:
             raise EditError(f"unknown action {action!r}")
@@ -442,6 +461,7 @@ class EditorSession:
             DeckEditError,
             SvgOpError,
             TransferError,
+            InkError,
             ValueError,
             KeyError,
             TypeError,
@@ -1923,9 +1943,17 @@ class EditorSession:
             )
         imports: set[str] = set()
         label = "Edit slide"
+        # The slide list as this edit leaves it, for the saved ink to follow
+        # the slides whose ids change (see _follow_ink); None: no id changes.
+        slides_after: list[Slide] | None = None
+        # A slide in ``slides_after`` that is not one of deck.slides: what it was
+        # made from, and whether it is a copy (the original stays too).
+        origins: dict[int, tuple[Slide, bool]] = {}
         if op == "move":
             src, dst = int(cast("int", msg["from"])), int(cast("int", msg["to"]))
             source.move_slide(src, dst)
+            slides_after = list(deck.slides)
+            slides_after.insert(dst, slides_after.pop(src))
             label = "Move slide"
         elif op == "delete":
             many = msg.get("slides")
@@ -1941,11 +1969,17 @@ class EditorSession:
             # Highest first, so each removal leaves the others' indices alone.
             for index in indices:
                 source.remove_slide(index)
+            slides_after = [s for i, s in enumerate(deck.slides) if i not in indices]
             label = "Delete slide" if len(indices) == 1 else "Delete slides"
         elif op == "hide":
             index, _ = self._deck_slide(deck, msg)
             hidden = bool(msg.get("hidden"))
             source.set_slide_arg(index, "visible", "False" if hidden else None)
+            slides_after = list(deck.slides)
+            slides_after[index] = dataclasses.replace(
+                deck.slides[index], visible=not hidden
+            )
+            origins[id(slides_after[index])] = (deck.slides[index], False)
             label = "Hide slide" if hidden else "Show slide"
         elif op == "title":
             index, _ = self._deck_slide(deck, msg)
@@ -1974,6 +2008,17 @@ class EditorSession:
             index, slide = self._deck_slide(deck, msg)
             overrides = self._copy_files(slide, deck, txn)
             source.duplicate_slide(index, overrides)
+            duplicate = dataclasses.replace(
+                slide,
+                **{
+                    name: ast.literal_eval(code) if code is not None else None
+                    for name, code in overrides.items()
+                    if name in ("src", "md", "id")
+                },
+            )
+            slides_after = list(deck.slides)
+            slides_after.insert(index + 1, duplicate)
+            origins[id(duplicate)] = (slide, True)
             extra["select"] = index + 1
             label = "Duplicate slide"
         elif op == "new":
@@ -2002,6 +2047,9 @@ class EditorSession:
                 deck,
             )
             source.set_slide_arg(index, "src", _py(name))
+            slides_after = list(deck.slides)
+            slides_after[index] = dataclasses.replace(slide, src=name)
+            origins[id(slides_after[index])] = (slide, False)
             label = "Give slide its own drawing"
         elif op == "layout":
             index, slide = self._deck_slide(deck, msg)
@@ -2013,11 +2061,132 @@ class EditorSession:
                 txn.write(src_path, svg.to_bytes())
             else:
                 source.set_slide_arg(index, "src", _py(layout))
+                slides_after = list(deck.slides)
+                slides_after[index] = dataclasses.replace(slide, src=layout)
+                origins[id(slides_after[index])] = (slide, False)
             label = "Change layout"
         else:
             raise EditError(f"unknown slide operation {op!r}")
         self._save_deck(txn, source, imports)
+        if slides_after is not None:
+            self._follow_ink(deck, slides_after, origins, txn)
         return label
+
+    # ── Ink ──
+
+    def _ink_slide(self, deck: Deck, msg: dict[str, object]) -> tuple[Slide, str]:
+        """The slide an ink request draws on and its id: by ``slideId`` (the
+        presenter knows slides by id) or by deck index ``slide`` (the editor)."""
+        visible = [s for s in deck.slides if s.visible]
+        ids = slide_ids(visible)
+        wanted = msg.get("slideId")
+        if not isinstance(wanted, str):
+            _, slide = self._deck_slide(deck, msg)
+            wanted = next(
+                (i for s, i in zip(visible, ids, strict=True) if s is slide), None
+            )
+            if wanted is None:
+                raise EditError("a hidden slide has no ink to draw on")
+        for slide, slide_id in zip(visible, ids, strict=True):
+            if slide_id == wanted:
+                return slide, slide_id
+        raise EditError(f"no slide {wanted!r}")
+
+    def _canvas(self, slide: Slide, deck: Deck) -> tuple[float, float, float, float]:
+        """The slide's canvas, which a new ink file takes as its own."""
+        try:
+            src = resolve_slide_src(slide.src, self.project_dir, deck.theme)
+            box = view_box(parse_svg_file(src))
+        except (OSError, ValueError):
+            box = None
+        return box or (0.0, 0.0, 1920.0, 1080.0)
+
+    def _ink(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        # Set by the server from the connection, never by the page: an audience
+        # screen on another machine sees the ink but never writes the deck.
+        self._local_only(msg, "save ink")
+        slide, slide_id = self._ink_slide(deck, msg)
+        path = ink_path(slide, slide_id, self.project_dir)
+        data = txn.read_optional(path)
+        extra["ink"] = self._deck_rel(path)
+        op = msg.get("op")
+        if op == "add":
+            raw = msg.get("strokes")
+            if not isinstance(raw, list) or not raw:
+                raise EditError("no strokes to save")
+            strokes = [Stroke.from_json(r) for r in cast("list[object]", raw)]
+            txn.write(path, add_strokes(data, strokes, self._canvas(slide, deck)))
+            return "Draw" if len(strokes) == 1 else f"Draw {len(strokes)} strokes"
+        if op == "erase":
+            raw_ids = msg.get("ids")
+            if not isinstance(raw_ids, list):
+                raise EditError("no strokes to erase")
+            ids = {str(i) for i in cast("list[object]", raw_ids)}
+            if data is not None:
+                txn.write(path, erase_strokes(data, ids))
+            return "Erase ink"
+        if op == "clear":
+            if data is not None:
+                txn.write(path, None)
+            return "Clear ink"
+        raise EditError(f"unknown ink operation {op!r}")
+
+    def _ink_files(self, slides: list[Slide]) -> dict[int, Path]:
+        """Each shown slide's ink file by the id the slide gets from its place
+        in ``slides``; a slide that names its own (``ink=``) is left out, since
+        that path does not follow the slide's id."""
+        visible = [s for s in slides if s.visible]
+        return {
+            id(s): ink_path(s, slide_id, self.project_dir)
+            for s, slide_id in zip(visible, slide_ids(visible), strict=True)
+            if s.ink is None
+        }
+
+    def _follow_ink(
+        self,
+        deck: Deck,
+        after: list[Slide],
+        origins: dict[int, tuple[Slide, bool]],
+        txn: _Txn,
+    ) -> None:
+        """Keep each slide's saved ink with it through a slide-list edit.
+
+        A slide's ink file is named after its id, and an id is inferred from
+        the slide's files and its place among same-named slides, so moving,
+        detaching or re-laying-out a slide can change it: the file is renamed
+        in the same step. A duplicate gets a copy; a deleted slide's ink goes
+        with it. A file in the way that nothing vacates is never overwritten
+        (two slides that only differ by an inferred ``-2``): that ink stays put.
+        """
+        before = self._ink_files(deck.slides)
+        now = self._ink_files(after)
+        kept: set[int] = set()
+        plans: list[tuple[Path, Path, bool]] = []
+        for slide in after:
+            origin, copy = origins.get(id(slide), (slide, False))
+            if not copy:
+                kept.add(id(origin))
+            src, dst = before.get(id(origin)), now.get(id(slide))
+            if src is not None and dst is not None and src != dst:
+                plans.append((src, dst, copy))
+        vacated = {src for src, _, copy in plans if not copy}
+        vacated |= {p for key, p in before.items() if key not in kept}
+        contents = {src: txn.read_optional(src) for src, _, _ in plans}
+        for path in vacated:
+            if txn.read_optional(path) is not None:
+                txn.write(path, None)
+        for src, dst, _ in plans:
+            data = contents[src]
+            if data is None:
+                continue
+            if dst not in vacated and dst.exists():
+                logger.warning(f"ink: {dst.name} already exists; {src.name} kept")
+                if src in vacated:
+                    txn.write(src, data)
+                continue
+            txn.write(dst, data)
 
     def _layout_of(self, slide: Slide, deck: Deck, txn: _Txn) -> str | None:
         """The layout a slide is built on: the one its own drawing names
@@ -2122,6 +2291,14 @@ class EditorSession:
                 new = _unique_path(path.parent, f"{path.stem}-copy", path.suffix)
                 txn.write(new, txn.read(path))
                 overrides["notes"] = _py(self._deck_rel(new))
+        if slide.ink is not None:
+            # A file the slide names itself; ink at the default place follows
+            # the copy's id instead (_follow_ink).
+            path = ink_path(slide, "", self.project_dir)
+            if path.is_file():
+                new = _unique_path(path.parent, f"{path.stem}-copy", path.suffix)
+                txn.write(new, txn.read(path))
+                overrides["ink"] = _py(self._deck_rel(new))
         if slide.id:
             overrides["id"] = _py(f"{slide.id}-copy")
         return overrides

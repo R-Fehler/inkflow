@@ -48,7 +48,7 @@ src/
                                Deck params: slides, transition, overlays, theme,
                                mode: ColorMode, style, font_size, embed_fonts
                                Slide params: src, id, md, zones, animations, transition,
-                               overlays, extra_style, title, notes, visible, font_size
+                               overlays, extra_style, title, notes, visible, font_size, ink
     enums.py          shared enums (Direction, Align, VAlign, MediaFit, MediaAlign,
                                ColorMode, Muted, Trigger, AnimationKind, ChartKind);
                                `_KebabStrEnum`
@@ -124,7 +124,9 @@ src/
                                schemas for the property panels), session.py (one request ->
                                one undoable whole-file step; EditorSession/History; a video
                                inserted anywhere is a new zone-video rect + a Video(...)
-                               zones= entry in one step),
+                               zones= entry in one step; the `ink` action adds / erases /
+                               clears strokes, local only, and slide-list edits move a
+                               slide's ink file when its id changes: `_follow_ink`),
                                model.py (build_model: per-slide sources, zones, cues for the
                                editor), drawioedit.py (a drawn-in diagram's shapes edited
                                on the slide: geometry/label/style/delete in its source,
@@ -217,6 +219,12 @@ src/
                                own picture a pipeline-only `<rect>` behind it (margin 4%
                                of its shorter side, `pointer-events: none`)
     clean.py          SVG Inkscape metadata stripping (used by cli and pre-commit hook)
+    ink.py            pen ink: `ink_path` (ink/<slide id>.svg or Slide(ink=)),
+                               `compose_ink` (the file's strokes as the slide's last
+                               `<g class="inkflow-ink">`, stretched if its viewBox differs),
+                               `Stroke` (a page's stroke validated field by field into a
+                               filled `<path>`), `add_strokes` / `erase_strokes` (the file
+                               as bytes, laid out as `inkflow clean` would write it)
     label2id.py       `inkflow label2id`: promote each element's inkscape:label to its
                                SVG id (Inkscape convenience for Morph/animation targets).
                                Slugifies non-id labels, skips clashes and preview-layer
@@ -285,14 +293,23 @@ src/
     globals.d.ts      ambient declarations for Python-injected globals (__SLIDES_JSON__ etc.)
     shared/           types, step engine (step.ts: WAAPI cue driver + elementActions),
                       keyframes.ts (reads @keyframes + per-cue var substitution),
-                      step-ring SVG builder, cubic-bezier easing
+                      step-ring SVG builder, cubic-bezier easing; ink (presenter and
+                      editor alike): ink.ts (pure: perfect-freehand options, outline ->
+                      path data, Douglas-Peucker `simplify`, eraser hit test, relay
+                      validation), inksettings.ts (pure palette state), inkpad.ts
+                      (pointer input -> strokes: coalesced + predicted samples, one
+                      redraw per frame, eraser, palm and click swallowing),
+                      inkpalette.ts (the floating palette)
     presenter/        main presenter modules — navigation, transitions (progress-driven
                       via progress-driver.ts), overview, picker, websocket, status bar,
                       keyboard, syncmenu.ts (sync-mode status-bar control),
                       pv.ts (presenter panel sidebar), video.ts (step-driven
                       <video> playback, wired in via status.ts), toeditor.ts (back to
                       /edit at this slide: the opener editor tab when there is one;
-                      hidden in a static build), and deck-url.ts
+                      hidden in a static build), ink.ts (ink mode: strokes held per
+                      slide in inkstore.ts, mounted into the slide's <svg> through
+                      slidehooks.ts, relayed as `ink` messages, saved with "Keep"
+                      through the session's `ink` edit-op), and deck-url.ts
                       (pure position<->fragment codec behind syncURL/readURL; the
                       only module reading location.pathname/search/hash)
     editor/           visual editor: canvas.ts (render, hit-testing, handles, drag ->
@@ -340,10 +357,12 @@ src/
                       and straight/elbow/curved routes, pure + tested),
                       chart.ts (the chart dialog: data grid, settings, server-drawn
                       preview; insert-chart / chart-save-data) over chartgrid.ts
-                      (pure: TSV paste, grid edits, series settings; tested)
+                      (pure: TSV paste, grid edits, series settings; tested),
+                      ink.ts (the pen tool: one session `ink` step per stroke /
+                      erase / clear)
     render/           the single-slide page behind `inkflow render`
   css/                CSS source
-    shared/           theme variables, animation keyframes
+    shared/           theme variables, animation keyframes, ink.css (the ink palette)
     presenter/        presenter partials including pv.css (sidebar panel)
 demo/
   deck.py             12-slide demo deck (SVG slides, some filling zones with Markdown via md=)
@@ -371,6 +390,9 @@ The HTTP response includes `Cache-Control: no-store` so hard refreshes always ge
 
 **Position sync is a dumb relay with client-side authority + modes.**
 Clients send `{"type":"nav","slideIndex","step"}` (validated + clamped server-side by `_coerce_nav_position`); the server stores the last position and rebroadcasts it as `{"type":"position",...}` to the *other* clients, and pushes it once to each newly connected client. A window that booted from a deep link (a slide named in the URL, captured by `readURL()` before `syncURL()` rewrites the bar) or reconnected asserts its own position and ignores that first push; a bare window adopts it. Each client also has a per-tab **sync mode** (`two-way`/`present`/`follow`/`solo`, `shared/types.ts`) deciding locally whether it broadcasts nav (`sends()`) and applies incoming positions (`receives()`) — the server knows nothing about modes. `s` cycles the mode; `syncmenu.ts` owns the status-bar widget, `websocket.ts` the network/state. Switching into a receiving mode sends `{"type":"sync-request"}` to catch up. Persisted in `sessionStorage`.
+
+**Ink is drawn into the slide, held per slide, and saved to a file of its own.**
+A stroke is perfect-freehand's outline around the pen's track (`shared/ink.ts`), written as one filled `<path>` so it renders anywhere without inkflow. `shared/inkpad.ts` turns pointer input into strokes for both pages: every coalesced sample is kept, the live stroke is one path redrawn once per animation frame (plus the browser's predicted samples) straight into the slide's own `<svg>`, so it is in slide units through the zoom camera, resizes and transitions; a pen's real pressure is used, a mouse's or finger's is simulated. By default only a pen draws (a mouse click and a swipe stay navigation, a palm near a pen is swallowed), and the click a gesture ends with never reaches the page. In the presenter (`presenter/ink.ts`, key `i`) ink is held per slide id (`inkstore.ts`, with undo) and re-mounted as `g.inkflow-live-ink` whenever `transitions.ts` mounts a slide (`slidehooks.ts`, which keeps transitions.ts and its tests free of ink). Other windows get it as `{"type":"ink","op":"draw"|"add"|"erase"|"abandon"|"request"|"state",...}`, relayed by the server untouched (or over the window link in a static build) and gated by the same `sends()`/`receives()` as the position; receivers validate every field (`strokeFrom`). With "Keep", a stroke also goes to the session as `edit-op` action `ink`, which `_local_only` restricts to loopback peers, so an audience screen never writes files. Saved ink is `ink/<slide id>.svg` (or `Slide(ink=)`), strokes directly under its root so each is an editor object (source role `ink`, selectable and movable like the slide's own shapes); `process_slide` composes it right after the overlays and before annotation (a cue can reveal a stroke). A slide's id is inferred from file names, so `EditorSession._follow_ink` renames, copies or deletes ink files in the same step as a slide edit that changes ids, never overwriting a file nothing vacates. `serialize_ink` writes exactly what `inkflow clean` would, so the pre-commit hook leaves ink files alone.
 
 **The deck position lives in the URL fragment, `#slide=7&steps=2` (`deck-url.ts`).**
 The fragment never reaches a server, so nothing has to route it and rewriting it is a same-document change every browser permits. The path segment this used to write (`/7`) only ever worked under `serve`, whose catch-all answers any path with the presenter: a static host 404s it on reload (the docs demo included), and a `file://` deck cannot have it at all — the browser rejects the rewrite (`history.replaceState` throws `SecurityError`; Firefox logs "Content at …/index.html may not load data from …/7"). The fragment is the only form: nothing writes a path segment any more and nothing reads one, so the position has exactly one representation. `deck-url.ts` is the only module that touches `location.hash`, and its two functions are pure over a `URL` so every case is unit-tested; `status.ts` supplies `window.location` and keeps a `try/catch` around `replaceState`.
