@@ -17,7 +17,7 @@ import { clearSelection, enterGroup, keyOf, render, slideRoot } from "./canvas";
 import { closeDialog, openDialog } from "./dialog";
 import { clear, h, toast } from "./dom";
 import { layoutLabel } from "./gallery";
-import { afterRender, setTool } from "./insert";
+import { setTool } from "./insert";
 import {
     copyTarget,
     layoutRows,
@@ -31,6 +31,7 @@ import {
 } from "./mastertree";
 import { edit, request } from "./net";
 import { openButton } from "./openwith";
+import { loadPlaceholders, placeholderDialog } from "./placeholders";
 import { closeMenu, menuItem, showMenu } from "./sorter";
 import { ed, emit, on } from "./state";
 import type { SlideModel } from "./types";
@@ -157,6 +158,8 @@ async function show(next: Item, slideIndex = onSlide): Promise<void> {
     const changed = item?.path !== next.path || item?.kind !== next.kind;
     item = next;
     onSlide = slideIndex;
+    // Its placeholders for the props panel, fetched alongside.
+    const listing = loadPlaceholders(next.kind, next.path);
     let view: { slide: SlideModel; data: SlideData } | null = null;
     if (slideIndex != null) {
         const real = ed.model?.slides[slideIndex];
@@ -192,12 +195,14 @@ async function show(next: Item, slideIndex = onSlide): Promise<void> {
             data: result.slide as SlideData,
         };
     }
+    const placeholders = (await listing) ?? undefined;
     if (ticket !== loading || !ed.masterMode) return;
     ed.master = {
         kind: next.kind,
         name: next.name,
         path: next.path,
         onSlide,
+        placeholders,
         ...view,
     };
     if (changed) {
@@ -676,43 +681,6 @@ function deleteLayout(l: MasterLayout): void {
     openDialog(`Delete layout “${title(l)}”`, body);
 }
 
-// A placeholder (an empty zone) in the middle of the layout shown: each
-// slide on it fills it with its own text or picture.
-async function addPlaceholder(kind: "text" | "picture"): Promise<void> {
-    const view = ed.master;
-    const src = view?.slide.sources?.find((s) => s.path === view.path);
-    const svg = slideRoot();
-    if (!view || !src || !svg) return;
-    const name = window.prompt(
-        kind === "picture"
-            ? "Name of the picture placeholder (slides fill it with an image or video):"
-            : "Name of the text placeholder (slides fill it with their text):",
-        kind === "picture" ? "picture" : "text",
-    );
-    if (name == null) return;
-    const vb = svg.viewBox.baseVal;
-    const w = (vb?.width || 1920) * (kind === "picture" ? 0.35 : 0.5);
-    const hgt = (vb?.height || 1080) * (kind === "picture" ? 0.35 : 0.2);
-    const result = await edit({
-        action: "master",
-        op: "add-zone",
-        file: src.path,
-        hash: src.hash,
-        zoneKind: kind,
-        name,
-        x: Math.round(((vb?.width || 1920) - w) / 2),
-        y: Math.round(((vb?.height || 1080) - hgt) / 2),
-        width: Math.round(w),
-        height: Math.round(hgt),
-    });
-    if (result.ok && typeof result.zone === "string") {
-        afterRender.ids = [`zone-${result.zone}`];
-        toast(
-            `${kind === "picture" ? "Picture" : "Text"} placeholder “${result.zone}” added: drag it into place`,
-        );
-    }
-}
-
 // What the props panel shows while nothing is selected in the master.
 export function masterPanel(): HTMLElement | null {
     if (!ed.master || !item || !tree) return null;
@@ -839,7 +807,7 @@ export function masterPanel(): HTMLElement | null {
                     type: "button",
                     class: "pbtn",
                     title: "An empty text zone each slide fills with its own text",
-                    onclick: () => void addPlaceholder("text"),
+                    onclick: () => placeholderDialog("text"),
                 },
                 "+ Text placeholder",
             ),
@@ -849,7 +817,7 @@ export function masterPanel(): HTMLElement | null {
                     type: "button",
                     class: "pbtn",
                     title: "An empty zone each slide fills with a picture or video",
-                    onclick: () => void addPlaceholder("picture"),
+                    onclick: () => placeholderDialog("picture"),
                 },
                 "+ Picture placeholder",
             ),

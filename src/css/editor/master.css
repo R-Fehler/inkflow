@@ -266,3 +266,31 @@ body.master-mode #canvas {
     justify-content: flex-end;
     gap: 8px;
 }
+
+/* Placeholders: the add dialog and the panel's Placeholder section
+   (placeholders.ts). */
+.placeholder-form .placeholder-kinds {
+    display: flex;
+    gap: 16px;
+}
+
+.placeholder-form .placeholder-kinds .check:has(input:disabled) {
+    opacity: 0.5;
+}
+
+.placeholder-form .hint {
+    margin: 0;
+}
+
+.placeholder-zone {
+    font-family: var(--font-ui-mono);
+}
+
+.props-section .placeholder-note {
+    margin: 2px 0 8px;
+    overflow-wrap: anywhere;
+}
+
+.props-section .prop-value {
+    font-size: 12px;
+}

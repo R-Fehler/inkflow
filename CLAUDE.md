@@ -91,6 +91,9 @@ src/
     pipeline.py       animation annotation + layout inlining; `process_slide(keep_zones=)`
                                keeps unfilled zones as dashed boxes (the slide master);
                                `pop_hints` takes `<inkflow:hint>` out, into `EmptyZone.hint`
+                               (the nearest layout's wins); `EmptyZone`s are
+                               `content.empty_zone_shapes`: the pruned zones plus
+                               unfilled `inkflow:show-shape` ones, which stay drawn
     content.py        TextBox / Image / Video / chart injection into zone rects, with
                                alignment support; Video emits data-* playback attrs (driven
                                by video.ts); a chart is a nested <svg> in the zone's box
@@ -397,6 +400,26 @@ src/
                                `_refresh_previews` rewrites the deck's stale Inkscape
                                previews into that step after the commit; `attach`
                                joins the author's last step (leaving the master)),
+                               placeholders.py (a layout's or overlay's zones as the
+                               master edits them: `target` (the file, its copy's
+                               theme original as an alias, the slides that get it,
+                               child layouts), `placeholders` (kind from the name:
+                               `is_media_zone`; prompt, nearest wins; box; `filled`),
+                               `taken_ids`, `zone_name`/`name_problem`, `set_prompt`,
+                               `plan_rename` / `plan_remove` = a `Plan` of writes made
+                               without writing: the zone, prompts, `<style>`
+                               `#zone-old`, arrows, `inkflow:default-zone` (set when
+                               `content` is renamed), and per slide `zones.rename_zone`
+                               on its Markdown (auto title/content get markers),
+                               `rename_zone_key` / animation targets in deck.py;
+                               refused when a slide already names the new zone or
+                               shares its Markdown with a slide off the layout; the
+                               session's `master` ops add-zone (`prompt`, `exact`, a
+                               `layout`/`overlay` name, a default box), zone-make
+                               (a drawn shape, `inkflow:show-shape`), zone-rename
+                               (`dryRun` writes nothing, not even the copy),
+                               zone-prompt, zone-remove (`dropContent`), and the
+                               read `master-placeholders`),
                                themeedit.py (Theme
                                dialog: token overrides as one marked block in the project's
                                styles.css, values validated, never raw CSS; the session's
@@ -443,7 +466,9 @@ src/
                                setup-pages, completion), present.py (serve, edit, build, export), agent.py
                                (outline, context, render, goto, select, setup-claude),
                                compare.py (`inkflow compare [LEFT] RIGHT`), master.py
-                               (`inkflow layout` copy/revert/save/rename/delete and
+                               (`inkflow layout` copy/revert/save/rename/delete,
+                               `layout placeholder` add/rename/prompt/remove and
+                               `layout placeholders [--json]`, and
                                `inkflow overlay` new/copy/revert: the session's
                                `master` action through editor/remote.py), slides.py
                                (the `slide` group: add, delete, duplicate, move, hide, show,
@@ -788,7 +813,12 @@ src/
                       placeholders, rename/delete/revert dialogs; the props
                       panel's `masterPanel`) over mastertree.ts (pure: the
                       layout tree under the background, badges, usage words,
-                      `copyTarget`; tested),
+                      `copyTarget`; tested); placeholders.ts (the add / make
+                      placeholder dialog, the panel's Placeholder section: name
+                      with a `zone-rename` dry run as it is typed, prompt,
+                      Remove; `ed.master.placeholders` from
+                      `master-placeholders`) over placeholdertext.ts (pure: the
+                      server's name rules, panel words; tested),
                       git.ts (Git menu; its Worktrees section: rows with
                       Compare = `inkflow:compare` CustomEvent {kind: "path",
                       deck, label} for the compare view, a dialog with what to

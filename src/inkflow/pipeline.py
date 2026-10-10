@@ -16,11 +16,11 @@ from inkflow.assets import AssetRoots, AssetSource, read_resolved_svg
 from inkflow.backgrounds import picture_backgrounds
 from inkflow.charts import ZONE_TEXT_SCALE, fence_font
 from inkflow.content import (
+    empty_zone_shapes,
     inject_style,
     remove_unreferenced_zones,
     substitute_content,
     substitute_zone_numbers,
-    unreferenced_zones,
     zone_box,
 )
 from inkflow.drawio_inline import inline_diagrams
@@ -619,13 +619,14 @@ class SlideSvg:
 
     def pop_hints(self) -> dict[str, str]:
         """The layouts' placeholder prompts (``<inkflow:hint zone=…>``), by
-        zone name, taken out of the slide: they are for the editor only."""
+        zone name, taken out of the slide: they are for the editor only. The
+        nearest layout's wins (ancestors are composed first)."""
         hints: dict[str, str] = {}
         for el in list(self.root.iter(INKFLOW_HINT)):
             zone = el.get("zone")
             text = (el.text or "").strip()
             if zone and text:
-                _ = hints.setdefault(zone, text)
+                hints[zone] = text
             parent = el.getparent()
             if parent is not None:
                 parent.remove(el)
@@ -633,7 +634,7 @@ class SlideSvg:
 
     def empty_zones(self, hints: dict[str, str] | None = None) -> list[EmptyZone]:
         zones: list[EmptyZone] = []
-        for el in unreferenced_zones(self.root):
+        for el in empty_zone_shapes(self.root):
             x, y, width, height = zone_box(el)
             name = (el.get("id") or "").removeprefix("zone-")
             zone: EmptyZone = {

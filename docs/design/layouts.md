@@ -214,6 +214,42 @@ slide's own pictures into picture zones (`zone-picture`, `zone-picture-2`…) of
 the same box. `inkflow layout rename` and `layout delete [--move-to L]`
 manage the deck's own layouts; references follow a rename.
 
+## Placeholders
+
+A layout's zones are its placeholders: what each slide on it fills. The
+editor's [slide master](../editor/index.md#slide-master) adds, renames and
+removes them; so does the command line:
+
+```bash
+inkflow layout placeholders content            # kind, prompt, box, filled on which slides
+inkflow layout placeholder add content code-example --prompt "Click to add the code example"
+inkflow layout placeholder add content hero --kind picture --box 1100,300,700,500
+inkflow layout placeholder rename content code-example snippet -n   # what would change
+inkflow layout placeholder rename content code-example snippet
+inkflow layout placeholder prompt content snippet "Paste the snippet"   # or --clear
+inkflow layout placeholder remove content snippet [--drop-content]
+```
+
+A placeholder is a `zone-<name>` rect, plus an optional prompt,
+`<inkflow:hint zone="<name>">…</inkflow:hint>`, which the editor shows in the
+empty zone on a new slide and the build leaves out. A picture placeholder's name
+says it is one (`zone-picture-hero`, `zone-logo`): that is how the editor knows
+to offer a picture there. A theme's layout is copied into the deck on the first
+change (`layouts/<name>.svg`, see above).
+
+A rename follows the slides in the same step: on every slide built on the
+layout (directly or on a layout built on it; for an overlay, every slide that
+gets it) `::old::` markers in its Markdown, `zones={"old": …}` keys and
+animations aimed at `zone-old` are renamed, as are prompts, `#zone-old` rules
+in the layout's own `<style>`, arrows attached to it and an
+`inkflow:default-zone` naming it. Markdown the layout's `title` or `content`
+zone took without a marker gets an explicit `::new::` marker, and renaming
+`content` declares the new name as the default zone, so plain Markdown keeps
+flowing into it. It is refused when a slide already uses the new name, or when
+a slide's Markdown file is also the Markdown of a slide on another layout.
+`#zone-old` rules in a `styles.css` are not rewritten; the rename warns about
+them.
+
 ## Built-in layouts
 
 The built-in theme ships eighteen layouts, usable by bare name in any deck:

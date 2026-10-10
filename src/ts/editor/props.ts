@@ -85,6 +85,7 @@ import { edit } from "./net";
 import { fileName, openButton } from "./openwith";
 import { isPdfRef, pdfPage, withPage } from "./pathtext";
 import { choosePage, pageUrl, sourceRef } from "./pdfpages";
+import { makePlaceholderSection, placeholderSection } from "./placeholders";
 import { renameButton, renameSlideFiles } from "./rename";
 import { distribute } from "./snap";
 import { currentSlide, ed, emit, on, sourceOf } from "./state";
@@ -1414,17 +1415,10 @@ function renderObjectPanel(sel: Selected): void {
         ),
     );
 
-    if (zone && ed.master) {
-        panel.append(
-            section(
-                "Placeholder",
-                h(
-                    "p",
-                    { class: "hint" },
-                    "Each slide on this layout fills this zone with its own content: here it shows sample text. Drag or resize it to move it on every slide.",
-                ),
-            ),
-        );
+    if (zone && ed.master) panel.append(placeholderSection(sel));
+    if (!zone && ed.master) {
+        const make = makePlaceholderSection(sel);
+        if (make) panel.append(make);
     }
     if (zone && !ed.master) {
         const slide = currentSlide()!;

@@ -952,7 +952,7 @@ commands:
         zip: ["$files([\".zip\"])"]
 
   - name: layout
-    description: The slide master's layouts - copy a theme's, revert, save a slide as one.
+    description: The slide master's layouts - copy a theme's, revert, save a slide as one, placeholders.
     commands:
       - name: copy
         description: Give the deck its own copy of a theme's layout.
@@ -996,6 +996,62 @@ commands:
         completion:
           flag:
             deck: ["$files([\".py\"])"]
+
+      - name: placeholders
+        description: List a layout's placeholders - kind, prompt, box, the slides that fill them.
+        flags:
+          -d, --deck=: Path to deck.py
+          --overlay: The name is an overlay's
+          --json: Print JSON
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: placeholder
+        description: Add, rename, prompt or remove a layout's placeholders (its zones).
+        commands:
+          - name: add
+            description: Add a text or picture placeholder.
+            flags:
+              -d, --deck=: Path to deck.py
+              --overlay: The name is an overlay's
+              --kind=: text or picture
+              --prompt=: What the empty zone says on a new slide
+              --box=: Its box, x,y,width,height
+            completion:
+              flag:
+                deck: ["$files([\".py\"])"]
+                kind: ["text", "picture"]
+
+          - name: rename
+            description: Rename a placeholder; every slide's content for it follows.
+            flags:
+              -d, --deck=: Path to deck.py
+              --overlay: The name is an overlay's
+              -n, --dry-run: Only say what would change
+            completion:
+              flag:
+                deck: ["$files([\".py\"])"]
+
+          - name: prompt
+            description: Set or clear a placeholder's prompt.
+            flags:
+              -d, --deck=: Path to deck.py
+              --overlay: The name is an overlay's
+              --clear: Remove the prompt
+            completion:
+              flag:
+                deck: ["$files([\".py\"])"]
+
+          - name: remove
+            description: Remove a placeholder (a shape it was made from stays).
+            flags:
+              -d, --deck=: Path to deck.py
+              --overlay: The name is an overlay's
+              --drop-content: Also delete what the slides put in it
+            completion:
+              flag:
+                deck: ["$files([\".py\"])"]
 
   - name: overlay
     description: The deck's overlays - what is drawn on top of every slide.

@@ -49,6 +49,7 @@ from inkflow.editor import (
     gitops,
     media,
     nativedialog,
+    placeholders,
     places,
     projects,
     worktrees,
@@ -99,8 +100,9 @@ from inkflow.editor.master import (
     overlay_name,
     slug_name,
     template_bytes,
+    with_inkflow,
 )
-from inkflow.editor.model import MEDIA_HIDDEN_FIELDS, is_media_zone, source_infos
+from inkflow.editor.model import MEDIA_HIDDEN_FIELDS, source_infos
 from inkflow.editor.previews import layout_previews
 from inkflow.editor.svgops import (
     SvgFile,
@@ -176,6 +178,7 @@ from inkflow.pipeline import (
     slide_ids,
 )
 from inkflow.sizes import PageSize
+from inkflow.svg import canvas_size
 from inkflow.svgio import parse_svg_file
 from inkflow.sync import build_context, deck_files, plan_preview
 from inkflow.titles import resolve_deck_title
@@ -482,6 +485,7 @@ _UNLOCKED = frozenset(
         "layout-previews",
         "master-tree",
         "master-render",
+        "master-placeholders",
         "find",
         "browse",
     }
@@ -861,6 +865,8 @@ class EditorSession:
             return {"ok": True, "master": master_tree(deck, self.deck_path)}
         if action == "master-render":
             return {"ok": True, **self._master_render(msg, deck)}
+        if action == "master-placeholders":
+            return self._placeholder_info(msg, deck)
         if action == "copy-slides":
             indices = msg.get("slides")
             if not isinstance(indices, list) or not all(
@@ -919,7 +925,11 @@ class EditorSession:
         ):
             raise EditError("deck.py changed since the last build; try again")
         try:
-            if msg.get("copyLayout") and isinstance(msg.get("file"), str):
+            if (
+                msg.get("copyLayout")
+                and not msg.get("dryRun")
+                and isinstance(msg.get("file"), str)
+            ):
                 self._copy_on_write(msg, deck, txn, extra)
             label = handler(msg, deck, txn, extra)
         except MasterError as exc:
@@ -3973,6 +3983,14 @@ class EditorSession:
             return self._new_overlay(msg, deck, txn, extra)
         if op == "add-zone":
             return self._add_zone(msg, deck, txn, extra)
+        if op == "zone-make":
+            return self._zone_make(msg, deck, txn, extra)
+        if op == "zone-rename":
+            return self._zone_rename(msg, deck, txn, extra)
+        if op == "zone-prompt":
+            return self._zone_prompt(msg, deck, txn, extra)
+        if op == "zone-remove":
+            return self._zone_remove(msg, deck, txn, extra)
         if op == "previews":
             extra["_previews"] = deck
             return "Update Inkscape previews"
@@ -4191,50 +4209,314 @@ class EditorSession:
         extra["overlay"] = {"name": stem, "path": str(dest), "where": where}
         return f"New overlay '{stem}'"
 
+    # ── Placeholders (editor/placeholders.py) ──
+
+    def _reader(self, txn: _Txn | None) -> placeholders.Reader:
+        """Files as the request left them; a theme's (outside the project)
+        as they are."""
+        root = self.project_dir.resolve()
+
+        def read(path: Path) -> bytes | None:
+            if txn is not None and path.resolve().is_relative_to(root):
+                return txn.read_optional(path)
+            try:
+                return path.read_bytes()
+            except OSError:
+                return None
+
+        return read
+
+    def _asset_kind(self, msg: dict[str, object], path: Path, deck: Deck) -> AssetKind:
+        if msg.get("kind") == "overlay" or msg.get("overlay"):
+            return AssetKind.OVERLAY
+        if theme_ref(path, deck.theme, AssetKind.OVERLAY) is not None:
+            return AssetKind.OVERLAY
+        if path.resolve().parent == (self.project_dir / "overlays").resolve():
+            return AssetKind.OVERLAY
+        return AssetKind.LAYOUT
+
+    def _named_file(self, msg: dict[str, object], deck: Deck) -> Path:
+        """The file a request names: ``file`` (a path, as the editor sends),
+        or a ``layout`` / ``overlay`` by name (an agent's command)."""
+        raw = msg.get("file") if msg.get("file") is not None else msg.get("path")
+        if isinstance(raw, str) and raw:
+            return Path(raw)
+        overlay = msg.get("overlay")
+        if isinstance(overlay, str) and overlay:
+            for o in overlay_entries(deck, self.project_dir):
+                if o.path is not None and overlay in (o.name, o.src):
+                    return o.path
+            raise EditError(f"no overlay named {overlay!r}")
+        layout = msg.get("layout")
+        if isinstance(layout, str) and layout:
+            entries = layout_entries(deck, self.project_dir)
+            if layout in entries:
+                return entries[layout].path
+            raise EditError(f"no layout named {layout!r} (see inkflow layouts)")
+        raise EditError("which layout?")
+
+    def _zone_target(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> placeholders.Target:
+        """The layout (or overlay) a placeholder request changes. A theme's
+        is copied into the deck first, in the same step (not for a dry run,
+        which writes nothing)."""
+        path = self._named_file(msg, deck)
+        kind = self._asset_kind(msg, path, deck)
+        msg["file"] = str(path)
+        inside = path.resolve().is_relative_to(self.project_dir.resolve())
+        if not inside and not msg.get("dryRun"):
+            self._copy_on_write(msg, deck, txn, extra)
+            path = Path(str(msg["file"]))
+        elif inside:
+            expected = msg.get("hash")
+            data = txn.read(path)
+            if isinstance(expected, str) and expected and file_hash(data) != expected:
+                raise EditError(f"{path.name} changed on disk; wait for the reload")
+        return placeholders.target(deck, self.project_dir, path, kind)
+
+    def _zone_arg(self, msg: dict[str, object]) -> str:
+        name = str(msg.get("zone") or "").strip().removeprefix("zone-")
+        if not name:
+            raise EditError("which placeholder?")
+        return name
+
+    def _placeholder_info(
+        self, msg: dict[str, object], deck: Deck
+    ) -> dict[str, object]:
+        """``master-placeholders``: a layout's (or an overlay's) placeholders,
+        those of the layouts it is built on, and the ids a new one must not
+        take."""
+        path = self._named_file(msg, deck)
+        kind = self._asset_kind(msg, path, deck)
+        t = placeholders.target(deck, self.project_dir, path, kind)
+        read = self._reader(None)
+        found = placeholders.placeholders(deck, t, read, self._md_file)
+        taken = placeholders.taken_ids(deck, self.project_dir, t, read)
+        return {
+            "ok": True,
+            "file": str(t.path),
+            "name": t.name,
+            "kind": kind.singular,
+            "slides": t.slides,
+            "placeholders": [p.json() for p in found],
+            "taken": sorted(taken),
+        }
+
+    def _write_plan(
+        self,
+        plan: placeholders.Plan,
+        txn: _Txn,
+        extra: dict[str, object],
+        deck: Deck,
+    ) -> None:
+        for path, data in plan.writes.items():
+            txn.write(path, data)
+        if plan.deck_changed and plan.source is not None:
+            self._save_deck(txn, plan.source, plan.imports)
+        extra["placeholder"] = plan.summary(deck, self.project_dir)
+        extra["structural"] = True
+
+    def _zone_name(self, kind: str, typed: str, taken: set[str], svg: SvgFile) -> str:
+        """A new placeholder's zone id: the typed name, refused when it is no
+        zone name or taken; none typed: ``zone-text``, numbered on."""
+        if not typed.strip():
+            return unique_id(svg.root, f"zone-{kind}", taken)
+        name = placeholders.zone_name(kind, typed)
+        problem = placeholders.name_problem(name)
+        if problem:
+            raise EditError(problem)
+        if f"zone-{name}" in taken:
+            raise EditError(f"zone-{name} is already used here")
+        return f"zone-{name}"
+
     def _add_zone(
         self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
     ) -> str:
-        """A placeholder (an empty zone) drawn into a layout or an overlay:
-        a text placeholder, or a picture placeholder (a zone named for media)."""
-        raw = msg.get("file")
-        if not isinstance(raw, str):
-            raise EditError("which layout?")
-        path = Path(raw)
-        data = txn.read(path)
-        expected = msg.get("hash")
-        if isinstance(expected, str) and expected and file_hash(data) != expected:
-            raise EditError(f"{path.name} changed on disk; wait for the reload")
-        svg = SvgFile.from_bytes(path, data)
-        picture = msg.get("zoneKind") == "picture"
-        base = _slug(str(msg.get("name") or "")) if msg.get("name") else ""
-        if not base or base == "slide":
-            base = "picture" if picture else "text"
-        if picture and not is_media_zone(base):
-            base = f"picture-{base}"
-        taken = all_ids(svg.root)
-        with contextlib.suppress(ValueError, OSError):
-            for ancestor in resolve_chain(path, self.project_dir, deck.theme):
-                taken |= all_ids(parse_svg_file(ancestor))
-        for overlay in overlay_entries(deck, self.project_dir):
-            if overlay.path is not None and overlay.path.resolve() != path.resolve():
-                with contextlib.suppress(Exception):
-                    taken |= all_ids(parse_svg_file(overlay.path))
-        zone_id = unique_id(svg.root, f"zone-{base}", taken)
-        box = {
-            k: float(cast("float", msg.get(k))) for k in ("x", "y", "width", "height")
-        }
-        if box["width"] <= 0 or box["height"] <= 0:
-            raise EditError("the placeholder needs a size")
+        """A placeholder (an empty zone) drawn into a layout or an overlay: a
+        text placeholder, or a picture placeholder (a zone named for media),
+        with its ``prompt``. The name is the one typed, refused when taken
+        (without ``exact``: numbered on instead, ``text-2``). Without a box
+        it goes in the middle of the canvas."""
+        t = self._zone_target(msg, deck, txn, extra)
+        path = t.path
+        svg = SvgFile.from_bytes(path, txn.read(path))
+        kind = "picture" if msg.get("zoneKind") == "picture" else "text"
+        typed = str(msg.get("name") or "")
+        taken = placeholders.taken_ids(
+            deck, self.project_dir, t, self._reader(txn)
+        ) | all_ids(svg.root)
+        if msg.get("exact"):
+            zone_id = self._zone_name(kind, typed, taken, svg)
+        else:
+            base = placeholders.zone_name(kind, typed) if typed.strip() else ""
+            if not base or placeholders.name_problem(base):
+                base = kind
+            zone_id = unique_id(svg.root, f"zone-{base}", taken)
+        x, y, width, height = self._zone_box(msg, svg, kind)
         xml = (
-            f'<rect id="{zone_id}" x="{box["x"]:g}" y="{box["y"]:g}" '
-            + f'width="{box["width"]:g}" height="{box["height"]:g}"/>'
+            f'<rect id="{zone_id}" x="{x:g}" y="{y:g}" '
+            + f'width="{width:g}" height="{height:g}"/>'
         )
         result = apply_ops(svg, [{"kind": "insert", "parent": "0:", "xml": xml}])
+        name = zone_id.removeprefix("zone-")
+        prompt = str(msg.get("prompt") or "").strip()
+        if prompt:
+            _ = placeholders.set_prompt(with_inkflow(svg), name, prompt)
         txn.write(path, svg.to_bytes())
         extra["ids"] = result.ids
         extra["structural"] = True
-        extra["zone"] = zone_id.removeprefix("zone-")
-        return "Add picture placeholder" if picture else "Add text placeholder"
+        extra["zone"] = name
+        if msg.get("previews"):
+            extra["_previews"] = deck
+        return (
+            "Add picture placeholder" if kind == "picture" else "Add text placeholder"
+        )
+
+    def _zone_box(
+        self, msg: dict[str, object], svg: SvgFile, kind: str
+    ) -> tuple[float, float, float, float]:
+        keys = ("x", "y", "width", "height")
+        given = [msg.get(k) for k in keys]
+        if all(isinstance(v, int | float) for v in given):
+            x, y, width, height = (float(cast("float", v)) for v in given)
+        else:
+            w, h = canvas_size(svg.root) or (1920.0, 1080.0)
+            width = round(w * (0.35 if kind == "picture" else 0.5))
+            height = round(h * (0.35 if kind == "picture" else 0.2))
+            x, y = round((w - width) / 2), round((h - height) / 2)
+        if width <= 0 or height <= 0:
+            raise EditError("the placeholder needs a size")
+        return (x, y, width, height)
+
+    def _zone_make(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """Make a drawn shape a placeholder: it keeps its look
+        (``inkflow:show-shape``, as text typed into a shape does); arrows and
+        animations that named it follow its new id."""
+        t = self._zone_target(msg, deck, txn, extra)
+        path = t.path
+        svg = SvgFile.from_bytes(path, txn.read(path))
+        el = element_at(svg.root, msg.get("loc"))
+        kind = "picture" if msg.get("zoneKind") == "picture" else "text"
+        tag = el.tag.rsplit("}", 1)[-1]
+        if kind == "text" and tag not in placeholders.TEXT_SHAPES:
+            raise EditError("only rectangles and ellipses can hold text")
+        if kind == "picture" and tag not in placeholders.PICTURE_SHAPES:
+            raise EditError("only a rectangle, an ellipse or a closed shape")
+        old = el.get("id") or ""
+        if old.startswith("zone-"):
+            raise EditError(f"this shape is the placeholder '{old[5:]}' already")
+        taken = placeholders.taken_ids(
+            deck, self.project_dir, t, self._reader(txn)
+        ) | all_ids(svg.root)
+        zone_id = self._zone_name(kind, str(msg.get("name") or ""), taken, svg)
+        apply_ops(
+            svg, [{"kind": "id", "loc": msg.get("loc"), "id": zone_id, "from": old}]
+        )
+        el.set(INKFLOW_SHOW_SHAPE, "true")
+        if kind == "text":
+            # Centred both ways, as text typed into a shape is.
+            style = el.get("style", "")
+            set_style(
+                el,
+                {
+                    var: "center"
+                    for var in ("--inkflow-align", "--inkflow-valign")
+                    if var not in style
+                },
+            )
+        name = zone_id.removeprefix("zone-")
+        prompt = str(msg.get("prompt") or "").strip()
+        if prompt:
+            _ = placeholders.set_prompt(with_inkflow(svg), name, prompt)
+        txn.write(path, svg.to_bytes())
+        if old:
+            self._rename_cues(deck, path, {old: zone_id}, txn)
+        extra["ids"] = {"new": zone_id}
+        extra["structural"] = True
+        extra["zone"] = name
+        if msg.get("previews"):
+            extra["_previews"] = deck
+        return (
+            "Make picture placeholder" if kind == "picture" else "Make text placeholder"
+        )
+
+    def _zone_rename(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """Rename a placeholder, every slide's content for it following (see
+        `placeholders.plan_rename`); ``dryRun`` only says what would change."""
+        t = self._zone_target(msg, deck, txn, extra)
+        old = self._zone_arg(msg)
+        new = placeholders.zone_name(
+            placeholders.kind_of(old), str(msg.get("to") or "")
+        )
+        plan = placeholders.plan_rename(
+            deck,
+            self.project_dir,
+            t,
+            old,
+            new,
+            self._reader(txn),
+            self._md_file,
+            lambda: self._deck_source(txn),
+        )
+        extra["zone"] = new
+        label = f"Rename placeholder '{old}' to '{new}'"
+        if msg.get("dryRun"):
+            extra["placeholder"] = plan.summary(deck, self.project_dir)
+            return label
+        self._write_plan(plan, txn, extra, deck)
+        extra["ids"] = {"new": f"zone-{new}"}
+        if msg.get("previews"):
+            extra["_previews"] = deck
+        return label
+
+    def _zone_prompt(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """Set (or, empty, remove) a placeholder's prompt. A zone of a layout
+        it is built on gets its prompt here, for this layout's slides."""
+        t = self._zone_target(msg, deck, txn, extra)
+        name = self._zone_arg(msg)
+        svg = SvgFile.from_bytes(t.path, txn.read(t.path))
+        found = placeholders.placeholders(deck, t, self._reader(txn), self._md_file)
+        if not any(p.name == name for p in found):
+            raise EditError(f"'{t.name}' has no placeholder '{name}'")
+        prompt = str(msg.get("prompt") or "").strip()
+        if placeholders.set_prompt(with_inkflow(svg), name, prompt):
+            txn.write(t.path, svg.to_bytes())
+        extra["zone"] = name
+        if msg.get("previews"):
+            extra["_previews"] = deck
+        if prompt:
+            return f"Set the prompt of '{name}'"
+        return f"Remove the prompt of '{name}'"
+
+    def _zone_remove(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """Remove a placeholder (a shape it was made from stays, plain); with
+        ``dropContent`` what the slides put in it goes too."""
+        t = self._zone_target(msg, deck, txn, extra)
+        name = self._zone_arg(msg)
+        plan = placeholders.plan_remove(
+            deck,
+            self.project_dir,
+            t,
+            name,
+            self._reader(txn),
+            self._md_file,
+            lambda: self._deck_source(txn),
+            bool(msg.get("dropContent")),
+        )
+        self._write_plan(plan, txn, extra, deck)
+        extra["zone"] = name
+        if msg.get("previews"):
+            extra["_previews"] = deck
+        return f"Remove placeholder '{name}'"
 
     # ── Animations ──
 

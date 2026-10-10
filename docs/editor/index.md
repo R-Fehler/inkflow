@@ -791,13 +791,44 @@ Choosing an entry draws it on the canvas with sample text in its zones (an
 empty zone shows as a dashed box), the layouts behind it and the overlays on
 top faded: only its own objects can be selected. Everything the toolbar draws
 and inserts goes into that file: shapes, text, pictures (a logo), diagrams.
-**+ Text placeholder** and **+ Picture placeholder** in the panel add an empty
-zone (a `zone-<name>` rect) that each slide on the layout fills with its own text
-or picture; drag a zone to move it for every slide. *Show* draws the layout with
+Drag a zone to move it for every slide. *Show* draws the layout with
 one of its slides' own content instead of sample text. Edits reach the slides
 at once (the thumbnails follow); **Close** goes back to the slides and brings
 the files' [Inkscape previews](../authoring/inkscape.md) up to date, as part of
 your last edit's undo step.
+
+**Placeholders** are the zones a layout leaves for its slides to fill, as in
+PowerPoint's slide master:
+
+- **Add one:** **+ Text placeholder** or **+ Picture placeholder** in the panel
+  asks for its kind, a name and an optional *prompt*. The name becomes the zone
+  `zone-<name>` (shown as you type; a name already used on the layout, the
+  layouts it is built on, its overlays or a slide on it is refused), a picture
+  placeholder's name says it is one (`hero` → `zone-picture-hero`). The prompt is
+  the grey text the empty zone shows on a new slide (*+ Click to add the code
+  example*); clicking it types the prompt in, selected, ready to be typed over.
+  It is stored in the layout as `<inkflow:hint zone="…">`, which the build takes
+  out.
+- **Make a drawn shape one:** select a rectangle or an ellipse you drew in the
+  master and choose **Make text placeholder** (or **Make picture placeholder**,
+  which also takes a closed path) in its panel. The shape keeps its look
+  (`inkflow:show-shape`, as with text typed into a shape) and stays visible on a
+  slide that leaves it empty.
+- **Change one:** select a zone in the master. Its **Placeholder** section shows
+  its kind, which slides fill it (*Filled on 3 slides: 2, 5, 7*), its **Name**
+  and its **Prompt** (empty: the zone's name shows). Typing a new name says what
+  the rename changes before you press Enter (*Renames the zone on 3 slides*).
+- **Rename follows the slides.** In the same undo step, every slide built on the
+  layout (directly, or on a layout built on it) keeps its content: `::code::`
+  becomes `::sample::` in its Markdown (a heading or body the layout's
+  `title`/`content` zone took without a marker gets one), `zones={"code": …}`
+  becomes `zones={"sample": …}` in `deck.py`, and animations aimed at
+  `zone-code` (a chart's series too) and arrows attached to it follow. The
+  rename is refused, naming the slide, when one of them already has a
+  `sample`, or when its Markdown file is shared with a slide on another layout.
+- **Remove placeholder** takes the zone out; one made from a shape stays as a
+  plain shape. What the slides put in it stays in their files (and no longer
+  shows) unless you tick *Also delete what slides … put in it*.
 
 **The theme's layouts are copied on write.** A built-in or theme layout lives in
 an installed package and is never written. Your first edit of one copies it into
@@ -824,8 +855,9 @@ once. A layout of the deck's own can be renamed (slides built on it follow, see
 [Renaming files](#renaming-files)) or deleted from its ⋯ menu; deleting one that
 slides use asks which layout they move to.
 
-From the command line: `inkflow layout copy|revert|save|rename|delete` and
-`inkflow overlay new` make the same changes (see
+From the command line: `inkflow layout copy|revert|save|rename|delete`,
+`inkflow layout placeholder add|rename|prompt|remove`, `inkflow layout
+placeholders` and `inkflow overlay new` make the same changes (see
 [Claude Code](claude-code.md#the-slide-master)).
 
 The layout gallery offers the built-in layouts drawn in the deck's shape

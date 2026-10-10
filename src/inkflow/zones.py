@@ -703,3 +703,38 @@ def remove_zone_section(source: str, zone: str) -> str:
             return before + "\n" if before else ""
         return (before + "\n\n" if before else "") + after
     return replace_zone_text(source, zone, "")
+
+
+def zone_names(source: str) -> set[str]:
+    """Every zone ``source`` names: its ``::zone::`` markers (an empty one
+    too) and the zones its leading text is auto-extracted into."""
+    markers = list(_ZONE_PATTERN.finditer(source))
+    head_end = markers[0].start() if markers else len(source)
+    return set(_auto_spans(source, 0, head_end)) | {m.group(1) for m in markers}
+
+
+def rename_zone(source: str, old: str, new: str) -> str:
+    """``source`` with zone ``old`` called ``new``: each ``::old …::`` marker
+    renamed (its parameters kept). Text auto-extracted into ``old`` (a leading
+    ``#`` heading for ``title``, the text after the headings for ``content``)
+    gets a ``::new::`` marker of its own, and the auto-extracted zones after it
+    explicit markers too, so they keep their text. The caller checks that
+    ``new`` is free (`zone_names`)."""
+    markers = list(_ZONE_PATTERN.finditer(source))
+    out = source
+    # From the last, so earlier offsets hold.
+    for m in reversed(markers):
+        if m.group(1) == old:
+            out = out[: m.start(1)] + new + out[m.end(1) :]
+    if any(m.group(1) == old for m in markers):
+        return out
+    head_end = markers[0].start() if markers else len(source)
+    auto = _auto_spans(source, 0, head_end)
+    if old not in auto:
+        return source
+    order = [z for z in ("title", "subtitle", "content") if z in auto]
+    for zone in reversed(order[order.index(old) :]):
+        start = auto[zone][0]
+        name = new if zone == old else zone
+        out = out[:start] + f"::{name}::\n" + out[start:]
+    return out

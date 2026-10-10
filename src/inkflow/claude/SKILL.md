@@ -89,7 +89,11 @@ them all as one undoable step (`--regex`, `--case`, `--word`, `-s SLIDE`,
   its own copy (`base` is behind every built-in layout; `agenda` only agenda
   slides), `inkflow layout revert NAME` undoes that. `inkflow layout save N
   NAME` turns slide N into a new layout; `inkflow overlay new logo` adds an
-  overlay on top of every slide to draw a logo or footer into.
+  overlay on top of every slide to draw a logo or footer into. A layout's
+  zones are its placeholders: `inkflow layout placeholders L` lists them,
+  `inkflow layout placeholder add|rename|prompt|remove L …` changes them (a
+  rename also renames `::zone::`, `zones=` keys and animation targets on every
+  slide on that layout; `-n` previews it). Never rename a zone by hand.
 - `slides/*.md`: Markdown routed into a layout's zones (`::zone::` markers;
   a leading `# Title` fills the title zone; `::step::` reveals on click).
 - `notes/*.md`: speaker notes.
