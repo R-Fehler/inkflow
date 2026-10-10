@@ -14,6 +14,7 @@ from inkflow import ns
 from inkflow.animations import Animation, Cue, PlayVideo
 from inkflow.assets import AssetRoots, AssetSource, read_resolved_svg
 from inkflow.backgrounds import picture_backgrounds
+from inkflow.charts import ZONE_TEXT_SCALE, fence_font
 from inkflow.content import (
     inject_style,
     remove_unreferenced_zones,
@@ -634,9 +635,15 @@ class SlideSvg:
         return duplicate_zone_ids(self.root)
 
     def inject_content(
-        self, content: dict[str, ZoneFill], font_size: int, dark_mode: bool
+        self,
+        content: dict[str, ZoneFill],
+        font_size: int,
+        dark_mode: bool,
+        chart_scale: float = ZONE_TEXT_SCALE,
     ) -> None:
-        self.root = substitute_content(self.root, content, font_size, dark_mode)
+        self.root = substitute_content(
+            self.root, content, font_size, dark_mode, chart_scale
+        )
 
     def convert_pdfs(self, pages: PdfPages) -> None:
         self.root = pages.apply(self.root)
@@ -674,6 +681,8 @@ class DeckContext:
     total_slides: int
     pdf_pages: PdfPages
     """Converts the PDF pictures (and reports a missing converter once)."""
+    chart_scale: float = ZONE_TEXT_SCALE
+    """A chart's text size relative to the body text (`PageSize.chart_text_scale`)."""
     editor: bool = False
     """Stamp provenance and collect ``SlideEditInfo`` for the visual editor."""
 
@@ -770,6 +779,7 @@ def process_slide(
     md_notes = ""
     reveal_pairs: list[tuple[Cue, int]] = []
     reveal_max = 0
+    font_size = slide.font_size if slide.font_size is not None else ctx.font_size
     if parsed is not None or slide.zones:
         zone_ids = doc.zone_ids()
         default_zone = resolve_default_zone(doc.root, zone_ids)
@@ -780,6 +790,7 @@ def process_slide(
             AssetSource.for_deck(ctx.assets),
             available_zones=zone_ids,
             default_zone=default_zone,
+            chart_font=fence_font(font_size, ctx.chart_scale),
         )
         md_notes = result.notes
         reveal_pairs = [(anim, step) for anim, step in result.animations]
@@ -789,11 +800,10 @@ def process_slide(
                 set(result.content), slide, parsed, zone_ids, default_zone
             )
         if result.content:
-            font_size = (
-                slide.font_size if slide.font_size is not None else ctx.font_size
-            )
             content = _resolve_autoplay_conflicts(result.content, slide.animations)
-            doc.inject_content(content, font_size, ctx.mode == ColorMode.DARK)
+            doc.inject_content(
+                content, font_size, ctx.mode == ColorMode.DARK, ctx.chart_scale
+            )
     # After injection, so a PDF in a zone or in Markdown is converted as well.
     doc.convert_pdfs(ctx.pdf_pages)
 
@@ -909,6 +919,7 @@ def deck_context(
         mode=deck.effective_mode,
         total_slides=total_slides,
         pdf_pages=PdfPages(assets),
+        chart_scale=deck.effective_size.chart_text_scale,
         editor=editor,
     )
 

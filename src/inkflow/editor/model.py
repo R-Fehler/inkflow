@@ -24,7 +24,7 @@ from inkflow.editor.chartedit import chart_json
 from inkflow.editor.codegen import field_schema, to_json
 from inkflow.editor.deckedit import DeckSource
 from inkflow.editor.svgops import file_hash
-from inkflow.layout import discover_layouts
+from inkflow.layout import discover_layouts, layouts_for
 from inkflow.loaders import load_md
 from inkflow.manifest import Chart, Deck, Image, Inline, Slide, TextBox, Video
 from inkflow.pipeline import SlideData, resolve_slide_src
@@ -325,6 +325,21 @@ def build_model(
         "defaultTransition": _transition_json(deck.effective_transition, deck_module),
         "layouts": _layouts(project_dir, deck),
         "colorTokens": list(SVG_TOKENS),
+        "deckSize": size_json(deck),
+    }
+
+
+def size_json(deck: Deck) -> dict[str, object]:
+    """The deck's size for the editor: the canvas new slides get (and the
+    thumbnails' shape), and whether it is printed."""
+    size = deck.effective_size
+    return {
+        "name": str(deck.size) if deck.size is not None else None,
+        "label": size.label,
+        "canvas": list(size.canvas),
+        "page": [round(v, 2) for v in size.page_pt],
+        "print": deck.is_print,
+        "fontSize": deck.effective_font_size,
     }
 
 
@@ -369,10 +384,11 @@ def _mark_overlays(sources: list[SourceInfo]) -> None:
 
 def _layouts(project_dir: Path, deck: Deck) -> list[dict[str, str]]:
     seen: dict[str, dict[str, str]] = {}
-    for label, path in discover_layouts(project_dir, deck.theme):
+    found = discover_layouts(project_dir, deck.theme)
+    for label, path in layouts_for(found, deck.effective_size):
         # Later sources (theme, local) shadow earlier ones with the same name.
         seen[path.stem] = {"name": path.stem, "source": label, "path": str(path)}
-    hidden = {"base", "numbered"}
+    hidden = {"base", "numbered", "poster-base"}
     return [v for k, v in sorted(seen.items()) if k not in hidden]
 
 

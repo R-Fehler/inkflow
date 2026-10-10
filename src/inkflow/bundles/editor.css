@@ -423,7 +423,7 @@ body.compare-mode #zoom-label {
   border-radius: 3px;
   overflow: hidden;
   box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--deck-ar, 16 / 9);
 }
 .cmp-thumb.none,
 .cmp-slide.empty {
@@ -437,7 +437,7 @@ body.compare-mode #zoom-label {
 .cmp-slide.empty {
   display: grid;
   place-items: center;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--deck-ar, 16 / 9);
   color: var(--subtext);
   font-size: 12px;
 }
@@ -869,7 +869,7 @@ body.offline #conn {
   outline: 2px solid transparent;
   outline-offset: 1px;
   background: var(--ui-canvas);
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--deck-ar, 16 / 9);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1826,7 +1826,7 @@ foreignObject.rich-editing {
 }
 .gallery-thumb {
   position: relative;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--deck-ar, 16 / 9);
   border-radius: 6px;
   overflow: hidden;
   background: var(--ui-canvas);

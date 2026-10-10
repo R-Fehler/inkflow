@@ -13,7 +13,7 @@ from pathlib import Path
 
 from inkflow.assets import AssetSource
 from inkflow.editor.model import is_media_zone
-from inkflow.layout import discover_layouts, layout_zones
+from inkflow.layout import discover_layouts, layout_zones, layouts_for
 from inkflow.logging import collect_logs
 from inkflow.manifest import Deck, Slide, ZoneContent
 from inkflow.pipeline import deck_context, process_slide
@@ -68,10 +68,11 @@ def _sample(zone: str) -> str:
 def _layouts(deck: Deck, project_dir: Path) -> list[tuple[str, str, Path]]:
     """(name, source, path) for every usable layout, the later source winning."""
     seen: dict[str, tuple[str, str, Path]] = {}
-    for label, path in discover_layouts(project_dir, deck.theme):
+    found = discover_layouts(project_dir, deck.theme)
+    for label, path in layouts_for(found, deck.effective_size):
         seen[path.stem] = (path.stem, label, path)
     order = {name: i for i, name in enumerate(BUILTIN_ORDER)}
-    entries = [v for k, v in seen.items() if k != "base"]
+    entries = [v for k, v in seen.items() if k not in ("base", "poster-base")]
     # The project's own layouts first, then the built-in order, then the rest.
     return sorted(
         entries,

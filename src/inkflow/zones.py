@@ -12,7 +12,13 @@ from lxml import etree
 
 from inkflow.animations import Animation, FadeIn
 from inkflow.assets import AssetSource
-from inkflow.charts import ChartIds, ResolvedChart, expand_fences, resolve
+from inkflow.charts import (
+    FENCE_FONT,
+    ChartIds,
+    ResolvedChart,
+    expand_fences,
+    resolve,
+)
 from inkflow.enums import Align, Trigger, VAlign
 from inkflow.logging import logger
 from inkflow.manifest import Chart, Media, TextBox, Video, ZoneContent
@@ -512,11 +518,14 @@ def build_slide_content(
     deck_source: AssetSource,
     available_zones: set[str] | None = None,
     default_zone: str = "",
+    chart_font: float = FENCE_FONT,
 ) -> SlideContent:
     """Assemble per-zone content from a parsed .md file and the deck's own zones.
 
     The two carry references written in different files, so each gets its own
     ``AssetSource``: this is the last point where which is which is still known.
+    ``chart_font`` is the text size Markdown charts are drawn with
+    (`charts.fence_font`).
     """
     zones: _ZoneChunks = {}
     zone_params: _ZoneParams = {}
@@ -532,7 +541,7 @@ def build_slide_content(
     chart_ids.taken.update(k for k, v in extra.items() if isinstance(v, Chart))
 
     def finish(html: str, source: AssetSource, ids: ChartIds = chart_ids) -> str:
-        return expand_fences(source.html(html), source, ids)
+        return expand_fences(source.html(html), source, ids, chart_font)
 
     notes_chunks = zones.pop("notes", None)
     notes_html = ""

@@ -1498,9 +1498,20 @@ class ChartIds:
         return gid
 
 
-def expand_fences(text: str, source: AssetSource, ids: ChartIds) -> str:
+def fence_font(font_size: float, chart_scale: float = ZONE_TEXT_SCALE) -> float:
+    """The text size a Markdown chart is drawn with (at ``FENCE_WIDTH``), for a
+    zone whose body text is ``font_size`` in a deck whose charts are
+    ``chart_scale`` of it: ``FENCE_FONT`` on a 16:9 slide, in proportion
+    elsewhere (larger on a poster)."""
+    return FENCE_FONT * (font_size / 36) * (chart_scale / ZONE_TEXT_SCALE)
+
+
+def expand_fences(
+    text: str, source: AssetSource, ids: ChartIds, font: float = FENCE_FONT
+) -> str:
     """Draw every chart fence placeholder in rendered HTML, its ``data:`` file
-    resolved against ``source`` (the Markdown file it was written in)."""
+    resolved against ``source`` (the Markdown file it was written in), its text
+    ``font`` in the chart's own units (`fence_font`)."""
 
     def draw(match: re.Match[str]) -> str:
         try:
@@ -1514,7 +1525,7 @@ def expand_fences(text: str, source: AssetSource, ids: ChartIds) -> str:
             chart_id = ids.claim(slug(fence.id) if fence.id else "chart")
             resolved = resolve(fence.chart, source)
             aspect = fence.aspect
-        root = render(resolved, FENCE_WIDTH, FENCE_WIDTH / aspect, chart_id, FENCE_FONT)
+        root = render(resolved, FENCE_WIDTH, FENCE_WIDTH / aspect, chart_id, font)
         root.set("id", chart_id)
         root.set("width", "100%")
         root.set("style", root.get("style", "") + ";display:block;height:auto")

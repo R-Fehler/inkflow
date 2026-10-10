@@ -4,6 +4,7 @@
 
 import { applyDeckStyles } from "../shared/deck-styles";
 import type { SlideData } from "../shared/types";
+import { setDeckCanvas } from "../shared/viewbox";
 import { toast } from "./dom";
 import { ed, emit } from "./state";
 import type { EditorModel, EditRequest, EditResult } from "./types";
@@ -13,6 +14,16 @@ let nextId = 1;
 const pending = new Map<number, (r: EditResult) => void>();
 let commandHandler: (msg: Record<string, unknown>) => void = () => {};
 let pendingSlides: SlideData[] | null = null;
+
+// The deck's canvas: the fallback for a slide without a viewBox, and the shape
+// of a thumbnail before its slide is drawn (`--deck-ar`).
+function applyDeckSize(model: EditorModel): void {
+    const size = model.deckSize;
+    if (!size) return;
+    const [w, h] = size.canvas;
+    setDeckCanvas(w, h);
+    document.documentElement.style.setProperty("--deck-ar", `${w} / ${h}`);
+}
 
 export function onCommand(fn: (msg: Record<string, unknown>) => void): void {
     commandHandler = fn;
@@ -105,6 +116,7 @@ export function connect(port: number): void {
                     pendingSlides = null;
                 }
                 ed.model = msg.model as EditorModel;
+                applyDeckSize(ed.model);
                 ed.rebuilt = true;
                 if (msg.history) {
                     setHistory(msg.history as HistoryState);

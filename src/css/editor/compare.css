@@ -252,7 +252,7 @@ body.compare-mode #zoom-label {
     border-radius: 3px;
     overflow: hidden;
     box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
-    aspect-ratio: 16 / 9;
+    aspect-ratio: var(--deck-ar, 16 / 9);
 }
 
 .cmp-thumb.none,
@@ -268,7 +268,7 @@ body.compare-mode #zoom-label {
 .cmp-slide.empty {
     display: grid;
     place-items: center;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: var(--deck-ar, 16 / 9);
     color: var(--subtext);
     font-size: 12px;
 }

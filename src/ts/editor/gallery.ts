@@ -63,6 +63,7 @@ function thumbnail(p: Preview): HTMLElement {
     const svg = box.querySelector("svg");
     if (svg) {
         const vb = parseViewBox(svg.getAttribute("viewBox"));
+        box.style.aspectRatio = `${vb.w} / ${vb.h}`;
         svg.setAttribute("width", "100%");
         svg.setAttribute("height", "100%");
         svg.querySelectorAll(".anim-pending").forEach((el) => {

@@ -34,7 +34,6 @@ from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
 from inkflow.assets import AssetRoots
 from inkflow.charts import (
-    ZONE_TEXT_SCALE,
     ChartError,
     ResolvedChart,
     Table,
@@ -958,7 +957,8 @@ class EditorSession:
             if slide is not None and slide.font_size is not None
             else deck.effective_font_size
         )
-        root = render(resolved, width, height, zone, size * ZONE_TEXT_SCALE)
+        scale = deck.effective_size.chart_text_scale
+        root = render(resolved, width, height, zone, size * scale)
         return {"ok": True, "svg": etree.tostring(root, encoding="unicode")}
 
     def _chart_data(self, msg: dict[str, object], deck: Deck) -> dict[str, object]:
@@ -2335,7 +2335,7 @@ class EditorSession:
             box = view_box(parse_svg_file(src))
         except (OSError, ValueError):
             box = None
-        return box or (0.0, 0.0, 1920.0, 1080.0)
+        return box or (0.0, 0.0, *deck.effective_size.canvas)
 
     def _ink(
         self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
@@ -2466,7 +2466,9 @@ class EditorSession:
         # create_slide resolves the parent and injects the Inkscape preview
         # layers; it writes to disk, so its file only becomes the transaction's.
         try:
-            create_slide(parent, path, self.project_dir, deck.theme)
+            create_slide(
+                parent, path, self.project_dir, deck.theme, deck.effective_size.canvas
+            )
             # Layout layers and theme colours, so it looks right in Inkscape.
             text = self._inkscape_preview(path, deck)
             data = text.encode("utf-8") if text is not None else path.read_bytes()

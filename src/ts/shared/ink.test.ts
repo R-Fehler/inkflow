@@ -6,6 +6,7 @@ import {
     flatten,
     HIGHLIGHTER_OPACITY,
     type InputPoint,
+    inkScale,
     insidePolygon,
     type LiveStroke,
     newInkId,
@@ -244,5 +245,21 @@ describe("relayed strokes are checked", () => {
         expect(unflatten([1, 2])).toBeNull();
         expect(unflatten([1, 2, "x"])).toBeNull();
         expect(unflatten([1, 2, 5])).toEqual([[1, 2, 1]]);
+    });
+});
+
+describe("inkScale", () => {
+    test("is 1 on a 1920 x 1080 slide and follows its size", () => {
+        expect(inkScale(1920, 1080)).toBe(1);
+        expect(inkScale(960, 540)).toBe(0.5);
+        expect(inkScale(1920)).toBe(1);
+        expect(inkScale(0)).toBe(1);
+    });
+
+    test("uses the larger ratio, so a tall slide fitted to a screen matches", () => {
+        // An A0 poster is shown fitted by its height.
+        expect(inkScale(3179, 4494)).toBeCloseTo(4494 / 1080);
+        // A phone-shaped slide likewise.
+        expect(inkScale(1080, 1920)).toBeCloseTo(1920 / 1080);
     });
 });

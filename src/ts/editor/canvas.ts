@@ -114,7 +114,7 @@ export function slideRoot(): SVGSVGElement | null {
 function viewBoxSize(): { w: number; h: number } {
     const svg = slideRoot();
     const vb = parseViewBox(svg?.getAttribute("viewBox") ?? null);
-    return { w: vb.w || 1920, h: vb.h || 1080 };
+    return { w: vb.w, h: vb.h };
 }
 
 export function scale(): number {
@@ -356,7 +356,7 @@ export function slideBox(el: Element): Box | null {
 export function slideSize(): Box {
     const svg = slideRoot();
     const vb = parseViewBox(svg?.getAttribute("viewBox") ?? null);
-    return { x: vb.x, y: vb.y, width: vb.w || 1920, height: vb.h || 1080 };
+    return { x: vb.x, y: vb.y, width: vb.w, height: vb.h };
 }
 
 const GEOM_ATTRS = [

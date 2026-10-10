@@ -223,7 +223,7 @@ body.offline #conn {
     outline: 2px solid transparent;
     outline-offset: 1px;
     background: var(--ui-canvas);
-    aspect-ratio: 16 / 9;
+    aspect-ratio: var(--deck-ar, 16 / 9);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1373,7 +1373,7 @@ foreignObject.rich-editing {
 
 .gallery-thumb {
     position: relative;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: var(--deck-ar, 16 / 9);
     border-radius: 6px;
     overflow: hidden;
     background: var(--ui-canvas);

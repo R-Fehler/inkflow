@@ -130,7 +130,13 @@ export function initInk(): void {
         tool: () => settings.tool,
         svg: () => (currentSlide()?.ink ? slideRoot() : null),
         style: (tool, svg) =>
-            styleFor(settings, tool, svg.viewBox.baseVal.width, tokenColor),
+            styleFor(
+                settings,
+                tool,
+                svg.viewBox.baseVal.width,
+                tokenColor,
+                svg.viewBox.baseVal.height,
+            ),
         *erasables(svg) {
             yield* svg.querySelectorAll<SVGGraphicsElement>(
                 ".inkflow-ink path[id], .inkflow-live-ink path[id]",

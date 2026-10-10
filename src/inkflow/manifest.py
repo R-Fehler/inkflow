@@ -16,6 +16,7 @@ from inkflow.enums import (
     VAlign,
 )
 from inkflow.overlay import Overlay
+from inkflow.sizes import PageSize
 from inkflow.themes import Builtin, Theme
 from inkflow.transitions import Transition
 
@@ -350,8 +351,8 @@ class Deck:
     - ``style`` / ``extra_style`` — *additive*: ``Deck.style`` is emitted first,
       then ``Slide.extra_style``; the slide CSS wins on equal-specificity rules via
       cascade order.
-    - ``theme``, ``mode``, ``embed_fonts``, ``title`` — deck-only; no per-slide
-      override.
+    - ``theme``, ``mode``, ``size``, ``embed_fonts``, ``title`` — deck-only; no
+      per-slide override.
 
     ```python
     def main() -> Deck:
@@ -385,16 +386,45 @@ class Deck:
     title: str | None = None
     """Presentation title, used for the browser tab, static build page, and PDF
     metadata. ``None`` infers a title from the project directory name."""
+    size: str | None = None
+    """The deck's size: the canvas new slides are drawn on and the page a PDF
+    prints at. A `PageSize` or its name: ``"16:9"``, ``"4:3"``, ``"9:16"``,
+    ``"a0"`` … ``"a5"`` (``"a1-landscape"``), ``"letter"``, or a custom
+    ``PageSize.mm(600, 900)``. ``None`` keeps each slide's own size and draws
+    new slides at 16:9. A paper size (a poster) also gets a print type scale
+    and, unless ``mode`` says otherwise, the light colour mode."""
+
+    def __post_init__(self) -> None:
+        if self.size is not None:
+            self.size = PageSize(self.size)
+
+    @property
+    def effective_size(self) -> PageSize:
+        """The deck's size, else 16:9 (what new slides are drawn at)."""
+        return PageSize(self.size) if self.size is not None else PageSize.WIDESCREEN
+
+    @property
+    def is_print(self) -> bool:
+        """Whether the deck is a sheet of paper (a poster, a handout)."""
+        return self.size is not None and PageSize(self.size).is_print
 
     @property
     def effective_mode(self) -> ColorMode:
-        """Resolved color mode: the deck value, else the theme's default."""
-        return self.mode if self.mode is not None else self.theme.mode
+        """Resolved color mode: the deck value, else the theme's default. A print
+        deck is light unless its theme sets a mode of its own."""
+        if self.mode is not None:
+            return self.mode
+        if self.is_print and not _sets_mode(self.theme):
+            return ColorMode.LIGHT
+        return self.theme.mode
 
     @property
     def effective_font_size(self) -> int:
-        """Resolved base font size: the deck value, else the theme's default."""
-        return self.font_size if self.font_size is not None else self.theme.font_size
+        """Resolved base font size: the deck value, else the theme's default,
+        scaled to the deck's size (`PageSize.base_font`)."""
+        if self.font_size is not None:
+            return self.font_size
+        return self.effective_size.base_font(self.theme.font_size)
 
     @property
     def effective_transition(self) -> Transition:
@@ -405,3 +435,11 @@ class Deck:
     def effective_overlays(self) -> Sequence[Overlay]:
         """Resolved default overlays: the deck value, else the theme's."""
         return self.overlays if self.overlays is not None else self.theme.overlays
+
+
+def _sets_mode(theme: Theme) -> bool:
+    """Whether a theme chose its colour mode, rather than inheriting the base
+    class's default."""
+    if "mode" in vars(theme):
+        return True
+    return any("mode" in vars(c) for c in type(theme).__mro__ if c is not Theme)

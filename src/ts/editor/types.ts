@@ -130,6 +130,18 @@ export interface EditorModel {
     defaultTransition: TransitionInfo;
     layouts: LayoutInfo[];
     colorTokens: string[];
+    deckSize?: DeckSize;
+}
+
+// The deck's size (`Deck(size=)`, inkflow/sizes.py): the canvas a new slide
+// gets and the thumbnails' shape.
+export interface DeckSize {
+    name: string | null; // null: the deck sets none (16:9 for new slides)
+    label: string;
+    canvas: [number, number];
+    page: [number, number]; // points
+    print: boolean;
+    fontSize: number; // the deck's body text size, in canvas units
 }
 
 // A request to the server's EditorSession (inkflow/editor/session.py).
