@@ -58,6 +58,7 @@ right away.
 | `inkflow goto N` | Shows slide `N` in the editor open on this deck. |
 | `inkflow select ID…` | Selects elements by id in the editor open on this deck, so Claude can point at what it means. |
 | `inkflow slide …` | Adds, deletes, duplicates, moves, hides, shows, renames or retitles slides, with their files (below). |
+| `inkflow anim …` | A slide's whole click timeline (Markdown reveals and `animations=[...]`, numbered as the build numbers them), and adding, changing, reordering or removing its animations as undoable steps ([below](#animations-from-the-command-line)). |
 | `inkflow find TEXT` / `inkflow replace TEXT NEW` | The editor's Find and Replace: every match on the slides with where it is, and a replace that is one undoable step ([below](#finding-and-replacing-text)). |
 | `inkflow worktree …` | A copy of the deck on a branch of its own for Claude to work in, merged when you like it ([below](#working-on-a-branch)). |
 | `inkflow compare [LEFT] RIGHT` | Which slides differ between two versions: the working copy, a revision (`main`, `HEAD~2`) or a deck folder. One line per slide that differs (`~ 3 features: slides/features.md, notes`, `+ 4 compare`, `- 7 morph`, `↕ 5 → 6 media`); `--json` adds the changed elements; `--sheet` writes side-by-side images of only those slides (see [Comparing two versions](compare.md)). |
@@ -94,6 +95,38 @@ slide 1 (drawn): deck.py: "[Widget]s"
 is *Agent: Replace "widget" with "gadget"* in its undo history, like the
 editor's own Replace All; otherwise the files are changed directly. It prints
 every file it wrote.
+
+## Animations from the command line
+
+A slide's clicks come from two places: reveals in its Markdown (`::step::`,
+`::steps::`, code highlight stages), which come first, and `animations=[...]`
+in `deck.py`, numbered on from them. `inkflow anim list -s N` prints them as
+one timeline, exactly as the build resolves the triggers:
+
+```text
+$ inkflow anim list -s 3
+slide 3 (drawn): 3 clicks
+  click    #  animation                target                       trigger timing
+      1    -  FadeIn                   zone-content "Second point"  click   0.4s
+      2    -  FadeIn                   zone-content "Third point"   click   0.4s
+      3    1  FadeIn                   #box                         click   0.4s
+      3    2  SlideIn direction=up     #label                       with    0.4s +0.2s
+  (- = a Markdown reveal: change it in the .md; # = an animations=[...] entry)
+```
+
+The `#` column numbers `animations=[...]`; the other commands take it:
+
+| Command | What it does |
+|---|---|
+| `inkflow anim add -s N TYPE TARGET [--trigger click\|with\|after\|at:N] [--duration MS] [--delay MS] [--easing E] [--direction D] [--set NAME=VALUE] [--at INDEX]` | Animates `TARGET` (an element id, a chart series `chart-series-sales`, a drawn-in diagram's cell; for `PlayVideo`, the video's zone). `TYPE` is an animation class (`FadeIn`, `SlideIn`, `ScaleOut`, `Highlight`, `PlayVideo`, or one the deck defines) or its kebab-case name (`fade-in`). Durations are milliseconds (`400`) or seconds (`0.4s`). |
+| `inkflow anim set -s N INDEX [--type T] [--target ID] [--trigger …] [--duration …] …` | Changes one animation; fields not given keep their values. |
+| `inkflow anim move -s N INDEX --to INDEX` | Moves it to another place in the list. |
+| `inkflow anim remove -s N INDEX…` | Removes animations, all in one step. |
+
+Types, fields and targets are checked against the deck itself: a misspelt type
+or id is refused with the nearest names. Each change is made through the same
+session action as the editor's Animation panel, so with the editor open it is
+one undoable *Agent: …* step there, and the new timeline is printed after it.
 
 ## Changing the slide list
 

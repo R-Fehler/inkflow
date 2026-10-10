@@ -2595,8 +2595,21 @@ class EditorSession:
             source.edit_animations(index, replace=(position, code.call(obj)))
             label = "Edit animation"
         elif op == "remove":
-            source.edit_animations(index, remove=position)
-            label = "Remove animation"
+            # Several at once (``indices``, an agent's `inkflow anim remove`):
+            # from the last, so each index still names the same animation.
+            raw = msg.get("indices")
+            positions = (
+                sorted({int(cast("int", i)) for i in cast("list[object]", raw)})
+                if isinstance(raw, list) and raw
+                else [position]
+            )
+            for at in reversed(positions):
+                source.edit_animations(index, remove=at)
+            label = (
+                "Remove animation"
+                if len(positions) == 1
+                else f"Remove {len(positions)} animations"
+            )
         elif op == "move":
             to = int(cast("int", msg.get("to")))
             source.edit_animations(index, move=(position, to))

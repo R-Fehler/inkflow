@@ -178,7 +178,8 @@ src/
                                outline.py (`inkflow outline`: per-slide files, layout chain,
                                zones with their origin and text, animations and clicks, read
                                off `build_model` + the editor build; `--slide N` adds zone
-                               boxes, canvas size and the slide SVG's named ids),
+                               boxes, canvas size and the slide SVG's named ids; with
+                               `--boxes` also the rendered boxes of `render --boxes`),
                                transfer.py (clipboard bundles: copy slides/objects with their
                                files, paste into any project; pasted Slide(...) must pass the
                                `check_slide_code` allowlist, never arbitrary Python),
@@ -246,6 +247,14 @@ src/
                                and `replace` actions over the files `build_model` lists
                                per slide, as the Find dialog sends them; `-s` sends
                                `deckSlide`, deck.py text of that Slide(...) only),
+                               anim.py (the `anim` group: `list` = the slide built alone
+                               (hidden ones as if shown), Markdown reveals read off its
+                               `inkflow-step-*` data-cues and code highlight stages, then
+                               `resolve_steps(animations, reveal max)`; add/set/move/
+                               remove send the session's `anim` action (Animation panel
+                               ops; `remove` takes `indices` for several in one step),
+                               types from inkflow.animations + the deck module, targets
+                               from the built slide's ids, nearest names on a miss),
                                authoring.py
                                (clean, label2id, add, parent group, sync, layouts), color.py (colorize,
                                palette), verify.py, worktree.py (the `worktree` group: add,

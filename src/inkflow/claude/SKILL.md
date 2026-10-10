@@ -137,6 +137,14 @@ Slide(
 Steps are inferred from triggers; never number them by hand unless pinning
 with `Trigger.at(n)`. Morph pairs elements by `id` across consecutive slides.
 
+`inkflow anim list -s N` prints the slide's whole click timeline (Markdown
+reveals first, then `animations=[...]` with its `#` index). Prefer these to
+editing the list by hand; they check types and target ids and are undoable
+steps in the open editor: `inkflow anim add -s N FadeIn box-a --trigger with
+--duration 300` (`--direction`, `--delay`, `--easing`, `--set scale=0.6`,
+`--at INDEX`), `anim set -s N INDEX --trigger after`, `anim move -s N INDEX
+--to 1`, `anim remove -s N INDEX…`.
+
 ## Images and video (deck.py)
 
 A zone is a `<rect id="zone-NAME">` in an SVG; `zones={"NAME": ...}` fills it.
@@ -269,8 +277,8 @@ a branch", don't touch their deck:
    and prints one line per layout problem (`slide 3 (intro): #zone-content:
    text overflows its zone by 120px (bottom)`; also code blocks cut off,
    objects outside the slide, text too small to read, and text whose
-   contrast with the pixels behind it is too low: `contrast 2.1:1 against
-   its background (needs 4.5:1): #777777 on #8a8a8a`), exit 1 on a problem.
+   contrast with the pixels behind it is too low: `contrast 2.3:1 against
+   its background (needs 4.5:1): #9ca0b0 on #eff1f5`), exit 1 on a problem.
    Fix what it reports: shorten text, enlarge the zone, move the object, or
    use a theme colour that stands out from what is behind the text (check
    both `mode`s if the deck may be shown in either).
