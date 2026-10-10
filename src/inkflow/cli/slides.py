@@ -1,4 +1,5 @@
-"""``inkflow slide``: add, delete, duplicate, move, hide and rename slides.
+"""``inkflow slide``: add, delete, duplicate, move, hide and rename slides,
+and group them in sections (``inkflow slide section``).
 
 A slide is more than its ``Slide(...)`` line: its drawing, Markdown, notes and
 saved ink are files named after it (``ink/<slide id>.svg`` follows the id,
@@ -93,6 +94,31 @@ class _Slides:
             return self.ids.index(ref)
         raise click.BadParameter(f"no slide with id {ref!r}", param_hint="SLIDE")
 
+    def section(self, ref: str) -> int:
+        """The index of SECTION (a name, any case, or a 1-based position)."""
+        names = [s.name for s in self.deck.sections]
+        if not names:
+            raise click.BadParameter("the deck has no sections", param_hint="SECTION")
+        ref = ref.strip()
+        if ref.isdigit() and 1 <= int(ref) <= len(names):
+            return int(ref) - 1
+        found = [k for k, name in enumerate(names) if name.casefold() == ref.casefold()]
+        if len(found) == 1:
+            return found[0]
+        if found:
+            places = ", ".join(str(k + 1) for k in found)
+            raise click.BadParameter(
+                f"{len(found)} sections are called {ref!r} ({places}): "
+                + "give its number",
+                param_hint="SECTION",
+            )
+        raise click.BadParameter(
+            f"no section {ref!r} (sections: {', '.join(names)})", param_hint="SECTION"
+        )
+
+    def section_name(self, k: int) -> str:
+        return repr(self.deck.sections[k].name)
+
     def name(self, index: int) -> str:
         number = self.numbers[index]
         if number is None:
@@ -158,7 +184,7 @@ def _new_place(applied: Applied, deck_path: Path) -> None:
 
 @main.group()
 def slide() -> None:
-    """Add, delete, duplicate, move, hide or rename slides.
+    """Add, delete, duplicate, move, hide or rename slides; group them in sections.
 
     Each command changes deck.py and the slide's own files together (its
     drawing, Markdown, notes and saved ink), exactly as the visual editor does,
@@ -291,22 +317,165 @@ def duplicate(ref: str, deck_path: Path) -> None:
     "--to",
     "to",
     type=click.IntRange(min=1),
-    required=True,
+    default=None,
     help="The number it gets (as the presenter counts); past the end = last.",
 )
+@click.option(
+    "--section",
+    "section_ref",
+    default=None,
+    metavar="SECTION",
+    help="The section it joins (at its end, or at --to within it).",
+)
 @deck_option
-def move(ref: str, to: int, deck_path: Path) -> None:
-    """Move a slide so it becomes slide number --to."""
+def move(ref: str, to: int | None, section_ref: str | None, deck_path: Path) -> None:
+    """Move a slide so it becomes slide number --to, or into --section.
+
+    With --to alone it joins the section of the slide it lands before.
+    """
+    if to is None and section_ref is None:
+        raise click.UsageError("give --to, --section or both")
     slides = _Slides.load(deck_path)
     src = slides.index(ref)
     rest = [i for i in range(len(slides.ids)) if i != src]
     shown = [i for i in rest if slides.numbers[i] is not None]
-    # Before the slide that number belongs to once this one is out of the way.
-    dst = rest.index(shown[to - 1]) if to <= len(shown) else len(rest)
+    request: dict[str, object] = {"action": "slide", "op": "move", "from": src}
+    where: list[str] = []
+    if to is not None:
+        # Before the slide that number belongs to once this one is out of the way.
+        request["to"] = rest.index(shown[to - 1]) if to <= len(shown) else len(rest)
+        where.append(f"to {min(to, len(shown) + 1)}")
+    else:
+        request["to"] = len(rest)  # the session keeps it inside the section
+    if section_ref is not None:
+        k = slides.section(section_ref)
+        request["section"] = k
+        where.append(f"into section {slides.section_name(k)}")
+    _apply(slides, request, f"Move {slides.name(src)} {' '.join(where)}")
+
+
+# ── Sections ──────────────────────────────────────────────────────────────────
+
+
+@slide.group("section")
+def section_group() -> None:
+    """Add, rename, move or remove sections (named groups of slides).
+
+    SECTION is a section's name (any case) or its 1-based position among the
+    sections. Slides before the first section belong to none. Each command is
+    one step, undoable in an open editor like the other slide commands.
+    """
+
+
+@section_group.command("add")
+@click.argument("name")
+@click.option(
+    "--at",
+    default=None,
+    metavar="SLIDE",
+    help="The slide it starts at; it takes the rest of that slide's section "
+    + "[default: a new empty section at the end].",
+)
+@deck_option
+def section_add(name: str, at: str | None, deck_path: Path) -> None:
+    """Start a section called NAME at slide --at."""
+    slides = _Slides.load(deck_path)
+    request: dict[str, object] = {"action": "slide", "op": "section-add", "name": name}
+    summary = f"Add section {name}"
+    if at is not None:
+        index = slides.index(at)
+        request["slide"] = index
+        summary += f" at {slides.name(index)}"
+    _apply(slides, request, summary)
+
+
+@section_group.command("rename")
+@click.argument("ref", metavar="SECTION")
+@click.argument("name", metavar="NEW_NAME")
+@deck_option
+def section_rename(ref: str, name: str, deck_path: Path) -> None:
+    """Rename a section."""
+    slides = _Slides.load(deck_path)
+    k = slides.section(ref)
     _apply(
         slides,
-        {"action": "slide", "op": "move", "from": src, "to": dst},
-        f"Move {slides.name(src)} to {min(to, len(shown) + 1)}",
+        {"action": "slide", "op": "section-rename", "section": k, "name": name},
+        f"Rename section {slides.section_name(k)} to {name}",
+    )
+
+
+@section_group.command("move")
+@click.argument("ref", metavar="SECTION")
+@click.option(
+    "--to",
+    type=click.IntRange(min=1),
+    default=None,
+    help="The position it gets among the sections (1 = first).",
+)
+@click.option(
+    "--before", default=None, metavar="SECTION", help="Put it before SECTION."
+)
+@deck_option
+def section_move(ref: str, to: int | None, before: str | None, deck_path: Path) -> None:
+    """Move a section, with all its slides, among the sections.
+
+    Slides before the first section stay first.
+    """
+    if (to is None) == (before is None):
+        raise click.UsageError("give --to or --before")
+    slides = _Slides.load(deck_path)
+    k = slides.section(ref)
+    count = len(slides.deck.sections)
+    if before is not None:
+        other = slides.section(before)
+        dst = other - 1 if other > k else other
+        where = f"before {slides.section_name(other)}"
+    else:
+        assert to is not None
+        dst = min(to, count) - 1
+        where = f"to {dst + 1}"
+    _apply(
+        slides,
+        {"action": "slide", "op": "section-move", "section": k, "to": dst},
+        f"Move section {slides.section_name(k)} {where}",
+    )
+
+
+@section_group.command("remove")
+@click.argument("ref", metavar="SECTION")
+@click.option(
+    "--with-slides",
+    is_flag=True,
+    help="Delete its slides too (with the files only they use).",
+)
+@click.option(
+    "--keep-files",
+    is_flag=True,
+    help="With --with-slides: leave the slides' files in place.",
+)
+@deck_option
+def section_remove(
+    ref: str, with_slides: bool, keep_files: bool, deck_path: Path
+) -> None:
+    """Remove a section; its slides join the section before it (or none).
+
+    With --with-slides its slides are deleted as `inkflow slide delete` does.
+    """
+    slides = _Slides.load(deck_path)
+    k = slides.section(ref)
+    summary = f"Remove section {slides.section_name(k)}"
+    if with_slides:
+        summary += " and its slides"
+    _apply(
+        slides,
+        {
+            "action": "slide",
+            "op": "section-remove",
+            "section": k,
+            "slides": with_slides,
+            "files": with_slides and not keep_files,
+        },
+        summary,
     )
 
 

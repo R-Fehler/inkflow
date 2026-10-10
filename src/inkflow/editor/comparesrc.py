@@ -715,6 +715,12 @@ def deck_facts(build: SideBuild) -> DeckFacts:
         "overlays": [o.src for o in deck.effective_overlays],
         "font_size": deck.effective_font_size,
         "title": deck.title,
+        # Which slides each section holds, by id (so a renamed section, a
+        # moved one or a slide moved between them each read as a change).
+        "sections": [
+            [section.name, [all_ids[i] for i in span]]
+            for section, span in zip(deck.sections, deck.section_ranges(), strict=True)
+        ],
     }
     return DeckFacts(out, settings)
 

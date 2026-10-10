@@ -100,6 +100,17 @@ class SlideOutline:
     ids: list[str] = field(default_factory=list)
     """Named elements of the slide's own SVG, nested as ``group{child …}``."""
     notes_text: str = ""
+    section: int | None = None
+    """Index into ``DeckOutline.sections``; ``None`` before the first section."""
+
+
+@dataclass
+class SectionOutline:
+    name: str
+    index: int
+    """Position in ``Deck(slides=[...])`` of its first slide (where it would
+    start, when empty)."""
+    count: int
 
 
 @dataclass
@@ -114,6 +125,7 @@ class DeckOutline:
     """The deck's ``Deck(size=)`` (``a0``, ``16:9``), ``None`` when it sets none."""
     page: str | None = None
     """The printed page that size names (``A0 portrait (841 x 1189 mm)``)."""
+    sections: list[SectionOutline] = field(default_factory=list)
 
 
 def _rel(path: str | Path | None, project_dir: Path) -> str | None:
@@ -362,6 +374,7 @@ def build_outline(deck: Deck, deck_path: Path, slides: list[SlideData]) -> DeckO
                 [o.src for o in slide.overlays] if slide.overlays is not None else None
             ),
             notes_text=str(notes.get("text") or ""),
+            section=deck.section_of(index),
         )
         if visible is None:
             item.zones = _hidden_zones(entry)
@@ -386,6 +399,10 @@ def build_outline(deck: Deck, deck_path: Path, slides: list[SlideData]) -> DeckO
         overlays=[o.src for o in deck.effective_overlays],
         size=str(deck.size) if deck.size is not None else None,
         page=deck.effective_size.label if deck.size is not None else None,
+        sections=[
+            SectionOutline(section.name, span.start, len(span))
+            for section, span in zip(deck.sections, deck.section_ranges(), strict=True)
+        ],
     )
 
 
@@ -516,7 +533,20 @@ def format_outline(outline: DeckOutline, number: int | None = None) -> str:
         "zone origins: md = the slide's .md, deck.py = Slide(zones=...); "
         + "anims: + with previous, > after previous, @n pinned",
     ]
+    starts: dict[int, list[SectionOutline]] = {}
+    for section in outline.sections:
+        starts.setdefault(section.index, []).append(section)
     for s in outline.slides:
+        for section in starts.pop(s.index, []):
+            lines.extend(["", _section_line(section)])
         lines.append("")
         lines.extend(_slide_lines(s, full=False))
+    for rest in starts.values():  # empty sections at the end
+        for section in rest:
+            lines.extend(["", _section_line(section)])
     return "\n".join(lines)
+
+
+def _section_line(section: SectionOutline) -> str:
+    count = f"{section.count} slide{'s' if section.count != 1 else ''}"
+    return f"## {section.name}  ({count})"

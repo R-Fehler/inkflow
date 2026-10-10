@@ -709,6 +709,29 @@ kbd {
   color: var(--bg);
   opacity: 0.75;
 }
+.pk-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pk-section {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--subtext);
+  font-size: 0.72rem;
+}
+#picker-list .pk-section-row .pk-title {
+  font-weight: 600;
+}
+#picker-list [role=option].active .pk-section {
+  color: var(--bg);
+  opacity: 0.75;
+}
 #picker-hint {
   border-top: 1px solid var(--overlay);
   color: var(--subtext);
@@ -880,6 +903,31 @@ kbd {
   gap: 1.75rem;
   width: 100%;
 }
+.overview-section {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin: 0.75rem 0 -0.75rem;
+  padding: 0 0.2rem 0.4rem;
+  border-bottom: 1px solid rgb(255 255 255 / 0.16);
+  cursor: pointer;
+}
+.overview-section:first-child {
+  margin-top: 0;
+}
+.overview-section-name {
+  color: #f4f4f6;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.overview-section-count {
+  color: rgb(255 255 255 / 0.55);
+  font-size: 0.72rem;
+}
+.overview-section:hover .overview-section-name {
+  color: var(--accent);
+}
 .overview-cell {
   display: flex;
   flex-direction: column;
@@ -988,6 +1036,19 @@ body.pv-open #pv-resize-handle {
 #pv-strip.timer-paused #pv-elapsed,
 #pv-strip.timer-paused #pv-timer-toggle {
   color: var(--yellow);
+}
+#pv-section {
+  flex-shrink: 0;
+  margin-top: -0.25rem;
+  padding: 0 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--subtext);
+  font-size: 0.85rem;
+}
+#pv-slide-info {
+  white-space: nowrap;
 }
 #pv-slide-info .slide-current {
   color: var(--text);

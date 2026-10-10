@@ -119,11 +119,19 @@ export interface LayoutInfo {
     path: string;
 }
 
+// A Section(...) of deck.py: its slides are deck indices start..start+count-1.
+export interface SectionInfo {
+    name: string;
+    start: number;
+    count: number;
+}
+
 export interface EditorModel {
     deckPath: string;
     projectDir: string;
     deckEditable: boolean;
     slides: SlideModel[];
+    sections: SectionInfo[];
     animationTypes: TypeInfo[];
     transitionTypes: TypeInfo[];
     mediaTypes: { image: FieldSchema[]; video: FieldSchema[] };

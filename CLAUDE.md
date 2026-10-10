@@ -32,7 +32,7 @@ src/
                                Cue, Transition, Align, VAlign, Direction, Easing,
                                AnimationKind, Trigger, Inline, Content, ZoneContent,
                                ColorMode, MediaFit,
-                               MediaAlign, Muted, Overlay, Chart, ChartKind, PageSize
+                               MediaAlign, Muted, Overlay, Chart, ChartKind, PageSize, Section
                                and the `animations` and `transitions` namespaces
                                (`Animation` is NOT top-level — it lives in `animations`)
     manifest.py       dataclasses for the deck DSL; Cue/Transition base.
@@ -50,7 +50,12 @@ src/
                                size (a PageSize; None = each slide its own, new
                                slides 16:9). `effective_size`, `is_print`; a print
                                deck defaults to light mode (unless the theme set a
-                               mode) and `effective_font_size` = `base_font`
+                               mode) and `effective_font_size` = `base_font`.
+                               `Section(name, slides=[...])` entries in `slides=`
+                               (after the unsectioned leading slides) are flattened
+                               by the `_SlideList` data descriptor: `deck.slides`
+                               stays `list[Slide]` everywhere, `deck.sections` /
+                               `section_ranges()` / `section_of(i)` record the groups
                                Slide params: src, id, md, zones, animations, transition,
                                overlays, extra_style, title, notes, visible, font_size, ink
     sizes.py          `PageSize`: a str value object naming a deck size ("16:9", "4:3",
@@ -176,7 +181,11 @@ src/
                                SVG + `locate`), svgops.py (write-back ops on one SVG:
                                attrs/style/paint/text/insert/delete/duplicate/order/group),
                                deckedit.py (libcst edits of deck.py: slide list, Slide(...)
-                               args, animations=[...], zones={...}, imports; keeps comments),
+                               args, animations=[...], zones={...}, imports; keeps comments;
+                               the slide list is read as `Group`s (unsectioned + one per
+                               Section) and every list edit is `restructure(groups)`: pure
+                               `move_in_groups`/`add_section`/`remove_section`/
+                               `move_section`, slides reindented to their new list),
                                codegen.py (DSL object -> shortest constructor source; field
                                schemas for the property panels), session.py (one request ->
                                one undoable whole-file step; EditorSession/History; a video
@@ -186,9 +195,12 @@ src/
                                slide's ink file when its id changes: `_follow_ink`; the
                                `slide` action's ops: new (optional `md` text) / delete
                                (`files`: also the drawing/md/notes/ink no remaining slide
-                               uses) / duplicate / move / hide / title / id (ink and
+                               uses) / duplicate / move (`slides` for several, `section`
+                               target) / hide / title / id (ink and
                                `slide:` links follow) / detach / layout / font-size /
-                               transition; a request's `agent` text labels its step
+                               transition / section-add / -rename / -remove / -move
+                               (`follow`: deck index whose new place comes back as
+                               `select`); a request's `agent` text labels its step
                                "Agent: …" and `deckHash` must match the build; each
                                result lists `changes` and the step's `seq`, which
                                `undo` may name to take back only that step),
@@ -200,7 +212,7 @@ src/
                                editor), drawioedit.py (a drawn-in diagram's shapes edited
                                on the slide: geometry/label/style/delete in its source,
                                the picture patched until draw.io redraws it), context.py (.inkflow/context.json for agents),
-                               outline.py (`inkflow outline`: per-slide files, layout chain,
+                               outline.py (`inkflow outline`: `## <section>` lines, per-slide files, layout chain,
                                zones with their origin and text, animations and clicks, read
                                off `build_model` + the editor build; `--slide N` adds zone
                                boxes, canvas size and the slide SVG's named ids),
@@ -265,7 +277,9 @@ src/
                                (outline, context, render, goto, select, setup-claude),
                                compare.py (`inkflow compare [LEFT] RIGHT`), slides.py
                                (the `slide` group: add, delete, duplicate, move, hide, show,
-                               rename, title; SLIDE = presentation number or id; runs the
+                               rename, title, and `slide section` add/rename/move/remove;
+                               SLIDE = presentation number or id, SECTION = name or
+                               1-based position; runs the
                                session's `slide` action via editor/remote.py, so with an
                                editor open it is an undoable "Agent: …" step there),
                                authoring.py
@@ -410,6 +424,8 @@ src/
                       thumbnails' `--deck-ar`); shared/ink.ts `inkScale` sizes
                       pen strokes by max(w/1920, h/1080)
     shared/           types, step engine (step.ts: WAAPI cue driver + elementActions),
+                      sections.ts (section runs of the presented slides, which carry
+                      `SlideData.section`; `verticalNeighbor` for wrapped grids),
                       keyframes.ts (reads @keyframes + per-cue var substitution),
                       step-ring SVG builder, cubic-bezier easing; ink (presenter and
                       editor alike): ink.ts (pure: perfect-freehand options, outline ->
@@ -421,7 +437,9 @@ src/
     presenter/        main presenter modules — navigation, transitions (progress-driven
                       via progress-driver.ts), overview, picker, websocket, status bar,
                       keyboard, syncmenu.ts (sync-mode status-bar control),
-                      pv.ts (presenter panel sidebar), video.ts (step-driven
+                      pv.ts (presenter panel sidebar; current section under the
+                      strip), overview.ts (grid with a heading per section, up/down
+                      by geometry), picker.ts (sections match too), video.ts (step-driven
                       <video> playback, wired in via status.ts), toeditor.ts (back to
                       /edit at this slide: the opener editor tab when there is one;
                       hidden in a static build), ink.ts (ink mode: strokes held per
@@ -433,7 +451,10 @@ src/
     editor/           visual editor: canvas.ts (render, hit-testing, handles, drag ->
                       attribute plans), geom.ts (pure matrices + move/resize/rotate plans),
                       snap.ts (smart guides), textedit.ts, insert.ts (tools, images,
-                      paste), sorter.ts, props.ts, notes.ts, toolbar.ts (shortcuts),
+                      paste), sorter.ts (slide list rows + the drag model shared
+                      with grid.ts), sections.ts (pure: rows, drop targets, move
+                      requests), sectionui.ts (section headers, collapse state in
+                      localStorage, section menu, rename, section-* edits), props.ts, notes.ts, toolbar.ts (shortcuts),
                       context.ts (agent context + goto/select), net.ts (edit-op requests),
                       animpreview.ts (▶ Play in the Animation order list and an
                       animation's panel: shared/step.ts runs played on the canvas

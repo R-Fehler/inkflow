@@ -312,6 +312,10 @@ def build_model(
         "projectDir": str(project_dir),
         "deckEditable": deck_editable,
         "slides": out_slides,
+        "sections": [
+            {"name": section.name, "start": span.start, "count": len(span)}
+            for section, span in zip(deck.sections, deck.section_ranges(), strict=True)
+        ],
         "animationTypes": [
             *_type_catalog(Animation, animations_module, deck_module),
             *[

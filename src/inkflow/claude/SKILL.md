@@ -50,6 +50,11 @@ Add, delete, duplicate, move, hide/show or re-id slides with `inkflow slide …`
 slide's Markdown, notes, drawing and ink files along, and with the editor open
 each is a step the author can undo there.
 
+Sections (`Section("Method", slides=[...])` entries in `slides=[...]`) group
+slides by name: `inkflow slide section add NAME --at N`, `section rename`,
+`section move`, `section remove`, and `inkflow slide move N --section NAME`.
+`inkflow outline` shows them as `## <section>` lines.
+
 ## Files
 
 - `deck.py`: `main()` returns `Deck(slides=[Slide(...), ...])`. Slide order,

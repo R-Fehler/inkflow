@@ -364,3 +364,79 @@ def test_a_request_for_another_build_of_the_deck_is_refused(project: Path) -> No
         session.apply(request, load_deck(project / "deck.py"))
     assert (project / "deck.py").read_text(encoding="utf-8") == DECK
     assert not session.history.done
+
+
+# ── Sections ──────────────────────────────────────────────────────────────────
+
+
+def _sections(project: Path) -> list[tuple[str, list[str | None]]]:
+    deck = load_deck(project / "deck.py")
+    out: list[tuple[str, list[str | None]]] = []
+    for section, span in zip(deck.sections, deck.section_ranges(), strict=True):
+        mds = [deck.slides[i].md for i in span]
+        out.append((section.name, [md if isinstance(md, str) else None for md in mds]))
+    return out
+
+
+def test_sections_from_the_command_line(project: Path) -> None:
+    out = _ok(project, "section", "add", "Middle", "--at", "intro")
+    assert "Add section Middle at slide 2 (intro)" in out
+    _ok(project, "section", "add", "End", "--at", "4")
+    assert _sections(project) == [
+        ("Middle", ["intro.md", "shared.md", "shared.md"]),
+        ("End", ["end.md"]),
+    ]
+    # Comments stay with their slides.
+    text = (project / "deck.py").read_text(encoding="utf-8")
+    assert (
+        '# The closing slide.\n                    Slide("plain", md="end.md")' in text
+    )
+    # Sections by name (any case) or number.
+    _ok(project, "section", "rename", "middle", "Body")
+    _ok(project, "section", "move", "2", "--before", "body")
+    assert [name for name, _ in _sections(project)] == ["End", "Body"]
+    _ok(project, "section", "move", "End", "--to", "2")
+    assert [name for name, _ in _sections(project)] == ["Body", "End"]
+    # A slide into a section: at its end, or at a number within it.
+    out = _ok(project, "move", "1", "--section", "end")
+    assert "into section 'End'" in out
+    assert _sections(project)[1] == ("End", ["end.md", None])
+    _ok(project, "move", "drawn", "--to", "1", "--section", "Body")
+    assert _sections(project)[0][1][0] is None
+    # Removing a section keeps its slides (they join the one before)...
+    _ok(project, "section", "remove", "End")
+    assert _sections(project) == [
+        ("Body", [None, "intro.md", "shared.md", "shared.md", "end.md"])
+    ]
+    # ...unless they go too, with their files.
+    _ok(project, "section", "add", "Last", "--at", "end")
+    _ok(project, "section", "remove", "Last", "--with-slides")
+    assert not (project / "slides" / "end.md").exists()
+    assert [name for name, _ in _sections(project)] == ["Body"]
+
+
+def test_section_references_are_checked(project: Path) -> None:
+    result = _run(project, "section", "rename", "Nope", "x")
+    assert result.exit_code != 0 and "no sections" in result.output
+    _ok(project, "section", "add", "Part", "--at", "2")
+    _ok(project, "section", "add", "Part", "--at", "3")
+    result = _run(project, "section", "rename", "part", "x")
+    assert result.exit_code != 0 and "2 sections are called 'part'" in result.output
+    _ok(project, "section", "rename", "2", "Second")
+    result = _run(project, "move", "1")
+    assert result.exit_code != 0 and "--to, --section" in result.output
+
+
+def test_section_commands_through_the_server_are_agent_steps(
+    project: Path, served: tuple[EditorSession, int]
+) -> None:
+    session, _ = served
+    _ok(project, "section", "add", "Body", "--at", "2")
+    _ok(project, "move", "1", "--section", "Body")
+    assert [s.label for s in session.history.done] == [
+        "Agent: Add section Body at slide 2 (intro)",
+        "Agent: Move slide 1 (drawn) into section 'Body'",
+    ]
+    session.apply({"action": "undo"}, load_deck(project / "deck.py"))
+    session.apply({"action": "undo"}, load_deck(project / "deck.py"))
+    assert (project / "deck.py").read_text(encoding="utf-8") == DECK

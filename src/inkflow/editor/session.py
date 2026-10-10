@@ -51,7 +51,18 @@ from inkflow.editor import (
     worktrees,
 )
 from inkflow.editor.codegen import Code, coerce_fields
-from inkflow.editor.deckedit import DeckEditError, DeckSource
+from inkflow.editor.deckedit import (
+    INFER,
+    DeckEditError,
+    DeckSource,
+    Group,
+    Infer,
+    add_section,
+    flatten,
+    move_in_groups,
+    move_section,
+    remove_section,
+)
 from inkflow.editor.drawioedit import DiagramEditError, apply_cell_ops
 from inkflow.editor.findreplace import (
     MAX_HITS,
@@ -2089,11 +2100,37 @@ class EditorSession:
         origins: dict[int, tuple[Slide, bool]] = {}
         relink: tuple[str, str] | None = None
         if op == "move":
-            src, dst = int(cast("int", msg["from"])), int(cast("int", msg["to"]))
-            source.move_slide(src, dst)
-            slides_after = list(deck.slides)
-            slides_after.insert(dst, slides_after.pop(src))
-            label = "Move slide"
+            many = msg.get("slides")
+            moved = (
+                [int(cast("int", i)) for i in cast("list[object]", many)]
+                if isinstance(many, list)
+                else [int(cast("int", msg["from"]))]
+            )
+            section: int | Infer | None = INFER
+            if "section" in msg:
+                target = msg.get("section")
+                section = None if target is None else int(cast("int", target))
+            groups = self._section_groups(source, deck)
+            try:
+                after = move_in_groups(
+                    groups, moved, int(cast("int", msg["to"])), section
+                )
+            except DeckEditError as exc:
+                raise EditError(str(exc)) from exc
+            source.restructure(after)
+            slides_after = [deck.slides[cast("int", i)] for i in flatten(after)]
+            extra["select"] = slides_after.index(deck.slides[min(moved)])
+            label = "Move slides" if len(set(moved)) > 1 else "Move slide"
+        elif isinstance(op, str) and op.startswith("section-"):
+            label, after = self._section_op(op, msg, deck, source)
+            source.restructure(after)
+            if op == "section-add":
+                imports.add("Section")
+            slides_after = [deck.slides[cast("int", i)] for i in flatten(after)]
+            if op == "section-remove" and msg.get("slides") and msg.get("files"):
+                kept = {id(s) for s in slides_after}
+                gone = [s for s in deck.slides if id(s) not in kept]
+                self._drop_slide_files(gone, slides_after, deck, txn)
         elif op == "delete":
             many = msg.get("slides")
             if isinstance(many, list):
@@ -2232,11 +2269,86 @@ class EditorSession:
         else:
             raise EditError(f"unknown slide operation {op!r}")
         self._save_deck(txn, source, imports)
+        follow = msg.get("follow")
+        # Where the slide the editor shows ends up, for it to stay on it.
+        if (
+            slides_after is not None
+            and isinstance(follow, int)
+            and 0 <= follow < len(deck.slides)
+        ):
+            kept = [i for i, s in enumerate(slides_after) if s is deck.slides[follow]]
+            extra["select"] = kept[0] if kept else min(follow, len(slides_after) - 1)
         if slides_after is not None:
             self._follow_ink(deck, slides_after, origins, txn)
         if relink is not None:
             extra["links"] = self._relink(*relink, deck, txn)
         return label
+
+    @staticmethod
+    def _section_groups(source: DeckSource, deck: Deck) -> list[Group]:
+        """deck.py's slide list as sections, checked against the built deck."""
+        groups = source.groups()
+        built = [len(deck.slides) - sum(len(s.slides) for s in deck.sections)]
+        built += [len(s.slides) for s in deck.sections]
+        if groups is None or [len(g.slides) for g in groups] != built:
+            raise EditError(
+                "deck.py builds its sections in code; edit them by hand or with Claude"
+            )
+        return groups
+
+    def _section_op(
+        self, op: str, msg: dict[str, object], deck: Deck, source: DeckSource
+    ) -> tuple[str, list[Group]]:
+        """A section edit (``section-add``/``-rename``/``-remove``/``-move``):
+        its label and the slide list it leaves, as groups of deck indices."""
+        groups = self._section_groups(source, deck)
+        sections = len(groups) - 1
+
+        def section_index() -> int:
+            k = msg.get("section")
+            if not isinstance(k, int) or not 0 <= k < sections:
+                raise EditError("no such section")
+            return k
+
+        def section_name() -> str:
+            name = " ".join(str(msg.get("name") or "").split())
+            if not name:
+                raise EditError("a section needs a name")
+            return name
+
+        try:
+            if op == "section-add":
+                at = msg.get("slide")
+                if at is not None and not (
+                    isinstance(at, int) and 0 <= at < len(deck.slides)
+                ):
+                    raise EditError("no such slide")
+                name = section_name()
+                return f"Add section {name}", add_section(groups, name, at)
+            if op == "section-rename":
+                k, name = section_index(), section_name()
+                after = [g.with_slides(list(g.slides)) for g in groups]
+                after[k + 1].name = name
+                return "Rename section", after
+            if op == "section-remove":
+                k = section_index()
+                with_slides = bool(msg.get("slides"))
+                after = remove_section(groups, k, with_slides)
+                if not flatten(after):
+                    raise EditError("a deck needs at least one slide")
+                label = (
+                    "Remove section and its slides" if with_slides else "Remove section"
+                )
+                return label, after
+            if op == "section-move":
+                k = section_index()
+                to = msg.get("to")
+                if not isinstance(to, int) or not 0 <= to < sections:
+                    raise EditError("no such place for the section")
+                return "Move section", move_section(groups, k, to)
+        except DeckEditError as exc:
+            raise EditError(str(exc)) from exc
+        raise EditError(f"unknown slide operation {op!r}")
 
     def _check_new_id(self, new_id: str, slide: Slide, deck: Deck) -> None:
         if not re.fullmatch(r"\w[\w.-]*", new_id):
@@ -2656,7 +2768,6 @@ class EditorSession:
                 raise EditError("no such slide")
             plan = plan_slide_replace(self.project_dir, data.get("bundle"))
             at = replace
-            source.remove_slide(at)
         else:
             after = data.get("after")
             at = (after if isinstance(after, int) else -1) + 1
@@ -2667,7 +2778,11 @@ class EditorSession:
             )
         for rel, payload in plan.writes.items():
             txn.write(self.project_dir / rel, payload)
-        source.insert_slide(at, plan.calls[0])
+        if isinstance(replace, int):
+            # In its place: its section and the comments above it stay.
+            source.replace_slide(at, plan.calls[0])
+        else:
+            source.insert_slide(at, plan.calls[0])
         self._save_deck(txn, source, plan.imports)
         ink = data.get("ink")
         mine = data.get("liveInk")

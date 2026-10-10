@@ -76,13 +76,20 @@ does, so nothing is left behind or orphaned:
 | `inkflow slide add --layout content [--after N] [--id NAME] [--title T] [--md TEXT]` | A new slide with its own drawing on that layout (`--like N`: the layout of slide `N`), after slide `N` (`0`: first; default: last). `--title` and `--md` (`-` reads stdin) become its `slides/<id>.md`. |
 | `inkflow slide delete N [N…]` | Removes the slides, with the drawing, Markdown, notes and ink only they use (`--keep-files` leaves those). |
 | `inkflow slide duplicate N` | A copy right after it, with copies of its own files. |
-| `inkflow slide move N --to M` | Moves slide `N` so it becomes slide `M`. |
+| `inkflow slide move N --to M` | Moves slide `N` so it becomes slide `M` (in the section of the slide it lands before). |
+| `inkflow slide move N --section S [--to M]` | Moves it into section `S`: at its end, or as slide `M` within it. |
+| `inkflow slide section add NAME --at N` | A [section](../authoring/slides.md#sections) starting at slide `N`; it takes the rest of that slide's section (no `--at`: an empty one at the end). |
+| `inkflow slide section rename S NEW` | Renames a section. |
+| `inkflow slide section move S --to K` / `--before S2` | Moves a section, with its slides, among the sections. |
+| `inkflow slide section remove S [--with-slides]` | Removes it; its slides join the section before it, or with `--with-slides` are deleted like `slide delete`. |
 | `inkflow slide hide N` / `show ID` | Sets or clears `visible=False`. |
 | `inkflow slide rename N NEW_ID` | Sets `id=`; its ink file and every `slide:<old id>` link follow. |
 | `inkflow slide title N TEXT` | Sets `title=` (`""` removes it). |
 
 A slide is named by its number, counted as the presenter and `inkflow goto` count
 (1-based, hidden slides left out), or by its id; a hidden slide goes by its id.
+A section is named by its name (any case) or its 1-based position among the
+sections. `inkflow outline` lists slides under a `## <section>` line per section.
 Each command prints the files it wrote, created, renamed or deleted, and
 `deck.py` keeps its comments and formatting.
 

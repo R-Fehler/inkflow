@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import InitVar, dataclass, field
-from typing import TypeAlias
+from typing import TypeAlias, cast, overload
 
 from inkflow.animations import Cue
 from inkflow.backgrounds import background_paint
@@ -337,6 +337,89 @@ class Slide:
 
 
 @dataclass
+class Section:
+    """A named group of consecutive slides, like PowerPoint's sections.
+
+    Written in ``Deck(slides=[...])`` in place of the slides it holds; the
+    deck flattens it, so ``Deck.slides`` stays the plain slide list and
+    ``Deck.sections`` records each section. Slides written before the first
+    section belong to none. A section may be empty; hidden slides keep theirs.
+
+    ```python
+    Deck(
+        slides=[
+            Slide("title"),
+            Section("Method", slides=[Slide("setup"), Slide("data")]),
+            Section("Results", slides=[Slide("plots")]),
+        ],
+    )
+    ```
+    """
+
+    name: str
+    """Shown above the section's slides in the editor and the overview, and in
+    the presenter panel; two sections may share a name."""
+    slides: list[Slide] = field(default_factory=list)
+    """The section's slides, in order."""
+
+    def __post_init__(self) -> None:
+        name = cast("object", self.name)
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("a Section needs a name")
+        for slide in cast("list[object]", self.slides):
+            if not isinstance(slide, Slide):
+                raise TypeError(
+                    f"Section {self.name!r} holds {type(slide).__name__}, "
+                    + "not Slide (sections do not nest)"
+                )
+
+
+class _SlideList:
+    """``Deck.slides``: takes slides and sections, keeps the flat slide list.
+
+    A data descriptor, so ``Deck(slides=[Slide(...), Section(...)])`` is
+    accepted (and typed) while everything reading ``deck.slides`` keeps getting
+    ``list[Slide]``; the sections are recorded beside it (``Deck.sections``).
+    """
+
+    @overload
+    def __get__(self, obj: None, owner: type | None = None) -> tuple[()]: ...
+    @overload
+    def __get__(self, obj: Deck, owner: type | None = None) -> list[Slide]: ...
+    def __get__(
+        self, obj: Deck | None, owner: type | None = None
+    ) -> list[Slide] | tuple[()]:
+        if obj is None:
+            return ()  # the dataclass default: no slides
+        return obj._slides  # pyright: ignore[reportPrivateUsage]
+
+    def __set__(self, obj: Deck, value: Sequence[Slide | Section]) -> None:
+        flat: list[Slide] = []
+        sections: list[Section] = []
+        prefix = 0
+        for item in cast("Sequence[object]", value):
+            if isinstance(item, Section):
+                sections.append(item)
+                flat.extend(item.slides)
+            elif isinstance(item, Slide):
+                if sections:
+                    raise ValueError(
+                        f"Slide({item.src!r}) follows Section({sections[-1].name!r}) "
+                        + "outside it: after the first section, every slide "
+                        + "belongs in one"
+                    )
+                flat.append(item)
+                prefix += 1
+            else:
+                raise TypeError(
+                    f"Deck slides hold Slide and Section, not {type(item).__name__}"
+                )
+        obj._slides = flat  # pyright: ignore[reportPrivateUsage]
+        obj._sections = sections  # pyright: ignore[reportPrivateUsage]
+        obj._unsectioned = prefix  # pyright: ignore[reportPrivateUsage]
+
+
+@dataclass
 class Deck:
     """The top-level presentation container.
 
@@ -364,8 +447,10 @@ class Deck:
     ```
     """
 
-    slides: list[Slide] = field(default_factory=list)
-    """The ordered slide list."""
+    slides: _SlideList = _SlideList()
+    """The ordered slide list: ``Slide`` entries, then any ``Section`` groups
+    of them. Read back, it is the flat ``list[Slide]`` (sections expanded in
+    place); ``sections`` records the groups."""
     transition: Transition | None = None
     """Default transition for all slides. ``None`` defers to the theme's default."""
     overlays: Sequence[Overlay] | None = None
@@ -407,6 +492,31 @@ class Deck:
     def is_print(self) -> bool:
         """Whether the deck is a sheet of paper (a poster, a handout)."""
         return self.size is not None and PageSize(self.size).is_print
+
+    _slides: list[Slide] = field(init=False, repr=False, compare=False)
+    _sections: list[Section] = field(init=False, repr=False, compare=False)
+    _unsectioned: int = field(init=False, repr=False, compare=False)
+
+    @property
+    def sections(self) -> list[Section]:
+        """The sections, in order (empty when the deck has none)."""
+        return self._sections
+
+    def section_ranges(self) -> list[range]:
+        """Each section's slides as indices into ``slides``, in order."""
+        ranges: list[range] = []
+        start = self._unsectioned
+        for section in self._sections:
+            ranges.append(range(start, start + len(section.slides)))
+            start += len(section.slides)
+        return ranges
+
+    def section_of(self, index: int) -> int | None:
+        """The section slide ``index`` belongs to (``None``: before them all)."""
+        for k, span in enumerate(self.section_ranges()):
+            if index in span:
+                return k
+        return None
 
     @property
     def effective_mode(self) -> ColorMode:

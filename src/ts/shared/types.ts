@@ -1,3 +1,5 @@
+import type { SectionRef } from "./sections";
+
 // Every field is always emitted by the Python side (pipeline.py process_deck),
 // so all are required here. Consumers that still guard with `|| ""` are being
 // defensive, not handling a real absent case.
@@ -13,6 +15,8 @@ export interface SlideData {
     title: string;
     notes: string;
     editableFiles: EditableFile[];
+    // The Section(...) the slide is in (absent before the first section).
+    section?: SectionRef;
 }
 
 // Whether the server has a configured edit command for each file kind (env vars

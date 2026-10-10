@@ -1,24 +1,46 @@
 // The grid view (G): every slide as a large thumbnail, like the presenter's
-// overview and PowerPoint's slide sorter. It works like the slide list: click
-// picks (Ctrl/Shift for several), drag reorders, right-click has the slide
-// menu, Ctrl+C / Ctrl+V / Delete act on the picked slides; double-click or
-// Enter opens a slide for editing.
+// overview and PowerPoint's slide sorter, in one block per section (its
+// header names it; click selects its slides, the caret collapses it, drag
+// moves it). It works like the slide list: click picks (Ctrl/Shift for
+// several), drag moves the picked slides (into another section too),
+// right-click has the slide menu, Ctrl+C / Ctrl+V / Delete act on the picked
+// slides; double-click or Enter opens a slide for editing.
 
+import { verticalNeighbor } from "../shared/sections";
 import { clear, h } from "./dom";
 import {
+    dropOnHeader,
+    dropOnSlide,
+    sectionBlocks,
+    sectionGapAtSlide,
+} from "./sections";
+import {
+    isCollapsed,
+    moveSectionToGap,
+    moveSlidesTo,
+    sectionHeader,
+    sections,
+    selectSection,
+} from "./sectionui";
+import {
+    clearDropMarks,
+    dragging,
+    dragSlides,
+    dropAtEnd,
     gotoSlide,
-    moveSlide,
+    headerGap,
+    markGap,
     openSlideMenu,
     pickSlide,
     Thumbs,
 } from "./sorter";
 import { ed, emit, on } from "./state";
+import type { SlideModel } from "./types";
 
 const view = document.getElementById("grid-view")!;
 const list = document.getElementById("grid-list")!;
 const sizeInput = document.getElementById("grid-size") as HTMLInputElement;
 const thumbs = new Thumbs();
-let dragFrom: number | null = null;
 
 export function gridOpen(): boolean {
     return !view.hidden;
@@ -44,129 +66,220 @@ function open(i: number): void {
     gotoSlide(i);
 }
 
+/** The last thing in the grid, which a drop past the end marks. */
+function lastMark(): Element | null {
+    return list.lastElementChild;
+}
+
+function gridItem(slide: SlideModel, i: number): HTMLElement {
+    const item = h(
+        "div",
+        {
+            class: `grid-item${i === ed.current ? " active" : ""}${ed.slideSelection.has(i) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
+            draggable: ed.model?.deckEditable ? "true" : null,
+            "data-index": i,
+        },
+        thumbs.thumb(slide),
+        h(
+            "div",
+            { class: "grid-caption" },
+            h("span", { class: "grid-num" }, String(i + 1)),
+            h(
+                "span",
+                { class: "grid-title" },
+                slide.title ?? slide.id ?? slide.src,
+            ),
+            slide.animations.length
+                ? h(
+                      "span",
+                      {
+                          class: "grid-badge",
+                          title: `${slide.animations.length} animation(s)`,
+                      },
+                      "✦",
+                  )
+                : null,
+        ),
+    );
+    item.addEventListener("click", (e) => {
+        pickSlide(i, e);
+        ed.focus = "sorter";
+    });
+    item.addEventListener("dblclick", () => open(i));
+    item.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (!ed.slideSelection.has(i)) {
+            ed.slideSelection.clear();
+            gotoSlide(i);
+        }
+        ed.focus = "sorter";
+        openSlideMenu(e.clientX, e.clientY, i);
+    });
+    item.addEventListener("dragstart", (e) => {
+        dragging.now = { kind: "slides", slides: dragSlides(i) };
+        e.dataTransfer?.setData("text/plain", String(i));
+        item.classList.add("dragging");
+    });
+    item.addEventListener("dragend", () => {
+        dragging.now = null;
+        clearDropMarks(list);
+        item.classList.remove("dragging");
+    });
+    item.addEventListener("dragover", (e) => {
+        const drag = dragging.now;
+        if (!drag) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (drag.kind === "section") {
+            markGap(list, sectionGapAtSlide(sections(), i), lastMark());
+            return;
+        }
+        const r = item.getBoundingClientRect();
+        clearDropMarks(list);
+        item.classList.add(
+            e.clientX > r.left + r.width / 2 ? "drop-after" : "drop-before",
+        );
+    });
+    item.addEventListener("drop", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const drag = dragging.now;
+        clearDropMarks(list);
+        if (!drag) return;
+        if (drag.kind === "section") {
+            void moveSectionToGap(
+                drag.section,
+                sectionGapAtSlide(sections(), i),
+            );
+            return;
+        }
+        const r = item.getBoundingClientRect();
+        const after = e.clientX > r.left + r.width / 2;
+        const target = dropOnSlide(sections(), i, after);
+        void moveSlidesTo(drag.slides, target.insertAt, target.section);
+    });
+    return item;
+}
+
+function gridHeader(k: number): HTMLElement {
+    const head = sectionHeader(k, "grid", () => selectSection(k));
+    head.addEventListener("dragstart", (e) => {
+        dragging.now = { kind: "section", section: k };
+        e.dataTransfer?.setData("text/plain", `section:${k}`);
+        head.closest(".grid-section")?.classList.add("dragging");
+    });
+    head.addEventListener("dragend", () => {
+        dragging.now = null;
+        head.closest(".grid-section")?.classList.remove("dragging");
+        clearDropMarks(list);
+    });
+    head.addEventListener("dragover", (e) => {
+        const drag = dragging.now;
+        if (!drag) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (drag.kind === "section") {
+            markGap(list, headerGap(head, k, e), lastMark());
+            return;
+        }
+        clearDropMarks(list);
+        head.classList.add("drop-into");
+    });
+    head.addEventListener("drop", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const drag = dragging.now;
+        clearDropMarks(list);
+        if (!drag) return;
+        if (drag.kind === "section") {
+            void moveSectionToGap(drag.section, headerGap(head, k, e));
+            return;
+        }
+        const target = dropOnHeader(sections(), k);
+        void moveSlidesTo(drag.slides, target.insertAt, target.section);
+    });
+    return head;
+}
+
 export function renderGrid(): void {
     if (view.hidden) return;
     clear(list);
     thumbs.begin();
     const slides = ed.model?.slides ?? [];
-    slides.forEach((slide, i) => {
-        const item = h(
-            "div",
-            {
-                class: `grid-item${i === ed.current ? " active" : ""}${ed.slideSelection.has(i) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
-                draggable: ed.model?.deckEditable ? "true" : null,
-                "data-index": i,
-            },
-            thumbs.thumb(slide),
-            h(
-                "div",
-                { class: "grid-caption" },
-                h("span", { class: "grid-num" }, String(i + 1)),
-                h(
-                    "span",
-                    { class: "grid-title" },
-                    slide.title ?? slide.id ?? slide.src,
-                ),
-                slide.animations.length
-                    ? h(
-                          "span",
-                          {
-                              class: "grid-badge",
-                              title: `${slide.animations.length} animation(s)`,
-                          },
-                          "✦",
-                      )
-                    : null,
-            ),
-        );
-        item.addEventListener("click", (e) => {
-            pickSlide(i, e);
-            ed.focus = "sorter";
+    const all = sections();
+    for (const block of sectionBlocks(slides.length, all)) {
+        const k = block.section;
+        const wrap = h("div", {
+            class: `grid-section${k == null ? " unsectioned" : ""}`,
         });
-        item.addEventListener("dblclick", () => open(i));
-        item.addEventListener("contextmenu", (e) => {
-            e.preventDefault();
-            if (!ed.slideSelection.has(i)) {
-                ed.slideSelection.clear();
-                gotoSlide(i);
+        if (k != null) wrap.append(gridHeader(k));
+        if (k == null || !isCollapsed(k)) {
+            const grid = h("div", { class: "grid-section-list" });
+            for (const i of block.slides) grid.append(gridItem(slides[i], i));
+            if (k != null && !block.slides.length) {
+                grid.append(
+                    h(
+                        "div",
+                        { class: "grid-empty" },
+                        "No slides: drop some on the heading",
+                    ),
+                );
             }
-            ed.focus = "sorter";
-            openSlideMenu(e.clientX, e.clientY, i);
-        });
-        item.addEventListener("dragstart", (e) => {
-            dragFrom = i;
-            e.dataTransfer?.setData("text/plain", String(i));
-            item.classList.add("dragging");
-        });
-        item.addEventListener("dragend", () => {
-            dragFrom = null;
-            list.querySelectorAll(".drop-before, .drop-after").forEach((el) => {
-                el.classList.remove("drop-before", "drop-after");
-            });
-            item.classList.remove("dragging");
-        });
-        item.addEventListener("dragover", (e) => {
-            if (dragFrom == null) return;
-            e.preventDefault();
-            const r = item.getBoundingClientRect();
-            const after = e.clientX > r.left + r.width / 2;
-            item.classList.toggle("drop-after", after);
-            item.classList.toggle("drop-before", !after);
-        });
-        item.addEventListener("dragleave", () => {
-            item.classList.remove("drop-before", "drop-after");
-        });
-        item.addEventListener("drop", (e) => {
-            e.preventDefault();
-            if (dragFrom == null) return;
-            const r = item.getBoundingClientRect();
-            let to = e.clientX > r.left + r.width / 2 ? i + 1 : i;
-            if (dragFrom < to) to -= 1;
-            void moveSlide(dragFrom, to);
-        });
-        list.append(item);
-    });
+            wrap.append(grid);
+        }
+        list.append(wrap);
+    }
     thumbs.end();
-    list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+    list.querySelector(".grid-item.active")?.scrollIntoView({
+        block: "nearest",
+    });
 }
 
-function columns(): number {
-    const items = [...list.children] as HTMLElement[];
-    if (items.length < 2) return 1;
-    const top = items[0].offsetTop;
-    const n = items.findIndex((el) => el.offsetTop !== top);
-    return n === -1 ? items.length : n;
+/** The thumbnails on screen, in reading order (collapsed sections left out). */
+function shown(): HTMLElement[] {
+    return [...list.querySelectorAll<HTMLElement>(".grid-item")];
 }
 
 function onKey(e: KeyboardEvent): void {
     if (view.hidden) return;
     const target = e.target as HTMLElement;
     if (target.closest("input, textarea, select, #dialog, #find-panel")) return;
-    const n = ed.model?.slides.length ?? 0;
-    const move = (to: number) => {
+    const items = shown();
+    const indices = items.map((el) => Number(el.dataset.index));
+    const here = indices.indexOf(ed.current);
+    const move = (to: number | undefined) => {
         e.preventDefault();
         e.stopPropagation();
+        if (to == null) return;
         ed.slideSelection.clear();
-        gotoSlide(Math.max(0, Math.min(n - 1, to)));
+        gotoSlide(to);
+    };
+    const vertical = (dir: 1 | -1) => {
+        if (here === -1) return indices[0];
+        const boxes = items.map((el) => {
+            const r = el.getBoundingClientRect();
+            return { left: r.left, top: Math.round(r.top), width: r.width };
+        });
+        return indices[verticalNeighbor(boxes, here, dir)];
     };
     switch (e.key) {
         case "ArrowLeft":
-            move(ed.current - 1);
+            move(indices[Math.max(0, here - 1)]);
             break;
         case "ArrowRight":
-            move(ed.current + 1);
+            move(indices[Math.min(indices.length - 1, here + 1)]);
             break;
         case "ArrowUp":
-            move(ed.current - columns());
+            move(vertical(-1));
             break;
         case "ArrowDown":
-            move(ed.current + columns());
+            move(vertical(1));
             break;
         case "Home":
-            move(0);
+            move(indices[0]);
             break;
         case "End":
-            move(n - 1);
+            move(indices[indices.length - 1]);
             break;
         case "Enter":
             e.preventDefault();
@@ -190,6 +303,27 @@ function setSize(px: number): void {
     }
 }
 
+function initListDrop(): void {
+    list.addEventListener("dragover", (e) => {
+        const drag = dragging.now;
+        if (!drag || e.target !== list) return;
+        e.preventDefault();
+        if (drag.kind === "section") {
+            markGap(list, sections().length, lastMark());
+        } else {
+            clearDropMarks(list);
+            lastMark()?.classList.add("drop-after");
+        }
+    });
+    list.addEventListener("drop", (e) => {
+        const drag = dragging.now;
+        if (!drag || e.target !== list) return;
+        e.preventDefault();
+        clearDropMarks(list);
+        dropAtEnd(drag);
+    });
+}
+
 export function initGrid(): void {
     document
         .getElementById("btn-grid")
@@ -207,7 +341,9 @@ export function initGrid(): void {
     sizeInput.value = String(saved);
     setSize(saved);
     sizeInput.addEventListener("input", () => setSize(Number(sizeInput.value)));
+    initListDrop();
     on("model", renderGrid);
     on("slide", renderGrid);
     on("slide-selection", renderGrid);
+    on("sections", renderGrid);
 }
