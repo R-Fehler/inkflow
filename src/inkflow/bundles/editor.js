@@ -512,17 +512,34 @@
     return wrap2.firstElementChild;
   }
   var toastTimer = 0;
-  function toast(message, kind = "info") {
+  function toast(message, kind = "info", action) {
     const el2 = document.getElementById("toast");
     if (!el2) return;
     el2.textContent = message;
     el2.className = `show ${kind}`;
+    if (action) {
+      el2.classList.add("has-action");
+      el2.append(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "toast-action",
+            onclick: () => {
+              el2.className = "";
+              action.run();
+            }
+          },
+          action.label
+        )
+      );
+    }
     window.clearTimeout(toastTimer);
     toastTimer = window.setTimeout(
       () => {
         el2.className = "";
       },
-      kind === "error" ? 6e3 : 2600
+      action ? 1e4 : kind === "error" ? 6e3 : 2600
     );
   }
 
@@ -1045,6 +1062,9 @@
     renderPending: false,
     canUndo: false,
     canRedo: false,
+    undoLabel: null,
+    // what Undo would take back ("Move slide")
+    redoLabel: null,
     slideSelection: /* @__PURE__ */ new Set(),
     // deck indices picked in the slide list
     focus: "canvas",
@@ -1148,10 +1168,7 @@
           ed.model = msg.model;
           ed.rebuilt = true;
           if (msg.history) {
-            const h3 = msg.history;
-            ed.canUndo = h3.canUndo;
-            ed.canRedo = h3.canRedo;
-            emit("history");
+            setHistory(msg.history);
           }
           emit("model");
           break;
@@ -1168,11 +1185,35 @@
         case "editor-command":
           commandHandler(msg);
           break;
+        case "agent-edit":
+          agentEdit(msg);
+          break;
         case "notify":
           toast(String(msg.message ?? ""));
           break;
       }
     };
+  }
+  function setHistory(h3) {
+    ed.canUndo = h3.canUndo ?? ed.canUndo;
+    ed.canRedo = h3.canRedo ?? ed.canRedo;
+    if ("undoLabel" in h3) ed.undoLabel = h3.undoLabel ?? null;
+    if ("redoLabel" in h3) ed.redoLabel = h3.redoLabel ?? null;
+    emit("history");
+  }
+  function agentEdit(msg) {
+    setHistory(msg);
+    const label4 = String(msg.label ?? "Agent: changed the deck");
+    const step = msg.step;
+    toast(label4, "info", {
+      label: "Undo",
+      run: () => {
+        void edit({
+          action: "undo",
+          ...typeof step === "number" ? { step } : {}
+        });
+      }
+    });
   }
   function request(req) {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1196,6 +1237,8 @@
     if (result.ok) {
       ed.canUndo = result.canUndo ?? ed.canUndo;
       ed.canRedo = result.canRedo ?? ed.canRedo;
+      if ("undoLabel" in result) ed.undoLabel = result.undoLabel ?? null;
+      if ("redoLabel" in result) ed.redoLabel = result.redoLabel ?? null;
       if (result.structural || req.action === "undo" || req.action === "redo") {
         ed.structuralPending = true;
         window.clearTimeout(pendingTimer);
@@ -11807,8 +11850,19 @@ ${area2.value.slice(pos)}`;
     $("zoom-label").textContent = `${Math.round(scale() * 100)}%`;
   }
   function updateHistory() {
-    $("btn-undo").disabled = !ed.canUndo;
-    $("btn-redo").disabled = !ed.canRedo;
+    const undoBtn = $("btn-undo");
+    const redoBtn = $("btn-redo");
+    undoBtn.disabled = !ed.canUndo;
+    redoBtn.disabled = !ed.canRedo;
+    undoBtn.title = historyTitle("Undo", ed.canUndo && ed.undoLabel, "Ctrl+Z");
+    redoBtn.title = historyTitle(
+      "Redo",
+      ed.canRedo && ed.redoLabel,
+      "Ctrl+Shift+Z"
+    );
+  }
+  function historyTitle(verb, label4, keys) {
+    return label4 ? `${verb} ${label4} (${keys})` : `${verb} (${keys})`;
   }
   function updateTools() {
     document.querySelectorAll("[data-tool]").forEach((b2) => {

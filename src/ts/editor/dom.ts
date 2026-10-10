@@ -84,19 +84,44 @@ export function icon(name: string, size = 16): SVGSVGElement {
 
 let toastTimer = 0;
 
+export interface ToastAction {
+    label: string;
+    run: () => void;
+}
+
+// A message at the bottom; with `action`, it carries a button (an agent's
+// edit offers "Undo") and stays longer, since the author has to reach it.
 export function toast(
     message: string,
     kind: "info" | "error" | "ok" = "info",
+    action?: ToastAction,
 ): void {
     const el = document.getElementById("toast");
     if (!el) return;
     el.textContent = message;
     el.className = `show ${kind}`;
+    if (action) {
+        el.classList.add("has-action");
+        el.append(
+            h(
+                "button",
+                {
+                    type: "button",
+                    class: "toast-action",
+                    onclick: () => {
+                        el.className = "";
+                        action.run();
+                    },
+                },
+                action.label,
+            ),
+        );
+    }
     window.clearTimeout(toastTimer);
     toastTimer = window.setTimeout(
         () => {
             el.className = "";
         },
-        kind === "error" ? 6000 : 2600,
+        action ? 10000 : kind === "error" ? 6000 : 2600,
     );
 }

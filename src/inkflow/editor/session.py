@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import base64
+import contextlib
 import dataclasses
 import os
 import re
@@ -152,6 +153,9 @@ class _Step:
     changes: list[_Change]
     coalesce: str | None = None
     """Consecutive steps with the same key merge into one (typing, nudging)."""
+    seq: int = 0
+    """Serial number in its History (0 until recorded), which an undo can name
+    so it undoes that step only (the editor's "Undo" on an agent's edit)."""
 
 
 @dataclass
@@ -161,8 +165,11 @@ class History:
     done: list[_Step] = field(default_factory=list)
     undone: list[_Step] = field(default_factory=list)
     limit: int = 200
+    serial: int = 0
 
     def record(self, step: _Step) -> None:
+        self.serial += 1
+        step.seq = self.serial
         last = self.done[-1] if self.done else None
         if (
             step.coalesce is not None
@@ -177,7 +184,7 @@ class History:
             merged += [
                 c for c in last.changes if c.path not in {m.path for m in merged}
             ]
-            self.done[-1] = _Step(last.label, merged, step.coalesce)
+            self.done[-1] = _Step(last.label, merged, step.coalesce, step.seq)
             self.undone.clear()
             return
         self.done.append(step)
@@ -201,10 +208,13 @@ class History:
                 change.path.parent.mkdir(parents=True, exist_ok=True)
                 change.path.write_bytes(target)
 
-    def undo(self) -> _Step:
+    def undo(self, seq: int | None = None) -> _Step:
+        """Undo the last step; with ``seq``, only when that is the step."""
         if not self.done:
             raise EditError("nothing to undo")
         step = self.done[-1]
+        if seq is not None and step.seq != seq:
+            raise EditError("other edits came after that one: undo them first (Ctrl+Z)")
         self._swap(step, forward=False)
         self.undone.append(self.done.pop())
         return step
@@ -369,7 +379,8 @@ class EditorSession:
         if not self.has_deck and action not in _PROJECT_ACTIONS:
             raise EditError("open or create a deck first")
         if action == "undo":
-            step = self.history.undo()
+            seq = msg.get("step")
+            step = self.history.undo(seq if isinstance(seq, int) else None)
             return self._result(step, undo=True)
         if action == "redo":
             step = self.history.redo()
@@ -455,6 +466,15 @@ class EditorSession:
         }.get(cast("str", action))
         if handler is None:
             raise EditError(f"unknown action {action!r}")
+        # An agent (``inkflow slide``) names the build it resolved slide
+        # numbers against: a deck.py rebuilt since then may number them apart.
+        expected = msg.get("deckHash")
+        if (
+            isinstance(expected, str)
+            and self.built_hash is not None
+            and expected != self.built_hash
+        ):
+            raise EditError("deck.py changed since the last build; try again")
         try:
             label = handler(msg, deck, txn, extra)
         except (
@@ -468,6 +488,10 @@ class EditorSession:
             OSError,
         ) as exc:
             raise EditError(str(exc)) from exc
+        agent = msg.get("agent")
+        if isinstance(agent, str) and agent.strip():
+            # Made by an agent through the CLI: the editor says so ("Agent: …").
+            label = f"Agent: {agent.strip()}"
         step = txn.commit(label)
         coalesce = msg.get("coalesce")
         step.coalesce = coalesce if isinstance(coalesce, str) else None
@@ -484,9 +508,62 @@ class EditorSession:
             "ok": True,
             "label": step.label,
             "hashes": hashes,
+            "changes": self._changes(step, undo),
+            "step": step.seq,
             "canUndo": bool(self.history.done),
             "canRedo": bool(self.history.undone),
+            **self.history_labels(),
         }
+
+    def history_labels(self) -> dict[str, str | None]:
+        """What Undo and Redo would do now, for the editor's buttons."""
+        done, undone = self.history.done, self.history.undone
+        return {
+            "undoLabel": done[-1].label if done else None,
+            "redoLabel": undone[-1].label if undone else None,
+        }
+
+    def _changes(self, step: _Step, undo: bool) -> list[dict[str, str]]:
+        """The files a step wrote (or an undo restored), relative to the
+        project: created, deleted, modified, or renamed (a deleted file whose
+        exact bytes reappear under another name)."""
+
+        def rel(path: Path) -> str:
+            try:
+                return path.relative_to(self.project_dir).as_posix()
+            except ValueError:
+                return str(path)
+
+        pairs = [
+            (c.path, c.after, c.before) if undo else (c.path, c.before, c.after)
+            for c in step.changes
+        ]
+        gone = {path: before for path, before, after in pairs if after is None}
+        out: list[dict[str, str]] = []
+        renamed: set[Path] = set()
+        for path, before, after in pairs:
+            if after is None:
+                continue
+            if before is not None:
+                out.append({"path": rel(path), "change": "modified"})
+                continue
+            origin = next(
+                (p for p, data in gone.items() if data == after and p not in renamed),
+                None,
+            )
+            if origin is not None:
+                renamed.add(origin)
+                out.append(
+                    {"path": rel(path), "change": "renamed", "from": rel(origin)}
+                )
+            else:
+                out.append({"path": rel(path), "change": "created"})
+        out += [
+            {"path": rel(path), "change": "deleted"}
+            for path in gone
+            if path not in renamed
+        ]
+        return out
 
     # ── Helpers ──
 
@@ -1949,6 +2026,7 @@ class EditorSession:
         # A slide in ``slides_after`` that is not one of deck.slides: what it was
         # made from, and whether it is a copy (the original stays too).
         origins: dict[int, tuple[Slide, bool]] = {}
+        relink: tuple[str, str] | None = None
         if op == "move":
             src, dst = int(cast("int", msg["from"])), int(cast("int", msg["to"]))
             source.move_slide(src, dst)
@@ -1970,6 +2048,9 @@ class EditorSession:
             for index in indices:
                 source.remove_slide(index)
             slides_after = [s for i, s in enumerate(deck.slides) if i not in indices]
+            if msg.get("files"):
+                gone = [deck.slides[i] for i in indices]
+                self._drop_slide_files(gone, slides_after, deck, txn)
             label = "Delete slide" if len(indices) == 1 else "Delete slides"
         elif op == "hide":
             index, _ = self._deck_slide(deck, msg)
@@ -1986,6 +2067,18 @@ class EditorSession:
             title = str(msg.get("title") or "").strip()
             source.set_slide_arg(index, "title", _py(title) if title else None)
             label = "Rename slide"
+        elif op == "id":
+            index, slide = self._deck_slide(deck, msg)
+            new_id = str(msg.get("id") or "").strip()
+            old_id = self._slide_id(slide, deck)
+            self._check_new_id(new_id, slide, deck)
+            source.set_slide_arg(index, "id", _py(new_id))
+            slides_after = list(deck.slides)
+            slides_after[index] = dataclasses.replace(slide, id=new_id)
+            origins[id(slides_after[index])] = (slide, False)
+            # Links to it (``slide:<id>``) are rewritten once deck.py is saved.
+            relink = (old_id, new_id)
+            label = "Change slide id"
         elif op == "font-size":
             index, _ = self._deck_slide(deck, msg)
             size = msg.get("size")
@@ -2034,7 +2127,17 @@ class EditorSession:
                 txn,
                 deck,
             )
-            source.insert_slide(after + 1, f"Slide({_py(name)})")
+            args = [_py(name)]
+            text = msg.get("md")
+            if isinstance(text, str) and text.strip():
+                # Its text from the start, in slides/<name>.md like a slide
+                # whose text was typed in the editor (_md_text).
+                md_path = _unique_path(
+                    self.project_dir / "slides", Path(name).stem, ".md"
+                )
+                txn.write(md_path, text.encode("utf-8"))
+                args.append(f"md={_py(md_path.name)}")
+            source.insert_slide(after + 1, f"Slide({', '.join(args)})")
             imports.add("Slide")
             extra["select"] = after + 1
             label = "New slide"
@@ -2070,7 +2173,83 @@ class EditorSession:
         self._save_deck(txn, source, imports)
         if slides_after is not None:
             self._follow_ink(deck, slides_after, origins, txn)
+        if relink is not None:
+            extra["links"] = self._relink(*relink, deck, txn)
         return label
+
+    def _check_new_id(self, new_id: str, slide: Slide, deck: Deck) -> None:
+        if not re.fullmatch(r"\w[\w.-]*", new_id):
+            raise EditError(
+                f"{new_id!r} is not a slide id: use letters, digits, - _ and ."
+            )
+        visible = [s for s in deck.slides if s.visible]
+        for other, other_id in zip(visible, slide_ids(visible), strict=True):
+            if other is not slide and new_id in (other_id, slide_ids([other])[0]):
+                raise EditError(f"another slide is already called {new_id!r}")
+
+    def _slide_files(self, slide: Slide, deck: Deck, ancestors: bool) -> set[Path]:
+        """The project files a slide is made of: its drawing (not a shared
+        layout or overlay), Markdown, notes and a named ink file. With
+        ``ancestors``, also every drawing its own one is built on."""
+        found: set[Path] = set()
+        try:
+            src = resolve_slide_src(slide.src, self.project_dir, deck.theme).resolve()
+        except (ValueError, OSError):
+            src = None
+        if (
+            src is not None
+            and src.is_relative_to(self.project_dir)
+            and not {"layouts", "overlays"} & set(src.parts)
+        ):
+            found.add(src)
+            if ancestors:
+                with contextlib.suppress(ValueError, OSError):
+                    chain = resolve_chain(src, self.project_dir, deck.theme)
+                    found |= {p.resolve() for p in chain}
+        if slide.md is not None and not isinstance(slide.md, Inline):
+            with contextlib.suppress(EditError, OSError, ValueError):
+                found.add(self._md_path(slide).resolve())
+        for named in (slide.notes, slide.ink):
+            if named and not isinstance(named, Inline):
+                path = Path(str(named))
+                path = path if path.is_absolute() else self.project_dir / path
+                found.add(path.resolve())
+        return {p for p in found if p.is_relative_to(self.project_dir)}
+
+    def _drop_slide_files(
+        self, gone: list[Slide], kept: list[Slide], deck: Deck, txn: _Txn
+    ) -> None:
+        """Delete the files only the deleted slides were made of; whatever a
+        remaining slide still uses (or is built on) stays."""
+        in_use: set[Path] = set()
+        for slide in kept:
+            in_use |= self._slide_files(slide, deck, ancestors=True)
+        for slide in gone:
+            for path in sorted(self._slide_files(slide, deck, ancestors=False)):
+                if path not in in_use and txn.read_optional(path) is not None:
+                    txn.write(path, None)
+
+    def _relink(self, old: str, new: str, deck: Deck, txn: _Txn) -> int:
+        """Point ``slide:<old>`` links at ``slide:<new>`` in deck.py and the
+        slides' own files; returns how many were rewritten."""
+        if old == new:
+            return 0
+        link = re.compile(rf"(?<=slide:){re.escape(old)}(?![\w.-])")
+        files = {self.deck_path.resolve()}
+        for slide in deck.slides:
+            files |= self._slide_files(slide, deck, ancestors=False)
+        count = 0
+        for path in sorted(files):
+            if path.suffix not in (".py", ".md", ".svg"):
+                continue
+            data = txn.read_optional(path)
+            if data is None:
+                continue
+            text, n = link.subn(new, data.decode("utf-8", errors="surrogateescape"))
+            if n:
+                count += n
+                txn.write(path, text.encode("utf-8", errors="surrogateescape"))
+        return count
 
     # ── Ink ──
 

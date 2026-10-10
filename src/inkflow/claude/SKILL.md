@@ -23,6 +23,11 @@ selection. Run it again whenever you need the current state.
 Point the author at something with `inkflow goto N` (1-based slide number)
 and `inkflow select ID [ID…]` (selects elements on the current slide).
 
+Add, delete, duplicate, move, hide/show or re-id slides with `inkflow slide …`
+(`inkflow slide --help`), not by editing `slides=[...]` by hand: they move the
+slide's Markdown, notes, drawing and ink files along, and with the editor open
+each is a step the author can undo there.
+
 ## Files
 
 - `deck.py`: `main()` returns `Deck(slides=[Slide(...), ...])`. Slide order,

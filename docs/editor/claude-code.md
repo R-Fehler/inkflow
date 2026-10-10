@@ -56,8 +56,37 @@ right away.
 | `inkflow verify` | Checks the deck for authoring mistakes. |
 | `inkflow goto N` | Shows slide `N` in the editor open on this deck. |
 | `inkflow select ID…` | Selects elements by id in the editor open on this deck, so Claude can point at what it means. |
+| `inkflow slide …` | Adds, deletes, duplicates, moves, hides, shows, renames or retitles slides, with their files (below). |
 
 With several editors running, `goto` and `select` find the right one from the
-deck's `.inkflow/context.json`. The editor keeps its state in `.inkflow/` in the project, which ignores itself in
+deck's `.inkflow/context.json`.
+
+## Changing the slide list
+
+A slide is more than its `Slide(...)` line in `deck.py`: it has its own drawing,
+Markdown, notes and saved ink, and some of those files are named after the
+slide's id. `inkflow slide` makes each change the way the editor's slide list
+does, so nothing is left behind or orphaned:
+
+| Command | What it does |
+|---|---|
+| `inkflow slide add --layout content [--after N] [--id NAME] [--title T] [--md TEXT]` | A new slide with its own drawing on that layout (`--like N`: the layout of slide `N`), after slide `N` (`0`: first; default: last). `--title` and `--md` (`-` reads stdin) become its `slides/<id>.md`. |
+| `inkflow slide delete N [N…]` | Removes the slides, with the drawing, Markdown, notes and ink only they use (`--keep-files` leaves those). |
+| `inkflow slide duplicate N` | A copy right after it, with copies of its own files. |
+| `inkflow slide move N --to M` | Moves slide `N` so it becomes slide `M`. |
+| `inkflow slide hide N` / `show ID` | Sets or clears `visible=False`. |
+| `inkflow slide rename N NEW_ID` | Sets `id=`; its ink file and every `slide:<old id>` link follow. |
+| `inkflow slide title N TEXT` | Sets `title=` (`""` removes it). |
+
+A slide is named by its number, counted as the presenter and `inkflow goto` count
+(1-based, hidden slides left out), or by its id; a hidden slide goes by its id.
+Each command prints the files it wrote, created, renamed or deleted, and
+`deck.py` keeps its comments and formatting.
+
+When the editor (or `inkflow serve`) has the deck open, the change is made by
+that server, as one step in the editor's undo history: the editor shows
+*Agent: Delete slide 3 (interface)* with an **Undo** button, and
+<kbd>Ctrl</kbd>+<kbd>Z</kbd> takes it back like any of your own edits. Without a
+server the files are changed directly, and `git` is the undo. The editor keeps its state in `.inkflow/` in the project, which ignores itself in
 git and is not watched for changes. `render` needs Chromium or Chrome, like
 `inkflow export`; one installed by Playwright is found too.

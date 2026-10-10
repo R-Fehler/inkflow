@@ -95,6 +95,81 @@ commands:
       --ws-port=: The server's WebSocket port
       --host=: Server host
 
+  - name: slide
+    description: Add, delete, duplicate, move, hide or rename slides.
+    commands:
+      - name: add
+        description: Add a slide with its own drawing, built on a layout.
+        flags:
+          -d, --deck=: Path to deck.py
+          -l, --layout=: Layout to build it on
+          --like=: The same layout as this slide
+          --after=: Insert after this slide (0 = first)
+          --id=: Name for its files, which gives its id
+          --title=: Its title
+          --md=: Its Markdown text (- reads stdin)
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: delete
+        description: Delete slides, with the files only they use.
+        flags:
+          -d, --deck=: Path to deck.py
+          --keep-files: Leave the slide's files in place
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: duplicate
+        description: Copy a slide, with its own files, right after it.
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: move
+        description: Move a slide so it becomes slide number --to.
+        flags:
+          --to=: The number it gets
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: hide
+        description: Leave a slide out of the presentation.
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: show
+        description: Put a hidden slide back in the presentation.
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: rename
+        description: Give a slide a new id; its ink and links follow.
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: title
+        description: Set a slide's title (title=).
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
   - name: setup-claude
     description: Install the Claude Code prompt hook and inkflow skill.
     flags:

@@ -90,13 +90,7 @@ export function connect(port: number): void {
                 ed.model = msg.model as EditorModel;
                 ed.rebuilt = true;
                 if (msg.history) {
-                    const h = msg.history as {
-                        canUndo: boolean;
-                        canRedo: boolean;
-                    };
-                    ed.canUndo = h.canUndo;
-                    ed.canRedo = h.canRedo;
-                    emit("history");
+                    setHistory(msg.history as HistoryState);
                 }
                 emit("model");
                 break;
@@ -113,11 +107,47 @@ export function connect(port: number): void {
             case "editor-command":
                 commandHandler(msg);
                 break;
+            case "agent-edit":
+                agentEdit(msg);
+                break;
             case "notify":
                 toast(String(msg.message ?? ""));
                 break;
         }
     };
+}
+
+interface HistoryState {
+    canUndo?: boolean;
+    canRedo?: boolean;
+    undoLabel?: string | null;
+    redoLabel?: string | null;
+}
+
+function setHistory(h: HistoryState): void {
+    ed.canUndo = h.canUndo ?? ed.canUndo;
+    ed.canRedo = h.canRedo ?? ed.canRedo;
+    if ("undoLabel" in h) ed.undoLabel = h.undoLabel ?? null;
+    if ("redoLabel" in h) ed.redoLabel = h.redoLabel ?? null;
+    emit("history");
+}
+
+// An agent changed the deck through the server (`inkflow slide …`): the step
+// is in this History like the author's own, and its Undo takes back exactly
+// that step (refused once something else came after it: Ctrl+Z then).
+function agentEdit(msg: Record<string, unknown>): void {
+    setHistory(msg as HistoryState);
+    const label = String(msg.label ?? "Agent: changed the deck");
+    const step = msg.step;
+    toast(label, "info", {
+        label: "Undo",
+        run: () => {
+            void edit({
+                action: "undo",
+                ...(typeof step === "number" ? { step } : {}),
+            });
+        },
+    });
 }
 
 // Send one request; resolves with the server's result (never rejects).
@@ -151,6 +181,8 @@ export async function edit(
     if (result.ok) {
         ed.canUndo = result.canUndo ?? ed.canUndo;
         ed.canRedo = result.canRedo ?? ed.canRedo;
+        if ("undoLabel" in result) ed.undoLabel = result.undoLabel ?? null;
+        if ("redoLabel" in result) ed.redoLabel = result.redoLabel ?? null;
         // After an edit that moved elements (or an undo, which may have), the
         // locators on screen no longer match the file: keep the old hashes so
         // the server refuses anything aimed at them until the rebuild lands.

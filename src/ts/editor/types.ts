@@ -145,6 +145,8 @@ export interface EditResult {
     select?: number;
     canUndo?: boolean;
     canRedo?: boolean;
+    undoLabel?: string | null;
+    redoLabel?: string | null;
     path?: string;
     rel?: string;
     theme?: unknown;
