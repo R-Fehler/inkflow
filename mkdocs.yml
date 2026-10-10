@@ -78,6 +78,7 @@ nav:
     - Animations: authoring/animations.md
     - Transitions: authoring/transitions.md
     - Morph in depth: authoring/morph.md
+    - Charts: authoring/charts.md
     - Working in Inkscape: authoring/inkscape.md
   - Layouts and themes:
     - Layouts: design/layouts.md
