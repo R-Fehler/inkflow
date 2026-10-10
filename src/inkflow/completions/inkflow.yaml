@@ -64,12 +64,14 @@ commands:
         deck: ["$files([\".py\"])"]
 
   - name: render
-    description: Render slides to PNG images.
+    description: Render slides to PNG images and report layout problems.
     flags:
       -d, --deck=: Path to deck.py
       -s, --slide=: Slide number (1-based); repeatable
       --all: Render every slide
       --step=: Build step to show
+      --sheet: One contact-sheet PNG of the slides
+      --check: Only measure the layout; exit 1 on a problem
       -o, --output=: PNG file or directory
       --scale=: Image scale
       --chromium=: Path to a Chromium/Chrome binary

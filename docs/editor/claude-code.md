@@ -52,7 +52,7 @@ right away.
 | Command | What it does |
 |---|---|
 | `inkflow context` | Prints what the editor has selected right now (`--json` for the raw data). |
-| `inkflow render` | Writes PNGs of slides at any build step to `.inkflow/render/`, the editor's current slide by default (`--slide N`, `--all`, `--step S`). Claude looks at them to check its own work. |
+| `inkflow render` | Writes PNGs of slides at any build step to `.inkflow/render/`, the editor's current slide by default (`--slide N`, `--all`, `--step S`), and reports layout problems. Claude looks at them to check its own work. `--sheet` puts the slides on one contact sheet; `--check` only measures (see below). |
 | `inkflow verify` | Checks the deck for authoring mistakes. |
 | `inkflow goto N` | Shows slide `N` in the editor open on this deck. |
 | `inkflow select ID…` | Selects elements by id in the editor open on this deck, so Claude can point at what it means. |
@@ -61,3 +61,34 @@ With several editors running, `goto` and `select` find the right one from the
 deck's `.inkflow/context.json`. The editor keeps its state in `.inkflow/` in the project, which ignores itself in
 git and is not watched for changes. `render` needs Chromium or Chrome, like
 `inkflow export`; one installed by Playwright is found too.
+
+## Checking the layout
+
+`inkflow render` measures each slide in the browser while it renders it, and
+prints a line for each layout problem it finds:
+
+```text
+slide 2 (features): #zone-content: text overflows its zone by 232px (bottom)
+slide 3 (interface): #zone-content: code block is cut off by 528px (right)
+slide 8 (morph): #logo: lies 40px outside the slide (right)
+slide 8 (morph): #lost: lies entirely outside the slide (right), so it is not shown
+slide 3 (interface): #zone-content: text 10px tall is likely too small to read (below 13.5px): "tiny footnote"
+```
+
+Lengths are in slide units, the numbers in the SVG. A zone's text is compared
+with the zone's box; a drawn object with the slide's edges, except a background
+or a band spanning the whole slide, and anything clipped on purpose (a crop, a
+media zone). Small text (below 1/80 of the slide's height) is a hint, the rest
+are problems.
+
+```bash
+inkflow render --check            # every slide, no images; exit 1 on a problem
+inkflow render --sheet            # .inkflow/render/sheet.png: all slides in a grid
+inkflow render --sheet -s 4 -s 5  # just these slides
+```
+
+A contact sheet labels each slide with its number and id, and flags the ones
+with problems. It is at most 1600 px wide, with up to 16 slides per image
+(`sheet-1.png`, `sheet-2.png`… for a longer deck), so one image shows the flow of
+the deck. Every render runs in a single browser, so `--all`, `--sheet` and
+`--check` take a few seconds for a whole deck.

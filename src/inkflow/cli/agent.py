@@ -20,8 +20,8 @@ import click
 
 from inkflow.cli._common import deck_option, main, resolve_deck_path
 from inkflow.editor.context import CONTEXT_DIR, format_context, read_context
-from inkflow.export import render_png
 from inkflow.logging import report
+from inkflow.render import render_slides, summary
 
 # The prompt hook stays quiet once the editor has not reported for this long.
 _HOOK_MAX_AGE = 2 * 60 * 60
@@ -83,7 +83,8 @@ def _current_slide(project_dir: Path) -> int:
     "slides",
     type=int,
     multiple=True,
-    help="Slide number (1-based); repeatable. Default: the editor's current slide.",
+    help="Slide number (1-based); repeatable. Default: the editor's current slide"
+    + " (every slide with --sheet or --check).",
 )
 @click.option("--all", "all_slides", is_flag=True, help="Render every slide.")
 @click.option(
@@ -93,10 +94,22 @@ def _current_slide(project_dir: Path) -> int:
     help="Build step to show (default: the final state, everything revealed).",
 )
 @click.option(
+    "--sheet",
+    is_flag=True,
+    help="One contact-sheet PNG with the slides in a grid, labelled with their"
+    + " numbers and ids, instead of one image per slide.",
+)
+@click.option(
+    "--check",
+    is_flag=True,
+    help="Only measure the layout: write no images, exit 1 on a problem.",
+)
+@click.option(
     "--output",
     "-o",
     default=None,
-    help="PNG file for one slide, or a directory (default: .inkflow/render/).",
+    help="PNG file for one slide or a sheet, or a directory"
+    + " (default: .inkflow/render/).",
 )
 @click.option(
     "--scale",
@@ -114,38 +127,48 @@ def render(
     slides: tuple[int, ...],
     all_slides: bool,
     step: int | None,
+    sheet: bool,
+    check: bool,
     output: str | None,
     scale: float,
     chromium: str | None,
     no_sandbox: bool,
 ) -> None:
-    """Render slides to PNG images, to look at the result.
+    """Render slides to PNG images and report layout problems.
 
     Uses headless Chromium, like `export`. Without `--slide`, renders the slide
     open in the visual editor (or the first). Prints the path of every image
-    written, which is what an agent reads back to check its own edits.
+    written, which is what an agent reads back to check its own edits, then
+    one line per layout problem: text that overflows its zone, a code block cut
+    off, an object outside the slide, text too small to read (a hint).
+
+    `--sheet` puts the slides on one contact sheet (16 per image at most).
+    `--check` measures without writing images and exits 1 if anything other
+    than a hint was found.
     """
+    if check and sheet:
+        raise click.UsageError("--check writes no images; drop --sheet or --check")
     resolved = resolve_deck_path(deck_path)
     project_dir = resolved.parent
-    if all_slides:
-        from inkflow.pipeline import process_deck
-        from inkflow.server import load_deck
-
-        count = len(process_deck(load_deck(resolved), project_dir, resolved))
-        numbers = list(range(1, count + 1))
+    numbers: list[int] | None
+    if all_slides or (not slides and (sheet or check)):
+        numbers = None
     else:
         numbers = list(slides) or [_current_slide(project_dir)]
-    out = Path(output) if output else project_dir / CONTEXT_DIR / "render"
-    if output is None:
-        (project_dir / CONTEXT_DIR).mkdir(exist_ok=True)
-        ignore = project_dir / CONTEXT_DIR / ".gitignore"
-        if not ignore.exists():
-            ignore.write_text("*\n", encoding="utf-8")
+    out: Path | None = None
+    if not check:
+        out = Path(output) if output else project_dir / CONTEXT_DIR / "render"
+        if output is None:
+            (project_dir / CONTEXT_DIR).mkdir(exist_ok=True)
+            ignore = project_dir / CONTEXT_DIR / ".gitignore"
+            if not ignore.exists():
+                ignore.write_text("*\n", encoding="utf-8")
     try:
-        written = render_png(
+        result = render_slides(
             resolved,
             numbers,
             out,
+            sheet=sheet,
             step=step,
             scale=scale,
             chromium=chromium,
@@ -153,8 +176,14 @@ def render(
         )
     except (RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
-    for path in written:
+    for path in result.images:
         click.echo(str(path))
+    for finding in result.findings:
+        click.echo(finding.message())
+    if check:
+        click.echo(summary(result.findings, len(result.slides)))
+        if any(f.is_problem for f in result.findings):
+            sys.exit(1)
 
 
 def _running_as_root() -> bool:
