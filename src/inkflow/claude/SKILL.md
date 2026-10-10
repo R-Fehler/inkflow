@@ -200,39 +200,78 @@ better ask the author to open it in draw.io (double-click it in the editor).
 `inkflow:drawio="inline"` (or `"themed"`: the deck's colours and fonts) on that
 `<image>`, the build draws the diagram into the slide instead of its picture;
 each draw.io cell is then an element named `<image id>-<cell id>` that
-`animations=[...]` can target (`FadeIn("flow-client")`) and a connector can
-attach to (`inkflow:connect-end="flow-client:left"`). Change a diagram's
+`animations=[...]` can target (`FadeIn("flow-client")`) and an arrow can
+attach to (`inkflow shape connect box flow-client`). Change a diagram's
 shapes in its `<mxGraphModel>` (geometry, `value`, `style`), never in the
 picture alone: draw.io redraws the picture from the source.
 
-## Text boxes, colours and links
+## Shapes, arrows and text boxes: `inkflow shape`
 
-- A free text box is a zone too: a `<rect id="zone-text">` (or `zone-text-2`, …) in
-  the slide's own SVG, filled by a `::text::` section in the slide's `.md` (or
-  `zones={"text": "..."}`). Its text wraps; SVG `<text>` does not.
-- Slide text belongs in the slide's `.md` file, not in `deck.py`: give a slide
-  without one `md="<slide-id>.md"` in `slides/` (the editor does the same on the
-  first text typed into it); keep `zones={...}` for images, videos and `TextBox`.
-- Text inside a drawn shape: give the zone rect (or ellipse) its own fill/stroke and
-  `inkflow:show-shape="true"`; the shape is then painted as the text box's
-  background and border (otherwise a zone shape is only a placeholder). Padding and
-  alignment are `--inkflow-padding` / `--inkflow-align` / `--inkflow-valign` in its
-  `style`.
+Draw with `inkflow shape …` (`inkflow shape --help`) rather than by editing
+SVG: each command makes the change the editor makes for the same click, so
+ids stay unique, an arrow's path is routed exactly where the editor routes it
+(and follows its shapes when they move), a text box gets its zone and its
+Markdown together, a renamed object keeps its arrows and animations, and
+with the editor open every command is one step the author can undo there.
+`-s SLIDE` (number or id) picks the slide, default the one open in the
+editor; coordinates are slide units (`--at X,Y` is the top-left corner,
+`--size W,H`). Objects go by id; a zone's `zone-` may be left off.
+
+- `inkflow shape list -s 3` shows the slide's objects: id, kind, box, text,
+  and each arrow's ends (`a:right -> b:left`), `STALE` when they no longer
+  meet their shapes.
+- `add rect|ellipse --text "Draft"`: a shape with text in it (it becomes the
+  text zone `zone-<id>`, its text a `::<id>::` section of the slide's `.md`);
+  `add textbox --text "…"`: wrapping Markdown text; `add text`: an SVG
+  `<text>` line (no wrapping); `add line|arrow --from X,Y --to X,Y`;
+  `add image --src FILE` (`--drawio inline` draws a draw.io diagram in, its
+  shapes then named `<id>-<cell id>`); `add chart --data data/x.csv --chart line`.
+  `--fill`/`--stroke` take theme colours (`accent`, `surface`, …) or `#hex`.
+- `connect A B --style elbow` (straight, elbow, curved) attaches an arrow to
+  two shapes, zones or draw.io shapes; `--from right --to top@0.25` picks the
+  sites (a side, or `side@fraction` clockwise along it; default: the nearest
+  pair), `--arrow end|start|both|none`, `--bend x:640` moves an elbow's middle.
+  `sites ID 3` offers three connection points per side.
+- `move ID… --by DX,DY` (or `--to X,Y`), `resize ID --size W,H`,
+  `align ID… left|center|…|bottom`, `distribute ID… horizontal`: attached
+  arrows follow. `style ID… --fill accent --stroke-width 2 --opacity 0.5`,
+  `text ID "…"`, `rename ID NEW`, `delete ID…` (a zone's text goes too),
+  `duplicate`, `group`/`ungroup`, `order ID front`, `lock`, `hide`/`show`,
+  `link ID slide:<id>|URL`.
+- `batch` reads a JSON list of commands from stdin and applies them as ONE
+  step (one undo, one rebuild); later commands see what earlier ones made.
+  Each object's first key names the command, its other keys are the options:
+
+  ```bash
+  inkflow shape batch -s 3 <<'EOF'
+  [{"add": "rect", "id": "plan", "at": [160, 420], "size": [320, 140], "text": "Plan"},
+   {"add": "rect", "id": "build", "at": [800, 640], "size": [320, 140], "text": "Build"},
+   {"add": "rect", "id": "ship", "at": [1440, 420], "size": [320, 140], "text": "Ship"},
+   {"connect": ["plan", "build"], "style": "elbow"},
+   {"connect": ["build", "ship"], "style": "elbow"}]
+  EOF
+  ```
+
+Reading existing files: an attached arrow is a `<path inkflow:connector="elbow"
+inkflow:connect-start="a:right" inkflow:connect-end="b:left" d="…">`, a text box a
+`<rect id="zone-text">` filled by a `::text::` section of the slide's `.md`.
+Raw SVG edits remain fine for anything the commands don't cover (gradients,
+paths, an element's own attributes); when you move shapes that way, run
+`inkflow shape reroute -s N` afterwards so their arrows meet them again
+(`inkflow verify` warns about arrows left behind).
+
+## Colours and links
+
+- Slide text belongs in the slide's `.md` file, not in `deck.py` (the shape
+  commands and the editor put it there).
 - Colour a few words with the theme palette:
   `<span class="inkflow-color-accent">words</span>` (any colour token).
-- Link to another slide with `[label](slide:<id>)` in Markdown, or wrap an SVG
-  object in `<a href="slide:<id>">`; web links open in a new tab.
+- Link to another slide with `[label](slide:<id>)` in Markdown, or
+  `inkflow shape link ID slide:<id>` for a drawn object; web links open in a
+  new tab.
 - Deck-wide colours and fonts: override `--inkflow-*` tokens in the project's
   `styles.css` (the editor's Theme dialog keeps them in one marked
   `/* inkflow:theme */` block; leave that block's markers intact).
-- `inkflow:locked="true"` on an object keeps the visual editor from selecting it.
-- An arrow attached to shapes is a `<path inkflow:connector="straight|elbow|curved"
-  inkflow:connect-start="<id>:right" inkflow:connect-end="<id>:left" d="…">` (sides:
-  top, right, bottom, left, or a point along a side: `top@0.25`, clockwise from the
-  side's first corner; a shape's `inkflow:sites="3"` offers three per side). An
-  elbow's moved middle segment is `inkflow:bend="x:640"` (or `y:`) in slide units.
-  Keep its `d` roughly right; the author's "Re-route all"
-  in the editor snaps it to the shapes. Rename an id and update `connect-*` too.
 
 ## Working on a branch
 

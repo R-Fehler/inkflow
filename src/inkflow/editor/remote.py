@@ -1,5 +1,9 @@
 """One editor request from the command line (an agent), applied where it belongs.
 
+Any session action goes this way: ``inkflow slide`` sends the ``slide``
+action, ``inkflow shape`` the ``shape`` action (commands that run the editor's
+drawing actions, see ``editor/shapes.py``).
+
 When an inkflow server has the deck open, the request goes to it over the
 WebSocket, exactly as the editor page sends its own: it becomes a step in that
 server's undo History, labelled ``Agent: …``, and every open editor shows it
@@ -28,6 +32,8 @@ from inkflow.manifest import Deck
 
 # How long to wait for the server to build a deck.py (before and after an edit).
 BUILD_WAIT = 30.0
+FAILED_GRACE = 2.0
+"""How long a failed build of the awaited deck.py must stay the last word."""
 
 
 class RemoteEditError(Exception):
@@ -118,14 +124,23 @@ def _on_server(
         """Wait until the server has built (or failed to build) ``target``;
         the last status, or None when the wait ran out."""
         deadline = time.monotonic() + wait
+        failed_at: float | None = None
+        failed_status: dict[str, object] | None = None
         while True:
             ws.send(json.dumps({"type": "build-status"}))
             try:
                 status = receive(ws, "build-status", deadline)
             except TimeoutError:
-                return None
-            if target in (status.get("deckHash"), status.get("failedHash")):
+                return failed_status if failed_at is not None else None
+            if status.get("deckHash") == target:
                 return status
+            if status.get("failedHash") == target:
+                # A build that read a file mid-write fails, and the write's
+                # own rebuild follows: a failure stands once it has lasted.
+                failed_at = failed_at or time.monotonic()
+                failed_status = status
+                if time.monotonic() - failed_at >= FAILED_GRACE:
+                    return status
             time.sleep(0.1)
 
     try:
