@@ -1170,6 +1170,8 @@
     },
     crop: (_el) => {
     },
+    // Opens a draw.io diagram's editor; false when the picture is not one.
+    diagram: (_el) => false,
     typeInto: (_el) => {
     },
     zoneMedia: (_zone) => {
@@ -2715,6 +2717,7 @@
       if (inner) select([inner]);
       return;
     }
+    if (canTransform(el2) && hooks.diagram(el2)) return;
     if (canTransform(el2) && (el2.localName === "image" || el2.localName === "svg" && [...el2.children].some((c) => c.localName === "image"))) {
       hooks.crop(el2);
     }
@@ -4824,6 +4827,24 @@
       "image"
     );
   }
+  async function insertDiagramImage(path, width, height) {
+    if (!await ensureOwnDrawing()) return false;
+    const src = ownSource();
+    if (!src) return false;
+    const svg = slideRoot();
+    const vb = svg?.viewBox.baseVal;
+    const slideW = vb?.width || 1920;
+    const slideH = vb?.height || 1080;
+    const k = Math.min(1, slideW * 0.6 / width, slideH * 0.6 / height);
+    const w = width * k;
+    const ht = height * k;
+    const parent = insertParent().el;
+    const p = toParent(parent, (slideW - w) / 2, (slideH - ht) / 2);
+    return insertXml(
+      `<image href="${relativePath(src.path, path)}" x="${fmt(p.x)}" y="${fmt(p.y)}" width="${fmt(w)}" height="${fmt(ht)}" preserveAspectRatio="xMidYMid meet"/>`,
+      "diagram"
+    );
+  }
   function pickFile(accept) {
     return new Promise((resolve) => {
       const input = document.createElement("input");
@@ -5124,6 +5145,165 @@
     );
   }
 
+  // src/ts/editor/drawio.ts
+  function diagramOf(el2) {
+    const image = pictureOf(el2);
+    const href = image?.getAttribute("href") ?? image?.getAttribute("xlink:href") ?? "";
+    return isDiagramHref(href) ? image : null;
+  }
+  function isDiagramHref(href) {
+    return /\.drawio\.svg$/i.test(href.split(/[?#]/)[0]);
+  }
+  function hrefOf(image) {
+    return (image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? "").split(/[?#]/)[0];
+  }
+  var open2 = null;
+  function editDiagram(sel) {
+    const image = diagramOf(sel.el);
+    const src = sourceOf(sel.key);
+    if (!image || !src) return;
+    if (!src.writable) {
+      toast("This picture lives in a layout; switch to layout mode", "error");
+      return;
+    }
+    void openDrawio({
+      path: hrefOf(image),
+      image: {
+        file: src.path,
+        hash: src.hash,
+        loc: image.getAttribute("data-ink") ?? sel.loc
+      }
+    });
+  }
+  function newDiagram() {
+    if (!currentSlide()) return;
+    void openDrawio({ path: null });
+  }
+  async function openDrawio(target) {
+    if (open2) return;
+    const res = await request({ action: "drawio-load", path: target.path });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot open that diagram", "error");
+      return;
+    }
+    const base2 = String(res.url);
+    let origin;
+    try {
+      origin = new URL(base2).origin;
+    } catch {
+      toast(`INKFLOW_DRAWIO_URL is not a web address: ${base2}`, "error");
+      return;
+    }
+    const dark = document.documentElement.dataset.theme !== "light";
+    const params = new URLSearchParams({
+      embed: "1",
+      proto: "json",
+      spin: "1",
+      configure: "1",
+      saveAndExit: "1",
+      noSaveBtn: "0",
+      libraries: "1",
+      modified: "unsavedChanges",
+      ui: dark ? "dark" : "kennedy"
+    });
+    const frame = h("iframe", {
+      class: "drawio-frame",
+      src: `${base2}${base2.includes("?") ? "&" : "?"}${params}`,
+      title: "draw.io"
+    });
+    const note = h(
+      "div",
+      { class: "drawio-note" },
+      `Loading draw.io from ${origin}\u2026`
+    );
+    const wrap2 = h("div", { id: "drawio", class: "drawio" }, frame, note);
+    document.body.append(wrap2);
+    open2 = wrap2;
+    let path = target.path;
+    let exitAfterSave = false;
+    let saving = false;
+    const post = (msg) => frame.contentWindow?.postMessage(JSON.stringify(msg), origin);
+    const close2 = () => {
+      window.removeEventListener("message", onMessage);
+      wrap2.remove();
+      open2 = null;
+    };
+    const save3 = async (svg) => {
+      const first = path === null;
+      const result = await edit({
+        action: "drawio-save",
+        path,
+        svg,
+        image: first ? void 0 : target.image
+      });
+      saving = false;
+      if (!result.ok) {
+        post({ action: "status", message: "Not saved", modified: true });
+        return;
+      }
+      if (first && typeof result.rel === "string") {
+        path = result.rel;
+        await insertDiagramImage(
+          String(result.path),
+          Number(result.width) || 640,
+          Number(result.height) || 360
+        );
+      }
+      if (exitAfterSave) close2();
+      else post({ action: "status", message: "Saved", modified: false });
+    };
+    const onMessage = (e) => {
+      if (e.source !== frame.contentWindow || e.origin !== origin) return;
+      let msg;
+      try {
+        msg = JSON.parse(String(e.data));
+      } catch {
+        return;
+      }
+      switch (msg.event) {
+        case "configure":
+          post({ action: "configure", config: { compressXml: false } });
+          break;
+        case "init":
+          note.remove();
+          post({
+            action: "load",
+            xml: String(res.xml ?? ""),
+            autosave: 0,
+            title: String(res.name ?? "Diagram")
+          });
+          break;
+        case "save":
+          if (saving) break;
+          saving = true;
+          exitAfterSave = !!msg.exit;
+          post({ action: "export", format: "xmlsvg", spin: "Saving" });
+          break;
+        case "export": {
+          const data = String(msg.data ?? "");
+          const svg = decodeSvg(data);
+          if (svg) void save3(svg);
+          else {
+            saving = false;
+            toast("draw.io sent something other than an SVG", "error");
+          }
+          break;
+        }
+        case "exit":
+          close2();
+          break;
+      }
+    };
+    window.addEventListener("message", onMessage);
+  }
+  function decodeSvg(data) {
+    const m = data.match(/^data:image\/svg\+xml(;base64)?,(.*)$/s);
+    if (!m) return data.trimStart().startsWith("<") ? data : null;
+    if (!m[1]) return decodeURIComponent(m[2]);
+    const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  }
+
   // src/ts/editor/objects.ts
   var host3 = document.getElementById("objects");
   var body = document.getElementById("props-body");
@@ -5275,7 +5455,7 @@
     const writable = !!src?.writable && (canTransform(el2) || ed.layoutMode || isOwnObject(el2));
     const kids = children(el2);
     const group = kids.length > 0;
-    const open3 = group && !collapsed.has(loc);
+    const open4 = group && !collapsed.has(loc);
     const selected = ed.selection.some((s) => s.el === el2);
     const locked = el2.hasAttribute("data-ink-locked");
     const hidden = isHidden(el2);
@@ -5293,7 +5473,7 @@
         {
           type: "button",
           class: `obj-twisty${group ? "" : " none"}`,
-          title: open3 ? "Collapse" : "Expand",
+          title: open4 ? "Collapse" : "Expand",
           onclick: (e) => {
             e.stopPropagation();
             if (collapsed.has(loc)) collapsed.delete(loc);
@@ -5301,7 +5481,7 @@
             renderObjects();
           }
         },
-        group ? open3 ? "\u25BE" : "\u25B8" : ""
+        group ? open4 ? "\u25BE" : "\u25B8" : ""
       ),
       name2,
       writable ? h(
@@ -5336,7 +5516,7 @@
     item.addEventListener("mouseenter", () => setHover(el2));
     item.addEventListener("mouseleave", () => setHover(null));
     out.push(item);
-    if (open3) {
+    if (open4) {
       for (const k of [...kids].reverse()) out.push(...row(k, depth + 1));
     }
     return out;
@@ -6601,6 +6781,16 @@
         h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
         openButton(projectFile(href))
       ),
+      isDiagramHref(href) ? h(
+        "div",
+        { class: "btn-row" },
+        button(
+          "Edit diagram",
+          "Open it in draw.io (or double-click it)",
+          () => editDiagram(sel),
+          "on"
+        )
+      ) : null,
       h(
         "div",
         { class: "btn-row" },
@@ -7459,7 +7649,7 @@
       emit("slide");
     }
   }
-  function open2(i) {
+  function open3(i) {
     ed.slideSelection.clear();
     toggleGrid(false);
     gotoSlide(i);
@@ -7501,7 +7691,7 @@
         pickSlide(i, e);
         ed.focus = "sorter";
       });
-      item.addEventListener("dblclick", () => open2(i));
+      item.addEventListener("dblclick", () => open3(i));
       item.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         if (!ed.slideSelection.has(i)) {
@@ -7587,7 +7777,7 @@
       case "Enter":
         e.preventDefault();
         e.stopPropagation();
-        open2(ed.current);
+        open3(ed.current);
         break;
       case "Escape":
         e.preventDefault();
@@ -9229,6 +9419,7 @@ ${area2.value.slice(pos)}`;
     });
     $("btn-image").addEventListener("click", () => void insertImage());
     $("btn-video").addEventListener("click", () => void insertVideo());
+    $("btn-diagram").addEventListener("click", () => newDiagram());
     $("zoom-in").addEventListener("click", () => setZoom(scale() * 1.25));
     $("zoom-out").addEventListener("click", () => setZoom(scale() / 1.25));
     $("zoom-fit").addEventListener("click", () => setZoom(0));
@@ -9319,6 +9510,9 @@ ${area2.value.slice(pos)}`;
           );
         }
       }
+      if (diagramOf(el2)) {
+        items.push(menuItem("Edit diagram", () => editDiagram(one)));
+      }
       if (pictureOf(el2)) {
         items.push(menuItem("Crop", () => void startCrop(one)));
       }
@@ -9402,6 +9596,7 @@ ${area2.value.slice(pos)}`;
       menuItem("Paste", () => void pasteFromClipboard()),
       menuItem("Select all", () => selectAll()),
       menuItem("Insert video from a folder\u2026", () => void insertFromDisk()),
+      menuItem("New diagram (draw.io)\u2026", () => newDiagram()),
       sep(),
       title("Slide"),
       menuItem(
@@ -9755,7 +9950,7 @@ Decks: new, open, recent` : "Decks";
     title2.select();
   }
   function openDeckDialog(data) {
-    const open3 = h(
+    const open4 = h(
       "button",
       { type: "button", class: "pbtn primary", disabled: true },
       "Open this deck"
@@ -9763,11 +9958,11 @@ Decks: new, open, recent` : "Decks";
     const picker = folderPicker(
       data.places?.default ?? data.current.replace(/[\\/][^\\/]*$/, ""),
       (f) => {
-        open3.disabled = !f.isDeck;
-        open3.textContent = f.isDeck ? `Open ${baseName2(f.path)}` : "No deck.py in this folder";
+        open4.disabled = !f.isDeck;
+        open4.textContent = f.isDeck ? `Open ${baseName2(f.path)}` : "No deck.py in this folder";
       }
     );
-    open3.addEventListener("click", () => {
+    open4.addEventListener("click", () => {
       const f = picker.current();
       if (f?.isDeck) void openDeck(join(f.path, "deck.py"));
     });
@@ -9778,7 +9973,7 @@ Decks: new, open, recent` : "Decks";
         { class: "deck-form" },
         h("p", { class: "hint" }, "Go to a folder with a deck.py in it."),
         picker.el,
-        h("div", { class: "btn-row end" }, open3)
+        h("div", { class: "btn-row end" }, open4)
       ),
       { large: true }
     );
@@ -11008,6 +11203,12 @@ Continue?`)) return null;
       if (sel) void startCrop(sel);
     };
     hooks.finishEditing = () => void finishTextEdit();
+    hooks.diagram = (el2) => {
+      const sel = ed.selection.find((s) => s.el === el2);
+      if (!sel || !diagramOf(el2)) return false;
+      editDiagram(sel);
+      return true;
+    };
     initCanvas();
     initInsert();
     initSorter();

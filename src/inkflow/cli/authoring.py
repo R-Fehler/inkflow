@@ -9,7 +9,7 @@ from lxml import etree as _etree
 from rich import box as rich_box
 from rich.table import Table
 
-from inkflow import ns, sync
+from inkflow import drawio, ns, sync
 from inkflow.clean import clean_inkscape_svg
 from inkflow.cli._common import (
     Project,
@@ -76,6 +76,13 @@ def clean(
     errors = False
     for target in targets:
         try:
+            data = target.path.read_bytes()
+            if drawio.is_drawio_path(target.path) or drawio.is_drawio_svg(data):
+                # draw.io's own file is never rewritten; as git's textconv
+                # (--stdout) it shows the diagram's source, readable in a diff.
+                if to_stdout:
+                    sys.stdout.write(drawio.textconv(data))
+                continue
             cleaned = clean_inkscape_svg(target.path, keep_preview=True)
             if check:
                 if cleaned != target.path.read_text(encoding="utf-8"):

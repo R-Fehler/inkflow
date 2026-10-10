@@ -80,6 +80,8 @@ export const hooks = {
     editingHost: (): Element | null => null,
     finishEditing: (): void => {},
     crop: (_el: SVGGraphicsElement): void => {},
+    // Opens a draw.io diagram's editor; false when the picture is not one.
+    diagram: (_el: SVGGraphicsElement): boolean => false,
     typeInto: (_el: SVGGraphicsElement): void => {},
     zoneMedia: (_zone: string): void => {},
     zoneText: (_zone: string): void => {},
@@ -2060,6 +2062,8 @@ function onDoubleClick(e: MouseEvent): void {
         if (inner) select([inner]);
         return;
     }
+    // A draw.io diagram opens in draw.io; any other picture crops.
+    if (canTransform(el) && hooks.diagram(el)) return;
     // Double-clicking a picture crops it, as in Google Slides.
     if (
         canTransform(el) &&

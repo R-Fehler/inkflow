@@ -113,6 +113,8 @@ _TEXT_EDITORS = [
 ]
 _CANDIDATES: dict[str, list[tuple[str, str]]] = {
     "SVG": [("inkscape", "Inkscape"), *_TEXT_EDITORS],
+    # A draw.io diagram (*.drawio.svg): draw.io desktop edits its source.
+    "DIAGRAM": [("drawio", "draw.io"), ("inkscape", "Inkscape"), *_TEXT_EDITORS],
     "IMAGE": [("gimp", "GIMP"), ("krita", "Krita"), ("pinta", "Pinta")],
     "TEXT": _TEXT_EDITORS,
     "VIDEO": [
@@ -140,6 +142,7 @@ _FLATPAKS = {
     "inkscape": "org.inkscape.Inkscape",
     "gimp": "org.gimp.GIMP",
     "krita": "org.kde.krita",
+    "drawio": "com.jgraph.drawio.desktop",
 }
 # macOS apps live in /Applications rather than on PATH.
 _MAC_APPS = {
@@ -155,10 +158,13 @@ _MAC_APPS = {
     "kdenlive": "kdenlive",
     "ghb": "HandBrake",
     "openshot-qt": "OpenShot Video Editor",
+    "drawio": "draw.io",
 }
 
 
 def _kind(path: Path) -> str | None:
+    if path.name.lower().endswith(".drawio.svg"):
+        return "DIAGRAM"
     suffix = path.suffix.lower().lstrip(".")
     return "SVG" if suffix == "svg" else KINDS.get(suffix)
 

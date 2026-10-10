@@ -31,6 +31,7 @@ import {
     startCrop,
 } from "./crop";
 import { clear, h, icon, toast } from "./dom";
+import { editDiagram, isDiagramHref } from "./drawio";
 import { layoutLabel, openGallery } from "./gallery";
 import {
     type Box,
@@ -1428,6 +1429,18 @@ function pictureSection(sel: Selected): HTMLElement {
             h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
             openButton(projectFile(href)),
         ),
+        isDiagramHref(href)
+            ? h(
+                  "div",
+                  { class: "btn-row" },
+                  button(
+                      "Edit diagram",
+                      "Open it in draw.io (or double-click it)",
+                      () => editDiagram(sel),
+                      "on",
+                  ),
+              )
+            : null,
         h(
             "div",
             { class: "btn-row" },

@@ -15,6 +15,7 @@ import { isCropped, setCropMode, startCrop } from "./crop";
 import { initDecks, showStart } from "./decks";
 import { initDialog } from "./dialog";
 import { toast } from "./dom";
+import { diagramOf, editDiagram } from "./drawio";
 import { initExport } from "./exportdlg";
 import { initFind } from "./find";
 import { initGallery } from "./gallery";
@@ -116,6 +117,12 @@ function boot(): void {
         if (sel) void startCrop(sel);
     };
     hooks.finishEditing = () => void finishTextEdit();
+    hooks.diagram = (el) => {
+        const sel = ed.selection.find((s) => s.el === el);
+        if (!sel || !diagramOf(el)) return false;
+        editDiagram(sel);
+        return true;
+    };
 
     initCanvas();
     initInsert();

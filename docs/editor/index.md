@@ -30,6 +30,7 @@ the file watcher shows each one the others' changes within a moment.
 | An image or video zone's settings | Its `Image(...)` / `Video(...)` call in `deck.py` |
 | A new text box | A `zone-text` rect in the slide's SVG; its Markdown in the slide's `.md` file |
 | A crop | The picture's SVG: the `<image>` goes into a nested `<svg>` frame |
+| A draw.io diagram | `diagrams/<name>.drawio.svg` (draw.io's editable SVG, its source stored uncompressed), shown on the slide as an `<image>` |
 | A line or arrow attached to shapes | A `<path>` with `inkflow:connector` and `inkflow:connect-start` / `-end`; re-routed in the same edit whenever an attached shape moves |
 | An elbow's moved middle segment, a shape's extra connection points | `inkflow:bend` on the arrow, `inkflow:sites` on the shape |
 | A link, alt text, hiding, locking | The object in the SVG: an `<a href>` around it, a `<title>`, `display:none`, `inkflow:locked` |
@@ -383,6 +384,48 @@ Select a picture and the panel offers:
 - **Replace…** swaps in another file at the same size and place.
 - **Fit**: fit inside its box, fill it (cropping the edges), or stretch.
 - **Alt text**, for screen readers (any object has it, see below).
+
+## Diagrams (draw.io)
+
+For diagrams beyond a few boxes and arrows (flowcharts, architecture, UML,
+network maps) the editor embeds [draw.io](https://www.drawio.com):
+
+- The toolbar's **diagram** button (or **New diagram (draw.io)…** in the
+  right-click menu of an empty spot) opens draw.io full screen. **Save & Exit**
+  puts the diagram on the slide, in the middle, at its own size (at most 60%
+  of the slide).
+- **Double-click** a diagram on the slide (or **Edit diagram** in its panel or
+  right-click menu) to edit it again. Saving updates the slide; the picture
+  keeps its width and takes the diagram's new proportions. **Exit** without
+  saving leaves everything as it was.
+- Each save is one undo step in the editor.
+
+**The file.** A diagram is `diagrams/<name>.drawio.svg`: draw.io's *editable
+SVG*, a normal picture of the diagram with the diagram's source stored inside
+it. So it is version-controlled like any other file, GitHub and GitLab show it
+as a picture, and draw.io desktop, the VS Code draw.io extension or
+[app.diagrams.net](https://app.diagrams.net) open the same file (**Open ▾**
+offers draw.io desktop when it is installed). The editor stores the source
+uncompressed, and `git diff` shows it as XML, one shape a line, after
+`inkflow setup-git`. The pre-commit cleaner leaves `.drawio.svg` files alone.
+On the slide a diagram is an ordinary picture: move, resize, crop, link and
+animate it as a whole.
+
+**Where draw.io comes from.** draw.io is too big to ship with inkflow, so it
+loads from `https://embed.diagrams.net` by default and needs an internet
+connection. Your diagram stays in the browser: draw.io receives it from the
+editor page and hands the saved SVG back to it. Checked with draw.io 32.4:
+besides its own files it only sends a usage ping to `log.diagrams.net` (its
+version and host, no diagram data). To keep everything on your network, or
+to work offline, run your own copy (for example the `jgraph/drawio` Docker
+image) and point inkflow at it:
+
+```bash
+INKFLOW_DRAWIO_URL=http://localhost:8080/ inkflow edit
+```
+
+**Not yet.** A diagram keeps draw.io's own colours, so it does not follow the
+deck's dark or light mode, and its shapes cannot be animated one by one.
 
 ## Video
 

@@ -82,6 +82,13 @@ Slide(
 
 Paths are relative to `deck.py`; keep media files in `assets/`.
 
+A **draw.io diagram** is `diagrams/<name>.drawio.svg` (draw.io's editable SVG:
+a picture with the diagram's `<mxfile>` source in the root's `content`
+attribute, stored uncompressed), shown on a slide as an `<image href>`. To
+change one, edit the `<mxGraphModel>` inside `content` *and* the drawing, or
+better ask the author to open it in draw.io (double-click it in the editor).
+`inkflow clean --stdout FILE` prints its source readably.
+
 ## Text boxes, colours and links
 
 - A free text box is a zone too: a `<rect id="zone-text">` (or `zone-text-2`, …) in

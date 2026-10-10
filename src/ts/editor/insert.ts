@@ -804,6 +804,31 @@ export async function insertImageFile(
     );
 }
 
+/** A draw.io diagram's picture, in the middle of the slide (the editor
+ * just saved the file, at most half the slide in either direction). */
+export async function insertDiagramImage(
+    path: string,
+    width: number,
+    height: number,
+): Promise<boolean> {
+    if (!(await ensureOwnDrawing())) return false;
+    const src = ownSource();
+    if (!src) return false;
+    const svg = slideRoot();
+    const vb = svg?.viewBox.baseVal;
+    const slideW = vb?.width || 1920;
+    const slideH = vb?.height || 1080;
+    const k = Math.min(1, (slideW * 0.6) / width, (slideH * 0.6) / height);
+    const w = width * k;
+    const ht = height * k;
+    const parent = insertParent().el;
+    const p = toParent(parent, (slideW - w) / 2, (slideH - ht) / 2);
+    return insertXml(
+        `<image href="${relativePath(src.path, path)}" x="${fmt(p.x)}" y="${fmt(p.y)}" width="${fmt(w)}" height="${fmt(ht)}" preserveAspectRatio="xMidYMid meet"/>`,
+        "diagram",
+    );
+}
+
 export function pickFile(accept: string): Promise<File | null> {
     return new Promise((resolve) => {
         const input = document.createElement("input");

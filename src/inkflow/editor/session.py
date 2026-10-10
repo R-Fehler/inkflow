@@ -18,13 +18,14 @@ import secrets
 import shutil
 import sys
 import tempfile
+import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, cast
 
 from inkflow import animations as animations_module
-from inkflow import instances
+from inkflow import drawio, instances
 from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
 from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, open_with
@@ -371,6 +372,8 @@ class EditorSession:
             return self._open_file(msg, deck)
         if action == "find":
             return {"ok": True, "hits": self._find(msg)}
+        if action == "drawio-load":
+            return self._drawio_load(msg)
         if deck is None:
             raise EditError("the deck has not built yet")
         if action == "theme-get":
@@ -407,6 +410,7 @@ class EditorSession:
             "anim": self._anim,
             "paste-slides": self._paste_slides,
             "paste-objects": self._paste_objects,
+            "drawio-save": self._drawio_save,
         }.get(cast("str", action))
         if handler is None:
             raise EditError(f"unknown action {action!r}")
@@ -1219,6 +1223,104 @@ class EditorSession:
         if msg.get("open") is not False:
             self.switch_to = deck_py
         return {"ok": True, "deck": str(deck_py), "opening": self.switch_to is not None}
+
+    # ── draw.io diagrams ──
+
+    def _diagram_path(self, raw: object) -> Path:
+        """A ``*.drawio.svg`` in the project, named as a slide shows it
+        (relative to the project) or by its full path."""
+        if not isinstance(raw, str) or not raw.strip():
+            raise EditError("which diagram?")
+        path = Path(urllib.parse.unquote(raw.strip()))
+        path = (path if path.is_absolute() else self.project_dir / path).resolve()
+        if not path.is_relative_to(self.project_dir.resolve()):
+            raise EditError("that diagram is outside the deck's folder")
+        if not drawio.is_drawio_path(path):
+            raise EditError("not a draw.io diagram (a .drawio.svg file)")
+        return path
+
+    def _drawio_load(self, msg: dict[str, object]) -> dict[str, object]:
+        """The diagram's source for the draw.io editor, and where draw.io is
+        loaded from (``INKFLOW_DRAWIO_URL``, e.g. a self-hosted copy)."""
+        url = os.environ.get("INKFLOW_DRAWIO_URL") or drawio.DEFAULT_URL
+        if not msg.get("path"):
+            return {"ok": True, "xml": "", "url": url, "name": "New diagram"}
+        path = self._diagram_path(msg.get("path"))
+        try:
+            xml = drawio.source(path.read_bytes())
+        except OSError as exc:
+            raise EditError(f"cannot read {path.name}: {exc}") from exc
+        except drawio.DrawioError as exc:
+            raise EditError(f"{path.name}: {exc}") from exc
+        return {
+            "ok": True,
+            "xml": xml,
+            "url": url,
+            "name": path.name[: -len(drawio.SUFFIX)],
+            "path": str(path),
+            "rel": self._deck_rel(path),
+        }
+
+    def _drawio_save(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """Write a diagram draw.io exported (its editable SVG), its source
+        stored uncompressed. Without a path it is a new one in ``diagrams/``.
+        With ``image`` (the slide's picture of it) the picture keeps its
+        width and takes the diagram's new proportions, in the same step."""
+        del deck
+        svg = msg.get("svg")
+        if not isinstance(svg, str) or not svg.strip():
+            raise EditError("nothing to save")
+        try:
+            data = drawio.normalize(svg.encode("utf-8"))
+        except drawio.DrawioError as exc:
+            raise EditError(f"the diagram could not be saved: {exc}") from exc
+        if msg.get("path"):
+            path = self._diagram_path(msg.get("path"))
+            label = f"Edit diagram {path.name[: -len(drawio.SUFFIX)]}"
+        else:
+            folder = self.project_dir / "diagrams"
+            n = 1
+            while (folder / f"diagram-{n}{drawio.SUFFIX}").exists():
+                n += 1
+            path = folder / f"diagram-{n}{drawio.SUFFIX}"
+            label = "New diagram"
+        txn.write(path, data)
+        image = msg.get("image")
+        if isinstance(image, dict):
+            self._fit_diagram_image(cast("dict[str, object]", image), data, txn)
+        width, height = drawio.size(data) or (0.0, 0.0)
+        extra.update(
+            path=str(path.resolve()),
+            rel=self._deck_rel(path),
+            width=width,
+            height=height,
+            structural=False,
+        )
+        return label
+
+    def _fit_diagram_image(
+        self, image: dict[str, object], data: bytes, txn: _Txn
+    ) -> None:
+        size = drawio.size(data)
+        if not size or not size[0] or not size[1]:
+            return
+        file = Path(cast("str", image.get("file")))
+        current = txn.read(file)
+        expected = image.get("hash")
+        if isinstance(expected, str) and expected and file_hash(current) != expected:
+            raise EditError(f"{file.name} changed on disk; wait for the reload")
+        svg = SvgFile.from_bytes(file, current)
+        el = element_at(svg.root, image.get("loc"))
+        if el.tag.rsplit("}", 1)[-1] != "image":
+            return
+        try:
+            width = float(el.get("width") or "")
+        except ValueError:
+            return
+        el.set("height", f"{width * size[1] / size[0]:.4g}")
+        txn.write(file, svg.to_bytes())
 
     # ── Formulas ──
 

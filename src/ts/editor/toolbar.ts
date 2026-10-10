@@ -23,6 +23,7 @@ import {
 import { copy, copySlides, cut, cutSlides } from "./clipboard";
 import { setCropMode } from "./crop";
 import { toast } from "./dom";
+import { newDiagram } from "./drawio";
 import { openFind } from "./find";
 import { openGallery } from "./gallery";
 import { toggleGrid } from "./grid";
@@ -362,6 +363,7 @@ export function initToolbar(): void {
     });
     $("btn-image").addEventListener("click", () => void insertImage());
     $("btn-video").addEventListener("click", () => void insertVideo());
+    $("btn-diagram").addEventListener("click", () => newDiagram());
     $("zoom-in").addEventListener("click", () => setZoom(scale() * 1.25));
     $("zoom-out").addEventListener("click", () => setZoom(scale() / 1.25));
     $("zoom-fit").addEventListener("click", () => setZoom(0));
