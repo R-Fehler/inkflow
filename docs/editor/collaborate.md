@@ -1,8 +1,8 @@
 # Editing together
 
 Several people can work on one deck at the same time: you on your computer,
-colleagues in the same room or on the same VPN through a share link, or you
-yourself from another machine over SSH. Everyone sees the others' edits within
+colleagues in the same room or on the same VPN through a share link, or all of
+you through SSH tunnels to a server you can log in to. Everyone sees the others' edits within
 a moment, who is on which slide, and what they have selected. Nothing is
 uploaded anywhere: the deck stays on the computer that runs `inkflow edit`.
 
@@ -12,7 +12,7 @@ There are three roles.
 
 | Role | Who | Can |
 |---|---|---|
-| **Owner** | Anyone on the computer running inkflow (a browser there, a command, an agent, an [SSH tunnel](#over-ssh)) | Everything |
+| **Owner** | Anyone on the computer running inkflow (a browser there, a command, an agent, an [SSH tunnel](#over-ssh)); in [SSH mode](#ssh-mode) only whoever opened the owner link, and commands of the same user | Everything |
 | **Editor** | Someone who opened an *editor link* | Edit the deck: slides, text, pictures, notes, ink, theme, export |
 | **Viewer** | Someone who opened a *view link* | Watch the presentation; it follows the presenter's slide |
 
@@ -106,23 +106,142 @@ inkflow edit --share --host 100.101.102.103 --allow-host laptop.tail1234.ts.net 
 
 ## Over SSH
 
-When the deck lives on another machine you can log in to (a workstation, a
-server), forward its port:
+When everyone involved can log in to one server (a lab machine, a workstation,
+a rented box), the deck can run there once for all of you. Each person opens it
+through an SSH tunnel of their own: nothing listens on the network, and the
+pages, pictures, videos and the live connection all travel inside SSH on the
+one port.
 
-```bash
-ssh -L 7777:localhost:7777 you@workstation
-# on the workstation:
-inkflow edit --no-open --deck talk/deck.py
+In the editor, **Share… → Share via SSH** writes out every command below for
+your deck (its repository, its folder, the port), each with **Copy**.
+
+### SSH mode
+
+Everyone logged in to the server reaches its `localhost`, and so does everyone
+who forwards a port to it. So when inkflow is started from an SSH login (it
+sees `SSH_CONNECTION` or `SSH_CLIENT` in its environment) it runs in **SSH
+mode**: being on the machine is not enough to be the owner. It prints an
+**owner link**:
+
+```text
+SSH mode  being on this machine is not enough to edit: open the owner link, through your SSH tunnel
+Owner  http://localhost:7777/edit?k=tb9XiVFCe8LZNRKhInLIWeUl
+       open it through: ssh -L 7777:localhost:7777 you@203.0.113.5
 ```
 
-and open `http://localhost:7777/edit` on your own computer. Through the tunnel
-you are the owner, with everything the owner can do (you have a shell there
-anyway). No link is needed and nothing listens on the network. To forward to a
-different local port, `ssh -L 8000:localhost:7777 …` and open
-`http://localhost:8000/edit`.
+Opening the owner link through your tunnel makes you the owner in that browser
+(it sets a cookie, as share links do; the token leaves the address bar). Opening
+`http://localhost:7777/edit` without it answers *Open the owner link*. The owner
+link stays the same while the server runs (**New links** does not change it);
+starting inkflow again makes a new one.
 
-Everything (pages, pictures, videos and the live connection) travels over the
-one port, so one forward is all it takes.
+`--ssh` turns SSH mode on wherever inkflow starts (inside `tmux` started
+outside an SSH login, say), `--no-ssh` turns it off (a server only you can log
+in to). Commands on the server (`inkflow slide`, `inkflow shape`, `inkflow
+goto`…) keep working as the owner: they read the owner token from the
+server's record in your user's state folder, which other users cannot read.
+
+In SSH mode, turning the links on (**Turn on links**, or `--share`) never makes
+the server listen on the network: the links name `localhost`, for each guest to
+open through their own tunnel.
+
+### Just you, on a server
+
+1. **Push your latest changes**: the server clones the deck from its
+   repository (Git menu → Commit, then Push). A deck without a remote needs
+   one first, such as an empty repository on GitHub or GitLab:
+
+    ```bash
+    git remote add origin <repository URL>
+    git push -u origin main
+    ```
+
+2. **Log in with the port forwarded**:
+
+    ```bash
+    ssh -L 7777:localhost:7777 you@server.example.com
+    ```
+
+    To keep inkflow running when the connection drops, start
+    `tmux new -A -s inkflow` (or `screen`) and run the next steps in it; the
+    same command gets back to it after logging in again. A private repository:
+    `ssh -A` lets the server clone with your own keys (whoever administers the
+    server can use them while you are logged in), or clone with an HTTPS
+    access token.
+
+3. **Once, on the server**: install uv, inkflow and the deck:
+
+    ```bash
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    source $HOME/.local/bin/env
+    git clone git@github.com:you/talks.git talks
+    cd talks
+    ```
+
+    When the deck's `pyproject.toml` pins inkflow (`inkflow init` writes one),
+    `uv run` installs it the first time. Otherwise install it as a tool, at the
+    version your deck runs on (the dialog writes it, such as
+    `uv tool install 'inkflow~=0.7.0'`), and leave out `uv run` below.
+
+4. **Start the editor**:
+
+    ```bash
+    uv run inkflow edit --no-open --ssh
+    ```
+
+    (`--deck keynote/deck.py` for a deck in a folder of the repository,
+    `--port` for another port.) It prints the owner link. If port 7777 is
+    taken on the server, it uses the next free one: log in again forwarding
+    that one.
+
+5. **On your computer, open the owner link** it printed. You are the owner
+   there, editing the server's copy of the deck.
+
+6. **When you are done**, commit and push on the server (its Git menu), then
+   `git pull` on your computer.
+
+Next time, one command logs in, updates the deck and starts the editor (it
+stops when the connection closes):
+
+```bash
+ssh -t -L 7777:localhost:7777 you@server.example.com "bash -lc 'cd talks && git pull && uv run inkflow edit --no-open --ssh'"
+```
+
+To forward a different local port (7777 is busy on your computer), say
+`ssh -L 8000:localhost:7777 …` and open the owner link with `8000` in place of
+`7777`.
+
+### Inviting collaborators through the server
+
+Each collaborator needs their own SSH login on the server. In the editor you
+opened as the owner, **Share… → Share via SSH** turns the links on (**Turn on
+links**) and writes a message for an editor and one for a viewer, with
+**Copy**:
+
+```text
+To edit the deck with me (you need an SSH login on server.example.com):
+
+1. In a terminal, run this, with your own login on server.example.com in place
+   of <your-user>. Keep it open; it shows nothing. (On Windows, the same
+   command works in PowerShell.)
+
+   ssh -N -L 7777:localhost:7777 <your-user>@server.example.com
+
+2. Open this link in your browser:
+
+   http://localhost:7777/edit?k=4ReDLi5Snm8Ihq9Yre7-KYBC
+```
+
+*Server address* is prefilled with the address your own SSH login reached (or
+the server's name); change it to the name people log in to. *Their local port*
+changes both the command and the link, for a collaborator whose 7777 is busy:
+`ssh -N -L 8000:localhost:7777 …` and `http://localhost:8000/edit?k=…` work
+together.
+
+Through their tunnel, someone with the editor link is an editor and someone
+with the view link a viewer, with everything that [those roles](#who-is-who)
+can and cannot do. Their SSH login does not make them the owner. **New links**
+disconnects everyone holding the old ones, and **Stop sharing** everyone.
 
 ## Seeing each other
 
@@ -175,9 +294,18 @@ usual.
   name this computer (its `Host`: `localhost`, an address, this computer's name
   or one given with `--allow-host`), so a site that points its own name at your
   computer (*DNS rebinding*) is refused.
-- Anyone who can reach `localhost` on this computer is the owner: other users
-  logged in to the same machine too. Share a multi-user machine over SSH only
-  from your own account, or not at all.
+- Without SSH mode, anyone who can reach `localhost` on this computer is the
+  owner: other users logged in to the same machine too. On a machine other
+  people log in to, use [SSH mode](#ssh-mode) (the default when inkflow starts
+  from an SSH login): there only the owner link makes the owner, and commands
+  read the owner token from a file only your user can read (`0600`, in a
+  folder only you can open).
+- In SSH mode the server never listens on the network, not even with the links
+  on: a guest needs both a login on the server and a link.
+- A browser sends the cookies of `localhost` to every port on it, so a program
+  of yours listening on another local port could see an inkflow cookie. The
+  tokens in them stop working when the server stops, when New links are made
+  (guest links) or when sharing stops.
 - Plain HTTP on a network you do not trust (café Wi-Fi, a conference) lets anyone
   on it read the links and the deck as they pass. Prefer SSH or a VPN there, or
   `--tls` with a certificate.

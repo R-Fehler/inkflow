@@ -3,7 +3,15 @@
 Three roles: the **owner** is a page or command on this machine (a loopback
 connection that names the server by a loopback name and came through no
 proxy, so an SSH tunnel counts and a reverse proxy does not); an **editor**
-and a **viewer** come with a share link, whose token sets a cookie. Every
+and a **viewer** come with a share link, whose token sets a cookie.
+
+In **SSH mode** (a server other people log in to, or reach through their own
+SSH tunnels: ``inkflow edit --ssh``, the default from an SSH login) this
+machine's loopback is everyone's, so it is not enough: the owner is a loopback
+request carrying the **owner token** (the owner link inkflow prints, which
+sets the same cookie; commands read it from their own user's instance
+record). The owner token lasts as long as the server; New links never change
+it. Every
 request is checked twice before anything else: its ``Host`` must be a name
 this machine answers to (no DNS rebinding: a page on ``evil.example`` whose
 name now points at 127.0.0.1 still says ``Host: evil.example``), and a
@@ -18,9 +26,11 @@ from __future__ import annotations
 
 import contextlib
 import ipaddress
+import os
 import secrets
 import socket
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from html import escape
 from typing import Literal, cast
@@ -243,6 +253,13 @@ class Access:
     editor_token: str = field(default_factory=new_token)
     viewer_token: str = field(default_factory=new_token)
     names: set[str] = field(default_factory=machine_names)
+    ssh: bool = False
+    """SSH mode: loopback alone is not the owner, the owner token is; share
+    links name ``localhost`` (each guest's own tunnel) and sharing never
+    listens on the network."""
+    owner_token: str = field(default_factory=new_token)
+    """What makes a loopback request the owner in SSH mode (unused outside
+    it). Kept for the server's lifetime: New links do not change it."""
 
     @property
     def scheme(self) -> str:
@@ -252,10 +269,27 @@ class Access:
     def cookie_name(self) -> str:
         return f"{COOKIE_PREFIX}{self.port}"
 
+    def cookie_name_for(self, host: str | None) -> str:
+        """The cookie's name for a request naming ``host``: after the port
+        the browser sees (``localhost:8000`` through ``ssh -L 8000:…``), else
+        the server's own. A browser sends a host's cookies to every port, so
+        two servers tunnelled to two local ports keep a cookie each."""
+        _name, port = split_host(host or "")
+        return f"{COOKIE_PREFIX}{port or self.port}"
+
     def rotate(self) -> None:
-        """New links: the old ones (and the cookies they set) stop working."""
+        """New links: the old ones (and the cookies they set) stop working.
+        The owner token stays."""
         self.editor_token = new_token()
         self.viewer_token = new_token()
+
+    def owner_path(self, path: str) -> str:
+        """``path`` as the owner opens it: with the owner token in SSH mode
+        (the owner link), as it is otherwise."""
+        if not self.ssh:
+            return path
+        joiner = "&" if "?" in path else "?"
+        return f"{path}{joiner}{TOKEN_PARAM}={self.owner_token}"
 
     # ── Names ──
 
@@ -307,7 +341,7 @@ class Access:
 
     # ── People ──
 
-    def is_owner(self, peer: str | None, request: Request) -> bool:
+    def is_local(self, peer: str | None, request: Request) -> bool:
         """This machine's own page or program: a loopback connection naming
         the server by a loopback name (an SSH tunnel's ``localhost``), not
         relayed by a proxy on this machine."""
@@ -317,38 +351,61 @@ class Access:
             return False
         return is_loopback_name(split_host(request.host or "")[0])
 
-    def token_role(self, token: str | None) -> Role | None:
-        if not token or not self.sharing:
+    def is_owner(self, peer: str | None, request: Request) -> bool:
+        """Whether the request is the owner's: from this machine, and in SSH
+        mode carrying the owner token too (in the URL or the cookie)."""
+        return self.admit(peer, request)[0] == "owner"
+
+    def token_role(self, token: str | None, *, local: bool = False) -> Role | None:
+        """The role a token gives: editor or viewer while shared, the owner
+        in SSH mode to a request from this machine (``local``)."""
+        if not token:
             return None
-        # Both compared, whichever matches, in constant time.
-        editor = secrets.compare_digest(token.encode(), self.editor_token.encode())
-        viewer = secrets.compare_digest(token.encode(), self.viewer_token.encode())
+        # All compared, whichever matches, in constant time.
+        given = token.encode()
+        owner = secrets.compare_digest(given, self.owner_token.encode())
+        editor = secrets.compare_digest(given, self.editor_token.encode())
+        viewer = secrets.compare_digest(given, self.viewer_token.encode())
+        if owner and self.ssh and local:
+            return "owner"
+        if not self.sharing:
+            return None
         return "editor" if editor else "viewer" if viewer else None
 
     def cookie_token(self, request: Request) -> str | None:
+        wanted = self.cookie_name_for(request.host)
         for part in request.headers.get("cookie", "").split(";"):
             name, _, value = part.strip().partition("=")
-            if name == self.cookie_name:
+            if name == wanted:
                 return value.strip()
         return None
+
+    def presents_token(self, request: Request) -> bool:
+        """Whether the request came with a token at all (a link that stopped
+        working, rather than none)."""
+        return bool(request.query.get(TOKEN_PARAM) or self.cookie_token(request))
 
     def admit(
         self, peer: str | None, request: Request
     ) -> tuple[Role | None, str | None]:
         """Who the request is and the token that admitted it (None for the
-        owner): the owner, a token in the URL (``?k=``), or the cookie one
-        set."""
-        if self.is_owner(peer, request):
+        owner without SSH mode): the owner, a token in the URL (``?k=``), or
+        the cookie one set."""
+        local = self.is_local(peer, request)
+        if local and not self.ssh:
             return "owner", None
         for token in (request.query.get(TOKEN_PARAM), self.cookie_token(request)):
-            role = self.token_role(token)
+            role = self.token_role(token, local=local)
             if role is not None:
                 return role, token
         return None, None
 
-    def set_cookie(self, token: str) -> str:
+    def set_cookie(self, token: str, host: str | None = None) -> str:
+        """The ``Set-Cookie`` value for ``token``, named for the request's
+        ``host`` (see ``cookie_name_for``)."""
         secure = "; Secure" if self.tls else ""
-        return f"{self.cookie_name}={token}; Path=/; HttpOnly; SameSite=Strict{secure}"
+        name = self.cookie_name_for(host)
+        return f"{name}={token}; Path=/; HttpOnly; SameSite=Strict{secure}"
 
     def links(self, addresses: list[str]) -> list[dict[str, str]]:
         """The two share links for each address (and ``<host>.local``)."""
@@ -363,6 +420,23 @@ class Access:
                 }
             )
         return out
+
+
+def over_ssh(environ: Mapping[str, str] | None = None) -> bool:
+    """Whether this process runs in an SSH login (``SSH_CONNECTION`` or
+    ``SSH_CLIENT`` set): the default for SSH mode."""
+    env = os.environ if environ is None else environ
+    return bool(env.get("SSH_CONNECTION") or env.get("SSH_CLIENT"))
+
+
+def ssh_server_address(environ: Mapping[str, str] | None = None) -> str | None:
+    """The address the SSH login reached this machine at (``SSH_CONNECTION``'s
+    third field), a guess at what others log in to."""
+    env = os.environ if environ is None else environ
+    fields = env.get("SSH_CONNECTION", "").split()
+    if len(fields) >= 3 and is_ip(fields[2]) and not is_loopback_ip(fields[2]):
+        return fields[2]
+    return None
 
 
 def redacted(token: str) -> str:

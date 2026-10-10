@@ -47,3 +47,13 @@ def _no_uv_lock(monkeypatch: pytest.MonkeyPatch) -> None:
         return False, "uv lock skipped in tests"
 
     monkeypatch.setattr("inkflow.pack.run_uv_lock", skipped)
+
+
+@pytest.fixture(autouse=True)
+def _no_running_servers(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Running servers are recorded in a folder of the test's own, never
+    the user's state dir (where a real `inkflow edit` would be found)."""
+    folder = tmp_path_factory.mktemp("servers") / "servers"
+    monkeypatch.setattr("inkflow.instances._dir", lambda: folder)

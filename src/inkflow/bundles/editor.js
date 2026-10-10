@@ -357,7 +357,7 @@
     return cues.map((_2, i2) => i2 === gov ? "hold" : "cancel");
   }
   function buildStepRun(root2, fromStep, toStep) {
-    const forward = toStep >= fromStep;
+    const forward2 = toStep >= fromStep;
     const runStep = Math.max(fromStep, toStep);
     const items = [];
     root2.querySelectorAll("[data-cues]").forEach((el2) => {
@@ -376,7 +376,7 @@
       (m2, it) => Math.max(m2, it.offsetMs + it.spanMs),
       0
     );
-    return { items, totalMs, forward, toStep };
+    return { items, totalMs, forward: forward2, toStep };
   }
   function seekStepRun(run, value) {
     const runTimeMs = value * run.totalMs;
@@ -1285,8 +1285,8 @@
   }
   var sessionKey = null;
   function clientKey() {
-    const stored = read(ID_KEY);
-    if (stored && /^[A-Za-z0-9_-]{16,64}$/.test(stored)) return stored;
+    const stored2 = read(ID_KEY);
+    if (stored2 && /^[A-Za-z0-9_-]{16,64}$/.test(stored2)) return stored2;
     if (!sessionKey) {
       const bytes = new Uint8Array(18);
       crypto.getRandomValues(bytes);
@@ -1522,15 +1522,15 @@
           )
         );
       }
-      const field = h("input", {
+      const field2 = h("input", {
         type: "number",
         min: 1,
         max: pages ?? null,
         step: 1,
         value: String(current2)
       });
-      field.addEventListener("keydown", (e2) => {
-        if (e2.key === "Enter") void pick2(Math.max(1, Number(field.value)));
+      field2.addEventListener("keydown", (e2) => {
+        if (e2.key === "Enter") void pick2(Math.max(1, Number(field2.value)));
       });
       const body3 = h(
         "div",
@@ -1539,13 +1539,13 @@
         h(
           "div",
           { class: "pdf-page-field" },
-          h("label", {}, "Page ", field, pages ? ` of ${pages}` : ""),
+          h("label", {}, "Page ", field2, pages ? ` of ${pages}` : ""),
           h(
             "button",
             {
               type: "button",
               class: "pbtn on",
-              onclick: () => void pick2(Math.max(1, Number(field.value)))
+              onclick: () => void pick2(Math.max(1, Number(field2.value)))
             },
             "Use this page"
           )
@@ -7667,7 +7667,7 @@ Undo brings them back.`
       });
       return sel;
     }
-    function field(label4, control) {
+    function field2(label4, control) {
       return h(
         "label",
         { class: "chart-field" },
@@ -7691,13 +7691,13 @@ Undo brings them back.`
         schedule2();
       });
       fields.append(
-        field(
+        field2(
           "Kind",
           select2(CHART_KINDS, kind, (v2) => {
             settings2.kind = v2;
           })
         ),
-        field(
+        field2(
           kind === "scatter" ? "X values" : kind === "pie" ? "Slices" : "Categories",
           select2(
             grid.columns.map((c2) => ({ value: c2, label: c2 })),
@@ -7707,7 +7707,7 @@ Undo brings them back.`
             }
           )
         ),
-        field("Title", title2)
+        field2("Title", title2)
       );
       const series = h("div", { class: "chart-series" });
       const choices = grid.columns.filter((c2) => c2 !== x2);
@@ -7772,7 +7772,7 @@ Undo brings them back.`
           settings2.labels = v2;
         })
       );
-      const range = (label4, lo, hi) => field(
+      const range = (label4, lo, hi) => field2(
         label4,
         h(
           "span",
@@ -7810,7 +7810,7 @@ Undo brings them back.`
       }
       fields.append(
         opts2,
-        field(
+        field2(
           "Legend",
           select2(
             [
@@ -9824,7 +9824,7 @@ Undo brings them back.`
         index,
         spec: { type, element: cue.element, fields }
       });
-      const header = h(
+      const header2 = h(
         "div",
         { class: "anim-head" },
         h("span", { class: `anim-kind k-${cue.kind}` }),
@@ -9857,7 +9857,7 @@ Undo brings them back.`
         h(
           "div",
           { class: "anim-card" },
-          header,
+          header2,
           info4 && editable ? fieldsEditor(
             info4.fields,
             cue.fields,
@@ -11357,10 +11357,10 @@ Undo brings them back.`
     on("render", renderProps);
     on("preview", renderProps);
     panel.addEventListener("keydown", (e2) => {
-      const field = e2.target;
-      if (e2.key !== "Escape" || !typingIn(field)) return;
+      const field2 = e2.target;
+      if (e2.key !== "Escape" || !typingIn(field2)) return;
       e2.preventDefault();
-      field.blur();
+      field2.blur();
       if (ed.scope?.closest("svg[data-drawio]")) enterGroup(null);
     });
     panel.addEventListener("focusout", () => {
@@ -13173,20 +13173,20 @@ ${area2.value.slice(pos)}`;
     closeFormula(false);
     const original = chip.querySelector("math")?.getAttribute("data-latex") ?? "";
     const before = chip.cloneNode(true);
-    const field = h("textarea", {
+    const field2 = h("textarea", {
       class: "formula-input",
       rows: 2,
       spellcheck: "false",
       placeholder: "LaTeX, e.g. \\frac{a}{b}"
     });
-    field.value = original || (isNew ? "x" : "");
+    field2.value = original || (isNew ? "x" : "");
     const block = h("input", { type: "checkbox" });
     block.checked = chip.classList.contains("block");
     const status3 = h("span", { class: "formula-status" });
     const pop = h(
       "div",
       { class: "formula-pop" },
-      field,
+      field2,
       h(
         "div",
         { class: "formula-row" },
@@ -13238,7 +13238,7 @@ ${area2.value.slice(pos)}`;
     let seq = 0;
     const renderNow = async () => {
       window.clearTimeout(timer6);
-      const latex = field.value.trim();
+      const latex = field2.value.trim();
       if (!latex) return;
       const mine = ++seq;
       const wantBlock = block.checked;
@@ -13264,7 +13264,7 @@ ${area2.value.slice(pos)}`;
       changed(content2);
       placePop(pop, self.chip);
     };
-    field.addEventListener("input", () => {
+    field2.addEventListener("input", () => {
       window.clearTimeout(timer6);
       timer6 = window.setTimeout(() => void renderNow(), 250);
     });
@@ -13273,8 +13273,8 @@ ${area2.value.slice(pos)}`;
     layer.append(pop);
     placePop(pop, chip);
     formula2 = self;
-    field.focus();
-    field.select();
+    field2.focus();
+    field2.select();
     if (isNew) void renderNow();
   }
   function swapKind(content2, chip, block) {
@@ -20351,9 +20351,430 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   var qrcode_default = qrcode;
   var stringToBytes = qrcode.stringToBytes;
 
+  // src/ts/editor/sshtext.ts
+  var DEFAULT_PORT = 7777;
+  var LOGIN_PLACEHOLDER = "you@server";
+  var USER_PLACEHOLDER = "<your-user>";
+  var SAFE = /^[A-Za-z0-9_@%+=:,./-]+$/;
+  function shellQuote2(text) {
+    if (text === "") return "''";
+    if (SAFE.test(text)) return text;
+    if (!text.includes("'")) return `'${text}'`;
+    if (!/[$`"\\!]/.test(text)) return `"${text}"`;
+    return `'${text.replaceAll("'", `'"'"'`)}'`;
+  }
+  function parsePort(text, fallback) {
+    const t2 = text.trim();
+    if (!/^\d{1,5}$/.test(t2)) return fallback;
+    const n3 = Number(t2);
+    return n3 >= 1 && n3 <= 65535 ? n3 : fallback;
+  }
+  function forward(local, remote) {
+    return `-L ${local}:localhost:${remote}`;
+  }
+  function linkAt(url, port) {
+    try {
+      const u2 = new URL(url);
+      u2.port = String(port);
+      return u2.toString();
+    } catch {
+      return url;
+    }
+  }
+  function codeParts(text) {
+    return text.split("`").map((part, i2) => ({ text: part, code: i2 % 2 === 1 })).filter((p2) => p2.text !== "");
+  }
+  function login(text) {
+    const t2 = text.trim();
+    return shellQuote2(t2 || LOGIN_PLACEHOLDER);
+  }
+  function inkflowCommand(info4) {
+    if (!info4.pinned) return "inkflow";
+    const project = info4.project ? ` --project ${shellQuote2(info4.project)}` : "";
+    return `uv run${project} inkflow`;
+  }
+  function startCommand(info4, port) {
+    const parts = [inkflowCommand(info4), "edit", "--no-open", "--ssh"];
+    if (port !== DEFAULT_PORT) parts.push("--port", String(port));
+    if (info4.deck !== "deck.py") parts.push("--deck", shellQuote2(info4.deck));
+    return parts.join(" ");
+  }
+  function folderOf(info4) {
+    return info4.folder || "deck";
+  }
+  function moveSteps(info4, loginText, port) {
+    const to = login(loginText);
+    const folder = shellQuote2(folderOf(info4));
+    const remote = info4.remote ? shellQuote2(info4.remote) : "<repository URL>";
+    const steps = [];
+    if (info4.inRepo && info4.remote) {
+      steps.push({
+        title: "Push your latest changes",
+        text: "The server clones the deck from its repository: commit and push what you changed (Git menu \u2192 Commit, then Push).",
+        commands: [],
+        notes: []
+      });
+    } else {
+      steps.push({
+        title: "Give the deck a repository the server can clone",
+        text: info4.inRepo ? "The deck's repository has no remote yet. Create an empty repository (on GitHub or GitLab, say), then add it here and push:" : "The deck is not in a git repository yet: commit it first (Git menu), then create an empty repository (on GitHub or GitLab, say), add it and push:",
+        commands: [
+          "git remote add origin <repository URL>",
+          `git push -u origin ${shellQuote2(info4.branch || "main")}`
+        ],
+        notes: []
+      });
+    }
+    steps.push({
+      title: "Log in to the server with the port forwarded",
+      text: `Everything below runs on the server, in this login. The tunnel brings its port ${port} to this computer.`,
+      commands: [`ssh ${forward(port, port)} ${to}`],
+      notes: [
+        "To keep inkflow running when the connection drops, start `tmux new -A -s inkflow` (or `screen`) first and run the next steps in it; the same command gets back to it after logging in again.",
+        "A private repository: `ssh -A` lets the server clone with your own keys (whoever administers the server can use them while you are logged in), or clone with an HTTPS access token."
+      ]
+    });
+    const install = ["curl -LsSf https://astral.sh/uv/install.sh | sh"];
+    install.push("source $HOME/.local/bin/env");
+    if (!info4.pinned)
+      install.push(`uv tool install ${shellQuote2(info4.requirement)}`);
+    install.push(`git clone ${remote} ${folder}`, `cd ${folder}`);
+    steps.push({
+      title: "On the server, once: install inkflow and get the deck",
+      text: info4.pinned ? "uv runs inkflow; the deck's pyproject.toml pins the version, which `uv run` installs the first time. Skip what the server has already." : "uv installs inkflow, at the version this deck runs on. Skip what the server has already.",
+      commands: install,
+      notes: []
+    });
+    steps.push({
+      title: "Start the editor",
+      text: `It prints an owner link, \`http://localhost:${port}/edit?k=\u2026\`. If it says port ${port} is taken, it uses the next free one: log in again forwarding that one.`,
+      commands: [startCommand(info4, port)],
+      notes: []
+    });
+    steps.push({
+      title: "On this computer, open the owner link",
+      text: "Open the link it printed in your browser here. You are the owner there, editing the server's copy of the deck; nobody else on the server is.",
+      commands: [],
+      notes: []
+    });
+    steps.push({
+      title: "Invite others",
+      text: "There, Share \u2192 Share via SSH writes the commands and the message for your collaborators. They need an SSH login on the server.",
+      commands: [],
+      notes: []
+    });
+    steps.push({
+      title: "When you are done",
+      text: "Commit and push on the server (its Git menu), then pull here:",
+      commands: ["git pull"],
+      notes: []
+    });
+    return steps;
+  }
+  function nextTimeCommand(info4, loginText, port) {
+    const inner = `cd ${shellQuote2(folderOf(info4))} && git pull && ${startCommand(info4, port)}`;
+    const remote = `bash -lc ${shellQuote2(inner)}`;
+    return `ssh -t ${forward(port, port)} ${login(loginText)} ${shellQuote2(remote)}`;
+  }
+  function guestTunnel(server, localPort, serverPort) {
+    const host5 = server.trim() || "server";
+    const at3 = SAFE.test(host5) ? `${USER_PLACEHOLDER}@${host5}` : shellQuote2(`${USER_PLACEHOLDER}@${host5}`);
+    return `ssh -N ${forward(localPort, serverPort)} ${at3}`;
+  }
+  function guestMessage(role, link, server, localPort, serverPort) {
+    const host5 = server.trim() || "server";
+    const what = role === "editor" ? "To edit the deck with me" : "To watch the presentation";
+    return [
+      `${what} (you need an SSH login on ${host5}):`,
+      "",
+      `1. In a terminal, run this, with your own login on ${host5} in place of ${USER_PLACEHOLDER}. Keep it open; it shows nothing. (On Windows, the same command works in PowerShell.)`,
+      "",
+      `   ${guestTunnel(host5, localPort, serverPort)}`,
+      "",
+      "2. Open this link in your browser:",
+      "",
+      `   ${linkAt(link, localPort)}`,
+      "",
+      localPort === serverPort ? `If port ${localPort} is taken on your computer, use another one in both places (the first number in the command and the one in the link).` : ""
+    ].join("\n").trimEnd();
+  }
+
+  // src/ts/editor/sshdialog.ts
+  var LOGIN_KEY = "inkflow-ssh-login";
+  var SERVER_KEY = "inkflow-ssh-server";
+  function stored(key) {
+    try {
+      return localStorage.getItem(key) ?? "";
+    } catch {
+      return "";
+    }
+  }
+  function store(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+    }
+  }
+  function rich(text) {
+    return codeParts(text).map(
+      (p2) => p2.code ? h("code", {}, p2.text) : p2.text
+    );
+  }
+  function commandBlock(text, what, copy3) {
+    return h(
+      "div",
+      { class: "ssh-copy" },
+      h("pre", { class: "ssh-command" }, text),
+      h(
+        "button",
+        { type: "button", class: "pbtn", onclick: () => copy3(text, what) },
+        "Copy"
+      )
+    );
+  }
+  function field(label4, input, hint) {
+    return h(
+      "label",
+      { class: "ssh-field" },
+      h("span", { class: "field-label" }, label4),
+      input,
+      hint ? h("span", { class: "hint" }, hint) : null
+    );
+  }
+  function textInput2(value, placeholder, width) {
+    return h("input", {
+      type: "text",
+      value,
+      placeholder,
+      spellcheck: "false",
+      autocomplete: "off",
+      style: width ? `width:${width}` : void 0
+    });
+  }
+  function stepList(steps, copy3) {
+    const list4 = h("ol", { class: "ssh-steps" });
+    for (const step2 of steps) {
+      list4.append(
+        h(
+          "li",
+          {},
+          h("strong", {}, step2.title),
+          h("p", {}, ...rich(step2.text)),
+          step2.commands.length ? commandBlock(step2.commands.join("\n"), "Command", copy3) : null,
+          ...step2.notes.map((n3) => h("p", { class: "hint" }, ...rich(n3)))
+        )
+      );
+    }
+    return list4;
+  }
+  function header(title2, back) {
+    return h(
+      "div",
+      { class: "ssh-head" },
+      h("button", { type: "button", class: "pbtn", onclick: back }, "\u2190 Back"),
+      h("h3", {}, title2)
+    );
+  }
+  function moveView(status3, opts2) {
+    let current2 = status3;
+    const login2 = textInput2(
+      stored(LOGIN_KEY),
+      "you@server.example.com",
+      "100%"
+    );
+    const port = textInput2(String(status3.port), String(status3.port), "7em");
+    const out = h("div", { class: "ssh-out" });
+    const draw = () => {
+      clear(out);
+      const info4 = current2.sshInfo;
+      if (!info4) {
+        out.append(h("p", { class: "hint" }, "\u2026"));
+        return;
+      }
+      const p2 = parsePort(port.value, current2.port);
+      out.append(stepList(moveSteps(info4, login2.value, p2), opts2.copy));
+      out.append(
+        h("h3", {}, "Next time"),
+        h(
+          "p",
+          {},
+          "Log in, update the deck and start the editor in one go (it stops when the connection closes):"
+        ),
+        commandBlock(
+          nextTimeCommand(info4, login2.value, p2),
+          "Command",
+          opts2.copy
+        )
+      );
+    };
+    login2.addEventListener("input", () => {
+      store(LOGIN_KEY, login2.value.trim());
+      draw();
+    });
+    port.addEventListener("input", draw);
+    const element = h(
+      "div",
+      { class: "ssh-view" },
+      header(
+        "Move this deck to a server and edit it there together",
+        opts2.back
+      ),
+      h(
+        "p",
+        {},
+        "On a server you and your collaborators can log in to over SSH, the deck runs once for everyone: each of you opens it through an SSH tunnel, and nothing listens on the network."
+      ),
+      h(
+        "div",
+        { class: "ssh-fields" },
+        field("Server login", login2),
+        field("Port", port)
+      ),
+      out
+    );
+    draw();
+    return {
+      element,
+      update: (s2) => {
+        const had = current2.sshInfo;
+        current2 = s2;
+        if (!had && s2.sshInfo) draw();
+      }
+    };
+  }
+  function inviteView(status3, opts2) {
+    let current2 = status3;
+    const info4 = status3.sshInfo;
+    const guess = stored(SERVER_KEY) || info4?.serverNames[0] || "";
+    const server = textInput2(guess, "server.example.com", "100%");
+    const localPort = textInput2(
+      String(status3.port),
+      String(status3.port),
+      "7em"
+    );
+    const out = h("div", { class: "ssh-out" });
+    let drawn = "";
+    const draw = (force = false) => {
+      const s2 = current2;
+      const key = JSON.stringify([
+        s2.sharing,
+        s2.links,
+        server.value,
+        localPort.value
+      ]);
+      if (!force && key === drawn) return;
+      drawn = key;
+      clear(out);
+      if (!s2.sharing || !s2.links.length) {
+        out.append(
+          h(
+            "div",
+            { class: "share-state" },
+            h(
+              "p",
+              {},
+              "The links are off. Turn them on to invite people; they still reach the deck only through SSH."
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                class: "pbtn primary",
+                onclick: opts2.turnOn
+              },
+              "Turn on links"
+            )
+          )
+        );
+        return;
+      }
+      const link = s2.links[0];
+      const local = parsePort(localPort.value, s2.port);
+      const host5 = server.value.trim();
+      for (const [role, url, title2] of [
+        ["editor", link.editor, "For an editor"],
+        ["viewer", link.view, "For a viewer"]
+      ]) {
+        const message = guestMessage(role, url, host5, local, s2.port);
+        out.append(
+          h("h3", {}, title2),
+          h(
+            "p",
+            { class: "hint" },
+            role === "editor" ? "Edits the deck with you." : "Watches the presentation and follows your slide."
+          ),
+          commandBlock(message, "Message", opts2.copy),
+          h(
+            "details",
+            { class: "ssh-parts" },
+            h("summary", {}, "The command and the link alone"),
+            commandBlock(
+              guestTunnel(host5, local, s2.port),
+              "Command",
+              opts2.copy
+            ),
+            commandBlock(linkAt(url, local), "Link", opts2.copy)
+          )
+        );
+      }
+      out.append(
+        h(
+          "p",
+          { class: "hint" },
+          "Whoever has the editor link and a login on this server can edit the deck's files (not the server's, and not git or programs). New links in the Share dialog disconnects everyone holding the old ones."
+        )
+      );
+    };
+    server.addEventListener("input", () => {
+      store(SERVER_KEY, server.value.trim());
+      draw();
+    });
+    localPort.addEventListener("input", () => draw());
+    const user = info4?.user ? ` (you logged in as ${info4.user})` : "";
+    const element = h(
+      "div",
+      { class: "ssh-view" },
+      header("Invite collaborators through SSH", opts2.back),
+      h(
+        "p",
+        {},
+        `This editor runs on a server in SSH mode${user}. Each collaborator logs in to it with their own SSH account, forwarding a port, and opens their link through that tunnel. Nothing listens on the network.`
+      ),
+      h(
+        "div",
+        { class: "ssh-fields" },
+        field(
+          "Server address",
+          server,
+          info4?.serverNames.length ? `The name they log in to (guessed: ${info4.serverNames.join(", ")}).` : "The name they log in to."
+        ),
+        field(
+          "Their local port",
+          localPort,
+          "Where the tunnel ends on their computer; another one if theirs is busy."
+        )
+      ),
+      out
+    );
+    draw(true);
+    return {
+      element,
+      update: (s2) => {
+        current2 = s2;
+        const names = s2.sshInfo?.serverNames ?? [];
+        if (!server.value && names.length) server.value = names[0];
+        draw();
+      }
+    };
+  }
+  function sshView(status3, opts2) {
+    return status3.ssh ? inviteView(status3, opts2) : moveView(status3, opts2);
+  }
+
   // src/ts/editor/share.ts
   var status2 = null;
   var body2 = null;
+  var ssh = null;
   var button5 = document.getElementById("btn-share");
   function qrSvg(text) {
     const qr = qrcode_default(0, "M");
@@ -20379,13 +20800,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       area2.remove();
     }
   }
-  function linkRow(label4, url, hint) {
+  function linkRow(label4, url, hint, withQr = true) {
     const qr = h("div", { class: "share-qr", title: `QR code: ${label4}` });
     qr.innerHTML = qrSvg(url);
     return h(
       "div",
       { class: "share-link" },
-      qr,
+      withQr ? qr : null,
       h(
         "div",
         { class: "share-link-text" },
@@ -20409,19 +20830,60 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       )
     );
   }
-  function render4() {
+  function openSsh() {
     if (!body2 || !status2) return;
+    ssh = sshView(status2, {
+      back: () => {
+        ssh = null;
+        render4();
+      },
+      copy: copy2,
+      turnOn: () => sendRaw({ type: "share", op: "on" })
+    });
     clear(body2);
-    const s2 = status2;
-    body2.append(
+    body2.append(ssh.element);
+  }
+  function sshSection(s2) {
+    return h(
+      "section",
+      { class: "share-ssh" },
+      h("h3", {}, "Over SSH"),
       h(
         "div",
         { class: "share-state" },
         h(
           "p",
-          {},
-          s2.sharing ? "Shared on the network: people with a link below can join." : "Only this computer can open the deck. Share it to give people on the same network (or VPN) a link."
+          { class: "hint" },
+          s2.ssh ? "The commands and the message for each collaborator's tunnel." : "Move the deck to a server you and others can log in to, and edit it there together through SSH tunnels."
         ),
+        h(
+          "button",
+          { type: "button", class: "pbtn", onclick: openSsh },
+          "Share via SSH"
+        )
+      )
+    );
+  }
+  function stateText(s2) {
+    if (s2.ssh) {
+      return s2.sharing ? "SSH mode: people with a link below join through an SSH tunnel to this server." : "SSH mode: this server is reached through SSH tunnels only. Turn the links on to invite people.";
+    }
+    return s2.sharing ? "Shared on the network: people with a link below can join." : "Only this computer can open the deck. Share it to give people on the same network (or VPN) a link.";
+  }
+  function render4() {
+    if (!body2 || !status2) return;
+    if (ssh) {
+      ssh.update(status2);
+      return;
+    }
+    clear(body2);
+    const s2 = status2;
+    const onLabel = s2.ssh ? "Turn on links" : "Share on the network";
+    body2.append(
+      h(
+        "div",
+        { class: "share-state" },
+        h("p", {}, stateText(s2)),
         h(
           "button",
           {
@@ -20432,7 +20894,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
               op: s2.sharing ? "off" : "on"
             })
           },
-          s2.sharing ? "Stop sharing" : "Share on the network"
+          s2.sharing ? "Stop sharing" : onLabel
         )
       )
     );
@@ -20452,16 +20914,22 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           h(
             "section",
             { class: "share-address" },
-            h("h3", {}, link.address),
+            h(
+              "h3",
+              {},
+              s2.ssh ? "Through each guest's tunnel" : link.address
+            ),
             linkRow(
               "Editor link",
               link.editor,
-              "Edits the deck with you (not your computer's files, git or programs)."
+              "Edits the deck with you (not your computer's files, git or programs).",
+              !s2.ssh
             ),
             linkRow(
               "View link",
               link.view,
-              "Watches the presentation and follows your slide."
+              "Watches the presentation and follows your slide.",
+              !s2.ssh
             )
           )
         );
@@ -20498,23 +20966,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         h(
           "p",
           { class: "hint" },
-          "The links travel unencrypted on the network: on a network you do not trust, share over SSH or a VPN instead."
+          s2.ssh ? "Each guest needs a login on this server for their tunnel; the links travel inside it, encrypted." : "The links travel unencrypted on the network: on a network you do not trust, share over SSH or a VPN instead."
         )
       );
     }
-    body2.append(
-      h(
-        "p",
-        { class: "hint" },
-        "From another computer over SSH: ",
-        h(
-          "code",
-          {},
-          `ssh -L ${s2.port}:localhost:${s2.port} you@this-computer`
-        ),
-        `, then open http://localhost:${s2.port}/edit there (as you).`
-      )
-    );
+    body2.append(sshSection(s2));
     const people = s2.people.filter((p2) => p2.id !== collab.me?.id);
     body2.append(
       h("h3", {}, people.length ? "Connected" : "No one else is connected")
@@ -20558,10 +21014,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function openShare() {
     body2 = h("div", { class: "share-dialog" }, h("p", {}, "\u2026"));
+    ssh = null;
     openDialog("Share", body2, {
       wide: true,
       onClose: () => {
         body2 = null;
+        ssh = null;
       }
     });
     sendRaw({ type: "share", op: "status" });

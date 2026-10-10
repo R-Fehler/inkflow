@@ -1020,3 +1020,275 @@ def test_where_a_shared_server_listens() -> None:
     # A VPN address only, and this machine for the owner's own pages.
     assert lan_host("100.101.102.103") == ["100.101.102.103", "localhost"]
     assert server._shares("100.101.102.103") and not server._shares("127.0.0.1")  # pyright: ignore[reportPrivateUsage]
+
+
+# ── SSH mode: a machine other people log in to ───────────────────────────────
+
+
+def test_in_ssh_mode_this_machine_needs_the_owner_token() -> None:
+    access = Access(7777, names=set(), ssh=True)
+    owner = access.owner_token
+    local = "127.0.0.1"
+    page = _req("/edit", Host="localhost:7777")
+    assert access.admit(local, page) == (None, None)  # another user, say
+    link = _req(f"/edit?k={owner}", Host="localhost:7777")
+    assert access.admit(local, link) == ("owner", owner)
+    cookie = _req("/edit", Host="localhost:7777", Cookie=f"inkflow-7777={owner}")
+    assert access.admit(local, cookie) == ("owner", owner)
+    assert access.is_owner(local, cookie) and not access.is_owner(local, page)
+    # Only from this machine (a tunnel's end), never relayed or from afar.
+    assert access.admit("192.168.1.9", link) == (None, None)
+    relayed = _req(f"/edit?k={owner}", Host="localhost:7777", **GUEST)
+    assert access.admit(local, relayed) == (None, None)
+    # Share links through the tunnels, while shared.
+    editor = _req(f"/edit?k={access.editor_token}", Host="localhost:7777")
+    viewer = _req(f"/?k={access.viewer_token}", Host="localhost:7777")
+    assert access.admit(local, editor) == (None, None)
+    access.sharing = True
+    assert access.admit(local, editor) == ("editor", access.editor_token)
+    assert access.admit(local, viewer) == ("viewer", access.viewer_token)
+    # New links leave the owner in.
+    access.rotate()
+    assert access.admit(local, editor) == (None, None)
+    assert access.admit(local, cookie) == ("owner", owner)
+    assert access.owner_path("/edit") == f"/edit?k={owner}"
+    assert access.owner_path("/edit?compare=x") == f"/edit?compare=x&k={owner}"
+
+
+def test_without_ssh_mode_this_machine_is_the_owner_as_ever() -> None:
+    access = Access(7777, names=set())
+    page = _req("/edit", Host="localhost:7777")
+    assert access.admit("127.0.0.1", page) == ("owner", None)
+    # The owner token means nothing outside SSH mode.
+    link = _req(f"/edit?k={access.owner_token}", Host="192.168.1.5:7777")
+    assert access.admit("192.168.1.9", link) == (None, None)
+    assert access.owner_path("/edit") == "/edit"
+
+
+def test_a_different_local_port_keeps_its_cookie_and_origin() -> None:
+    # ssh -L 8000:localhost:7777: the browser sees localhost:8000.
+    access = Access(7777, names=set(), ssh=True, sharing=True)
+    token = access.editor_token
+    assert access.set_cookie(token, "localhost:8000").startswith(
+        f"inkflow-8000={token}; Path=/; HttpOnly; SameSite=Strict"
+    )
+    assert access.set_cookie(token, "box.example").startswith("inkflow-7777=")
+    back = _req("/edit", Host="localhost:8000", Cookie=f"inkflow-8000={token}")
+    assert access.admit("127.0.0.1", back) == ("editor", token)
+    # Another server tunnelled to 8001 keeps its own cookie beside it.
+    other = _req("/edit", Host="localhost:8001", Cookie=f"inkflow-8000={token}")
+    assert access.admit("127.0.0.1", other) == (None, None)
+    assert access.origin_ok("http://localhost:8000", "localhost:8000")
+    assert not access.origin_ok("http://localhost:7777", "localhost:8000")
+
+
+def test_ssh_mode_defaults_to_an_ssh_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    from inkflow.access import over_ssh, ssh_server_address
+    from inkflow.cli.present import _sharing  # pyright: ignore[reportPrivateUsage]
+
+    login = "203.0.113.7 51234 198.51.100.2 22"
+    assert over_ssh({"SSH_CONNECTION": login})
+    assert over_ssh({"SSH_CLIENT": "203.0.113.7 51234 22"})
+    assert not over_ssh({})
+    assert ssh_server_address({"SSH_CONNECTION": login}) == "198.51.100.2"
+    assert ssh_server_address({"SSH_CONNECTION": "::1 5 ::1 22"}) is None
+    monkeypatch.delenv("SSH_CLIENT", raising=False)
+    monkeypatch.setenv("SSH_CONNECTION", login)
+    assert _sharing(False, (), None, None).ssh
+    assert not _sharing(False, (), None, False).ssh  # --no-ssh
+    monkeypatch.delenv("SSH_CONNECTION")
+    assert not _sharing(False, (), None, None).ssh
+    assert _sharing(False, (), None, True).ssh  # --ssh
+
+
+def test_ssh_mode_never_listens_on_the_network() -> None:
+    listen = server._listen_hosts  # pyright: ignore[reportPrivateUsage]
+    assert listen("localhost", shared=True, ssh=False) is None  # the LAN
+    assert listen("localhost", shared=True, ssh=True) == "localhost"
+    assert listen("localhost", shared=False, ssh=True) == "localhost"
+    # An explicit --host is the user's own choice, in either mode.
+    assert listen("100.101.102.103", shared=False, ssh=True) == [
+        "100.101.102.103",
+        "localhost",
+    ]
+
+
+def test_the_terminal_shows_the_owner_link_in_ssh_mode() -> None:
+    access = Access(7777, names=set(), ssh=True, sharing=True)
+    owner = server.owner_lines(access, 7777)
+    assert owner[0] == f"http://localhost:7777/edit?k={access.owner_token}"
+    assert owner[1].startswith("open it through: ssh -L 7777:localhost:7777 ")
+    lines = server.share_lines(access, 7777)
+    assert lines[0] == f"edit  http://localhost:7777/edit?k={access.editor_token}"
+    assert any("ssh -N -L 7777:localhost:7777" in line for line in lines)
+    assert server.owner_lines(Access(7777, names=set()), 7777) == []
+
+
+@pytest.fixture
+def ssh_mode(served: tuple[EditorSession, int]) -> Iterator[tuple[EditorSession, int]]:
+    """The deck served in SSH mode, not shared yet."""
+    session, port = served
+    server._share.access = Access(port, names=set(), ssh=True)  # pyright: ignore[reportPrivateUsage]
+    try:
+        yield session, port
+    finally:
+        server._share.access = Access(server.DEFAULT_PORT)  # pyright: ignore[reportPrivateUsage]
+        server._share.ssh_info = None  # pyright: ignore[reportPrivateUsage]
+
+
+def test_ssh_mode_asks_this_machine_for_the_owner_link(
+    ssh_mode: tuple[EditorSession, int],
+) -> None:
+    _, port = ssh_mode
+    owner = server._share.access.owner_token  # pyright: ignore[reportPrivateUsage]
+    status, _, body = _get(port, "/edit")
+    assert status == 401 and b"owner link" in body and owner.encode() not in body
+    with pytest.raises(InvalidStatus) as refused:
+        _ws(port)
+    assert refused.value.response.status_code == 401
+    status, headers, body = _get(port, f"/edit?k={owner}")
+    assert status == 200 and owner not in body.decode()
+    assert headers["set-cookie"].startswith(f"inkflow-{port}={owner};")
+    signed_in = {"Cookie": f"inkflow-{port}={owner}"}
+    assert _get(port, "/edit", signed_in)[0] == 200
+    with _ws(port, signed_in) as ws:
+        assert _until(ws, "welcome")["role"] == "owner"
+    url = f"ws://localhost:{port}/_inkflow/ws?k={owner}"
+    with connect(url, proxy=None) as ws:  # a command, with the token
+        assert _until(ws, "welcome")["role"] == "owner"
+
+
+def test_ssh_mode_shares_through_tunnels(ssh_mode: tuple[EditorSession, int]) -> None:
+    _, port = ssh_mode
+    access = server._share.access  # pyright: ignore[reportPrivateUsage]
+    signed_in = {"Cookie": f"inkflow-{port}={access.owner_token}"}
+    with _ws(port, signed_in) as owner:
+        owner.send(json.dumps({"type": "share", "op": "status"}))
+        status = _until(owner, "share-status")
+        assert status["ssh"] is True and status["sharing"] is False
+        info = cast("dict[str, object]", status["sshInfo"])
+        assert info["port"] == port and info["deck"] == "deck.py"
+        assert isinstance(info["serverNames"], list) and info["user"]
+        owner.send(json.dumps({"type": "share", "op": "on"}))
+        status = _until(owner, "share-status")
+        assert status["sharing"] is True and status["names"] == []
+        links = cast("list[dict[str, str]]", status["links"])
+        assert [link["address"] for link in links] == ["localhost"]
+        assert links[0]["editor"] == (
+            f"http://localhost:{port}/edit?k={access.editor_token}"
+        )
+    # A collaborator forwards another local port: ssh -L <forwarded>:…:<port>.
+    forwarded, stop = _forward(port)
+    try:
+        here = f"localhost:{forwarded}"
+
+        def get(path: str, headers: dict[str, str]) -> tuple[int, str]:
+            conn = http.client.HTTPConnection("127.0.0.1", forwarded, timeout=10)
+            conn.request("GET", path, headers={"Host": here, **headers})
+            response = conn.getresponse()
+            _ = response.read()
+            conn.close()
+            return response.status, response.getheader("set-cookie") or ""
+
+        assert get("/edit", {})[0] == 401
+        status, cookie = get(f"/edit?k={access.editor_token}", {})
+        assert status == 200
+        assert cookie.startswith(f"inkflow-{forwarded}={access.editor_token};")
+        guest = {"Cookie": cookie.split(";")[0]}
+        assert get("/edit", guest)[0] == 200
+        with connect(
+            f"ws://{here}/_inkflow/ws",
+            proxy=None,
+            origin=cast("object", f"http://{here}"),  # pyright: ignore[reportArgumentType]
+            additional_headers=guest,
+        ) as ws:
+            assert _until(ws, "welcome")["role"] == "editor"
+        viewer = f"inkflow-{forwarded}={access.viewer_token}"
+        assert get("/edit", {"Cookie": viewer})[0] == 403
+    finally:
+        stop.set()
+
+
+def test_commands_on_this_machine_send_the_owner_token(
+    ssh_mode: tuple[EditorSession, int],
+    project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+    import stat
+
+    from click.testing import CliRunner
+
+    from inkflow import instances
+    from inkflow.cli import main
+
+    _, port = ssh_mode
+    token = server._share.access.owner_token  # pyright: ignore[reportPrivateUsage]
+    deck = str(project / "deck.py")
+    record = instances.Instance(
+        os.getpid(), "127.0.0.1", port, port, deck, owner_token=token
+    )
+    instances.register(record)
+    folder = instances._dir()  # pyright: ignore[reportPrivateUsage]
+    if os.name == "posix":
+        assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+        written = folder / f"{os.getpid()}.json"
+        assert stat.S_IMODE(written.stat().st_mode) == 0o600
+    found = instances.running()
+    assert found == [record] and found[0].owner_token == token
+    assert record.ws_url() == f"ws://127.0.0.1:{port}/_inkflow/ws?k={token}"
+    assert record.owner_url("/edit") == f"http://127.0.0.1:{port}/edit?k={token}"
+    assert record.url("/edit") == f"http://127.0.0.1:{port}/edit"
+    without = instances.Instance(os.getpid(), "127.0.0.1", port, port, deck)
+    assert instances.probe(without) is None  # refused: not the owner
+
+    def serving(_deck: Path, _exclude_pid: int | None = None) -> instances.Instance:
+        return record
+
+    monkeypatch.setattr(instances, "serving", serving)
+    goto = CliRunner().invoke(main, ["goto", "2", "--deck", deck])
+    assert goto.exit_code == 0, goto.output
+    out = slides_tests._ok(project, "hide", "2")  # pyright: ignore[reportPrivateUsage]
+    assert "Ctrl+Z in the editor" in out  # applied by the server, as the owner
+
+
+def test_share_via_ssh_knows_where_the_deck_lives(tmp_path: Path) -> None:
+    import subprocess
+
+    from inkflow import sshshare
+
+    assert (
+        sshshare.strip_credentials("https://user:tok@github.com/o/r.git")
+        == "https://github.com/o/r.git"
+    )
+    assert sshshare.strip_credentials("git@github.com:o/r.git") == (
+        "git@github.com:o/r.git"
+    )
+    assert sshshare.strip_credentials("ssh://git@host:2222/o/r") == (
+        "ssh://git@host:2222/o/r"
+    )
+    repo = tmp_path / "my talks"
+    deck = repo / "keynote" / "deck.py"
+    deck.parent.mkdir(parents=True)
+    deck.write_text("# deck\n", encoding="utf-8")
+    (repo / "pyproject.toml").write_text(
+        '[project]\nname = "talks"\nversion = "0"\ndependencies = ["inkflow"]\n',
+        encoding="utf-8",
+    )
+    info = sshshare.details(deck, 7777)
+    assert info["inRepo"] is False and info["remote"] is None
+    for args in (
+        ["init", "-q", "-b", "main"],
+        ["remote", "add", "origin", "https://x:secret@example.com/o/talks.git"],
+    ):
+        _ = subprocess.run(["git", "-C", str(repo), *args], check=True)
+    info = sshshare.details(deck, 7777)
+    # Cloned on the server into the repository's name, as git clone does.
+    assert info["inRepo"] is True and info["folder"] == "talks"
+    assert sshshare.clone_folder("git@host:me/talks.git", "x") == "talks"
+    assert sshshare.clone_folder("ssh://git@host:22/g/sub/r/", "x") == "r"
+    assert sshshare.clone_folder(None, "my talks") == "my talks"
+    assert info["remote"] == "https://example.com/o/talks.git"
+    assert info["deck"] == "keynote/deck.py"
+    assert info["pinned"] is True and info["project"] == ""
+    assert info["port"] == 7777 and info["branch"] == "main"
