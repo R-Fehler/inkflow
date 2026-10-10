@@ -6,6 +6,10 @@ yourself from another machine over SSH. Everyone sees the others' edits within
 a moment, who is on which slide, and what they have selected. Nothing is
 uploaded anywhere: the deck stays on the computer that runs `inkflow edit`.
 
+For people who are not on your network, [share online](share-online.md)
+instead: the same links and roles, through an end-to-end encrypted relay on
+your own (free) Cloudflare account or server.
+
 ## Who is who
 
 There are three roles.
@@ -180,4 +184,5 @@ usual.
   from your own account, or not at all.
 - Plain HTTP on a network you do not trust (café Wi-Fi, a conference) lets anyone
   on it read the links and the deck as they pass. Prefer SSH or a VPN there, or
-  `--tls` with a certificate.
+  `--tls` with a certificate, or [share online](share-online.md), which is
+  encrypted end to end whatever the network.
