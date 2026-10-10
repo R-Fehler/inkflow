@@ -3,6 +3,7 @@ from inkflow.animations import Cue
 from inkflow.enums import (
     Align,
     AnimationKind,
+    ChartKind,
     ColorMode,
     Direction,
     Easing,
@@ -13,6 +14,7 @@ from inkflow.enums import (
     VAlign,
 )
 from inkflow.manifest import (
+    Chart,
     Content,
     Deck,
     Image,
@@ -30,6 +32,8 @@ from inkflow.transitions import Transition
 __all__ = [
     "Align",
     "AnimationKind",
+    "Chart",
+    "ChartKind",
     "ColorMode",
     "Content",
     "Cue",

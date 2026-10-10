@@ -12,9 +12,10 @@ from lxml import etree
 
 from inkflow.animations import Animation, FadeIn
 from inkflow.assets import AssetSource
+from inkflow.charts import ChartIds, ResolvedChart, expand_fences, resolve
 from inkflow.enums import Align, Trigger, VAlign
 from inkflow.logging import logger
-from inkflow.manifest import Media, TextBox, Video, ZoneContent
+from inkflow.manifest import Chart, Media, TextBox, Video, ZoneContent
 from inkflow.markdown import (
     html_fragment_to_xml,
     markdown_to_html,
@@ -48,9 +49,14 @@ _STEPS_BLOCK_RE = re.compile(
 # ── Public output types ───────────────────────────────────────────────────────
 
 
+ZoneFill = TextBox | Media | ResolvedChart
+"""What fills a zone once its content is resolved: text, media, or a chart with
+its data read."""
+
+
 @dataclass
 class SlideContent:
-    content: dict[str, TextBox | Media]  # zone-id (e.g. "zone-content") → content
+    content: dict[str, ZoneFill]  # zone-id (e.g. "zone-content") → content
     notes: str
     animations: list[tuple[Animation, int]] = field(default_factory=list)
     """Reveal animations generated for ``::step::`` markers, each paired with its
@@ -478,8 +484,13 @@ def _reroute_zones(
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
-def _resolve_zone_assets(item: TextBox | Media, source: AssetSource) -> TextBox | Media:
-    """Canonicalise the asset references a deck.py zone value carries."""
+def _resolve_zone_assets(
+    item: TextBox | Media | Chart, source: AssetSource
+) -> ZoneFill:
+    """Canonicalise the asset references a deck.py zone value carries (a chart:
+    read its data)."""
+    if isinstance(item, Chart):
+        return resolve(item, source)
     if isinstance(item, TextBox):
         if item.text is None:
             return item
@@ -516,18 +527,25 @@ def build_slide_content(
         zone_params = parsed.params
         auto_zones = parsed.auto_zones
 
+    # Chart ids are unique per slide; a chart zone's id is its zone's name.
+    chart_ids = ChartIds()
+    chart_ids.taken.update(k for k, v in extra.items() if isinstance(v, Chart))
+
+    def finish(html: str, source: AssetSource, ids: ChartIds = chart_ids) -> str:
+        return expand_fences(source.html(html), source, ids)
+
     notes_chunks = zones.pop("notes", None)
     notes_html = ""
     if notes_chunks:
         # Notes render to static HTML in the presenter panel, never into the slide
         # SVG, so their reveal animations are discarded (own throwaway id space).
         notes_html, _, _ = chunks_to_html(notes_chunks, 0, itertools.count(1))
-        notes_html = md_source.html(notes_html)
+        notes_html = finish(notes_html, md_source, ChartIds())
 
     if available_zones is not None:
         zones = _reroute_zones(zones, auto_zones, available_zones, default_zone)
 
-    result: dict[str, TextBox | Media] = {}
+    result: dict[str, ZoneFill] = {}
     animations: list[tuple[Animation, int]] = []
     base_step = 0
     ids = itertools.count(1)
@@ -537,7 +555,7 @@ def build_slide_content(
         animations.extend(zone_anims)
         p = zone_params.get(zone_name, {})
         result[f"zone-{zone_name}"] = TextBox(
-            text=md_source.html(html),
+            text=finish(html, md_source),
             align=Align(p["align"]) if "align" in p else None,
             valign=VAlign(p["valign"]) if "valign" in p else None,
             padding=float(p["padding"]) if "padding" in p else None,
@@ -551,7 +569,7 @@ def build_slide_content(
                 _split_steps(val), base_step, ids
             )
             animations.extend(zone_anims)
-            result[f"zone-{key}"] = TextBox(text=deck_source.html(html))
+            result[f"zone-{key}"] = TextBox(text=finish(html, deck_source))
         else:
             result[f"zone-{key}"] = _resolve_zone_assets(val, deck_source)
 

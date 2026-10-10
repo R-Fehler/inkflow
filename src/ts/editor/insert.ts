@@ -128,7 +128,7 @@ export function insertParent(): { loc: string; el: Element | null } {
 }
 
 // Slide coordinates → the insertion parent's user space.
-function toParent(
+export function toParent(
     el: Element | null,
     x: number,
     y: number,

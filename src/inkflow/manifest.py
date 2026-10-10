@@ -8,6 +8,7 @@ from inkflow.animations import Cue
 from inkflow.backgrounds import background_paint
 from inkflow.enums import (
     Align,
+    ChartKind,
     ColorMode,
     MediaAlign,
     MediaFit,
@@ -174,11 +175,72 @@ Media = Image | Video
 """A media asset of either kind — the union of `Image` and `Video`."""
 
 
-ZoneContent = str | Media | TextBox
+ChartValue: TypeAlias = float | int | str | None
+"""One cell of a chart's table: a number, a label, or ``None`` for a gap."""
+
+
+@dataclass
+class Chart:
+    """A chart plotted from a table of data, drawn into a zone at build time.
+
+    The data is a CSV, TSV or JSON file (``src``, relative to ``deck.py`` like an
+    ``Image``), or the columns written inline (``data``). The first row of a CSV
+    or TSV names the columns. ``x`` is the column of categories (default: the
+    first column) and ``y`` the columns plotted against it (default: every other
+    column holding numbers).
+
+    Colours and text come from the theme, so a chart follows the deck's palette
+    and colour mode. Every series is a group with the id
+    ``<zone>-series-<column>`` (a pie's slices ``<zone>-slice-<category>``), so
+    ``animations=[FadeIn("sales-series-revenue")]`` reveals one at a time.
+
+    ```python
+    Slide("content", zones={"sales": Chart("data/sales.csv", y=["revenue", "cost"])})
+    Chart(data={"year": [2023, 2024], "users": [120, 180]}, kind=ChartKind.LINE)
+    ```
+    """
+
+    src: str | None = None
+    """Path to a ``.csv``, ``.tsv`` or ``.json`` file. Exactly one of ``src`` and
+    ``data`` is given."""
+    kind: ChartKind = ChartKind.BAR
+    """Bars, lines, areas, dots or a pie (a plain string such as ``"line"`` works
+    too)."""
+    x: str | None = None
+    """The column of categories (for a scatter, of x values). ``None``: the first."""
+    y: list[str] | None = None
+    """The columns plotted, one series each. ``None``: every other numeric column.
+    A single name may be given as a plain string."""
+    title: str | None = None
+    """A heading drawn above the plot."""
+    stacked: bool = False
+    """Pile the series on each other (bar and area)."""
+    horizontal: bool = False
+    """Bars along the y axis, categories top to bottom (bar only)."""
+    legend: bool | None = None
+    """Show the legend. ``None``: when there is more than one series (always for
+    a pie)."""
+    labels: bool = False
+    """Write each value at its bar, point or slice."""
+    donut: bool = False
+    """Cut the middle out of a pie."""
+    data: dict[str, list[ChartValue]] | None = None
+    """The columns inline, ``{column: [values]}``, instead of a file."""
+
+    def __post_init__(self) -> None:
+        if (self.src is None) == (self.data is None):
+            raise ValueError("Chart needs exactly one of src= (a file) or data=")
+        self.kind = ChartKind(self.kind)
+        if isinstance(self.y, str):
+            self.y = [self.y]
+
+
+ZoneContent = str | Media | TextBox | Chart
 """A value accepted in ``Slide.zones``.
 
 A ``str`` is rendered as inline Markdown; a ``TextBox`` gives explicit
-alignment and padding control; an ``Image`` or ``Video`` injects media.
+alignment and padding control; an ``Image`` or ``Video`` injects media; a
+``Chart`` plots data.
 """
 
 
@@ -221,8 +283,8 @@ class Slide:
     routed into ``src``'s zones, if it defines any."""
     zones: dict[str, ZoneContent] = field(default_factory=dict)
     """Per-zone overrides. Keys are zone names without the ``zone-`` prefix; values
-    are ``ZoneContent`` (inline Markdown ``str``, ``TextBox``, or
-    ``Media``)."""
+    are ``ZoneContent`` (inline Markdown ``str``, ``TextBox``, ``Media`` or
+    ``Chart``)."""
     animations: list[Cue] = field(default_factory=list)
     """Animations and `PlayVideo` cues for this slide. They run after any markdown
     reveals in the content."""

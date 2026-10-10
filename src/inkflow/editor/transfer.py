@@ -37,7 +37,7 @@ from inkflow.assets import is_local_ref, rewrite_references
 from inkflow.editor.deckedit import DeckEditError, DeckSource
 from inkflow.layout import discover_layouts, resolve_chain
 from inkflow.loaders import resolve_content_src
-from inkflow.manifest import Deck, Image, Inline, Video
+from inkflow.manifest import Chart, Deck, Image, Inline, Video
 from inkflow.pipeline import resolve_slide_src
 
 BUNDLE_VERSION = 1
@@ -57,7 +57,9 @@ class TransferError(Exception):
 
 # ── What a pasted Slide(...) may contain ───────────────────────────────────────
 
-_CALLABLE_NAMES = frozenset({"Slide", "Image", "Video", "TextBox", "Inline", "Overlay"})
+_CALLABLE_NAMES = frozenset(
+    {"Slide", "Image", "Video", "TextBox", "Inline", "Overlay", "Chart"}
+)
 _VALUE_CLASSES: dict[str, object] = {
     name: getattr(enums, name)
     for name in (
@@ -69,6 +71,7 @@ _VALUE_CLASSES: dict[str, object] = {
         "MediaFit",
         "MediaAlign",
         "Muted",
+        "ChartKind",
         "ColorMode",
         "AnimationKind",
     )
@@ -292,7 +295,8 @@ def export_slides(deck: Deck, deck_path: Path, indices: list[int]) -> dict[str, 
             )
         media: dict[str, dict[str, str]] = {}
         for zone, value in slide.zones.items():
-            if isinstance(value, Image | Video):
+            # A chart's data file travels like a picture.
+            if isinstance(value, Image | Video | Chart):
                 entry: dict[str, str] = {}
                 for attr in ("src", "alt_src", "poster"):
                     ref = cast("str | None", getattr(value, attr, None))

@@ -166,6 +166,8 @@ at the same time and see each other's changes live.
   their shapes (straight, elbow or curved), smart guides, groups, copy-by-dragging and a
   format painter. Pictures with crop; videos of any size and, with ffmpeg, any format.
   Bigger diagrams open in [draw.io](https://www.drawio.com), kept as editable SVG.
+- **Charts from data.** Bar, line, area, scatter and pie charts plotted from a CSV kept in
+  the deck, edited in a spreadsheet-like grid with a live preview, drawn in the theme's colours.
 - **Type on the slide.** Rich text with lists, tables, links and LaTeX formulas, saved as Markdown.
 - **Layouts and theme.** Start slides from a layout gallery, edit the shared layouts, and set
   the deck's colours and fonts in a theme dialog.

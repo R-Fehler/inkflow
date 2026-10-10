@@ -10,6 +10,7 @@ import {
     zoneName,
 } from "./canvas";
 import { initCanvasMenu } from "./canvasmenu";
+import { editChart } from "./chart";
 import { initContext } from "./context";
 import { isCropped, setCropMode, startCrop } from "./crop";
 import { initDecks, showStart } from "./decks";
@@ -110,7 +111,11 @@ function boot(): void {
     readHash();
 
     hooks.editText = editTextOf;
-    hooks.editZone = (zone, el, at) => editZone(zone, el, { at });
+    hooks.editZone = (zone, el, at) => {
+        // A chart's "text" is its data.
+        if (currentSlide()?.zones[zone]?.kind === "chart") void editChart(zone);
+        else editZone(zone, el, { at });
+    };
     hooks.editingHost = editingHost;
     hooks.crop = (el) => {
         const sel = ed.selection.find((s) => s.el === el);
@@ -158,7 +163,7 @@ function boot(): void {
     on("error", showError);
     on("edit-zone", () => {
         const el = ed.selection[0]?.el;
-        if (el && isZone(el)) editZone(zoneName(el), el);
+        if (el && isZone(el)) hooks.editZone(zoneName(el), el);
     });
     on("edit-text", () => {
         const el = ed.selection[0]?.el;

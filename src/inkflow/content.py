@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import copy
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from lxml import etree
 
 from inkflow import ns
 from inkflow.backgrounds import MARGIN, background_paint
+from inkflow.charts import ZONE_TEXT_SCALE, ResolvedChart, render
 from inkflow.editor.provenance import copy_provenance
 from inkflow.enums import Muted
 from inkflow.logging import logger
@@ -430,9 +432,11 @@ def _replace_with_foreignobject(
             content_div.remove(child)
             wrapper.append(child)
 
-    fo.append(wrapper)
-
+    # Into the slide first, then the content: lxml drops the xmlns of an inline
+    # <svg> (a chart) as "redundant" with the slide root's when the two arrive
+    # together, though the XHTML div between them shadows it.
     _swap_zone(el, fo, rect, zone_id)
+    fo.append(wrapper)
 
 
 def _fmt_pos(base: int, offset_pct: float) -> str:
@@ -561,9 +565,25 @@ def _replace_with_media(
     _swap_zone(el, fo, rect, zone_id)
 
 
+def _replace_with_chart(
+    el: SvgElement, zone_id: str, font_size: int, item: ResolvedChart
+) -> None:
+    """Draw a chart into the zone's box: a nested ``<svg>`` in its place, whose
+    user units are the zone's, so the chart is laid out for its real size."""
+    rect = _zone_geometry(el).rect
+    chart = render(
+        item,
+        _parse_dimension(rect.width),
+        _parse_dimension(rect.height),
+        zone_id.removeprefix("zone-"),
+        font_size * ZONE_TEXT_SCALE,
+    )
+    _swap_zone(el, chart, rect, zone_id)
+
+
 def substitute_content(
     root: SvgElement,
-    content: dict[str, TextBox | Media],
+    content: Mapping[str, TextBox | Media | ResolvedChart],
     font_size: int = 36,
     dark_mode: bool = True,
 ) -> SvgElement:
@@ -575,6 +595,8 @@ def substitute_content(
 
         if isinstance(item, TextBox):
             _replace_with_foreignobject(el, zone_id, font_size, item)
+        elif isinstance(item, ResolvedChart):
+            _replace_with_chart(el, zone_id, font_size, item)
         else:
             _replace_with_media(el, root, zone_id, dark_mode, item)
 

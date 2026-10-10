@@ -4,7 +4,18 @@ The deck DSL you use in `deck.py`. Everything here is imported from the top-leve
 `inkflow` package:
 
 ```python
-from inkflow import Deck, Slide, Image, Video, TextBox, Overlay, Align, VAlign, Inline
+from inkflow import (
+    Deck,
+    Slide,
+    Image,
+    Video,
+    TextBox,
+    Chart,
+    Overlay,
+    Align,
+    VAlign,
+    Inline,
+)
 ```
 
 Refer to the [Enums](enums.md) reference page for the shared value types used across this section.
@@ -22,6 +33,8 @@ see the [Animations](animations.md) and [Transitions](transitions.md) reference 
 ::: inkflow.manifest.Video
 
 ::: inkflow.manifest.TextBox
+
+::: inkflow.manifest.Chart
 
 ::: inkflow.manifest.Inline
 

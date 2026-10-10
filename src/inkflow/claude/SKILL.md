@@ -90,8 +90,41 @@ the page to SVG in `.inkflow/cache/pdf/` and the served slide shows it under
 `_pdf/…` (with `data-inkflow-pdf` naming the PDF), but that cache is never a
 source to reference or edit. A figure drawn for paper (black on transparent)
 vanishes on a dark deck: give it `background="paper"` (`Image(...)`) or
-`inkflow:background="paper"` (an SVG `<image>`) for a white card behind it. A dashed placeholder box means no converter is
-installed (`pip install "inkflow[pdf]"`, or poppler's `pdftocairo`).
+`inkflow:background="paper"` (an SVG `<image>`) for a white card behind it.
+A dashed placeholder box means no converter is installed
+(`pip install "inkflow[pdf]"`, or poppler's `pdftocairo`).
+
+A **chart** fills a zone the same way, plotted from a data file at build time
+(keep data in `data/`; the first CSV row names the columns):
+
+```python
+from inkflow import Chart, ChartKind, Slide, animations
+
+Slide(
+    "demo.svg",  # contains <rect id="zone-sales" x="200" y="200" width="960" height="540"/>
+    zones={
+        "sales": Chart(
+            "data/sales.csv",
+            kind=ChartKind.LINE,
+            x="quarter",
+            y=["revenue", "cost"],
+            title="Sales",
+            labels=True,
+        )
+    },
+    animations=[animations.FadeIn("sales-series-revenue")],  # one series at a time
+)
+```
+
+Kinds: `BAR` (`stacked=`, `horizontal=`), `LINE`, `AREA` (`stacked=`),
+`SCATTER`, `PIE` (`donut=`). `Chart(data={"col": [...], ...})` writes the data
+inline; `.tsv` and `.json` (records or columns) work too. Each series is the
+group `<zone>-series-<column>` (pie slices `<zone>-slice-<category>`). In
+Markdown, a ```` ```chart ```` block takes `key: value` lines (`kind`, `x`,
+`y: a, b`, `title`, `stacked`, `horizontal`, `labels`, `legend`, `donut`,
+`id`, `aspect: 4:3`) and either `data: ../data/x.csv` (relative to the `.md`)
+or a Markdown table. To change a chart, edit its data file; never edit the
+drawn SVG.
 
 A **draw.io diagram** is `diagrams/<name>.drawio.svg` (draw.io's editable SVG:
 a picture with the diagram's `<mxfile>` source in the root's `content`

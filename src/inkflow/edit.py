@@ -33,7 +33,7 @@ class EditCommands:
     svg: str | None
     overrides: tuple[tuple[str, str], ...] = ()
     """Other ``INKFLOW_EDIT_CMD_<NAME>`` vars: an extension (``PNG``, ``MD``) or
-    a kind (``IMAGE``, ``TEXT``, ``VIDEO``), upper-case, in env order."""
+    a kind (``IMAGE``, ``TEXT``, ``VIDEO``, ``DATA``), upper-case, in env order."""
 
 
 NO_EDIT_COMMANDS = EditCommands(default=None, svg=None)
@@ -52,6 +52,8 @@ KINDS: dict[str, str] = {
     **dict.fromkeys(("md", "py", "css", "js", "txt", "toml", "json", "yaml"), "TEXT"),
     **dict.fromkeys(("mp4", "webm", "mov", "ogg"), "VIDEO"),
     "pdf": "PDF",
+    # A chart's table: a spreadsheet opens it as one.
+    **dict.fromkeys(("csv", "tsv"), "DATA"),
 }
 """File extension → the kind an ``INKFLOW_EDIT_CMD_<KIND>`` var covers."""
 
@@ -126,6 +128,14 @@ _CANDIDATES: dict[str, list[tuple[str, str]]] = {
         ("inkscape", "Inkscape"),
     ],
     "TEXT": _TEXT_EDITORS,
+    "DATA": [
+        ("localc", "LibreOffice Calc"),
+        ("libreoffice", "LibreOffice"),
+        ("gnumeric", "Gnumeric"),
+        ("numbers", "Numbers"),
+        ("excel", "Microsoft Excel"),
+        *_TEXT_EDITORS,
+    ],
     "VIDEO": [
         ("losslesscut", "LosslessCut (trim, no re-encoding)"),
         ("shotcut", "Shotcut"),
@@ -154,6 +164,8 @@ _FLATPAKS = {
     "drawio": "com.jgraph.drawio.desktop",
     "okular": "org.kde.okular",
     "evince": "org.gnome.Evince",
+    "libreoffice": "org.libreoffice.LibreOffice",
+    "gnumeric": "org.gnome.Gnumeric",
 }
 # macOS apps live in /Applications rather than on PATH.
 _MAC_APPS = {
@@ -170,6 +182,9 @@ _MAC_APPS = {
     "ghb": "HandBrake",
     "openshot-qt": "OpenShot Video Editor",
     "drawio": "draw.io",
+    "libreoffice": "LibreOffice",
+    "numbers": "Numbers",
+    "excel": "Microsoft Excel",
 }
 
 

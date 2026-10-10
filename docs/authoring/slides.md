@@ -93,6 +93,7 @@ Slide(
 | `str` | Rendered as inline Markdown |
 | `TextBox` | Text with explicit `align`, `valign` and `padding` |
 | `Image` / `Video` | Media, fitted and cropped to the zone |
+| `Chart` | A chart plotted from a data file, drawn at the zone's size (see [Charts](charts.md)) |
 
 A zone the slide never fills is removed from the output rather than left empty.
 

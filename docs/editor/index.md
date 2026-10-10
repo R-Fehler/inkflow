@@ -601,6 +601,41 @@ it and right-click opens the editor's menu, whatever its settings. To check it,
 within its trim. The presenter plays it as the deck says: with its controls when
 **Controls** is on, autoplaying or on a click.
 
+## Charts
+
+The toolbar's **chart** button (or **Insert chart…** in the right-click menu of
+an empty spot, which places it there) opens the chart dialog:
+
+- **The data** is a grid: type into the cells and the column names, add rows
+  and columns with **+ Row** / **+ Column**, remove one with its **×**. Cells
+  copied from a spreadsheet (LibreOffice, Excel, Google Sheets, Numbers) paste
+  into the grid from the cell you paste into, growing it as needed; pasted on
+  the header row, the first line names the columns. <kbd>Enter</kbd> moves down
+  (and adds a row at the bottom).
+- **The settings**: the kind (bar, line, area, scatter, pie), the column of
+  categories, which columns to plot (only columns of numbers can be), a title,
+  stacked, horizontal, donut, value labels and the legend.
+- **The preview** is drawn by the server exactly as the slide will draw it, at
+  the chart's size and in the deck's theme.
+
+**Insert chart** writes the data to a new `data/chart-N.csv` and puts the chart
+on the slide, 60% of its width, as one undo step. Like a video placed anywhere,
+it is an ordinary zone: a `zone-chart` rect in the slide's SVG, filled from
+`deck.py` with `Chart("data/chart-1.csv", ...)`, so it builds the same
+everywhere (see [Charts](../authoring/charts.md)). Move and resize it like any
+shape; it is redrawn at its new size.
+
+Select a chart and its panel shows the same settings; each change rewrites its
+`Chart(...)` call. **Edit data…** (or a double-click) opens the dialog on its
+data, and **Save** writes the file back (a TSV stays TSV, JSON stays JSON, and
+every cell is written as you typed it), or the `data={...}` written in
+`deck.py`. **Open ▾** opens the data file in a spreadsheet. Each series is a
+group named `<zone>-series-<column>`, so **Animations** can reveal them one at
+a time.
+
+A chart written as a ```` ```chart ```` block in Markdown is edited as that
+Markdown: double-click it to open the zone's text.
+
 ## Layouts and overlays
 
 Objects that come from a layout or an overlay are shared by every slide built on
@@ -721,10 +756,11 @@ default app:
 | Markdown, `deck.py`, CSS | VS Code, VSCodium, Zed, Sublime Text, Kate, gedit… |
 | Video | VLC, mpv |
 | PDF | Okular, Document Viewer, Zathura, Inkscape |
+| CSV, TSV (a chart's data) | LibreOffice Calc, Gnumeric, Numbers, Excel, then text editors |
 
 A command set in the environment comes first: `INKFLOW_EDIT_CMD`, or a more
 specific `INKFLOW_EDIT_CMD_SVG`, `INKFLOW_EDIT_CMD_PNG` (any extension) or
-`INKFLOW_EDIT_CMD_IMAGE` / `_TEXT` / `_VIDEO` (see
+`INKFLOW_EDIT_CMD_IMAGE` / `_TEXT` / `_VIDEO` / `_DATA` (see
 [CLI reference](../reference/cli.md#editing-from-the-presenter)). Save in the other
 program and the editor picks up the change as it does any other.
 

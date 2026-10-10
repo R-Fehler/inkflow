@@ -24,13 +24,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, cast
 
+from lxml import etree
+
 from inkflow import animations as animations_module
 from inkflow import drawio, instances, pdf
 from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
 from inkflow.assets import AssetRoots
+from inkflow.charts import (
+    ZONE_TEXT_SCALE,
+    ChartError,
+    ResolvedChart,
+    Table,
+    render,
+    serialize_rows,
+)
 from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, open_with
-from inkflow.editor import gitops, media, nativedialog, places, projects
+from inkflow.editor import chartedit, gitops, media, nativedialog, places, projects
 from inkflow.editor.codegen import Code, coerce_fields
 from inkflow.editor.deckedit import DeckEditError, DeckSource
 from inkflow.editor.drawioedit import DiagramEditError, apply_cell_ops
@@ -84,7 +94,7 @@ from inkflow.layout import (
     resolve_parent_path,
 )
 from inkflow.logging import logger
-from inkflow.manifest import Deck, Image, Inline, Slide, TextBox, Video
+from inkflow.manifest import Chart, Deck, Image, Inline, Slide, TextBox, Video
 from inkflow.ns import INKFLOW_SHOW_SHAPE
 from inkflow.pipeline import resolve_slide_src, slide_ids
 from inkflow.sync import build_context, plan_preview
@@ -382,6 +392,10 @@ class EditorSession:
             raise EditError("the deck has not built yet")
         if action == "theme-get":
             return {"ok": True, "theme": self._theme_info(deck)}
+        if action == "chart-preview":
+            return self._chart_preview(msg, deck)
+        if action == "chart-data":
+            return self._chart_data(msg, deck)
         if action == "layout-previews":
             return {"ok": True, "layouts": layout_previews(deck, self.deck_path)}
         if action == "copy-slides":
@@ -403,6 +417,9 @@ class EditorSession:
             "zone-media": self._zone_media,
             "media-props": self._media_props,
             "insert-video": self._insert_video,
+            "insert-chart": self._insert_chart,
+            "chart-props": self._chart_props,
+            "chart-save-data": self._chart_save_data,
             "insert-textbox": self._insert_textbox,
             "shape-text": self._shape_text,
             "to-markdown": self._to_markdown,
@@ -428,6 +445,7 @@ class EditorSession:
             ValueError,
             KeyError,
             TypeError,
+            OSError,
         ) as exc:
             raise EditError(str(exc)) from exc
         step = txn.commit(label)
@@ -787,6 +805,124 @@ class EditorSession:
         extra["ids"] = {"new": f"zone-{zone}"}
         extra["structural"] = True
         return "Insert video"
+
+    # ── Charts ──
+
+    def _zone_chart(self, deck: Deck, msg: dict[str, object]) -> tuple[int, str, Chart]:
+        """The ``Chart(...)`` filling the request's zone through ``zones={...}``."""
+        index, slide = self._deck_slide(deck, msg)
+        zone = str(msg.get("zone"))
+        chart = slide.zones.get(zone)
+        if not isinstance(chart, Chart):
+            raise EditError(f"zone {zone!r} holds no chart set in deck.py")
+        return index, zone, chart
+
+    def _chart_preview(self, msg: dict[str, object], deck: Deck) -> dict[str, object]:
+        """The chart as the build would draw it, from settings and a table the
+        dialog has not saved yet. Nothing is written."""
+        try:
+            if msg.get("zone") is not None:
+                _, zone, chart = self._zone_chart(deck, msg)
+            else:
+                zone, chart = "chart", Chart(data={})
+            chart = chartedit.apply_settings(chart, msg.get("chart"))
+            if msg.get("table") is not None:
+                table = Table.from_text(*chartedit.grid(msg.get("table")))
+            else:
+                table = chartedit.load(chart, self.project_dir)
+            resolved = ResolvedChart(chart, table)
+        except (ChartError, OSError, UnicodeDecodeError) as exc:
+            resolved = ResolvedChart(Chart(data={}), None, str(exc))
+            zone = "chart"
+        except ValueError as exc:
+            raise EditError(str(exc)) from exc
+        width = float(cast("float", msg.get("width") or 960))
+        height = float(cast("float", msg.get("height") or 540))
+        index = msg.get("slide")
+        slide = (
+            deck.slides[index]
+            if isinstance(index, int) and 0 <= index < len(deck.slides)
+            else None
+        )
+        size = (
+            slide.font_size
+            if slide is not None and slide.font_size is not None
+            else deck.effective_font_size
+        )
+        root = render(resolved, width, height, zone, size * ZONE_TEXT_SCALE)
+        return {"ok": True, "svg": etree.tostring(root, encoding="unicode")}
+
+    def _chart_data(self, msg: dict[str, object], deck: Deck) -> dict[str, object]:
+        """A chart zone's table as cell text, for the grid editor."""
+        _, _, chart = self._zone_chart(deck, msg)
+        try:
+            columns, rows = chartedit.text_table(chart, self.project_dir)
+        except (ChartError, OSError, UnicodeDecodeError) as exc:
+            raise EditError(str(exc)) from exc
+        path = chartedit.data_path(chart, self.project_dir)
+        return {
+            "ok": True,
+            "columns": columns,
+            "rows": rows,
+            "path": str(path) if path is not None else None,
+            "src": chart.src,
+        }
+
+    def _insert_chart(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """Place a chart anywhere: its table written to a new ``data/chart-N.csv``,
+        a new zone rect in the slide's own SVG, and ``Chart(...)`` filling it
+        through ``zones={...}`` in deck.py, as one step."""
+        index, slide = self._deck_slide(deck, msg)
+        columns, rows = chartedit.grid(msg.get("table"))
+        path = chartedit.new_data_file(self.project_dir)
+        txn.write(path, serialize_rows(".csv", columns, rows).encode("utf-8"))
+        chart = chartedit.apply_settings(Chart(self._deck_rel(path)), msg.get("chart"))
+        zone = self._new_zone(msg, deck, slide, txn, "chart")
+        source = self._deck_source(txn)
+        code = Code()
+        source.set_zone(index, zone, code.call(chart))
+        self._save_deck(txn, source, code.imports)
+        extra["ids"] = {"new": f"zone-{zone}"}
+        extra["structural"] = True
+        return "Insert chart"
+
+    def _chart_props(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, _extra: dict[str, object]
+    ) -> str:
+        """Change a chart's settings (kind, columns, title...) in deck.py."""
+        index, zone, chart = self._zone_chart(deck, msg)
+        updated = chartedit.apply_settings(chart, msg.get("fields"))
+        source = self._deck_source(txn)
+        code = Code()
+        source.set_zone(index, zone, code.call(updated))
+        self._save_deck(txn, source, code.imports)
+        return "Chart settings"
+
+    def _chart_save_data(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, _extra: dict[str, object]
+    ) -> str:
+        """Write a chart's edited table back where it came from: its data file
+        (in that file's format), or ``data={...}`` in deck.py; with the dialog's
+        settings, if it sent any, in the same step."""
+        index, zone, chart = self._zone_chart(deck, msg)
+        columns, rows = chartedit.grid(msg.get("table"))
+        updated = chartedit.apply_settings(chart, msg.get("chart"))
+        path = chartedit.data_path(chart, self.project_dir)
+        if path is not None:
+            if not chartedit.is_data_file(path):
+                raise EditError(f"cannot write chart data to {path.name}")
+            txn.write(path, serialize_rows(path.suffix, columns, rows).encode("utf-8"))
+        else:
+            data = Table.from_text(columns, rows).to_columns()
+            updated = dataclasses.replace(updated, data=data)
+        if updated != chart:
+            source = self._deck_source(txn)
+            code = Code()
+            source.set_zone(index, zone, code.call(updated))
+            self._save_deck(txn, source, code.imports)
+        return "Edit chart data"
 
     def _insert_textbox(
         self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]

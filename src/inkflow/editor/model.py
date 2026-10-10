@@ -20,12 +20,13 @@ from inkflow import drawio
 from inkflow import transitions as transitions_module
 from inkflow.animations import Animation, Cue, PlayVideo
 from inkflow.colors import SVG_TOKENS
+from inkflow.editor.chartedit import chart_json
 from inkflow.editor.codegen import field_schema, to_json
 from inkflow.editor.deckedit import DeckSource
 from inkflow.editor.svgops import file_hash
 from inkflow.layout import discover_layouts
 from inkflow.loaders import load_md
-from inkflow.manifest import Deck, Image, Inline, Slide, TextBox, Video
+from inkflow.manifest import Chart, Deck, Image, Inline, Slide, TextBox, Video
 from inkflow.pipeline import SlideData, resolve_slide_src
 from inkflow.transitions import Transition
 from inkflow.zones import zone_spans
@@ -126,7 +127,9 @@ def _type_catalog(
     return out
 
 
-def _zone_json(value: object) -> dict[str, object]:
+def _zone_json(value: object, project_dir: Path) -> dict[str, object]:
+    if isinstance(value, Chart):
+        return chart_json(value, project_dir)
     if isinstance(value, str):
         return {"kind": "text", "text": str(value)}
     if isinstance(value, TextBox):
@@ -250,7 +253,7 @@ def build_model(
         )
         entry["md"] = _md_json(slide, project_dir)
         entry["notes"] = _notes_json(slide, project_dir)
-        entry["zones"] = {k: _zone_json(v) for k, v in slide.zones.items()}
+        entry["zones"] = {k: _zone_json(v, project_dir) for k, v in slide.zones.items()}
         entry["transition"] = (
             _transition_json(slide.transition, deck_module)
             if slide.transition is not None

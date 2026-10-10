@@ -31,6 +31,8 @@ import {
     slideSize,
     zoneName,
 } from "./canvas";
+import { chartSettings, editChart } from "./chart";
+import { CHART_KINDS, xColumn } from "./chartgrid";
 import { parseConnection } from "./connectors";
 import {
     isCropped,
@@ -283,7 +285,7 @@ function mediaSection(
 ): HTMLElement {
     const kind = media.kind === "video" ? "video" : "image";
     const schema = ed.model?.mediaTypes?.[kind] ?? [];
-    const values = media.fields ?? {};
+    const values = (media.fields ?? {}) as Record<string, FieldValue>;
     const commit = (name: string, v: FieldValue) =>
         void edit({
             action: "media-props",
@@ -417,6 +419,117 @@ function zonePageRow(slide: SlideModel, zone: string, ref: string): Node {
             if (choice) show(choice.page);
         }),
     );
+}
+
+// A chart's settings, written back as its Chart(...) call in deck.py; its
+// data is edited in the chart dialog ("Edit data…").
+function chartSection(
+    slide: SlideModel,
+    zone: string,
+    value: ZoneValue,
+): HTMLElement {
+    const s = chartSettings(value);
+    const commit = (fields: Record<string, unknown>) =>
+        void edit({
+            action: "chart-props",
+            slide: slide.deckIndex,
+            zone,
+            fields,
+        });
+    const grid = {
+        columns: value.columns ?? [],
+        rows: [] as string[][],
+    };
+    const numeric = value.numeric ?? [];
+    const x = xColumn(grid, s);
+    // Without rows, plotted() cannot tell numbers: the model says which.
+    const shown = s.y ?? numeric.filter((c) => c !== x);
+    const check = (label: string, on: boolean, fn: (v: boolean) => void) => {
+        const box = h("input", { type: "checkbox" });
+        box.checked = on;
+        box.addEventListener("change", () => fn(box.checked));
+        return row(label, box);
+    };
+    const series = h("div", { class: "chart-series" });
+    for (const c of grid.columns.filter((c) => c !== x)) {
+        const box = h("input", { type: "checkbox" });
+        box.checked = shown.includes(c);
+        box.disabled = !numeric.includes(c);
+        box.addEventListener("change", () => {
+            const next = grid.columns.filter((n) =>
+                n === c ? box.checked : shown.includes(n),
+            );
+            const auto = numeric.filter((n) => n !== x);
+            const same =
+                next.length === auto.length &&
+                next.every((n, i) => n === auto[i]);
+            commit({ y: same ? null : next });
+        });
+        series.append(h("label", { class: "chart-check" }, box, c));
+    }
+    const rows: Node[] = [
+        row(
+            "Kind",
+            selectInput(CHART_KINDS, s.kind, (v) => commit({ kind: v })),
+        ),
+        row(
+            s.kind === "scatter" ? "X values" : "Categories",
+            selectInput(
+                grid.columns.map((c) => ({ value: c, label: c })),
+                x ?? "",
+                (v) => commit({ x: v === grid.columns[0] ? null : v }),
+            ),
+        ),
+        h(
+            "div",
+            { class: "prop-row" },
+            h(
+                "span",
+                { class: "prop-label" },
+                s.kind === "pie" ? "Sizes" : "Series",
+            ),
+            series,
+        ),
+        row(
+            "Title",
+            textInput(s.title ?? "", (v) => commit({ title: v }), "none"),
+        ),
+    ];
+    if (s.kind === "bar" || s.kind === "area") {
+        rows.push(check("Stacked", s.stacked, (v) => commit({ stacked: v })));
+    }
+    if (s.kind === "bar") {
+        rows.push(
+            check("Horizontal", s.horizontal, (v) => commit({ horizontal: v })),
+        );
+    }
+    if (s.kind === "pie") {
+        rows.push(check("Donut", s.donut, (v) => commit({ donut: v })));
+    }
+    rows.push(
+        check("Value labels", s.labels, (v) => commit({ labels: v })),
+        row(
+            "Legend",
+            selectInput(
+                [
+                    { value: "auto", label: "Auto" },
+                    { value: "on", label: "Show" },
+                    { value: "off", label: "Hide" },
+                ],
+                s.legend == null ? "auto" : s.legend ? "on" : "off",
+                (v) => commit({ legend: v === "auto" ? null : v === "on" }),
+            ),
+        ),
+        h(
+            "p",
+            { class: "hint" },
+            `Each series is a group with the id ${zone}-series-<column>: animate them one by one.`,
+        ),
+    );
+    if (value.error) {
+        rows.unshift(h("p", { class: "hint error" }, value.error));
+    }
+    return section("Chart", ...rows);
 }
 
 function typeInfo(list: TypeInfo[], type: string): TypeInfo | null {
@@ -1231,7 +1344,10 @@ function renderObjectPanel(sel: Selected): void {
                 ? ed.model?.deckPath
                 : slide.md.path;
         const isMedia =
-            !!media && (media.kind === "image" || media.kind === "video");
+            !!media &&
+            (media.kind === "image" ||
+                media.kind === "video" ||
+                media.kind === "chart");
         const body: Node[] = [
             h(
                 "div",
@@ -1240,7 +1356,30 @@ function renderObjectPanel(sel: Selected): void {
                 isMedia ? null : openButton(textFile),
             ),
         ];
-        if (media && (media.kind === "image" || media.kind === "video")) {
+        if (media?.kind === "chart") {
+            body.push(
+                h(
+                    "div",
+                    { class: "source-hint" },
+                    h(
+                        "p",
+                        { class: "hint media-src" },
+                        media.inline
+                            ? "Data written in deck.py"
+                            : (media.src ?? ""),
+                    ),
+                    media.path ? openButton(media.path) : null,
+                ),
+                button(
+                    "Edit data…",
+                    "Edit the chart's table (double-click)",
+                    () => void editChart(name),
+                ),
+            );
+        } else if (
+            media &&
+            (media.kind === "image" || media.kind === "video")
+        ) {
             body.push(
                 h(
                     "div",
@@ -1296,6 +1435,9 @@ function renderObjectPanel(sel: Selected): void {
         panel.append(section("Content", ...body));
         if (media && (media.kind === "image" || media.kind === "video")) {
             panel.append(mediaSection(slide, name, media));
+        }
+        if (media?.kind === "chart") {
+            panel.append(chartSection(slide, name, media));
         }
     }
 

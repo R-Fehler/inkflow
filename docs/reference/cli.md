@@ -71,7 +71,8 @@ for content, notes, and the deck script itself.
 Any other extension works the same way (`INKFLOW_EDIT_CMD_PNG`,
 `INKFLOW_EDIT_CMD_MD`), and so does a kind of file:
 `INKFLOW_EDIT_CMD_IMAGE` (PNG, JPEG, WebP, GIF…), `INKFLOW_EDIT_CMD_TEXT`
-(Markdown, Python, CSS…) and `INKFLOW_EDIT_CMD_VIDEO`.
+(Markdown, Python, CSS…), `INKFLOW_EDIT_CMD_VIDEO` and `INKFLOW_EDIT_CMD_DATA`
+(a chart's CSV or TSV).
 The most specific one set wins: extension, then kind, then `INKFLOW_EDIT_CMD`.
 The visual editor's **Open ▾** menu offers the same command first, followed by the
 programs it finds installed (see [Visual editor](../editor/index.md#opening-files-in-other-programs)).
