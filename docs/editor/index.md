@@ -621,7 +621,7 @@ Each result can also be downloaded straight from the dialog (the web page as a
 | <kbd>PageUp</kbd> <kbd>PageDown</kbd> | Previous / next slide |
 | <kbd>Ctrl</kbd>+<kbd>M</kbd> | New slide after this one, on the same layout |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> | New slide from the layout gallery |
-| <kbd>Ctrl</kbd>+<kbd>Enter</kbd> | Present from this slide |
+| <kbd>Ctrl</kbd>+<kbd>Enter</kbd> | Present from this slide (in the presenter, <kbd>Shift</kbd>+<kbd>E</kbd> or its editor button comes back here, at the slide it is on) |
 
 ## Opening files in other programs
 

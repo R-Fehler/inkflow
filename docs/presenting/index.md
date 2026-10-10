@@ -42,6 +42,7 @@ Press <kbd>?</kbd> at any time for the full keybinding list.
 | <kbd>s</kbd> | [Cycle sync mode](sync.md#sync-modes) |
 | <kbd>d</kbd> | Diagnostics |
 | <kbd>n</kbd> | Notifications |
+| <kbd>E</kbd> (<kbd>Shift</kbd>+<kbd>e</kbd>) | Back to the [visual editor](../editor/index.md), at this slide (served decks only) |
 | <kbd>?</kbd> | This help |
 
 <kbd>Esc</kbd> closes whatever is open.

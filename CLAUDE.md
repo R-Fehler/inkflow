@@ -240,7 +240,9 @@ src/
                       via progress-driver.ts), overview, picker, websocket, status bar,
                       keyboard, syncmenu.ts (sync-mode status-bar control),
                       pv.ts (presenter panel sidebar), video.ts (step-driven
-                      <video> playback, wired in via status.ts), and deck-url.ts
+                      <video> playback, wired in via status.ts), toeditor.ts (back to
+                      /edit at this slide: the opener editor tab when there is one;
+                      hidden in a static build), and deck-url.ts
                       (pure position<->fragment codec behind syncURL/readURL; the
                       only module reading location.pathname/search/hash)
     editor/           visual editor: canvas.ts (render, hit-testing, handles, drag ->

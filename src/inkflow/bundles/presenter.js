@@ -3153,6 +3153,34 @@
     renderSyncButton();
   }
 
+  // src/ts/presenter/toeditor.ts
+  var served = false;
+  function backToEditor() {
+    if (!served) return;
+    const hash = `#slide=${state.slideIndex + 1}`;
+    const opener = window.opener;
+    try {
+      if (opener && !opener.closed && opener.location.origin === location.origin && opener.location.pathname.startsWith("/edit")) {
+        opener.location.hash = hash;
+        opener.focus();
+        window.close();
+        if (window.closed) return;
+      }
+    } catch {
+    }
+    location.href = `/edit${hash}`;
+  }
+  function initToEditor(wsPort) {
+    const button = document.getElementById("btn-to-editor");
+    served = wsPort != null;
+    if (!button) return;
+    if (!served) {
+      button.style.display = "none";
+      return;
+    }
+    button.addEventListener("click", backToEditor);
+  }
+
   // src/ts/presenter/windowsync.ts
   var statusDot = document.getElementById("ws-dot");
   var btnPresenterView = document.getElementById("btn-presenter-view");
@@ -3789,6 +3817,7 @@
     g: { action: openPicker, preventDefault: true },
     o: { action: toggleOverview, preventDefault: true },
     e: { action: toggleMenu },
+    E: { action: backToEditor },
     f: { action: toggleFullscreen },
     b: { action: () => toggleCurtain("black") },
     ".": { action: toggleLaser },
@@ -3926,6 +3955,7 @@
   initSyncMenu();
   initWindowSync(WS_PORT);
   initEditMenu(EDIT_COMMANDS, WS_PORT);
+  initToEditor(WS_PORT);
   var deepLinked = readURL();
   loadSlide();
   renderPv();
