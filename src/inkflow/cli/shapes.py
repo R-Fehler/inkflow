@@ -232,6 +232,13 @@ def shape() -> None:
 )
 @click.option("--page", default=None, type=int, help="A PDF's page.")
 @click.option(
+    "--drawio",
+    "drawio_mode",
+    default=None,
+    type=click.Choice(["inline", "themed", "picture"]),
+    help="A draw.io diagram drawn into the slide (its shapes take arrows).",
+)
+@click.option(
     "--data",
     default=None,
     metavar="FILE",
@@ -265,6 +272,7 @@ def add(
     arrow: str | None,
     src: str | None,
     page: int | None,
+    drawio_mode: str | None,
     data: str | None,
     chart_kind: str | None,
     title: str | None,
@@ -303,6 +311,7 @@ def add(
         arrow=arrow,
         src=src,
         page=page,
+        drawio=drawio_mode,
         data=data,
         chart=chart_kind,
         title=title,

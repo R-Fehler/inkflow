@@ -226,6 +226,7 @@ commands:
           --arrow=: Arrowheads
           --src=: An image's file (copied into assets/ from outside the project)
           --page=: A PDF's page
+          --drawio=: A draw.io diagram drawn into the slide
           --data=: A chart's data (CSV, TSV, JSON, Markdown table)
           --chart=: A chart's kind
           --title=: A chart's title

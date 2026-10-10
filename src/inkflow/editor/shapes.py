@@ -135,6 +135,7 @@ COMMANDS: dict[str, tuple[frozenset[str], int, int | None]] = {
                 "arrow",
                 "src",
                 "page",
+                "drawio",
                 "data",
                 "chart",
                 "title",
@@ -692,7 +693,7 @@ class Runner:
             "arrow": {"from", "to", "id", "stroke", "stroke-width", "style", "arrow"},
             "text": {"at", "id", "text", "fill", "font-size"},
             "textbox": {"at", "size", "id", "text", "fill", "stroke", "stroke-width"},
-            "image": {"at", "size", "id", "src", "page"},
+            "image": {"at", "size", "id", "src", "page", "drawio"},
             "chart": {"at", "size", "id", "data", "chart", "title"},
         }[kind]
         wrong = sorted(set(opts) - allowed)
@@ -975,11 +976,24 @@ class Runner:
             box = self._box(opts, (natural[0] * k, natural[1] * k))
         loc, _, local_box = self._in_parent(box)
         ident = f' id="{escape(requested)}"' if requested else ""
+        shown = ""
+        if "drawio" in opts:
+            # The diagram panel's "Show as": drawn into the slide, its shapes
+            # named <picture id>-<cell id> (arrows attach to them).
+            mode = str(opts["drawio"])
+            if mode not in ("inline", "themed", "picture"):
+                raise ShapeError("--drawio takes inline, themed or picture")
+            if not drawio.is_drawio_path(arrival.path):
+                raise ShapeError(f"{arrival.path.name} is not a draw.io diagram")
+            if mode != "picture":
+                shown = f' inkflow:drawio="{mode}"'
+                if not requested:
+                    ident = ' id="diagram"'
         xml = (
             f'<image{ident} href="{escape(href)}" '
             + f'x="{fmt(local_box.x)}" y="{fmt(local_box.y)}" '
             + f'width="{fmt(local_box.width)}" height="{fmt(local_box.height)}" '
-            + 'preserveAspectRatio="xMidYMid meet"/>'
+            + f'preserveAspectRatio="xMidYMid meet"{shown}/>'
         )
         ids = self.svg(
             [
