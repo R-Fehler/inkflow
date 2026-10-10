@@ -3597,6 +3597,16 @@
     });
     if (result.ok && result.select != null) pendingSelect = result.select;
   }
+  async function newSlideLike(i = ed.current) {
+    const result = await edit({
+      action: "slide",
+      op: "new",
+      after: i,
+      like: i,
+      name: "slide"
+    });
+    if (result.ok && result.select != null) pendingSelect = result.select;
+  }
   async function duplicateSlide(i = ed.current) {
     const result = await edit({ action: "slide", op: "duplicate", slide: i });
     if (result.ok && result.select != null) pendingSelect = result.select;
@@ -9347,7 +9357,9 @@ ${area2.value.slice(pos)}`;
       void (e.shiftKey ? ungroupSelection() : groupSelection());
     } else if (mod && lower === "m") {
       handled();
-      void openGallery({ mode: "insert", after: ed.current });
+      if (e.shiftKey) void openGallery({ mode: "insert", after: ed.current });
+      else if (ed.model?.deckEditable) void newSlideLike(ed.current);
+      else toast("deck.py builds its slides in code; add slides there", "error");
     } else if (mod && key === "Enter") {
       handled();
       present();

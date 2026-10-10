@@ -610,7 +610,8 @@ Each result can also be downloaded straight from the dialog (the web page as a
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> <kbd>I</kbd> <kbd>K</kbd> (in text) | Bold, italic, link |
 | <kbd>Tab</kbd> (in a table) | Next cell |
 | <kbd>PageUp</kbd> <kbd>PageDown</kbd> | Previous / next slide |
-| <kbd>Ctrl</kbd>+<kbd>M</kbd> | New slide |
+| <kbd>Ctrl</kbd>+<kbd>M</kbd> | New slide after this one, on the same layout |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> | New slide from the layout gallery |
 | <kbd>Ctrl</kbd>+<kbd>Enter</kbd> | Present from this slide |
 
 ## Opening files in other programs

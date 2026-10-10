@@ -30,7 +30,13 @@ import { toggleGrid } from "./grid";
 import { insertImage, insertVideo, setTool, typeInto } from "./insert";
 import { edit } from "./net";
 import { alignSelection } from "./props";
-import { deleteSlide, deleteSlides, duplicateSlide, gotoSlide } from "./sorter";
+import {
+    deleteSlide,
+    deleteSlides,
+    duplicateSlide,
+    gotoSlide,
+    newSlideLike,
+} from "./sorter";
 import { currentSlide, ed, emit, on, type Tool } from "./state";
 import { copyStyle, pasteStyle } from "./stylecopy";
 import { isEditingText } from "./textedit";
@@ -273,7 +279,10 @@ function onKey(e: KeyboardEvent): void {
         void (e.shiftKey ? ungroupSelection() : groupSelection());
     } else if (mod && lower === "m") {
         handled();
-        void openGallery({ mode: "insert", after: ed.current });
+        // Ctrl+M: a new slide on this slide's layout; with Shift, pick one.
+        if (e.shiftKey) void openGallery({ mode: "insert", after: ed.current });
+        else if (ed.model?.deckEditable) void newSlideLike(ed.current);
+        else toast("deck.py builds its slides in code; add slides there", "error");
     } else if (mod && key === "Enter") {
         handled();
         present();

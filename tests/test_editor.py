@@ -835,6 +835,21 @@ class TestSession:
         assert (project / "notes" / "text.md").read_text() == "Hi"
         assert 'notes="notes/text.md"' in (project / "deck.py").read_text()
 
+    def test_new_slide_like_another_takes_its_layout(self, project: Path) -> None:
+        session = EditorSession(project / "deck.py")
+        session.apply(
+            {"action": "slide", "op": "new", "after": 0, "layout": "two"},
+            _deck(project),
+        )
+        # Like the slide just made (its own drawing, built on "two").
+        session.apply(
+            {"action": "slide", "op": "new", "after": 1, "like": 1, "name": "next"},
+            _deck(project),
+        )
+        deck = _deck(project)
+        assert deck.slides[2].src == "next.svg"
+        assert 'inkflow:parent="two"' in (project / "slides" / "next.svg").read_text()
+
     def test_slide_lifecycle(self, project: Path) -> None:
         session = EditorSession(project / "deck.py")
         session.apply(

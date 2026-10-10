@@ -223,6 +223,18 @@ export async function newSlide(
     if (result.ok && result.select != null) pendingSelect = result.select;
 }
 
+/** A new slide after ``i`` on the same layout as slide ``i`` (Ctrl+M). */
+export async function newSlideLike(i = ed.current): Promise<void> {
+    const result = await edit({
+        action: "slide",
+        op: "new",
+        after: i,
+        like: i,
+        name: "slide",
+    });
+    if (result.ok && result.select != null) pendingSelect = result.select;
+}
+
 export async function duplicateSlide(i = ed.current): Promise<void> {
     const result = await edit({ action: "slide", op: "duplicate", slide: i });
     if (result.ok && result.select != null) pendingSelect = result.select;

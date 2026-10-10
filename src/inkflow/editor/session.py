@@ -1728,6 +1728,10 @@ class EditorSession:
         elif op == "new":
             after = int(cast("int", msg.get("after", len(deck.slides) - 1)))
             layout = msg.get("layout")
+            if isinstance(msg.get("like"), int):
+                # The same layout as that slide (Ctrl+M).
+                _, model = self._deck_slide(deck, {"slide": msg.get("like")})
+                layout = self._layout_of(model, deck, txn)
             name = self._new_slide_file(
                 str(layout) if layout else None,
                 str(msg.get("name") or "slide"),
@@ -1763,6 +1767,15 @@ class EditorSession:
             raise EditError(f"unknown slide operation {op!r}")
         self._save_deck(txn, source, imports)
         return label
+
+    def _layout_of(self, slide: Slide, deck: Deck, txn: _Txn) -> str | None:
+        """The layout a slide is built on: the one its own drawing names
+        (``inkflow:parent``), or the shared layout it shows directly."""
+        src_path = resolve_slide_src(slide.src, self.project_dir, deck.theme)
+        if not self._is_own(src_path, deck):
+            return slide.src
+        svg = SvgFile.from_bytes(src_path, txn.read(src_path))
+        return svg.root.get("{urn:inkflow}parent")
 
     def _is_own(self, path: Path, deck: Deck) -> bool:
         resolved = path.resolve()
