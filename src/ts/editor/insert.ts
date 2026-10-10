@@ -6,12 +6,11 @@
 // so it looks the same), which is what makes "just draw on any slide" possible.
 
 import {
-    candidatesAt,
+    attachTargetAt,
     clearSelection,
     clientToSlide,
     drawOverlay,
     hooks,
-    isConnector,
     keyOf,
     mediaZoneAt,
     newConnectorPath,
@@ -342,9 +341,7 @@ function onToolDown(e: PointerEvent, start: { x: number; y: number }): boolean {
         if (connecting) {
             endHit = ev.altKey ? null : siteAt(end, null);
             if (endHit) end = { x: endHit.site.x, y: endHit.site.y };
-            const under = candidatesAt(ev.clientX, ev.clientY).find(
-                (el) => !isConnector(el),
-            );
+            const under = attachTargetAt(ev.clientX, ev.clientY);
             showSites([
                 ...(under
                     ? [

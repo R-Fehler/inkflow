@@ -27,6 +27,7 @@ import {
     sitesFromCorners,
 } from "./connectors";
 import { h, svgEl, toast } from "./dom";
+import { attachableCell, attachableCells, cellShape } from "./drawioshapes";
 import {
     type AttrPlan,
     apply,
@@ -1009,7 +1010,7 @@ export function sitesPerSide(el: Element): number {
 // then sit on the ellipse rather than the box around it).
 function cornersOf(el: Element): { corners: Pt[]; round: boolean } | null {
     try {
-        const m = measure(el);
+        const m = measure(attachableCell(el) ? cellShape(el) : el);
         if (!m) return null;
         const toSlide = multiply(invert(rootCTM()), mat(m.ctm));
         const b = m.bbox;
@@ -1055,13 +1056,37 @@ function attachables(except: Element | null): Element[] {
         ? [...ed.scope.children]
         : [...svg.querySelectorAll("[data-ink-top]")];
     const area = slideSize();
-    return pool.filter((el) => {
+    const objects = pool.filter((el) => {
         if (el === except || isConnector(el) || !el.hasAttribute("data-ink"))
             return false;
         const b = slideBox(el);
         // Full-slide backgrounds are not something an arrow points at.
         return !!b && b.width * b.height < area.width * area.height * 0.8;
     });
+    // And the shapes of a diagram drawn into the slide (draw.io cells).
+    const cells = objects.flatMap((el) =>
+        el.hasAttribute("data-drawio") ? attachableCells(el) : [],
+    );
+    return [...objects, ...cells];
+}
+
+/** What a line or arrow would attach to under the pointer: a diagram's shape
+ * before the diagram, else the topmost object that is not a connector. */
+export function attachTargetAt(
+    x: number,
+    y: number,
+    except: Element | null = null,
+): Element | null {
+    const svg = slideRoot();
+    for (const hit of document.elementsFromPoint(x, y)) {
+        if (!svg?.contains(hit)) continue;
+        const cell = attachableCell(hit);
+        if (cell) return cell;
+    }
+    return (
+        candidatesAt(x, y).find((el) => el !== except && !isConnector(el)) ??
+        null
+    );
 }
 
 /** The site nearest to a slide point (within a few screen pixels), if any. */
@@ -1123,6 +1148,57 @@ function connectorEnd(conn: Element, which: "start" | "end"): End | null {
     const m = toSlideMat(conn);
     if (!pts || !m) return null;
     return apply(m, which === "start" ? pts.start : pts.end);
+}
+
+/**
+ * Whether an attached connector's drawn ends no longer meet its shapes (they
+ * moved in draw.io, Inkscape or another editor since it was routed).
+ */
+export function isStale(conn: Element): boolean {
+    const pts = endpointsOf(conn.getAttribute("d") ?? "");
+    const m = toSlideMat(conn);
+    if (!pts || !m) return false;
+    for (const which of ["start", "end"] as const) {
+        const c = parseConnection(conn.getAttribute(ENDS[which]));
+        const target = c ? byId(c.id) : null;
+        const site = c && target ? siteOf(target, c.site) : null;
+        if (!site) continue;
+        const drawn = apply(m, which === "start" ? pts.start : pts.end);
+        if (Math.hypot(drawn.x - site.x, drawn.y - site.y) > 1) return true;
+    }
+    return false;
+}
+
+/** The slide's connectors attached to `id` or, for a diagram, its shapes. */
+export function connectorsTo(id: string): Element[] {
+    const svg = slideRoot();
+    if (!svg) return [];
+    return [
+        ...svg.querySelectorAll(`[${CSS.escape(CONNECTOR)}][data-ink]`),
+    ].filter(
+        (conn) =>
+            canTransform(conn) &&
+            (["start", "end"] as const).some((w) => {
+                const c = parseConnection(conn.getAttribute(ENDS[w]));
+                return !!c && (c.id === id || c.id.startsWith(`${id}-`));
+            }),
+    );
+}
+
+/** Re-route connectors along their shapes (`coalesce`: into that step). */
+export function rerouteConnectors(
+    conns: Element[],
+    label = "Re-route arrows",
+    coalesce?: string,
+): Promise<unknown> | null {
+    const plans = conns.flatMap((el) => {
+        const d = connectorPath(el);
+        const sel = toSelected(el as SVGGraphicsElement);
+        return d
+            ? [{ sel, ops: [{ kind: "attrs", loc: sel.loc, set: { d } }] }]
+            : [];
+    });
+    return plans.length ? sendSvgOps(plans, label, coalesce) : null;
 }
 
 const BEND = "inkflow:bend";
@@ -1289,9 +1365,7 @@ function endpointPlans(
     const sel = drag.snaps[0].sel;
     const conn = sel.el;
     const hit = e.altKey ? null : siteAt(p, conn);
-    const under = candidatesAt(e.clientX, e.clientY).find(
-        (el) => el !== conn && !isConnector(el),
-    );
+    const under = attachTargetAt(e.clientX, e.clientY, conn);
     siteHints = [
         ...(under
             ? [
@@ -1968,9 +2042,7 @@ function onPointerMove(e: PointerEvent): void {
             // The connection sites a line or arrow would attach to.
             const p = clientToSlide(e.clientX, e.clientY);
             const hit = e.altKey ? null : siteAt(p, null);
-            const under = candidatesAt(e.clientX, e.clientY).find(
-                (el) => !isConnector(el),
-            );
+            const under = attachTargetAt(e.clientX, e.clientY);
             const hints = [
                 ...(under
                     ? [

@@ -17,6 +17,7 @@ import base64
 import re
 import urllib.parse
 import zlib
+from dataclasses import dataclass
 from pathlib import Path
 
 from lxml import etree
@@ -80,6 +81,45 @@ def decompress(mxfile: str) -> str:
         page.append(model)
     root.set("compressed", "false")
     return etree.tostring(root, encoding="unicode")
+
+
+@dataclass(frozen=True)
+class Cell:
+    """One cell of a diagram's source, as far as the slide needs it."""
+
+    kind: str
+    """``vertex`` (a shape), ``edge`` (an arrow), ``label`` (an arrow's
+    label, a vertex inside an edge) or ``other`` (the root and its layers)."""
+    parent: str | None
+
+
+def cells(mxfile: str) -> dict[str, Cell]:
+    """The cells of every page of a diagram source, by id (first page wins)."""
+    root = etree.fromstring(decompress(mxfile).encode("utf-8"), parser=svg_parser())
+    raw: dict[str, tuple[str, str | None]] = {}
+    for cell in root.iter("mxCell", "UserObject", "object"):
+        # A cell with data is an <object>/<UserObject> wrapping its <mxCell>.
+        inner = cell if cell.tag == "mxCell" else cell.find("mxCell")
+        cell_id = cell.get("id")
+        if inner is None or cell_id is None or cell_id in raw:
+            continue
+        kind = (
+            "vertex"
+            if inner.get("vertex") == "1"
+            else "edge"
+            if inner.get("edge") == "1"
+            else "other"
+        )
+        raw[cell_id] = (kind, inner.get("parent"))
+    return {
+        cell_id: Cell(
+            "label"
+            if kind == "vertex" and parent and raw.get(parent, ("",))[0] == "edge"
+            else kind,
+            parent,
+        )
+        for cell_id, (kind, parent) in raw.items()
+    }
 
 
 def source(data: bytes) -> str:

@@ -9,12 +9,13 @@
 // another copy (self-hosted, offline). Messages are only taken from that
 // frame and that origin.
 
+import { connectorsTo, isStale, rerouteConnectors } from "./canvas";
 import { pictureOf } from "./crop";
 import { closeDialog, openDialog } from "./dialog";
 import { h, toast } from "./dom";
 import { insertDiagramImage } from "./insert";
 import { edit, request } from "./net";
-import { currentSlide, sourceOf } from "./state";
+import { currentSlide, off, on, sourceOf } from "./state";
 import type { Selected } from "./types";
 
 /**
@@ -67,6 +68,8 @@ interface Target {
     path: string | null;
     // The slide's picture of it: keeps its width, follows new proportions.
     image?: { file: string; hash: string; loc: string };
+    // Its id: arrows attached to it or its shapes follow a save.
+    id?: string | null;
 }
 
 let open: HTMLElement | null = null;
@@ -87,6 +90,7 @@ export function editDiagram(sel: Selected): void {
             hash: src.hash,
             loc: image.getAttribute("data-ink") ?? sel.loc,
         },
+        id: image.getAttribute("id"),
     });
 }
 
@@ -194,12 +198,16 @@ async function openDrawio(target: Target): Promise<void> {
 
     const save = async (svg: string) => {
         const first = path === null;
+        // The arrows' re-routing joins the save's undo step.
+        const step = `drawio-save-${Date.now()}`;
         const result = await edit({
             action: "drawio-save",
             path,
             svg,
             image: first ? undefined : target.image,
+            coalesce: step,
         });
+        if (result.ok && !first && target.id) followArrows(target.id, step);
         saving = false;
         if (!result.ok) {
             post({ action: "status", message: "Not saved", modified: true });
@@ -266,6 +274,20 @@ async function openDrawio(target: Target): Promise<void> {
         }
     };
     window.addEventListener("message", onMessage);
+}
+
+// Arrows attached to a diagram (or its shapes, when drawn into the slide)
+// follow it once the slide shows the saved diagram.
+function followArrows(id: string, step: string): void {
+    const rendered = () => {
+        off("render", rendered);
+        window.clearTimeout(give);
+        const stale = connectorsTo(id).filter(isStale);
+        if (stale.length)
+            void rerouteConnectors(stale, "Re-route arrows", step);
+    };
+    const give = window.setTimeout(() => off("render", rendered), 10000);
+    on("render", rendered);
 }
 
 // ── draw.io desktop (no internet needed) ──

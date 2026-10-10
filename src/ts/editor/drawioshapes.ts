@@ -34,3 +34,30 @@ function cellLabel(g: Element): string {
     }
     return "";
 }
+
+/** A shape of a drawn diagram that an arrow can attach to, if `el` is one. */
+export function attachableCell(el: Element | null): SVGGElement | null {
+    const cell = el?.closest<SVGGElement>('g[data-cell-kind="vertex"][id]');
+    return cell?.closest("svg[data-drawio]") ? cell : null;
+}
+
+/** The shapes of a drawn diagram that arrows can attach to. */
+export function attachableCells(svg: Element): SVGGElement[] {
+    return [
+        ...svg.querySelectorAll<SVGGElement>('g[data-cell-kind="vertex"][id]'),
+    ];
+}
+
+/**
+ * What a cell's connection points sit on: its shape, not its label (which
+ * may stick out) nor the cells inside it. draw.io draws a cell as its shape
+ * first, then the label.
+ */
+export function cellShape(cell: Element): Element {
+    for (const kid of cell.children) {
+        if (kid.hasAttribute("data-cell-id")) continue;
+        if (kid.querySelector("foreignObject, text, switch")) continue;
+        return kid;
+    }
+    return cell;
+}
