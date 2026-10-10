@@ -58,6 +58,7 @@ import {
 import { layoutLabel, openGallery } from "./gallery";
 import {
     type Box,
+    fmt,
     parseTransform,
     planResize,
     planRotate,
@@ -65,10 +66,17 @@ import {
     relativePath,
     rotationOf,
 } from "./geom";
-import { pickFile, upload, zoneMedia } from "./insert";
+import {
+    IMAGE_ACCEPT,
+    naturalSize,
+    pickFile,
+    upload,
+    zoneMedia,
+} from "./insert";
 import { edit } from "./net";
 import { fileName, openButton } from "./openwith";
-import { assetRef } from "./pathtext";
+import { isPdfRef, pdfPage, withPage } from "./pathtext";
+import { choosePage, pageUrl, sourceRef } from "./pdfpages";
 import { distribute } from "./snap";
 import { currentSlide, ed, emit, on, sourceOf } from "./state";
 import type {
@@ -375,6 +383,32 @@ function mediaSection(
         );
     }
     return section(kind === "video" ? "Video" : "Image", ...rows);
+}
+
+// The page a PDF in an image zone shows (``Image("plot.pdf#page=2")``).
+function zonePageRow(slide: SlideModel, zone: string, ref: string): Node {
+    const file = projectFile(ref);
+    const page = pdfPage(ref);
+    const show = (n: number) => {
+        if (!file || n === page) return;
+        void edit({
+            action: "zone-media",
+            slide: slide.deckIndex,
+            zone,
+            src: file,
+            page: n,
+        });
+    };
+    return h(
+        "div",
+        { class: "prop-row" },
+        h("span", { class: "prop-label" }, "Page"),
+        numberInput(page, (n) => show(Math.max(1, Math.round(n))), { min: 1 }),
+        button("Pages…", "See the PDF's pages and pick one", async () => {
+            const choice = file ? await choosePage(file, page) : null;
+            if (choice) show(choice.page);
+        }),
+    );
 }
 
 function typeInfo(list: TypeInfo[], type: string): TypeInfo | null {
@@ -1206,6 +1240,9 @@ function renderObjectPanel(sel: Selected): void {
                     h("p", { class: "hint media-src" }, media.src ?? ""),
                     openButton(projectFile(media.src)),
                 ),
+                ...(media.kind === "image" && isPdfRef(media.src ?? "")
+                    ? [zonePageRow(slide, name, media.src ?? "")]
+                    : []),
                 button(
                     "Replace media…",
                     "Pick another image or video",
@@ -1687,9 +1724,9 @@ function pictureSection(sel: Selected): HTMLElement {
     const image = pictureOf(sel.el)!;
     const loc = image.getAttribute("data-ink") ?? sel.loc;
     const src = sourceOf(sel.key);
-    const href = assetRef(
-        image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? "",
-    );
+    // A PDF picture shows its page converted to SVG; this is the PDF.
+    const href = sourceRef(image);
+    const pdf = isPdfRef(href) ? projectFile(href) : null;
     const par = image.getAttribute("preserveAspectRatio") ?? "xMidYMid meet";
     const fit = FITS.find((f) => f.par === par)?.value ?? "contain";
     const imageOps = (set: Record<string, string | null>, label: string) =>
@@ -1700,9 +1737,10 @@ function pictureSection(sel: Selected): HTMLElement {
         h(
             "div",
             { class: "source-hint" },
-            h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
+            h("p", { class: "hint media-src" }, pictureName(href)),
             openButton(projectFile(href)),
         ),
+        pdf ? pdfPageRow(sel, image, pdf, pdfPage(href), imageOps) : null,
         isDiagramHref(href)
             ? h(
                   "div",
@@ -1723,12 +1761,21 @@ function pictureSection(sel: Selected): HTMLElement {
                 "Replace…",
                 "Pick another picture; it keeps this size and place",
                 async () => {
-                    const file = await pickFile("image/*");
+                    const file = await pickFile(IMAGE_ACCEPT);
                     const up = file && src ? await upload(file) : null;
                     if (!up || !src) return;
+                    let page = 1;
+                    if (isPdfRef(up.path)) {
+                        const choice = await choosePage(up.path);
+                        if (!choice) return;
+                        page = choice.page;
+                    }
                     imageOps(
                         {
-                            href: relativePath(src.path, up.path),
+                            href: withPage(
+                                relativePath(src.path, up.path),
+                                page,
+                            ),
                             "xlink:href": null,
                         },
                         "Replace picture",
@@ -1770,6 +1817,51 @@ function pictureSection(sel: Selected): HTMLElement {
                     ),
             ),
         ),
+    );
+}
+
+function pictureName(ref: string): string {
+    const name = ref.replace(/#.*$/, "").split("/").pop() ?? ref;
+    return isPdfRef(ref) ? `${name} · page ${pdfPage(ref)}` : name;
+}
+
+// The page a PDF picture shows. A new page keeps the picture's width and
+// takes the page's shape (a cropped picture keeps its frame).
+function pdfPageRow(
+    sel: Selected,
+    image: Element,
+    file: string,
+    page: number,
+    imageOps: (set: Record<string, string | null>, label: string) => void,
+): HTMLElement {
+    const show = async (n: number, shown?: string | null) => {
+        const url = shown ?? (await pageUrl(file, n));
+        const src = sourceOf(sel.key);
+        const root = ed.model?.projectDir;
+        if (!url || !src || !root || n === page) return;
+        const set: Record<string, string | null> = {
+            href: withPage(relativePath(src.path, `${root}/${file}`), n),
+            "xlink:href": null,
+        };
+        const width = Number.parseFloat(image.getAttribute("width") ?? "");
+        if (!isCropped(sel.el) && width > 0) {
+            const size = await naturalSize(url);
+            set.height = fmt((width * size.h) / size.w);
+        }
+        imageOps(set, `Show page ${n}`);
+    };
+    // A <div>, not row()'s <label>, which would pass clicks to the button.
+    return h(
+        "div",
+        { class: "prop-row" },
+        h("span", { class: "prop-label" }, "Page"),
+        numberInput(page, (n) => void show(Math.max(1, Math.round(n))), {
+            min: 1,
+        }),
+        button("Pages…", "See the PDF's pages and pick one", async () => {
+            const choice = await choosePage(file, page);
+            if (choice) void show(choice.page, choice.url);
+        }),
     );
 }
 

@@ -63,3 +63,20 @@ export function splitTyped(value: string): { dir: string; prefix: string } {
 export function assetRef(href: string): string {
     return href.replace(/\?v=[0-9a-f]+$/, "");
 }
+
+/** Whether a reference names a PDF (a figure; its page after ``#``). */
+export function isPdfRef(ref: string): boolean {
+    return /\.pdf(?:[#?]|$)/i.test(ref) && !/^[a-z][a-z0-9+.-]*:/i.test(ref);
+}
+
+/** The page a PDF reference shows (``plot.pdf#page=2``): 1 without one. */
+export function pdfPage(ref: string): number {
+    const m = /#(?:.*&)?page=(\d+)/i.exec(ref);
+    return m ? Math.max(1, Number(m[1])) : 1;
+}
+
+/** The reference to ``page`` of a PDF (the first page needs no fragment). */
+export function withPage(ref: string, page: number): string {
+    const file = ref.replace(/#.*$/, "");
+    return page > 1 ? `${file}#page=${page}` : file;
+}

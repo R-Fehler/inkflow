@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
     assetRef,
     commonPrefix,
+    isPdfRef,
     joinPath,
+    pdfPage,
     samePath,
     splitTyped,
     startingWith,
+    withPage,
     withSep,
 } from "./pathtext";
 
@@ -50,5 +53,25 @@ describe("asset references", () => {
             "diagrams/a.drawio.svg",
         );
         expect(assetRef("assets/pic.png")).toBe("assets/pic.png");
+    });
+});
+
+describe("PDF references", () => {
+    it("tells a PDF and its page", () => {
+        expect(isPdfRef("figures/plot.pdf")).toBe(true);
+        expect(isPdfRef("figures/Plot.PDF#page=2")).toBe(true);
+        expect(isPdfRef("plot.pdf.png")).toBe(false);
+        expect(isPdfRef("https://example.com/plot.pdf")).toBe(false);
+        expect(pdfPage("plot.pdf")).toBe(1);
+        expect(pdfPage("plot.pdf#page=3")).toBe(3);
+        expect(pdfPage("plot.pdf#zoom=50&page=2")).toBe(2);
+    });
+
+    it("writes the page as the fragment, none for the first", () => {
+        expect(withPage("plot.pdf", 2)).toBe("plot.pdf#page=2");
+        expect(withPage("plot.pdf#page=2", 1)).toBe("plot.pdf");
+        expect(withPage("../a/plot.pdf#page=2", 4)).toBe(
+            "../a/plot.pdf#page=4",
+        );
     });
 });

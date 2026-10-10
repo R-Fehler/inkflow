@@ -508,9 +508,11 @@ export function projectFile(
 ): string | null {
     if (!ref || /^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("_theme/"))
         return null;
-    if (ref.startsWith("/")) return ref;
+    // The file only: not a PDF's page (#page=2) or a served version (?v=).
+    const file = ref.replace(/[#?].*$/, "");
+    if (file.startsWith("/")) return file;
     const parts = base ? base.split("/").slice(0, -1) : [];
-    for (const part of ref.split("/")) {
+    for (const part of file.split("/")) {
         if (part === "..") parts.pop();
         else if (part && part !== ".") parts.push(part);
     }

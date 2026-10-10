@@ -994,9 +994,10 @@
   function projectFile(ref, base2) {
     if (!ref || /^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("_theme/"))
       return null;
-    if (ref.startsWith("/")) return ref;
+    const file = ref.replace(/[#?].*$/, "");
+    if (file.startsWith("/")) return file;
     const parts = base2 ? base2.split("/").slice(0, -1) : [];
-    for (const part of ref.split("/")) {
+    for (const part of file.split("/")) {
       if (part === "..") parts.pop();
       else if (part && part !== ".") parts.push(part);
     }
@@ -3121,6 +3122,17 @@
   function assetRef(href) {
     return href.replace(/\?v=[0-9a-f]+$/, "");
   }
+  function isPdfRef(ref) {
+    return /\.pdf(?:[#?]|$)/i.test(ref) && !/^[a-z][a-z0-9+.-]*:/i.test(ref);
+  }
+  function pdfPage(ref) {
+    const m = /#(?:.*&)?page=(\d+)/i.exec(ref);
+    return m ? Math.max(1, Number(m[1])) : 1;
+  }
+  function withPage(ref, page) {
+    const file = ref.replace(/#.*$/, "");
+    return page > 1 ? `${file}#page=${page}` : file;
+  }
 
   // src/ts/editor/dialog.ts
   var host2 = document.getElementById("dialog");
@@ -3187,6 +3199,138 @@
     );
     host2.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") e.stopPropagation();
+    });
+  }
+
+  // src/ts/editor/pdfpages.ts
+  var THUMBS = 24;
+  function sourceRef(image) {
+    return image.getAttribute("data-inkflow-pdf") ?? assetRef(
+      image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? ""
+    );
+  }
+  function fileName(path) {
+    return path.replace(/#.*$/, "").split(/[\\/]/).pop() ?? path;
+  }
+  async function pageUrl(path, page) {
+    const res = await request({ action: "pdf-page", path, page });
+    if (!res.ok) {
+      toast(res.error ?? `cannot show page ${page}`, "error");
+      return null;
+    }
+    return String(res.url);
+  }
+  async function choosePage(path, current2 = 1) {
+    const info3 = await request({ action: "pdf-pages", path });
+    if (!info3.ok) {
+      toast(info3.error ?? "cannot read the PDF", "error");
+      return null;
+    }
+    const name2 = fileName(path);
+    if (info3.ignored) {
+      toast(
+        `${name2} is ignored by git (see .gitignore): add it to the repository with "git add -f" to keep it`
+      );
+    }
+    if (!info3.converter) {
+      toast(`${name2} shows as a placeholder: ${String(info3.hint)}`, "error");
+      return { page: current2, url: null };
+    }
+    const pages = typeof info3.pages === "number" ? info3.pages : null;
+    if (pages === 1) {
+      const url = await pageUrl(path, 1);
+      return url ? { page: 1, url } : null;
+    }
+    return pageDialog(path, name2, pages, current2);
+  }
+  function pageDialog(path, name2, pages, current2) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (choice) => {
+        if (done) return;
+        done = true;
+        resolve(choice);
+        closeDialog();
+      };
+      const grid = h("div", { class: "pdf-pages" });
+      const urls = /* @__PURE__ */ new Map();
+      const pick2 = async (page) => {
+        const url = urls.get(page) ?? await pageUrl(path, page);
+        if (url) finish({ page, url });
+      };
+      const count = pages ?? THUMBS;
+      for (let page = 1; page <= Math.min(count, THUMBS); page++) {
+        grid.append(
+          h(
+            "button",
+            {
+              type: "button",
+              class: `pdf-page${page === current2 ? " current" : ""}`,
+              title: `Page ${page}`,
+              "data-page": page,
+              onclick: () => void pick2(page)
+            },
+            h("span", { class: "pdf-thumb" }),
+            h("span", {}, `Page ${page}`)
+          )
+        );
+      }
+      const field = h("input", {
+        type: "number",
+        min: 1,
+        max: pages ?? null,
+        step: 1,
+        value: String(current2)
+      });
+      field.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") void pick2(Math.max(1, Number(field.value)));
+      });
+      const body2 = h(
+        "div",
+        {},
+        grid,
+        h(
+          "div",
+          { class: "pdf-page-field" },
+          h("label", {}, "Page ", field, pages ? ` of ${pages}` : ""),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn on",
+              onclick: () => void pick2(Math.max(1, Number(field.value)))
+            },
+            "Use this page"
+          )
+        )
+      );
+      openDialog(`Which page of ${name2}?`, body2, {
+        wide: true,
+        hint: "A figure from a PDF shows one page",
+        onClose: () => finish(null)
+      });
+      void (async () => {
+        for (const card of grid.querySelectorAll(
+          ".pdf-page"
+        )) {
+          if (done) return;
+          const page = Number(card.dataset.page);
+          const res = await request({ action: "pdf-page", path, page });
+          if (!res.ok) {
+            for (const rest of grid.querySelectorAll(
+              ".pdf-page"
+            )) {
+              if (Number(rest.dataset.page) >= page) rest.remove();
+            }
+            return;
+          }
+          const url = String(res.url);
+          urls.set(page, url);
+          card.querySelector(".pdf-thumb")?.append(
+            h("img", { src: `/${url}`, alt: `Page ${page}` })
+          );
+        }
+      })();
     });
   }
 
@@ -4053,7 +4197,7 @@
 
   // src/ts/editor/openwith.ts
   var menu2 = document.getElementById("context-menu");
-  function fileName(path) {
+  function fileName2(path) {
     return path.split(/[\\/]/).pop() ?? path;
   }
   function inProject(path) {
@@ -4069,7 +4213,7 @@
     }
     const apps = res.apps ?? [];
     clear(menu2);
-    menu2.append(h("div", { class: "menu-title" }, `Open ${fileName(path)} in`));
+    menu2.append(h("div", { class: "menu-title" }, `Open ${fileName2(path)} in`));
     for (const app of apps) {
       menu2.append(menuItem(app.label, () => void open(path, app)));
     }
@@ -4087,7 +4231,7 @@
   }
   async function open(path, app) {
     const res = await request({ action: "open-file", path, app: app.id });
-    if (res.ok) toast(`Opened ${fileName(path)} in ${app.label}`, "ok");
+    if (res.ok) toast(`Opened ${fileName2(path)} in ${app.label}`, "ok");
     else toast(res.error ?? "Could not open the file", "error");
   }
   function openButton(path, label4 = "Open") {
@@ -4097,7 +4241,7 @@
       {
         type: "button",
         class: "pbtn open-with",
-        title: `Open ${fileName(path)} in another program`,
+        title: `Open ${fileName2(path)} in another program`,
         onclick: (e) => {
           const r = e.currentTarget.getBoundingClientRect();
           void openMenu(path, r.left, r.bottom + 4);
@@ -5058,8 +5202,9 @@
   function isVideo(file) {
     return file instanceof File && file.type.startsWith("video/") || VIDEO_EXT.test(file.name);
   }
+  var IMAGE_ACCEPT = "image/*,.pdf,application/pdf";
   function isImage(file) {
-    return file instanceof File && file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name);
+    return file instanceof File && (file.type.startsWith("image/") || file.type === "application/pdf") || /\.(png|jpe?g|gif|webp|svg|pdf)$/i.test(file.name);
   }
   async function insertVideoFile(file, at2) {
     if (!await ensureOwnDrawing()) return;
@@ -5120,7 +5265,15 @@
     const up = await upload(file);
     const src = ownSource();
     if (!up || !src) return;
-    const size3 = await naturalSize(up.rel);
+    let href = relativePath(src.path, up.path);
+    let shown = up.rel;
+    if (isPdfRef(up.path)) {
+      const choice = await choosePage(up.path);
+      if (!choice) return;
+      href = withPage(href, choice.page);
+      shown = choice.url;
+    }
+    const size3 = shown ? await naturalSize(shown) : { w: 400, h: 300 };
     const svg = slideRoot();
     const vb = svg?.viewBox.baseVal;
     const maxW = (vb?.width || 1920) * 0.5;
@@ -5132,7 +5285,6 @@
     const cy = at2?.y ?? (vb?.height || 1080) / 2;
     const parent = insertParent().el;
     const p = toParent(parent, cx - w / 2, cy - h2 / 2);
-    const href = relativePath(src.path, up.path);
     await insertXml(
       `<image href="${href}" x="${fmt(p.x)}" y="${fmt(p.y)}" width="${fmt(w)}" height="${fmt(h2)}" preserveAspectRatio="xMidYMid meet"/>`,
       "image"
@@ -5166,20 +5318,23 @@
     });
   }
   async function insertImage() {
-    const file = await pickFile("image/*");
+    const file = await pickFile(IMAGE_ACCEPT);
     if (file) await insertImageFile(file);
   }
-  var MEDIA_ACCEPT = `image/*,${VIDEO_ACCEPT}`;
+  var MEDIA_ACCEPT = `${IMAGE_ACCEPT},${VIDEO_ACCEPT}`;
   async function fillZone(zone, file) {
     const slide = currentSlide();
     if (!slide) return;
     const up = await upload(file);
     if (!up) return;
+    const choice = isPdfRef(up.path) ? await choosePage(up.path) : null;
+    if (isPdfRef(up.path) && !choice) return;
     const result = await edit({
       action: "zone-media",
       slide: slide.deckIndex,
       zone,
       src: up.path,
+      page: choice?.page ?? null,
       fit: slide.zones[zone]?.fit ?? "cover"
     });
     if (result.ok && isVideo(file)) {
@@ -5198,6 +5353,10 @@
   function cleanForPaste(el2) {
     const copy2 = el2.cloneNode(true);
     for (const node of [copy2, ...copy2.querySelectorAll("*")]) {
+      if (node.hasAttribute("data-inkflow-pdf")) {
+        node.setAttribute("href", sourceRef(node));
+        node.removeAttribute("xlink:href");
+      }
       for (const attr of [...node.attributes]) {
         const name2 = attr.name;
         if (name2.startsWith("data-")) node.removeAttribute(name2);
@@ -5251,7 +5410,7 @@
       const target = e.target;
       if (target.closest("textarea, input")) return;
       const file = [...e.clipboardData?.files ?? []].find(
-        (f) => f.type.startsWith("image/") || isVideo(f)
+        (f) => f.type.startsWith("image/") || f.type === "application/pdf" || isVideo(f)
       );
       if (file) {
         e.preventDefault();
@@ -6718,6 +6877,30 @@
     }
     return section(kind === "video" ? "Video" : "Image", ...rows);
   }
+  function zonePageRow(slide, zone, ref) {
+    const file = projectFile(ref);
+    const page = pdfPage(ref);
+    const show = (n2) => {
+      if (!file || n2 === page) return;
+      void edit({
+        action: "zone-media",
+        slide: slide.deckIndex,
+        zone,
+        src: file,
+        page: n2
+      });
+    };
+    return h(
+      "div",
+      { class: "prop-row" },
+      h("span", { class: "prop-label" }, "Page"),
+      numberInput(page, (n2) => show(Math.max(1, Math.round(n2))), { min: 1 }),
+      button("Pages\u2026", "See the PDF's pages and pick one", async () => {
+        const choice = file ? await choosePage(file, page) : null;
+        if (choice) show(choice.page);
+      })
+    );
+  }
   function typeInfo(list3, type) {
     return list3.find((t) => t.type === type) ?? null;
   }
@@ -6813,7 +6996,7 @@
     addFile("Markdown", slide.md?.rel, slide.md?.path);
     addFile("Notes", slide.notes.rel, slide.notes.path);
     const deckPath = ed.model?.deckPath;
-    if (deckPath) addFile("Deck", fileName(deckPath), deckPath);
+    if (deckPath) addFile("Deck", fileName2(deckPath), deckPath);
     const textInDeck = slide.md?.kind !== "file" && (slide.md?.kind === "inline" || Object.values(slide.zones).some((z) => z.kind === "text"));
     if (textInDeck && editable)
       files2.append(
@@ -7423,6 +7606,7 @@
             h("p", { class: "hint media-src" }, media.src ?? ""),
             openButton(projectFile(media.src))
           ),
+          ...media.kind === "image" && isPdfRef(media.src ?? "") ? [zonePageRow(slide, name2, media.src ?? "")] : [],
           button(
             "Replace media\u2026",
             "Pick another image or video",
@@ -7835,9 +8019,8 @@
     const image = pictureOf(sel.el);
     const loc = image.getAttribute("data-ink") ?? sel.loc;
     const src = sourceOf(sel.key);
-    const href = assetRef(
-      image.getAttribute("href") ?? image.getAttribute("xlink:href") ?? ""
-    );
+    const href = sourceRef(image);
+    const pdf = isPdfRef(href) ? projectFile(href) : null;
     const par = image.getAttribute("preserveAspectRatio") ?? "xMidYMid meet";
     const fit = FITS.find((f) => f.par === par)?.value ?? "contain";
     const imageOps = (set, label4) => void sendSvgOps([{ sel, ops: [{ kind: "attrs", loc, set }] }], label4);
@@ -7847,9 +8030,10 @@
       h(
         "div",
         { class: "source-hint" },
-        h("p", { class: "hint media-src" }, href.split("/").pop() ?? href),
+        h("p", { class: "hint media-src" }, pictureName(href)),
         openButton(projectFile(href))
       ),
+      pdf ? pdfPageRow(sel, image, pdf, pdfPage(href), imageOps) : null,
       isDiagramHref(href) ? h(
         "div",
         { class: "btn-row" },
@@ -7868,12 +8052,21 @@
           "Replace\u2026",
           "Pick another picture; it keeps this size and place",
           async () => {
-            const file = await pickFile("image/*");
+            const file = await pickFile(IMAGE_ACCEPT);
             const up = file && src ? await upload(file) : null;
             if (!up || !src) return;
+            let page = 1;
+            if (isPdfRef(up.path)) {
+              const choice = await choosePage(up.path);
+              if (!choice) return;
+              page = choice.page;
+            }
             imageOps(
               {
-                href: relativePath(src.path, up.path),
+                href: withPage(
+                  relativePath(src.path, up.path),
+                  page
+                ),
                 "xlink:href": null
               },
               "Replace picture"
@@ -7909,6 +8102,40 @@
           )
         )
       )
+    );
+  }
+  function pictureName(ref) {
+    const name2 = ref.replace(/#.*$/, "").split("/").pop() ?? ref;
+    return isPdfRef(ref) ? `${name2} \xB7 page ${pdfPage(ref)}` : name2;
+  }
+  function pdfPageRow(sel, image, file, page, imageOps) {
+    const show = async (n2, shown) => {
+      const url = shown ?? await pageUrl(file, n2);
+      const src = sourceOf(sel.key);
+      const root2 = ed.model?.projectDir;
+      if (!url || !src || !root2 || n2 === page) return;
+      const set = {
+        href: withPage(relativePath(src.path, `${root2}/${file}`), n2),
+        "xlink:href": null
+      };
+      const width = Number.parseFloat(image.getAttribute("width") ?? "");
+      if (!isCropped(sel.el) && width > 0) {
+        const size3 = await naturalSize(url);
+        set.height = fmt(width * size3.h / size3.w);
+      }
+      imageOps(set, `Show page ${n2}`);
+    };
+    return h(
+      "div",
+      { class: "prop-row" },
+      h("span", { class: "prop-label" }, "Page"),
+      numberInput(page, (n2) => void show(Math.max(1, Math.round(n2))), {
+        min: 1
+      }),
+      button("Pages\u2026", "See the PDF's pages and pick one", async () => {
+        const choice = await choosePage(file, page);
+        if (choice) void show(choice.page, choice.url);
+      })
     );
   }
   function showAsRow(sel, mode) {

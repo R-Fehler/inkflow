@@ -277,6 +277,9 @@ describe("projectFile", () => {
         );
         expect(projectFile("./b.png", "slides/x.svg")).toBe("slides/b.png");
         expect(projectFile("assets/v.mp4")).toBe("assets/v.mp4");
+        expect(projectFile("../figures/plot.pdf#page=2", "slides/x.svg")).toBe(
+            "figures/plot.pdf",
+        );
     });
 
     test("ignores what no program here opens", () => {

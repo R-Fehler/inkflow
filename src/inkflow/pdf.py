@@ -336,14 +336,16 @@ def placeholder(label: str, reason: str) -> str:
 
     It has no size of its own, so it fills the picture's box whatever its shape.
     """
+    # vw is the picture's own width here: the text shrinks with a small box.
+    big, small = "clamp(8px,5vw,24px)", "clamp(6px,3.5vw,16px)"
     text = 'x="50%" y="50%" text-anchor="middle" font-family="sans-serif" fill="#888"'
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">'
         + '<rect x="1%" y="1%" width="98%" height="98%"'
         + ' fill="rgba(128,128,128,0.08)" stroke="#888" stroke-width="3"'
         + ' stroke-dasharray="12 8"/>'
-        + f'<text {text} font-size="24">{escape(label)}</text>'
-        + f'<text {text} dy="1.6em" font-size="16">{escape(reason)}</text>'
+        + f'<text {text} style="font-size:{big}">{escape(label)}</text>'
+        + f'<text {text} dy="1.6em" style="font-size:{small}">{escape(reason)}</text>'
         + "</svg>"
     )
     return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()

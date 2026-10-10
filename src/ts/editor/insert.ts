@@ -24,7 +24,8 @@ import { type End, pathData, route, type Site } from "./connectors";
 import { svgEl, toast } from "./dom";
 import { fmt, invert, mat, multiply, relativePath, transformBox } from "./geom";
 import { edit, request } from "./net";
-import { assetRef } from "./pathtext";
+import { assetRef, isPdfRef, withPage } from "./pathtext";
+import { choosePage, sourceRef } from "./pdfpages";
 import {
     CONNECTOR_TOOLS,
     currentSlide,
@@ -630,7 +631,7 @@ export function droppedPath(dt: DataTransfer | null): string | null {
     }
 }
 
-function naturalSize(rel: string): Promise<{ w: number; h: number }> {
+export function naturalSize(rel: string): Promise<{ w: number; h: number }> {
     return new Promise((resolve) => {
         const img = new Image();
         img.onload = () =>
@@ -697,10 +698,15 @@ export function isVideo(file: MediaIn): boolean {
     );
 }
 
+// A PDF is a picture too: the slide shows one page of it (a paper's figure).
+export const IMAGE_ACCEPT = "image/*,.pdf,application/pdf";
+
 function isImage(file: MediaIn): boolean {
     return (
-        (file instanceof File && file.type.startsWith("image/")) ||
-        /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name)
+        (file instanceof File &&
+            (file.type.startsWith("image/") ||
+                file.type === "application/pdf")) ||
+        /\.(png|jpe?g|gif|webp|svg|pdf)$/i.test(file.name)
     );
 }
 
@@ -783,7 +789,16 @@ export async function insertImageFile(
     const up = await upload(file);
     const src = ownSource();
     if (!up || !src) return;
-    const size = await naturalSize(up.rel);
+    let href = relativePath(src.path, up.path);
+    let shown: string | null = up.rel;
+    if (isPdfRef(up.path)) {
+        const choice = await choosePage(up.path);
+        if (!choice) return;
+        href = withPage(href, choice.page);
+        shown = choice.url;
+    }
+    // Without a converter the picture is a placeholder: give it a page's shape.
+    const size = shown ? await naturalSize(shown) : { w: 400, h: 300 };
     const svg = slideRoot();
     const vb = svg?.viewBox.baseVal;
     const maxW = (vb?.width || 1920) * 0.5;
@@ -795,7 +810,6 @@ export async function insertImageFile(
     const cy = at?.y ?? (vb?.height || 1080) / 2;
     const parent = insertParent().el;
     const p = toParent(parent, cx - w / 2, cy - h / 2);
-    const href = relativePath(src.path, up.path);
     await insertXml(
         `<image href="${href}" x="${fmt(p.x)}" y="${fmt(p.y)}" width="${fmt(w)}" height="${fmt(h)}" preserveAspectRatio="xMidYMid meet"/>`,
         "image",
@@ -838,22 +852,25 @@ export function pickFile(accept: string): Promise<File | null> {
 }
 
 export async function insertImage(): Promise<void> {
-    const file = await pickFile("image/*");
+    const file = await pickFile(IMAGE_ACCEPT);
     if (file) await insertImageFile(file);
 }
 
-const MEDIA_ACCEPT = `image/*,${VIDEO_ACCEPT}`;
+const MEDIA_ACCEPT = `${IMAGE_ACCEPT},${VIDEO_ACCEPT}`;
 
 export async function fillZone(zone: string, file: MediaIn): Promise<void> {
     const slide = currentSlide();
     if (!slide) return;
     const up = await upload(file);
     if (!up) return;
+    const choice = isPdfRef(up.path) ? await choosePage(up.path) : null;
+    if (isPdfRef(up.path) && !choice) return;
     const result = await edit({
         action: "zone-media",
         slide: slide.deckIndex,
         zone,
         src: up.path,
+        page: choice?.page ?? null,
         fit: slide.zones[zone]?.fit ?? "cover",
     });
     if (result.ok && isVideo(file)) {
@@ -876,6 +893,11 @@ export async function zoneMedia(zone: string): Promise<void> {
 export function cleanForPaste(el: Element): string {
     const copy = el.cloneNode(true) as Element;
     for (const node of [copy, ...copy.querySelectorAll("*")]) {
+        // A PDF picture shows a converted page: the copy names the PDF.
+        if (node.hasAttribute("data-inkflow-pdf")) {
+            node.setAttribute("href", sourceRef(node));
+            node.removeAttribute("xlink:href");
+        }
         for (const attr of [...node.attributes]) {
             const name = attr.name;
             if (name.startsWith("data-")) node.removeAttribute(name);
@@ -937,7 +959,10 @@ export function initInsert(): void {
         const target = e.target as HTMLElement;
         if (target.closest("textarea, input")) return;
         const file = [...(e.clipboardData?.files ?? [])].find(
-            (f) => f.type.startsWith("image/") || isVideo(f),
+            (f) =>
+                f.type.startsWith("image/") ||
+                f.type === "application/pdf" ||
+                isVideo(f),
         );
         if (file) {
             e.preventDefault();
