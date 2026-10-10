@@ -308,6 +308,13 @@ class TestDiscoverLayouts:
         local_idx = next(i for i, lbl in enumerate(labels) if lbl == "local")
         assert builtin_idx < local_idx
 
+    def test_built_in_theme_not_listed_twice(self) -> None:
+        # The default theme's asset dir is the built-in dir itself.
+        results = discover_layouts(None, Theme())
+        paths = [p for _, p in results]
+        assert len(paths) == len(set(paths))
+        assert {label for label, _ in results} == {"builtin"}
+
     def test_no_project_dir_no_local(self) -> None:
         results = discover_layouts(None, None)
         assert all(label != "local" for label, _ in results)

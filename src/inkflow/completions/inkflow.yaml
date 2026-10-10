@@ -63,6 +63,16 @@ commands:
       flag:
         deck: ["$files([\".py\"])"]
 
+  - name: outline
+    description: Print what is on every slide, in a few lines each.
+    flags:
+      -d, --deck=: Path to deck.py
+      -s, --slide=: One slide (1-based) in detail
+      --json: Print the full structure
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+
   - name: render
     description: Render slides to PNG images.
     flags:

@@ -51,6 +51,7 @@ right away.
 
 | Command | What it does |
 |---|---|
+| `inkflow outline` | Prints what is on every slide in a few lines each: its files and layout chain, each zone with where its text is written and how it starts, the animations and clicks. `--slide N` shows one slide in full (zone texts and boxes, canvas size, element ids to animate, animations as `deck.py` writes them); `--json` for the whole structure. Claude starts here instead of reading every file. |
 | `inkflow context` | Prints what the editor has selected right now (`--json` for the raw data). |
 | `inkflow render` | Writes PNGs of slides at any build step to `.inkflow/render/`, the editor's current slide by default (`--slide N`, `--all`, `--step S`). Claude looks at them to check its own work. |
 | `inkflow verify` | Checks the deck for authoring mistakes. |

@@ -68,6 +68,58 @@ def context(deck_path: Path, as_json: bool, hook: bool) -> None:
         click.echo(format_context(data))
 
 
+@main.command()
+@deck_option
+@click.option(
+    "--slide",
+    "-s",
+    "number",
+    type=int,
+    default=None,
+    help="Show one slide (1-based) in detail: full zone texts, zone boxes, "
+    + "element ids, animations as deck.py writes them.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Print the full structure.")
+def outline(deck_path: Path, number: int | None, as_json: bool) -> None:
+    """Print what is on every slide, in a few lines each.
+
+    For each slide: its number, id, title and position in deck.py's
+    `slides=[...]`, its SVG and layout chain, Markdown, notes and ink files,
+    its own transition, then each zone (where its content is written and the
+    start of its text, or the media/chart file) and the animations with the
+    clicks they take. Start here instead of reading deck.py and every file.
+    """
+    from inkflow.editor.outline import build_outline, format_outline, outline_json
+    from inkflow.pipeline import process_deck
+    from inkflow.server import load_deck
+
+    resolved = resolve_deck_path(deck_path)
+    try:
+        deck = load_deck(resolved)
+        slides = process_deck(deck, resolved.parent, resolved, editor=True)
+        result = build_outline(deck, resolved, slides)
+    except Exception as exc:
+        raise click.ClickException(f"cannot build the deck: {exc}") from exc
+    if as_json:
+        data = outline_json(result)
+        if number is not None:
+            picked = [
+                s
+                for s in cast("list[dict[str, object]]", data["slides"])
+                if s["number"] == number
+            ]
+            if not picked:
+                raise click.ClickException(f"no slide {number}")
+            data = picked[0]
+        indent = 1 if sys.stdout.isatty() else None
+        click.echo(json.dumps(data, indent=indent, ensure_ascii=False))
+        return
+    try:
+        click.echo(format_outline(result, number))
+    except IndexError as exc:
+        raise click.ClickException(f"no slide {number}") from exc
+
+
 def _current_slide(project_dir: Path) -> int:
     data = read_context(project_dir) or {}
     slide = cast("dict[str, object]", data.get("slide") or {})

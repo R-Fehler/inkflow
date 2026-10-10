@@ -228,14 +228,17 @@ def _check_default_zone(
         return []
     if md is None:
         return []
-    # verify only reads the zone structure, so the asset sources are the plain
-    # project-rooted ones: nothing it returns depends on how a reference resolves.
-    source = AssetSource.for_deck(AssetRoots(project_dir))
+    # verify only reads the zone structure, but each reference still resolves
+    # against its own file, or a Markdown `![](../assets/x.png)` would be warned
+    # about as leaving the project.
+    roots = AssetRoots(project_dir)
+    source = AssetSource.for_deck(roots)
+    md_source = AssetSource.for_file(roots, md.path) if md.path else source
     try:
         build_slide_content(
             parse_markdown_zones(md.text),
             slide.zones,
-            source,
+            md_source,
             source,
             available_zones=zone_ids,
             default_zone=default_zone,

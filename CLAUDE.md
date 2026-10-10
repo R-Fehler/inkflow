@@ -131,6 +131,10 @@ src/
                                editor), drawioedit.py (a drawn-in diagram's shapes edited
                                on the slide: geometry/label/style/delete in its source,
                                the picture patched until draw.io redraws it), context.py (.inkflow/context.json for agents),
+                               outline.py (`inkflow outline`: per-slide files, layout chain,
+                               zones with their origin and text, animations and clicks, read
+                               off `build_model` + the editor build; `--slide N` adds zone
+                               boxes, canvas size and the slide SVG's named ids),
                                transfer.py (clipboard bundles: copy slides/objects with their
                                files, paste into any project; pasted Slide(...) must pass the
                                `check_slide_code` allowlist, never arbitrary Python),
@@ -166,7 +170,7 @@ src/
                                `main` group, shared options, and the Project/Target helpers;
                                commands are grouped by area: project.py (init, setup-git,
                                completion), present.py (serve, edit, build, export), agent.py
-                               (context, render, goto, select, setup-claude), authoring.py
+                               (outline, context, render, goto, select, setup-claude), authoring.py
                                (clean, label2id, add, parent group, sync, layouts), color.py (colorize,
                                palette), verify.py. Submodules register on `main` by import.
     launcher.py       `inkflow setup-desktop`: an application-menu launcher (Linux

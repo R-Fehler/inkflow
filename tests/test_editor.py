@@ -1785,7 +1785,8 @@ def test_context_round_trip_and_format(tmp_path: Path) -> None:
     data = read_context(tmp_path)
     assert data is not None
     text = format_context(data)
-    assert "slide 2/5: Intro (id: intro)" in text
+    assert 'slide 2/5 "Intro" (id intro, deck.py slides[1])' in text
+    assert "\n  svg slides/intro.svg\nselected:\n" in text
     assert "<rect> #box in slides/intro.svg at (1, 2) size 3x4" in text
     assert "zone 'title' #zone-title" in text
     assert format_context(data, max_age=-1) == ""
