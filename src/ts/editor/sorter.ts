@@ -24,24 +24,25 @@ let dragFrom: number | null = null;
 
 // Click picks one slide; Ctrl/Cmd adds or removes one, Shift a range (for
 // copying, cutting or deleting several at once).
+// The slide list and the grid view both redraw on "slide-selection".
 export function pickSlide(i: number, e: MouseEvent): void {
     ed.focus = "sorter";
     if (e.shiftKey) {
         const [a, b] = [Math.min(ed.current, i), Math.max(ed.current, i)];
         for (let k = a; k <= b; k++) ed.slideSelection.add(k);
-        renderSorter();
+        emit("slide-selection");
         return;
     }
     if (e.ctrlKey || e.metaKey) {
         if (!ed.slideSelection.size) ed.slideSelection.add(ed.current);
         if (ed.slideSelection.has(i)) ed.slideSelection.delete(i);
         else ed.slideSelection.add(i);
-        renderSorter();
+        emit("slide-selection");
         if (ed.slideSelection.has(i)) gotoSlide(i);
         return;
     }
     ed.slideSelection.clear();
-    if (i === ed.current) renderSorter();
+    if (i === ed.current) emit("slide-selection");
     else gotoSlide(i);
 }
 
