@@ -187,6 +187,23 @@
   }
 
   // src/ts/render/measure.ts
+  var PRINT_DPI_HINT = 150;
+  var PRINT_DPI_PROBLEM = 100;
+  var BODY_TEXT = /* @__PURE__ */ new Set(["p", "li", "td", "dd", "blockquote"]);
+  function printedDpi(natural, boxIn, fit) {
+    if (natural.w <= 0 || natural.h <= 0 || boxIn.w <= 0 || boxIn.h <= 0) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const sx = boxIn.w / natural.w;
+    const sy = boxIn.h / natural.h;
+    if (fit === "fill") return Math.min(1 / sx, 1 / sy);
+    const inchesPerPixel = fit === "cover" ? Math.max(sx, sy) : Math.min(sx, sy);
+    return 1 / inchesPerPixel;
+  }
+  function isVector(url) {
+    const clean = url.split(/[?#]/)[0].toLowerCase();
+    return clean.endsWith(".svg") || clean.endsWith(".svgz") || clean.endsWith(".pdf") || url.startsWith("data:image/svg");
+  }
   var TOLERANCE = 2;
   var MIN_TEXT_FRACTION = 1 / 80;
   function union(a, b) {
@@ -242,7 +259,9 @@
           seen.size = f.size;
           seen.text = f.text;
         }
-      } else if (seen.kind !== "small-text" && f.kind !== "small-text") {
+      } else if (seen.kind === "low-res" && f.kind === "low-res") {
+        if (f.dpi < seen.dpi) Object.assign(seen, f);
+      } else if (seen.kind !== "small-text" && f.kind !== "small-text" && seen.kind !== "low-res" && f.kind !== "low-res") {
         for (const side of ["top", "right", "bottom", "left"]) {
           seen[side] = Math.max(seen[side], f[side]);
         }
@@ -285,8 +304,10 @@
     "polygon"
   ]);
   var Measurer = class {
-    constructor(svg2) {
+    constructor(svg2, print = null, natural = /* @__PURE__ */ new Map()) {
       this.svg = svg2;
+      this.print = print;
+      this.natural = natural;
       const vb = svg2.viewBox.baseVal;
       const w = vb && vb.width > 0 ? vb.width : svg2.width.baseVal.value;
       const h = vb && vb.height > 0 ? vb.height : svg2.height.baseVal.value;
@@ -303,6 +324,8 @@
       this.minText = h * MIN_TEXT_FRACTION;
     }
     svg;
+    print;
+    natural;
     findings = [];
     canvas;
     toSlide;
@@ -332,6 +355,9 @@
           continue;
         }
         if (style.visibility === "hidden") continue;
+        if (el.localName === "image") {
+          this.picture(el, el.href.baseVal);
+        }
         if (el.localName === "foreignObject") {
           this.zone(el);
         } else if (el.localName === "text") {
@@ -376,14 +402,61 @@
       const size = Number.parseFloat(style.fontSize) * scaleOf(ctm) * this.unit;
       this.smallText(el, size, text);
     }
-    smallText(el, size, text) {
-      if (!(size > 0) || size >= this.minText) return;
+    smallText(el, size, text, holder = null) {
+      if (!(size > 0)) return;
+      if (this.print) {
+        const pt = size * this.print.ptPerUnit;
+        const body = !!holder?.closest(Array.from(BODY_TEXT).join(","));
+        const min = body ? this.print.bodyPt : this.print.minPt;
+        if (pt >= min) return;
+        this.findings.push({
+          kind: "small-text",
+          target: describe(el),
+          size: Math.round(pt * 10) / 10,
+          min: Math.round(min * 10) / 10,
+          text: snippet(text),
+          unit: "pt",
+          body
+        });
+        return;
+      }
+      if (size >= this.minText) return;
       this.findings.push({
         kind: "small-text",
         target: describe(el),
         size: Math.round(size * 10) / 10,
         min: Math.round(this.minText * 10) / 10,
         text: snippet(text)
+      });
+    }
+    /** Print: does a raster picture have pixels enough for its printed size? */
+    picture(el, href) {
+      if (!this.print || !href || isVector(href)) return;
+      if (el.hasAttribute("data-inkflow-pdf")) return;
+      const url = new URL(href, document.baseURI).href;
+      const natural = this.natural.get(url);
+      if (!natural) return;
+      const rect = el.getBoundingClientRect();
+      const box = this.slideBox(rect);
+      const inch = this.print.ptPerUnit / 72;
+      const boxIn = {
+        w: (box.right - box.left) * inch,
+        h: (box.bottom - box.top) * inch
+      };
+      const dpi = printedDpi(natural, boxIn, fitOf(el));
+      if (!(dpi < PRINT_DPI_HINT)) return;
+      this.findings.push({
+        kind: "low-res",
+        target: describe(el),
+        dpi: Math.round(dpi),
+        min: PRINT_DPI_HINT,
+        problem: dpi < PRINT_DPI_PROBLEM,
+        text: snippet(
+          decodeURIComponent(
+            href.split(/[?#]/)[0].split("/").pop() ?? href
+          ),
+          40
+        )
       });
     }
     /** A zone holding HTML: does its content fit inside it? */
@@ -411,7 +484,7 @@
               const size = Number.parseFloat(
                 getComputedStyle(holder).fontSize
               ) * pxToSlide;
-              this.smallText(fo, size, text);
+              this.smallText(fo, size, text, holder);
             }
             continue;
           }
@@ -434,6 +507,9 @@
           ];
           if (replaced.includes(child.localName)) {
             add(child.getBoundingClientRect());
+            if (child instanceof HTMLImageElement) {
+              this.picture(child, child.currentSrc || child.src);
+            }
             continue;
           }
           const scrolls = style.overflowX !== "visible" || style.overflowY !== "visible";
@@ -454,6 +530,11 @@
       if (wrapper) {
         visit(wrapper);
       } else if (fo.querySelector(":scope > img, :scope > video")) {
+        for (const img of Array.from(fo.querySelectorAll("img"))) {
+          if (getComputedStyle(img).display !== "none") {
+            this.picture(img, img.currentSrc || img.src);
+          }
+        }
         return;
       } else {
         visit(fo);
@@ -481,10 +562,21 @@
         const text = n.textContent ?? "";
         if (!text.trim() || !n.parentElement) continue;
         const size = Number.parseFloat(getComputedStyle(n.parentElement).fontSize) * pxToSlide;
-        this.smallText(fo, size, text);
+        this.smallText(fo, size, text, n.parentElement);
       }
     }
   };
+  function fitOf(el) {
+    if (el instanceof HTMLElement) {
+      const fit = getComputedStyle(el).objectFit;
+      if (fit === "cover") return "cover";
+      if (fit === "fill") return "fill";
+      return "contain";
+    }
+    const par = el.getAttribute("preserveAspectRatio") ?? "";
+    if (par.startsWith("none")) return "fill";
+    return par.includes("slice") ? "cover" : "contain";
+  }
   function scaleOf(m) {
     const a = m.a ?? 1;
     const b = m.b ?? 0;
@@ -514,8 +606,8 @@
     const text = snippet(el.textContent ?? "", 30);
     return text ? `<${el.localName}> "${text}"` : `<${el.localName}>`;
   }
-  function measureSlide(svg2) {
-    return new Measurer(svg2).run();
+  function measureSlide(svg2, print = null, natural = /* @__PURE__ */ new Map()) {
+    return new Measurer(svg2, print, natural).run();
   }
 
   // src/ts/render/main.ts
@@ -559,6 +651,35 @@
       }
     }
   }
+  async function naturalSizes(root) {
+    const sizes = /* @__PURE__ */ new Map();
+    const urls = /* @__PURE__ */ new Set();
+    for (const el of Array.from(root.querySelectorAll("image"))) {
+      const href = el.href.baseVal;
+      if (href && !isVector(href))
+        urls.add(new URL(href, document.baseURI).href);
+    }
+    for (const img of Array.from(root.querySelectorAll("img"))) {
+      if (img.naturalWidth > 0) {
+        sizes.set(img.currentSrc || img.src, {
+          w: img.naturalWidth,
+          h: img.naturalHeight
+        });
+      }
+    }
+    await Promise.all(
+      Array.from(urls, async (url) => {
+        const img = new Image();
+        img.src = url;
+        try {
+          await img.decode();
+          sizes.set(url, { w: img.naturalWidth, h: img.naturalHeight });
+        } catch {
+        }
+      })
+    );
+    return sizes;
+  }
   function frame() {
     return new Promise((resolve) => requestAnimationFrame(() => resolve()));
   }
@@ -571,6 +692,12 @@
     settleCss();
     await frame();
     await frame();
-    return svg ? measureSlide(svg) : [];
+    if (!svg) return [];
+    const print = __RENDER_PRINT__;
+    return measureSlide(
+      svg,
+      print,
+      print ? await naturalSizes(svg) : /* @__PURE__ */ new Map()
+    );
   })();
 })();

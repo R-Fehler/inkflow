@@ -210,3 +210,120 @@ def test_poster_layouts_render_without_problems(poster: Path, layout: str) -> No
     result = render_slides(deck_py, None, None, no_sandbox=True)
     problems = [f.message() for f in result.findings if f.is_problem]
     assert problems == []
+    # The template's text is all large enough to read on paper, too.
+    hints = [f.message() for f in result.findings]
+    assert hints == []
+
+
+# ── Print checks ──────────────────────────────────────────────────────────────
+
+
+def test_print_check_thresholds_follow_the_sheet() -> None:
+    from inkflow.export import PdfPage
+    from inkflow.render import print_check
+
+    a0 = PageSize.A0
+    check = print_check(PdfPage(*a0.page_pt, a0.canvas))
+    assert check["ptPerUnit"] == pytest.approx(0.75, abs=1e-3)
+    assert check["minPt"] == pytest.approx(17.9, abs=0.05)  # about 18 pt
+    assert check["bodyPt"] == pytest.approx(23.8, abs=0.05)  # about 24 pt
+    a1 = PageSize.A1
+    small = print_check(PdfPage(*a1.page_pt, a1.canvas))
+    # The A0 canvas on an A1 sheet: everything scaled by 1/sqrt(2).
+    assert small["ptPerUnit"] == pytest.approx(0.75 / 2**0.5, abs=1e-3)
+    assert small["bodyPt"] == pytest.approx(23.8 / 2**0.5, abs=0.1)
+
+
+def test_print_checks_apply_to_paper_only() -> None:
+    from inkflow.manifest import Deck
+    from inkflow.pipeline import SlideData
+    from inkflow.render import print_checks
+
+    def slide(attrs: str) -> SlideData:
+        svg = f'<svg xmlns="http://www.w3.org/2000/svg" {attrs}/>'
+        return cast("SlideData", cast(object, {"svg": svg, "notes": "", "id": "s"}))
+
+    screen = slide('viewBox="0 0 1920 1080"')
+    paper = slide('viewBox="0 0 841 1189" width="841mm" height="1189mm"')
+    assert print_checks(Deck(), [screen, paper])[0] is None
+    raw = print_checks(Deck(), [paper])[0]
+    assert raw is not None and raw["ptPerUnit"] == pytest.approx(72 / 25.4)
+    assert all(c is not None for c in print_checks(Deck(size="a0"), [screen]))
+    assert print_checks(Deck(size="16:9"), [screen]) == [None]
+
+
+def test_print_findings_read_as_points_and_dpi() -> None:
+    from inkflow.render import parse_findings
+
+    raw = [
+        {
+            "kind": "small-text",
+            "target": "#zone-col-1",
+            "size": 20.5,
+            "min": 23.8,
+            "text": "Body",
+            "unit": "pt",
+            "body": True,
+        },
+        {
+            "kind": "low-res",
+            "target": "<image>",
+            "dpi": 72,
+            "min": 150,
+            "problem": True,
+            "text": "photo.png",
+        },
+        {
+            "kind": "low-res",
+            "target": "#pic",
+            "dpi": 120,
+            "min": 150,
+            "problem": False,
+            "text": "pic.jpg",
+        },
+    ]
+    small, coarse, soft = parse_findings(1, "poster", raw)
+    assert not small.is_problem
+    assert "body text 20.5 pt is likely too small to read on paper" in (small.message())
+    assert coarse.is_problem and not soft.is_problem
+    assert "photo.png prints at 72 dpi, pixelated" in coarse.message()
+    assert "120 dpi, soft" in soft.message()
+
+
+@pytest.mark.skipif(find_chromium() is None, reason="chromium not available")
+def test_render_check_finds_small_print_and_coarse_pictures(tmp_path: Path) -> None:
+    from inkflow.render import render_slides
+    from tests.test_print_export import _png  # pyright: ignore[reportPrivateUsage]
+
+    (tmp_path / "slides").mkdir()
+    (tmp_path / "slides" / "small.png").write_bytes(_png(300, 200))
+    (tmp_path / "slides" / "fine.png").write_bytes(_png(1600, 1200))
+    (tmp_path / "slides" / "poster.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3179 4494">'
+        + '<image id="coarse" href="small.png" x="100" y="100" width="1000"'
+        + ' height="667"/>'
+        + '<image id="sharp" href="fine.png" x="100" y="900" width="600"'
+        + ' height="450"/>'
+        + '<text id="tiny" x="100" y="2000" font-size="16">Footnote</text>'
+        + '<text id="big" x="100" y="2200" font-size="40">Body</text>'
+        + "</svg>"
+    )
+    (tmp_path / "deck.py").write_text(
+        "from inkflow import Deck, Slide\n\n\ndef main() -> Deck:\n"
+        + '    return Deck(size="a0", slides=[Slide("slides/poster.svg")])\n'
+    )
+    result = render_slides(tmp_path / "deck.py", None, None, no_sandbox=True)
+    found = {(f.kind, f.target): f for f in result.findings}
+    coarse = found[("low-res", "#coarse")]
+    # 300 px across 1000 units = 750 pt = 10.4 in: 29 dpi.
+    assert coarse.dpi == 29 and coarse.is_problem
+    assert ("low-res", "#sharp") not in found  # 1600 px over 6.25 in: 256 dpi
+    tiny = found[("small-text", "#tiny")]
+    assert tiny.unit == "pt" and tiny.size == 12  # 16 units at 0.75 pt
+    assert ("small-text", "#big") not in found
+    # A screen deck keeps measuring in px, and never pictures.
+    (tmp_path / "deck.py").write_text(
+        (tmp_path / "deck.py").read_text().replace('size="a0", ', "")
+    )
+    screen = render_slides(tmp_path / "deck.py", None, None, no_sandbox=True)
+    assert all(f.kind != "low-res" and f.unit == "px" for f in screen.findings)

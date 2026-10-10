@@ -330,6 +330,15 @@ def _canvas(svg: str) -> tuple[float, float]:
     return float(w), float(h)
 
 
+def is_paper_svg(svg: str) -> bool:
+    """Whether an SVG is drawn on paper: its ``width`` or ``height`` is a
+    length in mm, cm, in, pt or pc (an Inkscape A0 page)."""
+    attrs = _root_attrs(svg)
+    return any(
+        physical_length_pt(attrs.get(a)) is not None for a in ("width", "height")
+    )
+
+
 def _own_page(svg: str, canvas: tuple[float, float]) -> tuple[float, float]:
     """A slide's page from its own SVG: physical width/height, else its canvas
     in CSS px."""

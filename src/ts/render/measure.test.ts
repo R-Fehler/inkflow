@@ -3,8 +3,12 @@ import {
     type Box,
     disjoint,
     type Finding,
+    isVector,
     mergeFindings,
     overhang,
+    PRINT_DPI_HINT,
+    PRINT_DPI_PROBLEM,
+    printedDpi,
     significant,
     snippet,
     spansCanvas,
@@ -141,4 +145,56 @@ describe("mergeFindings", () => {
 test("snippet flattens whitespace and shortens", () => {
     expect(snippet("  a\n  b  ")).toBe("a b");
     expect(snippet("x".repeat(50), 10)).toBe(`${"x".repeat(9)}…`);
+});
+
+describe("print checks", () => {
+    test("printed resolution: pixels over inches, as the picture is fitted", () => {
+        // 3000 px across 10 inches: 300 dpi.
+        expect(
+            printedDpi({ w: 3000, h: 2000 }, { w: 10, h: 10 }, "contain"),
+        ).toBe(300);
+        // Covering the box, the picture is drawn larger: fewer dots per inch.
+        expect(
+            printedDpi({ w: 3000, h: 2000 }, { w: 10, h: 10 }, "cover"),
+        ).toBe(200);
+        // Stretched: the coarser direction counts.
+        expect(printedDpi({ w: 3000, h: 2000 }, { w: 10, h: 10 }, "fill")).toBe(
+            200,
+        );
+        expect(printedDpi({ w: 0, h: 0 }, { w: 1, h: 1 }, "contain")).toBe(
+            Number.POSITIVE_INFINITY,
+        );
+        expect(PRINT_DPI_PROBLEM).toBeLessThan(PRINT_DPI_HINT);
+    });
+
+    test("vector pictures are never low resolution", () => {
+        expect(isVector("figures/plot.svg")).toBe(true);
+        expect(isVector("figures/plot.SVG?v=3")).toBe(true);
+        expect(isVector("paper.pdf#page=2")).toBe(true);
+        expect(isVector("data:image/svg+xml;base64,AAA")).toBe(true);
+        expect(isVector("photo.png")).toBe(false);
+        expect(isVector("photo.jpg?v=1")).toBe(false);
+    });
+
+    test("a picture used twice keeps its lowest resolution", () => {
+        const found: Finding[] = [
+            {
+                kind: "low-res",
+                target: "#p",
+                dpi: 140,
+                min: 150,
+                problem: false,
+                text: "a.png",
+            },
+            {
+                kind: "low-res",
+                target: "#p",
+                dpi: 80,
+                min: 150,
+                problem: true,
+                text: "a.png",
+            },
+        ];
+        expect(mergeFindings(found)).toEqual([found[1]]);
+    });
 });

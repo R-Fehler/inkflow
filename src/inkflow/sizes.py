@@ -270,8 +270,8 @@ class PageSize(str):
         short = min(self._canvas)
         if not self._print:
             return max(1, round(theme_size * short / SCREEN_SHORT))
-        floor = PRINT_MIN_BODY_PT / self.pt_per_unit
-        return max(1, round(theme_size / 36 * max(short / PRINT_TEXT_RATIO, floor)))
+        body = print_body_pt(*self._page_pt) / self.pt_per_unit
+        return max(1, round(theme_size / 36 * body))
 
     @property
     def chart_text_scale(self) -> float:
@@ -369,6 +369,14 @@ def parse_view_box(text: str | None) -> tuple[float, float, float, float] | None
     except ValueError:
         return None
     return (x, y, w, h) if w > 0 and h > 0 else None
+
+
+def print_body_pt(width_pt: float, height_pt: float) -> float:
+    """The body text size a sheet of paper is read at, in points: its shorter
+    side over 80 (30 pt on A0, 21 pt on A1), never below 10 pt. What
+    `PageSize.base_font` gives a print deck, and what `inkflow render` checks
+    printed text against."""
+    return max(min(width_pt, height_pt) / PRINT_TEXT_RATIO, PRINT_MIN_BODY_PT)
 
 
 ASPECT_TOLERANCE = 0.01

@@ -34,9 +34,12 @@ from inkflow.editor.compare import (
 from inkflow.editor.comparesrc import SideBuild
 from inkflow.enums import ColorMode
 from inkflow.export import (
+    PdfPage,
     asset_roots,
     copy_assets,
     find_chromium,
+    is_paper_svg,
+    pdf_pages,
     served,
     slide_dimensions,
 )
@@ -46,6 +49,7 @@ from inkflow.logging import logger
 from inkflow.manifest import Deck
 from inkflow.pipeline import SlideData, process_deck
 from inkflow.server import load_deck
+from inkflow.sizes import print_body_pt
 from inkflow.titles import resolve_deck_title
 
 # ── findings ──────────────────────────────────────────────────────────────────
@@ -59,7 +63,7 @@ class Finding:
 
     slide: int
     slide_id: str
-    kind: str  # overflow | clipped | outside | small-text
+    kind: str  # overflow | clipped | outside | small-text | low-res
     target: str
     top: int = 0
     right: int = 0
@@ -69,10 +73,21 @@ class Finding:
     size: float = 0.0
     minimum: float = 0.0
     text: str = ""
+    unit: str = "px"
+    """``pt`` for text measured as printed (a print deck)."""
+    body: bool = False
+    """Printed small text that is body text (paragraphs, lists, tables)."""
+    dpi: float = 0.0
+    """A picture's resolution at its printed size (``low-res``)."""
+    problem: bool = False
+    """A ``low-res`` picture below `PRINT_DPI_PROBLEM` (else a hint)."""
 
     @property
     def is_problem(self) -> bool:
-        """Small text is a hint; everything else is something to fix."""
+        """Small text and a picture that is merely soft are hints; everything
+        else is something to fix."""
+        if self.kind == "low-res":
+            return self.problem
         return self.kind != "small-text"
 
     def _sides(self) -> list[str]:
@@ -97,6 +112,21 @@ class Finding:
             said = f"lies {getattr(self, side)}px outside the slide ({side})"
         elif self.kind == "outside":
             said = f"lies outside the slide by {self._reach()}"
+        elif self.kind == "low-res":
+            what = f"{self.text} " if self.text else ""
+            said = (
+                f"picture {what}prints at {self.dpi:g} dpi"
+                + (", pixelated" if self.problem else ", soft")
+                + f" (below {self.minimum:g} dpi at its printed size):"
+                + " use a larger image, or a vector one (SVG, PDF)"
+            )
+        elif self.unit == "pt":
+            what = "body text" if self.body else "text"
+            said = f"{what} {self.size:g} pt is likely too small to read on paper"
+            if self.minimum:
+                said += f" (below {self.minimum:g} pt)"
+            if self.text:
+                said += f': "{self.text}"'
         else:
             said = f"text {self.size:g}px tall is likely too small to read"
             if self.minimum:
@@ -117,7 +147,7 @@ def parse_findings(slide: int, slide_id: str, raw: object) -> list[Finding]:
         data = cast("dict[str, object]", item)
         kind = data.get("kind")
         target = data.get("target")
-        if kind not in ("overflow", "clipped", "outside", "small-text"):
+        if kind not in ("overflow", "clipped", "outside", "small-text", "low-res"):
             continue
         if not isinstance(target, str):
             continue
@@ -141,6 +171,10 @@ def parse_findings(slide: int, slide_id: str, raw: object) -> list[Finding]:
                 size=number("size"),
                 minimum=number("min"),
                 text=text if isinstance(text, str) else "",
+                unit="pt" if data.get("unit") == "pt" else "px",
+                body=data.get("body") is True,
+                dpi=number("dpi"),
+                problem=data.get("problem") is True,
             )
         )
     return found
@@ -299,9 +333,42 @@ def _page_template(
     )
 
 
-def _slide_page(template: str, svg: str) -> str:
+def print_check(page: PdfPage) -> dict[str, float]:
+    """How the render page checks a slide printed on ``page`` (measure.ts's
+    ``PrintCheck``): text in points against the sheet's body size
+    (`sizes.print_body_pt`): below 0.6 of it a hint (18 pt on A0), body text
+    below 0.8 of it (24 pt on A0)."""
+    cw, ch = page.canvas
+    body = print_body_pt(page.width, page.height)
+    return {
+        "ptPerUnit": min(page.width / cw, page.height / ch),
+        "minPt": round(body * PRINT_MIN_TEXT, 1),
+        "bodyPt": round(body * PRINT_MIN_BODY, 1),
+    }
+
+
+PRINT_MIN_TEXT = 0.6
+"""Printed text below this fraction of the sheet's body size is a hint."""
+PRINT_MIN_BODY = 0.8
+"""Printed body text below this fraction of the sheet's body size is a hint."""
+
+
+def print_checks(deck: Deck, slides: list[SlideData]) -> list[dict[str, float] | None]:
+    """Each slide's print check, ``None`` for a screen slide: a print deck's
+    every slide, and in a deck without a size the slides drawn on paper
+    (``width``/``height`` in mm, cm, in, pt or pc)."""
+    pages = pdf_pages(slides, deck)
+    checks: list[dict[str, float] | None] = []
+    for slide, page in zip(slides, pages, strict=True):
+        printed = deck.is_print or (deck.size is None and is_paper_svg(slide["svg"]))
+        checks.append(print_check(page) if printed else None)
+    return checks
+
+
+def _slide_page(template: str, svg: str, print_: dict[str, float] | None = None) -> str:
     w, h = slide_dimensions(svg)
-    html = template.replace("__RENDER_SVG__", json.dumps(svg).replace("</", "<\\/"))
+    html = template.replace("__RENDER_PRINT__", json.dumps(print_))
+    html = html.replace("__RENDER_SVG__", json.dumps(svg).replace("</", "<\\/"))
     return html.replace("__W__", str(w)).replace("__H__", str(h))
 
 
@@ -373,6 +440,7 @@ def render_slides(
 
     result = RenderResult(slides=numbers)
     shots: dict[int, str] = {}
+    checks = print_checks(deck, slides)
     with (
         tempfile.TemporaryDirectory() as tmp,
         served(Path(tmp)) as url,
@@ -383,7 +451,7 @@ def render_slides(
         for n in numbers:
             svg = slides[n - 1]["svg"]
             w, h = slide_dimensions(svg)
-            html = _slide_page(template, svg)
+            html = _slide_page(template, svg, checks[n - 1])
             (Path(tmp) / f"slide-{n}.html").write_text(html, encoding="utf-8")
             density = thumb_width[n] / w if sheet else scale
             page.viewport(w, h, density)
