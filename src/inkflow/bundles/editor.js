@@ -491,6 +491,45 @@
     );
   }
 
+  // src/ts/editor/drawioshapes.ts
+  function diagramShapes(svg) {
+    const shapes = [];
+    for (const g of svg.querySelectorAll("g[data-cell-id]")) {
+      const parent = g.parentElement?.closest("g[data-cell-id]");
+      if (!parent?.parentElement?.closest("g[data-cell-id]")) continue;
+      const id = g.getAttribute("id");
+      if (id) shapes.push({ id, label: cellLabel(g), el: g });
+    }
+    return shapes;
+  }
+  function cellLabel(g) {
+    const own = (sel) => [...g.querySelectorAll(sel)].filter(
+      (el2) => el2.closest("g[data-cell-id]") === g
+    );
+    for (const el2 of [...own("foreignObject"), ...own("text")]) {
+      const text = (el2.textContent ?? "").replace(/\s+/g, " ").trim();
+      if (text) return text;
+    }
+    return "";
+  }
+  function attachableCell(el2) {
+    const cell = el2?.closest('g[data-cell-kind="vertex"][id]');
+    return cell?.closest("svg[data-drawio]") ? cell : null;
+  }
+  function attachableCells(svg) {
+    return [
+      ...svg.querySelectorAll('g[data-cell-kind="vertex"][id]')
+    ];
+  }
+  function cellShape(cell) {
+    for (const kid of cell.children) {
+      if (kid.hasAttribute("data-cell-id")) continue;
+      if (kid.querySelector("foreignObject, text, switch")) continue;
+      return kid;
+    }
+    return cell;
+  }
+
   // src/ts/editor/geom.ts
   var IDENTITY = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
   function mat(m) {
@@ -1898,7 +1937,7 @@
   }
   function cornersOf(el2) {
     try {
-      const m = measure(el2);
+      const m = measure(attachableCell(el2) ? cellShape(el2) : el2);
       if (!m) return null;
       const toSlide = multiply(invert(rootCTM()), mat(m.ctm));
       const b = m.bbox;
@@ -1933,12 +1972,25 @@
     if (!svg) return [];
     const pool = ed.scope ? [...ed.scope.children] : [...svg.querySelectorAll("[data-ink-top]")];
     const area2 = slideSize();
-    return pool.filter((el2) => {
+    const objects = pool.filter((el2) => {
       if (el2 === except || isConnector(el2) || !el2.hasAttribute("data-ink"))
         return false;
       const b = slideBox(el2);
       return !!b && b.width * b.height < area2.width * area2.height * 0.8;
     });
+    const cells = objects.flatMap(
+      (el2) => el2.hasAttribute("data-drawio") ? attachableCells(el2) : []
+    );
+    return [...objects, ...cells];
+  }
+  function attachTargetAt(x, y, except = null) {
+    const svg = slideRoot();
+    for (const hit of document.elementsFromPoint(x, y)) {
+      if (!svg?.contains(hit)) continue;
+      const cell = attachableCell(hit);
+      if (cell) return cell;
+    }
+    return candidatesAt(x, y).find((el2) => el2 !== except && !isConnector(el2)) ?? null;
   }
   function siteAt(p, except) {
     const within = SNAP_SITE_PX / (scale() || 1);
@@ -1986,6 +2038,40 @@
     const m = toSlideMat(conn);
     if (!pts || !m) return null;
     return apply(m, which === "start" ? pts.start : pts.end);
+  }
+  function isStale(conn) {
+    const pts = endpointsOf(conn.getAttribute("d") ?? "");
+    const m = toSlideMat(conn);
+    if (!pts || !m) return false;
+    for (const which of ["start", "end"]) {
+      const c = parseConnection(conn.getAttribute(ENDS[which]));
+      const target = c ? byId(c.id) : null;
+      const site = c && target ? siteOf(target, c.site) : null;
+      if (!site) continue;
+      const drawn = apply(m, which === "start" ? pts.start : pts.end);
+      if (Math.hypot(drawn.x - site.x, drawn.y - site.y) > 1) return true;
+    }
+    return false;
+  }
+  function connectorsTo(id) {
+    const svg = slideRoot();
+    if (!svg) return [];
+    return [
+      ...svg.querySelectorAll(`[${CSS.escape(CONNECTOR)}][data-ink]`)
+    ].filter(
+      (conn) => canTransform(conn) && ["start", "end"].some((w) => {
+        const c = parseConnection(conn.getAttribute(ENDS[w]));
+        return !!c && (c.id === id || c.id.startsWith(`${id}-`));
+      })
+    );
+  }
+  function rerouteConnectors(conns, label4 = "Re-route arrows", coalesce) {
+    const plans = conns.flatMap((el2) => {
+      const d = connectorPath(el2);
+      const sel = toSelected(el2);
+      return d ? [{ sel, ops: [{ kind: "attrs", loc: sel.loc, set: { d } }] }] : [];
+    });
+    return plans.length ? sendSvgOps(plans, label4, coalesce) : null;
   }
   var BEND = "inkflow:bend";
   function connectorRoute(conn, ends = {}, style = connectorStyle(conn), bend = parseBend(conn.getAttribute(BEND))) {
@@ -2090,9 +2176,7 @@
     const sel = drag.snaps[0].sel;
     const conn = sel.el;
     const hit = e.altKey ? null : siteAt(p, conn);
-    const under = candidatesAt(e.clientX, e.clientY).find(
-      (el2) => el2 !== conn && !isConnector(el2)
-    );
+    const under = attachTargetAt(e.clientX, e.clientY, conn);
     siteHints = [
       ...under ? [
         {
@@ -2633,9 +2717,7 @@
       } else if (ed.tool in CONNECTOR_TOOLS && e.buttons === 0) {
         const p = clientToSlide(e.clientX, e.clientY);
         const hit = e.altKey ? null : siteAt(p, null);
-        const under = candidatesAt(e.clientX, e.clientY).find(
-          (el2) => !isConnector(el2)
-        );
+        const under = attachTargetAt(e.clientX, e.clientY);
         const hints = [
           ...under ? [
             {
@@ -4480,9 +4562,7 @@
       if (connecting) {
         endHit = ev.altKey ? null : siteAt(end, null);
         if (endHit) end = { x: endHit.site.x, y: endHit.site.y };
-        const under = candidatesAt(ev.clientX, ev.clientY).find(
-          (el2) => !isConnector(el2)
-        );
+        const under = attachTargetAt(ev.clientX, ev.clientY);
         showSites([
           ...under ? [
             {
@@ -5202,7 +5282,8 @@
         file: src.path,
         hash: src.hash,
         loc: image.getAttribute("data-ink") ?? sel.loc
-      }
+      },
+      id: image.getAttribute("id")
     });
   }
   function newDiagram() {
@@ -5302,12 +5383,15 @@
     };
     const save3 = async (svg) => {
       const first = path === null;
+      const step = `drawio-save-${Date.now()}`;
       const result = await edit({
         action: "drawio-save",
         path,
         svg,
-        image: first ? void 0 : target.image
+        image: first ? void 0 : target.image,
+        coalesce: step
       });
+      if (result.ok && !first && target.id) followArrows(target.id, step);
       saving = false;
       if (!result.ok) {
         post({ action: "status", message: "Not saved", modified: true });
@@ -5369,6 +5453,17 @@
       }
     };
     window.addEventListener("message", onMessage);
+  }
+  function followArrows(id, step) {
+    const rendered = () => {
+      off("render", rendered);
+      window.clearTimeout(give);
+      const stale = connectorsTo(id).filter(isStale);
+      if (stale.length)
+        void rerouteConnectors(stale, "Re-route arrows", step);
+    };
+    const give = window.setTimeout(() => off("render", rendered), 1e4);
+    on("render", rendered);
   }
   function offerDesktop(target, why) {
     openDialog(
@@ -5766,28 +5861,6 @@
     on("selection", renderObjects);
   }
 
-  // src/ts/editor/drawioshapes.ts
-  function diagramShapes(svg) {
-    const shapes = [];
-    for (const g of svg.querySelectorAll("g[data-cell-id]")) {
-      const parent = g.parentElement?.closest("g[data-cell-id]");
-      if (!parent?.parentElement?.closest("g[data-cell-id]")) continue;
-      const id = g.getAttribute("id");
-      if (id) shapes.push({ id, label: cellLabel(g), el: g });
-    }
-    return shapes;
-  }
-  function cellLabel(g) {
-    const own = (sel) => [...g.querySelectorAll(sel)].filter(
-      (el2) => el2.closest("g[data-cell-id]") === g
-    );
-    for (const el2 of [...own("foreignObject"), ...own("text")]) {
-      const text = (el2.textContent ?? "").replace(/\s+/g, " ").trim();
-      if (text) return text;
-    }
-    return "";
-  }
-
   // src/ts/editor/videopreview.ts
   function videoOf(el2) {
     if (!el2) return null;
@@ -6181,6 +6254,7 @@
     panel.append(section("Files", files2));
     const arrows = attachedConnectors();
     if (arrows.length) {
+      const stale = arrows.filter((a) => isStale(a.el)).length;
       panel.append(
         section(
           "Arrows",
@@ -6189,6 +6263,11 @@
             { class: "hint" },
             `${arrows.length} arrow${arrows.length === 1 ? " is" : "s are"} attached to shapes and follow them when they move here. After moving shapes in another editor, re-route them:`
           ),
+          stale ? h(
+            "p",
+            { class: "hint warn" },
+            `${stale} ${stale === 1 ? "arrow no longer meets its shape" : "arrows no longer meet their shapes"} (moved in draw.io or another editor).`
+          ) : null,
           button(
             "Re-route all",
             "Re-attach every arrow to its shapes",
@@ -7575,7 +7654,8 @@
     }
   }
   function renderProps() {
-    if (document.activeElement && panel.contains(document.activeElement)) {
+    const active3 = document.activeElement;
+    if (active3 && panel.contains(active3) && active3.localName !== "button") {
       refreshOnBlur = true;
       return;
     }

@@ -32,7 +32,7 @@ from lxml import etree
 from inkflow import ns
 from inkflow.assets import AssetRoots, AssetSource
 from inkflow.colors import parse_style, serialize_style
-from inkflow.drawio import is_drawio_path, size
+from inkflow.drawio import DrawioError, cells, is_drawio_path, size
 from inkflow.editor.provenance import INK, INK_TAG, is_element
 from inkflow.logging import logger
 from inkflow.svgio import SvgElement, parse_svg_file
@@ -77,7 +77,7 @@ def inline_diagrams(root: SvgElement, roots: AssetRoots) -> SvgElement:
             continue
         try:
             diagram = AssetSource.for_file(roots, path).svg(parse_svg_file(path))
-        except (OSError, etree.XMLSyntaxError) as exc:
+        except (OSError, ValueError) as exc:  # unreadable, or not an SVG
             logger.warning(f"cannot draw the diagram {href} into the slide: {exc}")
             continue
         prefix = image.get("id") or _fresh_id(
@@ -140,11 +140,25 @@ def _drawn(
     for kid in diagram:
         svg.append(copy.deepcopy(kid))
     _rename_ids(svg, diagram.get("id"), prefix)
+    _mark_cells(svg, diagram.get("content"))
     themed = mode is DiagramMode.THEMED
     for el in svg.iterdescendants():
         if is_element(el):
             _restyle(el, themed)
     return svg
+
+
+def _mark_cells(svg: SvgElement, content: str | None) -> None:
+    """``data-cell-kind`` on each cell: the editor attaches arrows to shapes
+    (vertices), never to draw.io's own arrows, their labels or the layers."""
+    try:
+        known = cells(content) if content else {}
+    except (DrawioError, etree.XMLSyntaxError):
+        known = {}
+    for el in svg.iterdescendants():
+        if is_element(el) and (cell_id := el.get("data-cell-id")) is not None:
+            cell = known.get(cell_id)
+            el.set("data-cell-kind", cell.kind if cell else "other")
 
 
 def _size(diagram: SvgElement) -> tuple[float, float] | None:

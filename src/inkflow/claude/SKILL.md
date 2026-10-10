@@ -91,7 +91,8 @@ better ask the author to open it in draw.io (double-click it in the editor).
 `inkflow:drawio="inline"` (or `"themed"`: the deck's colours and fonts) on that
 `<image>`, the build draws the diagram into the slide instead of its picture;
 each draw.io cell is then an element named `<image id>-<cell id>` that
-`animations=[...]` can target (`FadeIn("flow-client")`).
+`animations=[...]` can target (`FadeIn("flow-client")`) and a connector can
+attach to (`inkflow:connect-end="flow-client:left"`).
 
 ## Text boxes, colours and links
 

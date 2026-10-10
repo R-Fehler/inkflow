@@ -431,6 +431,18 @@ that its element is gone. The shapes are still drawn by
 draw.io: to change one, edit the diagram (the editor's own tools would be
 overwritten by the next save in draw.io).
 
+**Arrows to a diagram's shapes.** In the drawn modes, the line and arrow tools
+also offer the connection points of each draw.io shape (not of draw.io's own
+arrows), so an arrow from a text box can end on the diagram's "Client" box:
+`inkflow:connect-end="flow-client:left"`. It follows when you move or resize
+the diagram, and renaming the diagram renames its shapes' references and
+animations with it. After you save the diagram from the editor, the attached
+arrows are re-routed in the same undo step. After a save in draw.io desktop
+(or any outside change), the slide's **Arrows** section says how many arrows
+no longer meet their shapes and **Re-route all** puts them back. In Picture
+mode the shapes are not on the slide: arrows attached to them keep their last
+route and attach again when the diagram is drawn.
+
 In the slide's SVG the choice is one attribute on the picture,
 `inkflow:drawio="inline"` or `"themed"`; the file keeps the `<image>`, so
 Inkscape and other SVG viewers still show the picture.

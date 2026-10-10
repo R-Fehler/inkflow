@@ -10,6 +10,7 @@ import {
     elementGeom,
     enterGroup,
     isConnector,
+    isStale,
     isZone,
     moveOps,
     select,
@@ -488,6 +489,7 @@ function renderSlidePanel(): void {
     panel.append(section("Files", files));
     const arrows = attachedConnectors();
     if (arrows.length) {
+        const stale = arrows.filter((a) => isStale(a.el)).length;
         panel.append(
             section(
                 "Arrows",
@@ -496,6 +498,13 @@ function renderSlidePanel(): void {
                     { class: "hint" },
                     `${arrows.length} arrow${arrows.length === 1 ? " is" : "s are"} attached to shapes and follow them when they move here. After moving shapes in another editor, re-route them:`,
                 ),
+                stale
+                    ? h(
+                          "p",
+                          { class: "hint warn" },
+                          `${stale} ${stale === 1 ? "arrow no longer meets its shape" : "arrows no longer meet their shapes"} (moved in draw.io or another editor).`,
+                      )
+                    : null,
                 button(
                     "Re-route all",
                     "Re-attach every arrow to its shapes",
@@ -2078,8 +2087,10 @@ function renderMultiPanel(): void {
 // ── Wiring ──
 
 export function renderProps(): void {
-    if (document.activeElement && panel.contains(document.activeElement)) {
+    const active = document.activeElement;
+    if (active && panel.contains(active) && active.localName !== "button") {
         // Do not yank the control being typed in; refresh once it loses focus.
+        // (A clicked button keeps focus too, but has nothing to lose.)
         refreshOnBlur = true;
         return;
     }

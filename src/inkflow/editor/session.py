@@ -512,10 +512,12 @@ class EditorSession:
                 ungroup(svg, cast("str", op.get("loc")))
                 structural = True
         plain = [op for op in ops if op.get("kind") not in ("group", "ungroup")]
+        prefixes: dict[str, str] = {}
         if plain:
             result = apply_ops(svg, plain)
             result_ids.update(result.ids)
             structural = structural or result.structural
+            prefixes = result.renamed_prefixes
         out = svg.to_bytes()
         if out != untouched:
             # A batch that changes nothing leaves the file's own formatting alone.
@@ -528,7 +530,7 @@ class EditorSession:
             if op.get("kind") == "id" and isinstance(op.get("from"), str)
         }
         if renames:
-            self._rename_cues(deck, path, renames, txn)
+            self._rename_cues(deck, path, renames, txn, prefixes)
         if zone_ops:
             index, slide = self._deck_slide(deck, {"slide": msg["zoneSlide"]})
             for kind, el_id, key in zone_ops:
@@ -553,9 +555,15 @@ class EditorSession:
         return str(msg.get("label") or "Edit shape")
 
     def _rename_cues(
-        self, deck: Deck, path: Path, renames: dict[str, str], txn: _Txn
+        self,
+        deck: Deck,
+        path: Path,
+        renames: dict[str, str],
+        txn: _Txn,
+        prefixes: dict[str, str] | None = None,
     ) -> None:
-        """Keep ``animations=[...]`` pointing at an element whose id changed."""
+        """Keep ``animations=[...]`` pointing at an element whose id changed
+        (and, for a renamed diagram, at its shapes: ``prefixes``)."""
         source = self._deck_source(txn)
         if source.slide_calls(expected=len(deck.slides)) is None:
             return
@@ -571,8 +579,12 @@ class EditorSession:
             if source.animation_count(index) != len(slide.animations):
                 continue
             for i, cue in enumerate(slide.animations):
-                if cue.element in renames:
-                    new = dataclasses.replace(cue, element=renames[cue.element])
+                element = renames.get(cue.element)
+                for old, new_id in (prefixes or {}).items():
+                    if element is None and cue.element.startswith(f"{old}-"):
+                        element = f"{new_id}-{cue.element.removeprefix(f'{old}-')}"
+                if element is not None:
+                    new = dataclasses.replace(cue, element=element)
                     source.edit_animations(index, replace=(i, code.call(new)))
                     changed = True
         if changed:

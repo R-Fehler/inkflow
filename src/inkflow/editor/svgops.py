@@ -121,6 +121,9 @@ class OpResult:
     """Ids assigned during the batch: request-local key → id."""
     structural: bool = False
     """Whether element positions changed (locators into this file are stale)."""
+    renamed_prefixes: dict[str, str] = field(default_factory=dict)
+    """Renamed draw.io pictures: the names of their shapes start with the
+    picture's id (``<id>-<cell>``, see drawio_inline), so those follow."""
 
 
 def _resolve(root: SvgElement, loc: object) -> SvgElement:
@@ -441,6 +444,9 @@ def apply_ops(svg: SvgFile, ops: list[dict[str, object]]) -> OpResult:
             el.set("id", new_id)
             if old_id:
                 _rename_connections(root, old_id, new_id)
+                if _is_diagram_picture(el):
+                    _rename_connections(root, old_id, new_id, prefix=True)
+                    result.renamed_prefixes[old_id] = new_id
         elif kind == "ensure-id":
             if not el.get("id"):
                 el.set("id", unique_id(root, str(op.get("base") or _local(el.tag))))
@@ -624,15 +630,30 @@ def _uncrop(frame: SvgElement) -> None:
 CONNECT_ENDS = (f"{{{ns.INKFLOW}}}connect-start", f"{{{ns.INKFLOW}}}connect-end")
 
 
-def _rename_connections(root: SvgElement, old: str, new: str) -> None:
-    """Keep connectors attached to an object whose id changed ("<id>:<site>")."""
+def _rename_connections(
+    root: SvgElement, old: str, new: str, *, prefix: bool = False
+) -> None:
+    """Keep connectors attached to an object whose id changed ("<id>:<site>"),
+    or, with ``prefix``, to the shapes of a renamed diagram ("<id>-<cell>")."""
     for el in root.iter():
         if not is_element(el):
             continue
         for attr in CONNECT_ENDS:
             value = el.get(attr)
-            if value and value.rpartition(":")[0] == old:
-                el.set(attr, f"{new}:{value.rpartition(':')[2]}")
+            if not value:
+                continue
+            target, _, site = value.rpartition(":")
+            if target == old and not prefix:
+                el.set(attr, f"{new}:{site}")
+            elif prefix and target.startswith(f"{old}-"):
+                el.set(attr, f"{new}-{target.removeprefix(f'{old}-')}:{site}")
+
+
+def _is_diagram_picture(el: SvgElement) -> bool:
+    href = el.get("href") or el.get(f"{{{ns.XLINK}}}href") or ""
+    return _local(el.tag) == "image" and href.split("?")[0].lower().endswith(
+        ".drawio.svg"
+    )
 
 
 def _outer(el: SvgElement) -> SvgElement:
