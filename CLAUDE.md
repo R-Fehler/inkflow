@@ -135,14 +135,29 @@ src/
                                `Access.host_ok` (Host: loopback names, IP literals,
                                `machine_names`, `--allow-host`; DNS rebinding),
                                `origin_ok` (a WebSocket's Origin = the page's own
-                               host:port; none = a program), `is_owner` (loopback peer +
-                               loopback Host + no proxy headers: an SSH tunnel is the
-                               owner, `tailscale serve` is not), `admit` (`?k=` or the
-                               `inkflow-<port>` cookie -> editor/viewer token,
-                               `secrets.compare_digest`), `rotate`, `links`,
-                               `lan_addresses`, `enter_page` (sets the cookie, then
-                               moves on without the token; not a redirect: SameSite=
-                               Strict), `redacted` (what logs may show of a token)
+                               host:port; none = a program), `is_local` (loopback peer +
+                               loopback Host + no proxy headers: an SSH tunnel is
+                               local, `tailscale serve` is not) = the owner, except in
+                               SSH mode (`Access.ssh`: `--ssh`, default `over_ssh()` =
+                               SSH_CONNECTION/SSH_CLIENT set), where the owner is a
+                               local request with the `owner_token` (the printed owner
+                               link `owner_path`, kept across `rotate`); `admit` (`?k=`
+                               or the cookie, named `cookie_name_for(Host)`: the port
+                               the browser sees, `inkflow-8000` through `ssh -L
+                               8000:…:7777`, else the server's -> owner/editor/viewer
+                               token, `secrets.compare_digest`), `presents_token`,
+                               `rotate`, `links`, `lan_addresses`, `enter_page` (sets
+                               the cookie, then moves on without the token; not a
+                               redirect: SameSite=Strict), `redacted` (what logs may
+                               show of a token), `ssh_server_address`
+    sshshare.py       what "Share via SSH" writes commands from (`details`, the
+                               `share-status`'s `sshInfo`, gathered on the dialog's
+                               `status` op): server names (SSH_CONNECTION's server
+                               address, fqdn, host name), login user, the deck's repo
+                               via `publish.layout` (remote with web credentials
+                               stripped, `clone_folder`, deck path in the repo,
+                               pyproject pins inkflow -> `uv run`, else `uv tool
+                               install <requirement>`)
     collab.py         the connected people (`People`, `Client`: id, role, token,
                                page's private `key`, name, colour, page, slide,
                                selection, editing); `Client.author` = whose History
@@ -415,8 +430,10 @@ src/
                                `__main__.py` gives a console-less process devnull
                                streams), or in a terminal with `--terminal`
     instances.py      one server per deck: each server records {pid, host, port,
-                               ws_port (= port unless `--ws-port`), deck, tls}
-                               in the user state dir (`register`/`unregister`, by
+                               ws_port (= port unless `--ws-port`), deck, tls,
+                               owner_token (SSH mode)} in the user state dir (dir 0700,
+                               records 0600; `ws_url()`/`owner_url()` carry `?k=`, the
+                               probe a cookie; `url()` never does) (`register`/`unregister`, by
                                `_serve_deck`); `serving(deck)` finds the live one, trusting
                                a record only when `/_inkflow/instance` answers with its
                                pid (stale ones are deleted). Used by `inkflow edit/serve`
@@ -656,7 +673,12 @@ src/
     editor/           (editing together: collab.ts = presence (avatars, slide
                       dots, others' selections via `hooks.drawPeers`, the name
                       dialog), share.ts = the owner's Share… dialog (links, QR
-                      via qrcode-generator, New links, Disconnect),
+                      via qrcode-generator, New links, Disconnect; in SSH mode
+                      "Turn on links", localhost links without QR),
+                      sshdialog.ts = its "Share via SSH" view (not SSH mode: move
+                      the deck to a server, steps + Next time; SSH mode: the
+                      collaborator's tunnel + link message per role) over
+                      sshtext.ts (pure + tested: `shellQuote`, commands, messages),
                       conflict.ts = the box keeping typing a stale write
                       refused; shared/identity.ts = name + private key in
                       localStorage, shared/wsurl.ts = `socketUrl(location)`)
@@ -970,15 +992,18 @@ A side is a `comparesrc.Source`: `{"kind":"live"}`, `{"kind":"commit","rev"}` (a
   says whether the page is served (null in a static build). `--ws-port`
   (deprecated) additionally opens the old separate port on this machine only,
   behind the same checks (`_ws_check`, origin = the HTTP port's pages);
-  `editor/remote.py` and `inkflow goto/select` use `Instance.ws_url()` / the
-  context's `server.wsPath`
+  `editor/remote.py` and `inkflow goto/select` use `Instance.ws_url()` (with the
+  owner token in SSH mode; goto/select look the instance up first) / the
+  context's `server.wsPath` (never a token: context.json is in the project)
 - The door, before anything else, for every HTTP request and WebSocket
   handshake: `Host` must name this machine (else 403: DNS rebinding); a
   WebSocket's `Origin`, when sent, must be this server's page (else 403:
   cross-site WebSocket hijacking); then who it is (`Access.admit`): the owner
-  (loopback, see access.py), or a valid share token in `?k=` or the cookie, else
-  401. A `?k=` request answers `enter_page` with `Set-Cookie: inkflow-<port>=…;
-  HttpOnly; SameSite=Strict` (+ `Secure` with `--tls`). Viewers get the presenter
+  (loopback, see access.py; in SSH mode loopback + the owner token), or a valid
+  share token in `?k=` or the cookie, else 401 (SSH mode without any token: "Open
+  the owner link", `_SSH_401`, never the token). A `?k=` request answers
+  `enter_page` with `Set-Cookie: inkflow-<browser port>=…; HttpOnly;
+  SameSite=Strict` (+ `Secure` with `--tls`). Viewers get the presenter
   only (403 on `/edit`, `/_export/`, `/_cmp/`; `/_inkflow/instance` is the
   owner's). Pages carry `X-Frame-Options`/`frame-ancestors 'self'` and
   `Referrer-Policy: no-referrer`. Messages by role: `allowed()` (owner only:
@@ -993,7 +1018,11 @@ A side is a `comparesrc.Source`: `{"kind":"live"}`, `{"kind":"commit","rev"}` (a
   sockets with code 4001 (`SENT_AWAY`: the page says why and stops
   reconnecting). Links per `lan_addresses()` (+ `.local`, `--allow-host` names)
   are printed in the TUI and sent as `share-status`; tokens never reach the log
-  in full. `--tls CERT KEY` serves HTTPS/WSS on the same port
+  in full. `--tls CERT KEY` serves HTTPS/WSS on the same port. SSH mode
+  (`--ssh/--no-ssh`, `Sharing.ssh`): `_listen_hosts` never moves the listener
+  for sharing (only `--host` does), links name `localhost`, `share-status` adds
+  `ssh` + `sshInfo`; the TUI prints the owner link (`owner_lines`, `LiveUI.
+  set_owner`) and the instance record holds the owner token
 - Presence: each connection is a `collab.Client` (`welcome` {id, role, colour,
   name} on connect); pages send `presence` {page, key, name, slide, selection,
   editing}, relayed to everyone as `presence` {people} (never persisted, never

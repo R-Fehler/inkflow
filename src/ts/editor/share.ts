@@ -1,13 +1,18 @@
 // The owner's Share… dialog: share the deck on the local network (or a VPN)
 // and stop again, without restarting; an editor link and a view link per
 // address, each with Copy and a QR code; new links (everyone who joined with
-// the old ones is disconnected); who is connected, with Disconnect.
+// the old ones is disconnected); who is connected, with Disconnect. "Share
+// via SSH" opens sshdialog.ts in its place. In SSH mode (a server others log
+// in to) the links name localhost, for each guest's own tunnel, and turning
+// them on never listens on the network.
 
 import qrcode from "qrcode-generator";
 import { collab } from "./collab";
 import { dialogOpen, openDialog } from "./dialog";
 import { clear, h, toast } from "./dom";
 import { onMessage, sendRaw } from "./net";
+import { type SshView, sshView } from "./sshdialog";
+import type { SshInfo } from "./sshtext";
 
 interface Link {
     address: string;
@@ -20,6 +25,9 @@ interface ShareStatus {
     links: Link[];
     names: string[];
     port: number;
+    /** SSH mode: links for tunnels, no network listening. */
+    ssh?: boolean;
+    sshInfo?: SshInfo | null;
     people: {
         id: string;
         name: string;
@@ -32,6 +40,8 @@ interface ShareStatus {
 
 let status: ShareStatus | null = null;
 let body: HTMLElement | null = null;
+/** "Share via SSH", shown in the dialog's place while open. */
+let ssh: SshView | null = null;
 const button = document.getElementById("btn-share");
 
 /** An SVG QR code for `text` (generated here; nothing leaves the page). */
@@ -42,7 +52,7 @@ export function qrSvg(text: string): string {
     return qr.createSvgTag({ cellSize: 3, margin: 2, scalable: true });
 }
 
-function copy(text: string, what: string): void {
+export function copy(text: string, what: string): void {
     const done = () => toast(`${what} copied`, "ok");
     if (navigator.clipboard && window.isSecureContext) {
         navigator.clipboard.writeText(text).then(done, () => fallback());
@@ -61,13 +71,18 @@ function copy(text: string, what: string): void {
     }
 }
 
-function linkRow(label: string, url: string, hint: string): HTMLElement {
+function linkRow(
+    label: string,
+    url: string,
+    hint: string,
+    withQr = true,
+): HTMLElement {
     const qr = h("div", { class: "share-qr", title: `QR code: ${label}` });
     qr.innerHTML = qrSvg(url);
     return h(
         "div",
         { class: "share-link" },
-        qr,
+        withQr ? qr : null,
         h(
             "div",
             { class: "share-link-text" },
@@ -92,21 +107,69 @@ function linkRow(label: string, url: string, hint: string): HTMLElement {
     );
 }
 
-function render(): void {
+function openSsh(): void {
     if (!body || !status) return;
+    ssh = sshView(status, {
+        back: () => {
+            ssh = null;
+            render();
+        },
+        copy,
+        turnOn: () => sendRaw({ type: "share", op: "on" }),
+    });
     clear(body);
-    const s = status;
-    body.append(
+    body.append(ssh.element);
+}
+
+function sshSection(s: ShareStatus): HTMLElement {
+    return h(
+        "section",
+        { class: "share-ssh" },
+        h("h3", {}, "Over SSH"),
         h(
             "div",
             { class: "share-state" },
             h(
                 "p",
-                {},
-                s.sharing
-                    ? "Shared on the network: people with a link below can join."
-                    : "Only this computer can open the deck. Share it to give people on the same network (or VPN) a link.",
+                { class: "hint" },
+                s.ssh
+                    ? "The commands and the message for each collaborator's tunnel."
+                    : "Move the deck to a server you and others can log in to, and edit it there together through SSH tunnels.",
             ),
+            h(
+                "button",
+                { type: "button", class: "pbtn", onclick: openSsh },
+                "Share via SSH",
+            ),
+        ),
+    );
+}
+
+function stateText(s: ShareStatus): string {
+    if (s.ssh) {
+        return s.sharing
+            ? "SSH mode: people with a link below join through an SSH tunnel to this server."
+            : "SSH mode: this server is reached through SSH tunnels only. Turn the links on to invite people.";
+    }
+    return s.sharing
+        ? "Shared on the network: people with a link below can join."
+        : "Only this computer can open the deck. Share it to give people on the same network (or VPN) a link.";
+}
+
+function render(): void {
+    if (!body || !status) return;
+    if (ssh) {
+        ssh.update(status);
+        return;
+    }
+    clear(body);
+    const s = status;
+    const onLabel = s.ssh ? "Turn on links" : "Share on the network";
+    body.append(
+        h(
+            "div",
+            { class: "share-state" },
+            h("p", {}, stateText(s)),
             h(
                 "button",
                 {
@@ -118,7 +181,7 @@ function render(): void {
                             op: s.sharing ? "off" : "on",
                         }),
                 },
-                s.sharing ? "Stop sharing" : "Share on the network",
+                s.sharing ? "Stop sharing" : onLabel,
             ),
         ),
     );
@@ -138,16 +201,22 @@ function render(): void {
                 h(
                     "section",
                     { class: "share-address" },
-                    h("h3", {}, link.address),
+                    h(
+                        "h3",
+                        {},
+                        s.ssh ? "Through each guest's tunnel" : link.address,
+                    ),
                     linkRow(
                         "Editor link",
                         link.editor,
                         "Edits the deck with you (not your computer's files, git or programs).",
+                        !s.ssh,
                     ),
                     linkRow(
                         "View link",
                         link.view,
                         "Watches the presentation and follows your slide.",
+                        !s.ssh,
                     ),
                 ),
             );
@@ -186,23 +255,13 @@ function render(): void {
             h(
                 "p",
                 { class: "hint" },
-                "The links travel unencrypted on the network: on a network you do not trust, share over SSH or a VPN instead.",
+                s.ssh
+                    ? "Each guest needs a login on this server for their tunnel; the links travel inside it, encrypted."
+                    : "The links travel unencrypted on the network: on a network you do not trust, share over SSH or a VPN instead.",
             ),
         );
     }
-    body.append(
-        h(
-            "p",
-            { class: "hint" },
-            "From another computer over SSH: ",
-            h(
-                "code",
-                {},
-                `ssh -L ${s.port}:localhost:${s.port} you@this-computer`,
-            ),
-            `, then open http://localhost:${s.port}/edit there (as you).`,
-        ),
-    );
+    body.append(sshSection(s));
     const people = s.people.filter((p) => p.id !== collab.me?.id);
     body.append(
         h("h3", {}, people.length ? "Connected" : "No one else is connected"),
@@ -256,10 +315,12 @@ function setStatus(msg: Record<string, unknown>): void {
 
 export function openShare(): void {
     body = h("div", { class: "share-dialog" }, h("p", {}, "…"));
+    ssh = null;
     openDialog("Share", body, {
         wide: true,
         onClose: () => {
             body = null;
+            ssh = null;
         },
     });
     sendRaw({ type: "share", op: "status" });
