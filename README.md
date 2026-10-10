@@ -175,6 +175,9 @@ at the same time and see each other's changes live.
   editor or live while presenting; kept as plain vector paths in the deck, or gone when you
   move on.
 - **Type on the slide.** Rich text with lists, tables, links and LaTeX formulas, saved as Markdown.
+- **Any size, posters too.** 16:9, 4:3, phone-shaped 9:16, or paper from A0 to letter:
+  poster layouts with a print type scale, checks for text and pictures too small for print,
+  and a PDF at the exact printed size, with bleed and crop marks when a print shop asks.
 - **Layouts and theme.** Start slides from a layout gallery, edit the shared layouts, and set
   the deck's colours and fonts in a theme dialog.
 - **Animations, transitions and notes** from the properties panel; preview each build step,

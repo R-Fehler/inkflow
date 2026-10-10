@@ -89,16 +89,50 @@ If your binary is elsewhere:
 inkflow export --chromium /usr/bin/chromium-browser
 ```
 
-### Slide dimensions
+### Page size
 
-The PDF page size is auto-detected from the first slide's `viewBox`.
-No configuration needed for standard decks.
+Each page is the deck's size, [`Deck(size=...)`](../authoring/posters.md#sizes):
+`size="a0"` prints every page at exactly 841 x 1189 mm, `"16:9"` at
+1920 x 1080 px (20 x 11.25 in). Each slide's `viewBox` is scaled onto the page,
+so a poster drawn on the A0 canvas prints on A1 when the deck says `"a1"`, and a
+slide of another shape is letterboxed (`inkflow verify` warns about it).
 
-To override — for example when mixing slide sizes or forcing a specific output resolution:
+A deck without a size prints each slide at its own size: the `width` and
+`height` of its SVG when they are lengths in `mm`, `cm`, `in`, `pt` or `pc` (an
+Inkscape A0 page is `width="841mm" height="1189mm"`), else its `viewBox` at
+1 unit = 1 px. Slides of different sizes each get their own page size in the
+same PDF.
+
+`--size` prints every page at one size instead, by name, as a physical size,
+or in px as before:
 
 ```bash
-inkflow export --size 1280x720
+inkflow export --size a1               # A1 portrait
+inkflow export --size a0-landscape
+inkflow export --size 841x1189mm       # also cm, in: 36x48in
+inkflow export --size 1280x720         # px
 ```
+
+The page boxes are exact: Chromium prints page sizes on a grid of about
+1/75 in, so inkflow writes each page's box to the size asked for afterwards
+(an A0 page is 2383.94 x 3370.39 pt). Text stays text (selectable, with its
+font embedded), drawings stay vector, and pictures keep their own pixels.
+
+### Bleed and crop marks
+
+A print shop that asks for bleed wants the background to run past the edge
+where the sheet is cut:
+
+```bash
+inkflow export --bleed 3mm --crop-marks
+```
+
+`--bleed` (`3mm`, `0.125in`; a bare number is mm) makes each page that much
+larger on every side and extends every background that covers the whole slide
+(a rectangle or a picture) into it. `--crop-marks` marks the corners of the
+finished page in a margin outside the bleed. With bleed, the PDF's `TrimBox`
+and `BleedBox` say where the finished page is. The editor's Export dialog
+offers both for a print deck ("3 mm bleed and crop marks").
 
 ### Running as root or in Docker
 

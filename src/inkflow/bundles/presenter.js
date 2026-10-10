@@ -4962,7 +4962,9 @@
     svg.style.width = `${vb.w}px`;
     svg.style.height = `${vb.h}px`;
     const scale = Math.min(thumb.clientWidth / vb.w, thumb.clientHeight / vb.h);
-    svg.style.transform = `scale(${scale})`;
+    const dx = (thumb.clientWidth - vb.w * scale) / 2;
+    const dy = (thumb.clientHeight - vb.h * scale) / 2;
+    svg.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
   }
   function computeCols() {
     const cols = getComputedStyle(overviewGrid).gridTemplateColumns.split(" ").length;
@@ -4975,8 +4977,9 @@
     const availH = overview.clientHeight - parseFloat(getComputedStyle(overview).paddingTop) - parseFloat(getComputedStyle(overview).paddingBottom);
     const [vbW, vbH] = firstSlideViewBox();
     const ratio = vbH / vbW;
-    let cols = n2;
-    for (let c2 = 1; c2 <= n2; c2++) {
+    const most = Math.max(n2, 8);
+    let cols = most;
+    for (let c2 = 1; c2 <= most; c2++) {
       const thumbW = (availW - (c2 - 1) * gap) / c2;
       const rows = Math.ceil(n2 / c2);
       if (rows * (thumbW * ratio + gap) - gap <= availH) {
