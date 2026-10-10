@@ -13,7 +13,7 @@ from click.testing import CliRunner
 
 from inkflow import drawio
 from inkflow.cli import main
-from inkflow.edit import EditCommands, open_choices
+from inkflow.edit import App, EditCommands, open_choices
 from inkflow.editor.session import EditError, EditorSession
 from inkflow.editor.svgops import SvgFile, file_hash
 
@@ -149,3 +149,39 @@ def test_open_with_offers_draw_io(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("inkflow.edit.shutil.which", which)
     choices = open_choices(Path("flow.drawio.svg"), EditCommands(None, None))
     assert [c.id for c in choices][:2] == ["drawio", "inkscape"]
+
+
+def test_a_new_diagram_for_draw_io_desktop(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = EditorSession(project / "deck.py")
+    made = session.apply({"action": "drawio-new"}, object())  # pyright: ignore[reportArgumentType]
+    assert made["rel"] == "diagrams/diagram-1.drawio.svg"
+    assert (made["width"], made["height"]) == drawio.BLANK_SIZE
+    data = (project / "diagrams" / "diagram-1.drawio.svg").read_bytes()
+    assert drawio.is_drawio_svg(data) and b"New diagram" in data  # placeholder
+    assert "<mxCell" in drawio.source(data)
+    # Opening it in draw.io desktop leaves the file exactly as it is (no
+    # Inkscape preview layers, unlike a slide SVG).
+    launched: list[str] = []
+
+    def which(name: str) -> str | None:
+        return f"/usr/bin/{name}" if name == "drawio" else None
+
+    monkeypatch.setattr("inkflow.edit.shutil.which", which)
+
+    def open_with(path: Path, app: App) -> None:
+        launched.append(f"{app.id}:{path.name}")
+
+    monkeypatch.setattr("inkflow.editor.session.open_with", open_with)
+    session.apply(
+        {
+            "action": "open-file",
+            "path": "diagrams/diagram-1.drawio.svg",
+            "app": "drawio",
+            "_local": True,
+        },
+        object(),  # pyright: ignore[reportArgumentType]
+    )
+    assert launched == ["drawio:diagram-1.drawio.svg"]
+    assert (project / "diagrams" / "diagram-1.drawio.svg").read_bytes() == data

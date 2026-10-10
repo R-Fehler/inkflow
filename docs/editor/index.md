@@ -424,6 +424,15 @@ image) and point inkflow at it:
 INKFLOW_DRAWIO_URL=http://localhost:8080/ inkflow edit
 ```
 
+**Without internet.** When draw.io cannot load (the computer is offline, or it
+does not answer within 15 seconds), the editor offers **draw.io desktop**
+instead; the loading screen also has a **Use draw.io desktop instead** button
+from the start. A new diagram then gets its file right away, shown on the slide
+as a placeholder, and opens in the draw.io app; save there and the slide
+updates. If the app is not installed, the editor says where to get it
+([drawio.com](https://www.drawio.com), or
+`flatpak install flathub com.jgraph.drawio.desktop`).
+
 **Not yet.** A diagram keeps draw.io's own colours, so it does not follow the
 deck's dark or light mode, and its shapes cannot be animated one by one.
 

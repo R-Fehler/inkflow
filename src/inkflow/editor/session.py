@@ -411,6 +411,7 @@ class EditorSession:
             "paste-slides": self._paste_slides,
             "paste-objects": self._paste_objects,
             "drawio-save": self._drawio_save,
+            "drawio-new": self._drawio_new,
         }.get(cast("str", action))
         if handler is None:
             raise EditError(f"unknown action {action!r}")
@@ -911,7 +912,11 @@ class EditorSession:
         if app is None:
             raise EditError(f"no such program for {path.name}")
         result: dict[str, object] = {"ok": True}
-        if deck is not None and path.suffix.lower() == ".svg":
+        if (
+            deck is not None
+            and path.suffix.lower() == ".svg"
+            and not drawio.is_drawio_path(path)  # draw.io's own file, never touched
+        ):
             # Inkscape draws only what is in the file: bring its layout layers
             # and theme colours up to date first (one undoable step).
             text = self._inkscape_preview(path, deck)
@@ -1299,6 +1304,28 @@ class EditorSession:
             structural=False,
         )
         return label
+
+    def _drawio_new(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """A new, empty diagram file (for draw.io desktop, when the embedded
+        draw.io cannot load): its picture is a placeholder until it is saved."""
+        del msg, deck
+        folder = self.project_dir / "diagrams"
+        n = 1
+        while (folder / f"diagram-{n}{drawio.SUFFIX}").exists():
+            n += 1
+        path = folder / f"diagram-{n}{drawio.SUFFIX}"
+        txn.write(path, drawio.blank())
+        width, height = drawio.BLANK_SIZE
+        extra.update(
+            path=str(path.resolve()),
+            rel=self._deck_rel(path),
+            width=width,
+            height=height,
+            structural=False,
+        )
+        return "New diagram"
 
     def _fit_diagram_image(
         self, image: dict[str, object], data: bytes, txn: _Txn

@@ -2540,5 +2540,19 @@ body.start-mode #workspace {
     align-items: center;
     justify-content: center;
     color: var(--subtext);
-    pointer-events: none;
+    background: var(--ui-bg);
+}
+
+.drawio-note-card {
+    max-width: 520px;
+    padding: 20px 24px;
+    border: 1px solid var(--ui-line);
+    border-radius: 12px;
+    background: var(--ui-panel);
+    text-align: center;
+}
+
+.drawio-note.failed .drawio-note-card {
+    color: var(--text);
+    border-color: var(--yellow);
 }

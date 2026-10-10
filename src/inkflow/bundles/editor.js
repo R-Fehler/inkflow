@@ -5209,6 +5209,14 @@
       toast(`INKFLOW_DRAWIO_URL is not a web address: ${base2}`, "error");
       return;
     }
+    const local = /^https?:\/\/(localhost|127\.|\[::1\])/.test(origin);
+    if (!navigator.onLine && !local) {
+      offerDesktop(
+        target,
+        `This computer is offline, and draw.io loads from ${origin}.`
+      );
+      return;
+    }
     const dark = document.documentElement.dataset.theme !== "light";
     const params = new URLSearchParams({
       embed: "1",
@@ -5226,19 +5234,53 @@
       src: `${base2}${base2.includes("?") ? "&" : "?"}${params}`,
       title: "draw.io"
     });
+    let path = target.path;
+    let exitAfterSave = false;
+    let saving = false;
+    let loaded = false;
+    const status2 = h("p", {}, `Loading draw.io from ${origin}\u2026`);
     const note = h(
       "div",
       { class: "drawio-note" },
-      `Loading draw.io from ${origin}\u2026`
+      h(
+        "div",
+        { class: "drawio-note-card" },
+        status2,
+        h(
+          "div",
+          { class: "btn-row" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              title: "Draw it in the draw.io app on this computer (no internet needed)",
+              onclick: () => {
+                close2();
+                void useDesktop({ ...target, path });
+              }
+            },
+            "Use draw.io desktop instead"
+          ),
+          h(
+            "button",
+            { type: "button", class: "pbtn", onclick: () => close2() },
+            "Cancel"
+          )
+        )
+      )
     );
     const wrap2 = h("div", { id: "drawio", class: "drawio" }, frame, note);
     document.body.append(wrap2);
     open2 = wrap2;
-    let path = target.path;
-    let exitAfterSave = false;
-    let saving = false;
+    const slow = window.setTimeout(() => {
+      if (loaded) return;
+      status2.textContent = `draw.io did not load from ${origin}. Is this computer offline? Draw the diagram in draw.io desktop instead.`;
+      note.classList.add("failed");
+    }, 15e3);
     const post = (msg) => frame.contentWindow?.postMessage(JSON.stringify(msg), origin);
     const close2 = () => {
+      window.clearTimeout(slow);
       window.removeEventListener("message", onMessage);
       wrap2.remove();
       open2 = null;
@@ -5277,9 +5319,11 @@
       }
       switch (msg.event) {
         case "configure":
+          loaded = true;
           post({ action: "configure", config: { compressXml: false } });
           break;
         case "init":
+          loaded = true;
           note.remove();
           post({
             action: "load",
@@ -5310,6 +5354,121 @@
       }
     };
     window.addEventListener("message", onMessage);
+  }
+  function offerDesktop(target, why) {
+    openDialog(
+      "Draw in draw.io desktop?",
+      h(
+        "div",
+        { class: "deck-form" },
+        h("p", {}, why),
+        h(
+          "p",
+          { class: "hint" },
+          "The diagram can be drawn in the draw.io app on this computer instead: save there, and the slide updates."
+        ),
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => closeDialog()
+            },
+            "Cancel"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              onclick: () => {
+                closeDialog();
+                void useDesktop(target);
+              }
+            },
+            "Open in draw.io desktop"
+          )
+        )
+      )
+    );
+  }
+  async function useDesktop(target) {
+    let path = target.path;
+    const apps = path ? await request({ action: "open-apps", path }) : null;
+    if (path && !hasDesktop(apps?.apps)) {
+      desktopMissing();
+      return;
+    }
+    if (!path) {
+      const made = await edit({ action: "drawio-new" });
+      if (!made.ok || typeof made.rel !== "string") return;
+      path = made.rel;
+      const placed = await insertDiagramImage(
+        String(made.path),
+        Number(made.width) || 640,
+        Number(made.height) || 360
+      );
+      if (!placed) return;
+      const found = await request({ action: "open-apps", path });
+      if (!hasDesktop(found.apps)) {
+        desktopMissing();
+        return;
+      }
+    }
+    const res = await request({ action: "open-file", path, app: "drawio" });
+    if (!res.ok) {
+      toast(res.error ?? "draw.io desktop did not start", "error");
+      return;
+    }
+    toast("Opened in draw.io desktop: save there and the slide updates", "ok");
+  }
+  function hasDesktop(apps) {
+    return Array.isArray(apps) && apps.some((a) => a.id === "drawio");
+  }
+  function desktopMissing() {
+    openDialog(
+      "draw.io desktop is not installed",
+      h(
+        "div",
+        { class: "deck-form" },
+        h(
+          "p",
+          {},
+          "Install the draw.io app (free) on this computer, then try again:"
+        ),
+        h(
+          "ul",
+          {},
+          h(
+            "li",
+            {},
+            h(
+              "a",
+              {
+                href: "https://www.drawio.com/",
+                target: "_blank",
+                rel: "noopener"
+              },
+              "drawio.com"
+            ),
+            " (Windows, macOS, Linux)"
+          ),
+          h(
+            "li",
+            {},
+            "Linux: flatpak install flathub com.jgraph.drawio.desktop"
+          )
+        ),
+        h(
+          "p",
+          { class: "hint" },
+          "Or run draw.io on your own network (the jgraph/drawio Docker image) and start inkflow with INKFLOW_DRAWIO_URL pointing at it."
+        )
+      )
+    );
   }
   function decodeSvg(data) {
     const m = data.match(/^data:image\/svg\+xml(;base64)?,(.*)$/s);
