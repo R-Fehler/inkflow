@@ -283,7 +283,7 @@ commands:
     description: Draw on a slide as the visual editor does.
     commands:
       - name: add
-        description: Add a rect, ellipse, line, arrow, text, textbox, image or chart
+        description: Add a rect, ellipse, line, arrow, text, textbox, image, video or chart
         flags:
           -d, --deck=: Path to deck.py
           -s, --slide=: Slide number or id
@@ -307,6 +307,17 @@ commands:
           --data=: A chart's data (CSV, TSV, JSON, Markdown table)
           --chart=: A chart's kind
           --title=: A chart's title
+          --poster=: A video's picture before it plays
+          --autoplay: A video plays when shown
+          --no-autoplay: A video plays when shown
+          --loop: A video starts over
+          --no-loop: A video starts over
+          --controls: A video's play bar
+          --no-controls: A video's play bar
+          --muted=: A video's sound
+          --start=: Where a video starts, in seconds
+          --end=: Where a video stops, in seconds
+          --fit=: How a video fills its box
         completion:
           flag:
             deck: ["$files([\".py\"])"]

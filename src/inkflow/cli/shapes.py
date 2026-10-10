@@ -252,6 +252,45 @@ def shape() -> None:
     help="A chart's kind [bar].",
 )
 @click.option("--title", default=None, help="A chart's title.")
+@click.option(
+    "--poster",
+    default=None,
+    metavar="FILE",
+    help="A video's picture before it plays.",
+)
+@click.option(
+    "--autoplay/--no-autoplay", default=None, help="A video plays when shown."
+)
+@click.option("--loop/--no-loop", default=None, help="A video starts over.")
+@click.option(
+    "--controls/--no-controls", default=None, help="A video's play bar [shown]."
+)
+@click.option(
+    "--muted",
+    default=None,
+    type=click.Choice(["auto", "on", "off"]),
+    help="A video's sound [auto: muted when it autoplays].",
+)
+@click.option(
+    "--start",
+    "video_start",
+    default=None,
+    type=float,
+    help="Where a video starts, in seconds.",
+)
+@click.option(
+    "--end",
+    "video_end",
+    default=None,
+    type=float,
+    help="Where a video stops, in seconds.",
+)
+@click.option(
+    "--fit",
+    default=None,
+    type=click.Choice(["contain", "cover", "fill", "none"]),
+    help="How a video fills its box [contain].",
+)
 def add(
     kind: str,
     deck_path: Path,
@@ -276,8 +315,16 @@ def add(
     data: str | None,
     chart_kind: str | None,
     title: str | None,
+    poster: str | None,
+    autoplay: bool | None,
+    loop: bool | None,
+    controls: bool | None,
+    muted: str | None,
+    video_start: float | None,
+    video_end: float | None,
+    fit: str | None,
 ) -> None:
-    """Add a rect, ellipse, line, arrow, text, textbox, image or chart.
+    """Add a rect, ellipse, line, arrow, text, textbox, image, video or chart.
 
     \b
     rect, ellipse  the editor's shape (surface fill, accent outline); --text
@@ -288,12 +335,17 @@ def add(
     textbox        a wrapping Markdown text box: a zone-text rect, its text
                    a section of the slide's Markdown
     image          --src FILE (a PDF shows --page)
+    video          --src FILE (MP4, WebM, Ogg, MOV): a zone-video rect,
+                   Video(...) in deck.py; --poster, --autoplay, --loop,
+                   --no-controls, --muted, --start/--end seconds, --fit
     chart          --data FILE, or a sample table to edit in the editor
     """
     if src is not None and not Path(src).is_absolute():
         src = str(Path(src).resolve())
     if data is not None and not Path(data).is_absolute():
         data = str(Path(data).resolve())
+    if poster is not None and not Path(poster).is_absolute():
+        poster = str(Path(poster).resolve())
     command = _command(
         "add",
         kind,
@@ -315,6 +367,14 @@ def add(
         data=data,
         chart=chart_kind,
         title=title,
+        poster=poster,
+        autoplay=autoplay,
+        loop=loop,
+        controls=controls,
+        muted=muted,
+        start=video_start,
+        end=video_end,
+        fit=fit,
     )
     _send(deck_path, slide_ref, [command], f"Add {kind}", as_json)
 

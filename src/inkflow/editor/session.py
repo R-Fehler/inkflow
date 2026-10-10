@@ -133,7 +133,7 @@ from inkflow.editor.transfer import (
     plan_slide_replace,
     retarget_fragment,
 )
-from inkflow.enums import ColorMode, MediaFit
+from inkflow.enums import ColorMode, MediaFit, Muted
 from inkflow.fontreport import (
     BundlePlan,
     FontDirs,
@@ -1547,14 +1547,84 @@ class EditorSession:
         rel = self._deck_rel(Path(src))
         if Path(rel).suffix.lower() not in media.VIDEO_SUFFIXES:
             raise EditError("not a video file")
-        zone = self._new_zone(msg, deck, slide, txn, "video")
+        video = self._video(rel, msg.get("video"))
+        zone = self._new_zone(msg, deck, slide, txn, _zone_base(msg, "video"))
         source = self._deck_source(txn)
         code = Code()
-        source.set_zone(index, zone, code.call(Video(rel)))
+        source.set_zone(index, zone, code.call(video))
         self._save_deck(txn, source, code.imports)
         extra["ids"] = {"new": f"zone-{zone}"}
         extra["structural"] = True
         return "Insert video"
+
+    def _video(self, rel: str, raw: object) -> Video:
+        """``Video(rel, ...)`` with a request's ``video`` settings (an agent's
+        ``inkflow shape add video`` flags), each checked."""
+        video = Video(rel)
+        if raw is None:
+            return video
+        if not isinstance(raw, dict):
+            raise EditError("video settings must be an object")
+        given = cast("dict[str, object]", raw)
+        unknown = set(given) - {
+            "autoplay",
+            "loop",
+            "controls",
+            "muted",
+            "fit",
+            "start",
+            "end",
+            "poster",
+        }
+        if unknown:
+            raise EditError(f"unknown video settings: {', '.join(sorted(unknown))}")
+
+        def flag(key: str, default: bool) -> bool:
+            value = given.get(key, default)
+            if not isinstance(value, bool):
+                raise EditError(f"video {key} must be true or false")
+            return value
+
+        def seconds(key: str) -> float | None:
+            value = given.get(key)
+            if value is None:
+                return None
+            if not isinstance(value, int | float) or isinstance(value, bool):
+                raise EditError(f"video {key} must be seconds")
+            if value < 0:
+                raise EditError(f"video {key} must not be negative")
+            return float(value)
+
+        try:
+            muted = Muted[str(given.get("muted", "auto")).upper()]
+        except KeyError:
+            raise EditError("video muted takes auto, on or off") from None
+        try:
+            fit = MediaFit[str(given.get("fit", "contain")).upper()]
+        except KeyError:
+            raise EditError("video fit takes contain, cover, fill or none") from None
+        start, end = seconds("start"), seconds("end")
+        if start is not None and end is not None and end <= start:
+            raise EditError("video end must come after its start")
+        poster: str | None = None
+        if "poster" in given:
+            raw_poster = given["poster"]
+            if not isinstance(raw_poster, str) or not raw_poster:
+                raise EditError("video poster must be a file")
+            poster = self._deck_rel(Path(raw_poster))
+            if Path(poster).suffix.lower() not in media.IMAGE_SUFFIXES:
+                raise EditError("video poster must be a picture")
+        return dataclasses.replace(
+            video,
+            autoplay=flag("autoplay", video.autoplay),
+            loop=flag("loop", video.loop),
+            controls=flag("controls", video.controls),
+            muted=muted,
+            fit=fit,
+            start=start,
+            end=end,
+            poster=poster,
+        )
 
     # ── Charts ──
 

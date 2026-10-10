@@ -97,7 +97,17 @@ class Session(Protocol):
 
 MAX_COMMANDS = 500
 
-KINDS = ("rect", "ellipse", "line", "arrow", "text", "textbox", "image", "chart")
+KINDS = (
+    "rect",
+    "ellipse",
+    "line",
+    "arrow",
+    "text",
+    "textbox",
+    "image",
+    "video",
+    "chart",
+)
 ANCHORS = (
     "top-left",
     "top",
@@ -139,6 +149,14 @@ COMMANDS: dict[str, tuple[frozenset[str], int, int | None]] = {
                 "data",
                 "chart",
                 "title",
+                "poster",
+                "autoplay",
+                "loop",
+                "muted",
+                "controls",
+                "start",
+                "end",
+                "fit",
             }
         ),
         1,
@@ -261,6 +279,19 @@ def number(value: object, what: str, low: float | None = None) -> float:
     if not math.isfinite(n) or (low is not None and n < low):
         raise ShapeError(f"--{what} takes a number of at least {low:g}, not {value!r}")
     return n
+
+
+def _flag(value: object, what: str) -> bool:
+    """A yes/no option: a boolean from the command line, or a batch's
+    ``true``/``false`` (also ``yes``/``no``, ``on``/``off``, ``1``/``0``)."""
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("true", "yes", "on", "1"):
+        return True
+    if text in ("false", "no", "off", "0"):
+        return False
+    raise ShapeError(f"--{what} takes true or false, not {value!r}")
 
 
 def paint(value: object, what: str) -> dict[str, object]:
@@ -699,6 +730,20 @@ class Runner:
             "textbox": {"at", "size", "id", "text", "fill", "stroke", "stroke-width"},
             "image": {"at", "size", "id", "src", "page", "drawio"},
             "chart": {"at", "size", "id", "data", "chart", "title"},
+            "video": {
+                "at",
+                "size",
+                "id",
+                "src",
+                "poster",
+                "autoplay",
+                "loop",
+                "muted",
+                "controls",
+                "start",
+                "end",
+                "fit",
+            },
         }[kind]
         wrong = sorted(set(opts) - allowed)
         if wrong:
@@ -709,7 +754,7 @@ class Runner:
             )
         self.own_path(create=True)
         requested = str(opts["id"]) if "id" in opts else None
-        if requested is not None and kind not in ("textbox", "chart"):
+        if requested is not None and kind not in ("textbox", "chart", "video"):
             if "text" in opts and kind in ("rect", "ellipse"):
                 self.check_new_id(f"zone-{requested.removeprefix('zone-')}")
             else:
@@ -1015,6 +1060,80 @@ class Runner:
         self.created.append(new)
         moved = "" if inside else f"; copied to {self.rel(arrival.path)}"
         self.report("add image", [new], f"{href}{moved}")
+
+    def _add_video(self, opts: dict[str, object], requested: str | None) -> None:
+        if "src" not in opts:
+            raise ShapeError("add video needs --src FILE")
+        raw = Path(str(opts["src"])).expanduser()
+        source = raw if raw.is_absolute() else self.project_dir / raw
+        outside = not source.resolve().is_relative_to(self.project_dir.resolve())
+        if outside and not self._local:
+            raise ShapeError(
+                "a video from outside the project is copied in only by a "
+                + "command on this computer"
+            )
+        suffix = source.suffix.lower()
+        if suffix not in media.VIDEO_SUFFIXES:
+            hint = (
+                ": browsers cannot play it; convert it to MP4 or WebM first "
+                + "(the editor's video insert offers that, or ffmpeg)"
+                if suffix in media.OTHER_VIDEO_SUFFIXES
+                else " (MP4, WebM, Ogg or MOV)"
+            )
+            raise ShapeError(f"not a video for the slide: {source.name}{hint}")
+        try:
+            arrival = media.import_path(self.project_dir, source.resolve())
+        except media.MediaError as exc:
+            raise ShapeError(str(exc)) from exc
+        slide = self.size()
+        w = js_round(slide.width * 0.5)
+        loc, _, box = self._in_parent(self._box(opts, (w, js_round(w * 9 / 16))))
+        settings: dict[str, object] = {}
+        for key in ("autoplay", "loop", "controls"):
+            if key in opts:
+                settings[key] = _flag(opts[key], key)
+        for key in ("muted", "fit"):
+            if key in opts:
+                settings[key] = str(opts[key])
+        for key in ("start", "end"):
+            if key in opts:
+                settings[key] = number(opts[key], key, 0)
+        if "poster" in opts:
+            poster = Path(str(opts["poster"])).expanduser()
+            poster = poster if poster.is_absolute() else self.project_dir / poster
+            if not poster.resolve().is_relative_to(self.project_dir.resolve()):
+                if not self._local:
+                    raise ShapeError(
+                        "a poster from outside the project is copied in only by "
+                        + "a command on this computer"
+                    )
+                try:
+                    poster = media.import_path(self.project_dir, poster.resolve()).path
+                except media.MediaError as exc:
+                    raise ShapeError(str(exc)) from exc
+            settings["poster"] = str(poster)
+        msg: dict[str, object] = {
+            "slide": self.index,
+            "file": str(self.own_path(create=True)),
+            "parent": loc,
+            "x": js_round(box.x),
+            "y": js_round(box.y),
+            "width": js_round(box.width),
+            "height": js_round(box.height),
+            "src": str(arrival.path),
+        }
+        if settings:
+            msg["video"] = settings
+        if requested:
+            msg["zone"] = requested
+        result = self.action("insert-video", msg)
+        zone = str(cast("dict[str, str]", result.get("ids") or {}).get("new", ""))
+        if requested and zone != f"zone-{requested.removeprefix('zone-')}":
+            raise ShapeError(f"zone {requested!r} is taken on this slide")
+        self.created.append(zone)
+        self.report(
+            "add video", [zone], f"Video({self.rel(arrival.path)!r}) in deck.py"
+        )
 
     def _add_chart(self, opts: dict[str, object], requested: str | None) -> None:
         slide = self.size()

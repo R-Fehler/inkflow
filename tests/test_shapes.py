@@ -21,7 +21,7 @@ import pytest
 from click.testing import CliRunner, Result
 from websockets.sync.client import connect
 
-from inkflow import instances
+from inkflow import Video, instances
 from inkflow.cli import main
 from inkflow.editor.bbox import Geometry, path_bbox
 from inkflow.editor.geometry import Box
@@ -292,6 +292,70 @@ def test_text_line_image_and_chart(project: Path) -> None:
     deck = (project / "deck.py").read_text(encoding="utf-8")
     assert "Chart('data/sales.csv')" in deck.replace('"', "'")
     assert not (project / "data" / "chart-1.csv").exists()
+
+
+def test_a_video_with_its_settings(project: Path) -> None:
+    (project / "assets" / "clip.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    (project / "assets" / "still.png").write_bytes(
+        bytes.fromhex(
+            "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+            + "1f15c4890000000d49444154789c6360000002000154a24f5d"
+            + "0000000049454e44ae426082"
+        )
+    )
+    _ok(
+        project,
+        "add",
+        "video",
+        "-s",
+        "1",
+        "--src",
+        str(project / "assets" / "clip.mp4"),
+        "--id",
+        "demo",
+        "--size",
+        "800,450",
+        "--autoplay",
+        "--loop",
+        "--no-controls",
+        "--poster",
+        str(project / "assets" / "still.png"),
+        "--start",
+        "2",
+        "--end",
+        "9.5",
+    )
+    rect = _el(project, "zone-demo")
+    assert (rect["width"], rect["height"]) == ("800", "450")
+    deck = load_deck(project / "deck.py")
+    video = deck.slides[0].zones["demo"]
+    assert isinstance(video, Video)
+    assert video.src == "assets/clip.mp4"
+    assert (video.autoplay, video.loop, video.controls) == (True, True, False)
+    assert video.poster == "assets/still.png"
+    assert (video.start, video.end) == (2.0, 9.5)
+    # Not a video, or one browsers cannot play: refused with what to do.
+    (project / "assets" / "clip.mkv").write_bytes(b"x")
+    bad = _run(
+        project, "add", "video", "-s", "1", "--src", str(project / "assets/clip.mkv")
+    )
+    assert bad.exit_code != 0
+    assert "clip.mkv" in bad.output
+    late = _run(
+        project,
+        "add",
+        "video",
+        "-s",
+        "1",
+        "--src",
+        str(project / "assets" / "clip.mp4"),
+        "--start",
+        "5",
+        "--end",
+        "1",
+    )
+    assert late.exit_code != 0
+    assert "end must come after its start" in late.output
 
 
 # ── Arrows ─────────────────────────────────────────────────────────────────────

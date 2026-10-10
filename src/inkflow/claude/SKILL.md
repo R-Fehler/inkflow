@@ -291,7 +291,9 @@ editor; coordinates are slide units (`--at X,Y` is the top-left corner,
   `add textbox --text "…"`: wrapping Markdown text; `add text`: an SVG
   `<text>` line (no wrapping); `add line|arrow --from X,Y --to X,Y`;
   `add image --src FILE` (`--drawio inline` draws a draw.io diagram in, its
-  shapes then named `<id>-<cell id>`); `add chart --data data/x.csv --chart line`.
+  shapes then named `<id>-<cell id>`); `add chart --data data/x.csv --chart line`;
+  `add video --src clip.mp4 --id demo --autoplay --loop` (a `zone-demo` rect +
+  `Video(...)` in `zones={...}`; `--poster`, `--no-controls`, `--start/--end`).
   `--fill`/`--stroke` take theme colours (`accent`, `surface`, …) or `#hex`.
 - `connect A B --style elbow` (straight, elbow, curved) attaches an arrow to
   two shapes, zones or draw.io shapes; `--from right --to top@0.25` picks the
