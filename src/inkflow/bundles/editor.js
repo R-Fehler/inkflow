@@ -11136,7 +11136,19 @@ Undo brings them back.`
         )
       )
     );
-    if (zone) {
+    if (zone && ed.master) {
+      panel.append(
+        section(
+          "Placeholder",
+          h(
+            "p",
+            { class: "hint" },
+            "Each slide on this layout fills this zone with its own content: here it shows sample text. Drag or resize it to move it on every slide."
+          )
+        )
+      );
+    }
+    if (zone && !ed.master) {
       const slide = currentSlide();
       const name2 = zoneName(el2);
       const origin2 = slide.zoneOrigins?.[name2];
@@ -11337,7 +11349,8 @@ Undo brings them back.`
       panel.append(detailsSection(sel));
     }
     if (movable) panel.append(arrangeSection([sel]));
-    if (id || zone || src?.writable) panel.append(elementAnimations(sel));
+    if (!ed.master && (id || zone || src?.writable))
+      panel.append(elementAnimations(sel));
   }
   var ARROW = "url(#inkflow-arrow)";
   function attachedConnectors() {

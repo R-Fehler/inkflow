@@ -1414,7 +1414,19 @@ function renderObjectPanel(sel: Selected): void {
         ),
     );
 
-    if (zone) {
+    if (zone && ed.master) {
+        panel.append(
+            section(
+                "Placeholder",
+                h(
+                    "p",
+                    { class: "hint" },
+                    "Each slide on this layout fills this zone with its own content: here it shows sample text. Drag or resize it to move it on every slide.",
+                ),
+            ),
+        );
+    }
+    if (zone && !ed.master) {
         const slide = currentSlide()!;
         const name = zoneName(el);
         const origin = slide.zoneOrigins?.[name];
@@ -1655,7 +1667,9 @@ function renderObjectPanel(sel: Selected): void {
     }
 
     if (movable) panel.append(arrangeSection([sel]));
-    if (id || zone || src?.writable) panel.append(elementAnimations(sel));
+    // Animations are a slide's: the slide master has none to add to.
+    if (!ed.master && (id || zone || src?.writable))
+        panel.append(elementAnimations(sel));
 }
 
 // ── Connectors ──
