@@ -29,7 +29,7 @@ from typing import Protocol, cast
 from lxml import etree
 
 from inkflow import animations as animations_module
-from inkflow import drawio, instances, pdf
+from inkflow import drawio, instances, pdf, publish
 from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
 from inkflow.assets import AssetRoots
@@ -129,6 +129,7 @@ from inkflow.pipeline import resolve_slide_src, slide_ids
 from inkflow.sizes import PageSize
 from inkflow.svgio import parse_svg_file
 from inkflow.sync import build_context, plan_preview
+from inkflow.titles import resolve_deck_title
 from inkflow.transitions import Transition
 from inkflow.zones import remove_zone_section, replace_zone_text, zone_spans
 
@@ -444,6 +445,8 @@ class EditorSession:
             return self._media(msg)
         if action == "git":
             return self._git(msg)
+        if action == "publish":
+            return self._publish(msg, deck)
         if action == "worktree":
             return self._worktree(msg)
         if action in _PROJECT_ACTIONS:
@@ -1465,6 +1468,117 @@ class EditorSession:
             self.history = History()
             extra["historyCleared"] = True
         return {"ok": True, **extra, "git": gitops.status(self.project_dir)}
+
+    def _publish(self, msg: dict[str, object], deck: Deck | None) -> dict[str, object]:
+        """Publishing on GitHub Pages or GitLab Pages (publish.py): ``status``
+        says what each host's setup writes and what is in the way; ``setup``
+        writes it as one undoable step (local only: the files are at the
+        repository's root, which may be outside the deck)."""
+        op = str(msg.get("op") or "status")
+        if op == "status":
+            return {"ok": True, "publish": self._publish_status(deck)}
+        if op != "setup":
+            raise EditError(f"unknown publish operation {op!r}")
+        self._local_only(msg, "set up publishing")
+        host = msg.get("host")
+        if host not in publish.HOSTS:
+            raise EditError("choose GitHub Pages or GitLab Pages")
+        kind = host
+        try:
+            plan = publish.plan(
+                self.deck_path,
+                kind,
+                msg.get("release") is True,
+                readme=msg.get("readme") is True,
+                title=resolve_deck_title(deck, self.project_dir) if deck else None,
+            )
+        except publish.PublishError as exc:
+            raise EditError(str(exc)) from exc
+        if plan.conflicts and msg.get("force") is not True:
+            raise EditError(
+                f"{', '.join(plan.conflicts)} exists already: replace it to go on"
+            )
+        changes: list[_Change] = []
+        for rel, text in plan.files.items():
+            path = (plan.where.root / rel).resolve()
+            before = path.read_bytes() if path.exists() else None
+            after = text.encode("utf-8")
+            if before == after:
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(after)
+            changes.append(_Change(path, before, after))
+        written = list(plan.files)
+        result: dict[str, object] = {"ok": True}
+        if changes:
+            step = _Step(f"Publish on {publish.HOST_NAMES[kind]}", changes)
+            self.history.record(step)
+            result = self._result(step)
+        return {
+            **result,
+            "written": written,
+            "url": plan.url,
+            "settingsUrl": plan.settings,
+            "note": plan.url_note,
+            "steps": plan.steps(written),
+            "warnings": plan.warnings,
+            "git": gitops.status(self.project_dir),
+        }
+
+    def _publish_status(self, deck: Deck | None) -> dict[str, object]:
+        where = publish.layout(self.deck_path)
+        hosts: dict[str, object] = {}
+        urls: list[str] = []
+        for host in publish.HOSTS:
+            plan = publish.plan(self.deck_path, host, True)
+            files: list[dict[str, object]] = []
+            for rel in publish.paths_for(host, True):
+                path = where.root / rel
+                state = "none"
+                if path.is_file():
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                    state = "inkflow" if publish.made_by_inkflow(text) else "other"
+                files.append(
+                    {
+                        "path": rel,
+                        "exists": state,
+                        "release": rel == publish.GITHUB_RELEASE,
+                    }
+                )
+            hosts[host] = {
+                "url": plan.url,
+                "settingsUrl": plan.settings,
+                "note": plan.url_note,
+                "files": files,
+                "warnings": plan.warnings,
+            }
+            if plan.url:
+                urls.append(plan.url)
+        configured = publish.detect(where.root)
+        readme = where.root / "README.md"
+        readme_state = "missing"
+        if readme.is_file():
+            text = readme.read_text(encoding="utf-8", errors="replace")
+            linked = any(u in text for u in urls)
+            readme_state = "linked" if linked else "present"
+        fonts: list[str] = []
+        if deck is not None:
+            try:
+                fonts = publish.font_warnings(deck, self.project_dir, self.deck_path)
+            except Exception as exc:  # a font check never blocks publishing
+                logger.warning(f"could not check the deck's fonts: {exc}")
+        return {
+            "root": str(where.root),
+            "scope": where.scope,
+            "inRepo": where.in_repo,
+            "branch": where.branch,
+            "remote": where.remote.project_url if where.remote else None,
+            "suggested": publish.host_of(where.remote),
+            "configured": configured,
+            "hosts": hosts,
+            "readme": readme_state,
+            "fonts": fonts,
+        }
 
     def _worktree(self, msg: dict[str, object]) -> dict[str, object]:
         """The deck's git worktrees (editor/worktrees.py): list them, add one

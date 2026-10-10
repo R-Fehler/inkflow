@@ -200,6 +200,15 @@ branch and how many files changed. Its menu covers what a deck needs day to day:
 - **Compare…** compares the working copy with a commit, a branch or worktree,
   or another deck folder, slide by slide: see
   [Comparing two versions](compare.md).
+- **Publish…** puts the deck online at every push, on GitHub Pages or GitLab
+  Pages (preselected from the `origin` remote), optionally with a release
+  (one HTML file and a PDF) at every tag `v…`. The dialog lists the files it
+  writes at the repository's root (and a README link, if you like), writes
+  them as one step you can undo, offers to commit them, and shows the address
+  the slides will have and the one setting to change on the host. Once set
+  up, the menu shows **Published at …** (a link) and **Publish… (update)**
+  writes the files again. It also names fonts only your computer has, which
+  the online deck would miss. See [Publishing online](../presenting/publish.md).
 
 Discard, pull, switching or creating a branch, merging a worktree, and View, Restore or Revert change
 the deck's files on disk, so the editor's undo and redo history starts over after

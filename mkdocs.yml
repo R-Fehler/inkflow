@@ -98,6 +98,7 @@ nav:
     - Presenter panel: presenting/presenter-panel.md
     - Multi-window sync: presenting/sync.md
     - Export: presenting/export.md
+    - Publishing online: presenting/publish.md
   - Reference:
     - Manifest: reference/manifest.md
     - Themes: reference/theme.md

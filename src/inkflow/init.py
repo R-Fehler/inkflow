@@ -54,7 +54,7 @@ def _project_name(target: Path) -> str:
     return slug or "my-deck"
 
 
-def _inkflow_requirement() -> str:
+def inkflow_requirement() -> str:
     """Pin the scaffold to the running inkflow via a compatible-release bound.
 
     ``~=X.Y.Z`` lets patch fixes flow in but caps at the next minor, so a deck is
@@ -167,7 +167,7 @@ def write_pyproject(target: Path) -> None:
     """A bare ``pyproject.toml`` declaring the deck's inkflow dependency."""
     (target / "pyproject.toml").write_text(
         _PYPROJECT.format(
-            name=_project_name(target), requirement=_inkflow_requirement()
+            name=_project_name(target), requirement=inkflow_requirement()
         ),
         encoding="utf-8",
     )

@@ -2659,6 +2659,51 @@ foreignObject.rich-editing .math-chip.editing {
     cursor: pointer;
 }
 
+/* Git menu → Publish… (publish.ts). */
+.menu-item.publish-link {
+    box-sizing: border-box;
+    max-width: 320px;
+    overflow: hidden;
+    color: var(--blue);
+    text-decoration: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.publish-form .check-row {
+    margin-top: 0;
+    margin-bottom: 6px;
+}
+
+.publish-form .look-list {
+    max-width: 440px;
+}
+
+.publish-url {
+    padding-top: 5px;
+    overflow-wrap: anywhere;
+}
+
+.publish-note {
+    margin: 4px 0 0;
+}
+
+.publish-notes .publish-note {
+    margin: 0 0 4px;
+}
+
+.publish-steps {
+    margin: 0;
+    padding-left: 18px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.publish-steps a,
+.publish-url a {
+    color: var(--blue);
+}
+
 /* Videos on the canvas let clicks through to their zone (select, drag). */
 #slide-host video {
     pointer-events: none;

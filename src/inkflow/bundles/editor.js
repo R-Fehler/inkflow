@@ -15007,6 +15007,279 @@ Decks: new, open, recent` : "Decks";
     document.getElementById("btn-export")?.addEventListener("click", openExport);
   }
 
+  // src/ts/editor/publishtext.ts
+  function defaultHost(info4) {
+    return info4.configured?.host ?? info4.suggested ?? "github";
+  }
+  function filesFor(info4, host4, release) {
+    return info4.hosts[host4].files.filter((f2) => release || !f2.release);
+  }
+  function fileAction(file) {
+    if (file.exists === "inkflow") return "update";
+    if (file.exists === "other") return "replace";
+    return "new";
+  }
+  function linkParts(text) {
+    const parts = [];
+    const re2 = /https?:\/\/[^\s)]+[^\s).,;]/g;
+    let last = 0;
+    for (const m2 of text.matchAll(re2)) {
+      const at2 = m2.index ?? 0;
+      if (at2 > last) parts.push({ text: text.slice(last, at2) });
+      parts.push({ url: m2[0] });
+      last = at2 + m2[0].length;
+    }
+    if (last < text.length) parts.push({ text: text.slice(last) });
+    return parts;
+  }
+
+  // src/ts/editor/publish.ts
+  var HOST_NAMES = {
+    github: "GitHub Pages",
+    gitlab: "GitLab Pages"
+  };
+  function linked(text) {
+    return h(
+      "span",
+      {},
+      ...linkParts(text).map(
+        (p2) => "url" in p2 ? h(
+          "a",
+          { href: p2.url, target: "_blank", rel: "noopener" },
+          p2.url
+        ) : p2.text
+      )
+    );
+  }
+  function fileRow(action, path) {
+    const tone = action === "new" ? "new" : action === "replace" ? "deleted" : "modified";
+    return h(
+      "div",
+      { class: "git-file" },
+      h("span", { class: `git-status s-${tone}` }, action),
+      h("code", { class: "git-path" }, path)
+    );
+  }
+  function address(url, note) {
+    return h(
+      "div",
+      { class: "publish-url" },
+      url ? h("a", { href: url, target: "_blank", rel: "noopener" }, url) : h("span", { class: "hint" }, "not known yet"),
+      note ? h("p", { class: "hint publish-note" }, `(${note})`) : null
+    );
+  }
+  async function openPublishDialog(commit, canPush) {
+    const res = await request({ action: "publish", op: "status" });
+    if (!res.ok) {
+      toast(res.error ?? "could not read the publishing setup", "error");
+      return;
+    }
+    const info4 = res.publish;
+    let host4 = defaultHost(info4);
+    const release = h("input", { type: "checkbox" });
+    release.checked = info4.configured?.release ?? false;
+    const readme = h("input", { type: "checkbox" });
+    readme.checked = info4.readme === "missing";
+    const hostButtons = ["github", "gitlab"].map((value) => {
+      const radio = h("input", {
+        type: "radio",
+        name: "publish-host",
+        value
+      });
+      radio.checked = value === host4;
+      radio.addEventListener("change", () => {
+        host4 = value;
+        update();
+      });
+      return h(
+        "label",
+        { class: "look" },
+        radio,
+        h(
+          "span",
+          { class: "look-text" },
+          h("strong", {}, HOST_NAMES[value]),
+          h(
+            "span",
+            { class: "hint" },
+            value === "github" ? "A workflow in .github/workflows/" : "A pages job in .gitlab-ci.yml"
+          )
+        )
+      );
+    });
+    const files2 = h("div", { class: "git-files" });
+    const where = h("div", {});
+    const notes = h("div", { class: "publish-notes" });
+    const write = h(
+      "button",
+      { type: "button", class: "pbtn primary", onclick: () => void run() },
+      "Write files"
+    );
+    release.addEventListener("change", () => update());
+    readme.addEventListener("change", () => update());
+    function update() {
+      const hostInfo = info4.hosts[host4];
+      const list3 = filesFor(info4, host4, release.checked);
+      const rows = list3.map((f2) => fileRow(fileAction(f2), f2.path));
+      if (readme.checked && info4.readme !== "linked") {
+        const missing = info4.readme === "missing";
+        rows.push(fileRow(missing ? "new" : "link", "README.md"));
+      }
+      files2.replaceChildren(...rows);
+      where.replaceChildren(address(hostInfo.url, hostInfo.note));
+      notes.replaceChildren(
+        ...[...hostInfo.warnings, ...info4.fonts].map(
+          (w2) => h("p", { class: "hint warn publish-note" }, w2)
+        )
+      );
+      write.textContent = list3.some((f2) => f2.exists !== "none") ? "Update files" : "Write files";
+    }
+    async function run() {
+      const list3 = filesFor(info4, host4, release.checked);
+      const theirs = list3.filter((f2) => f2.exists === "other");
+      if (theirs.length && !confirm(
+        `${theirs.map((f2) => f2.path).join(", ")} exists already and was not written by inkflow. Replace it?`
+      ))
+        return;
+      write.disabled = true;
+      const out = await edit({
+        action: "publish",
+        op: "setup",
+        host: host4,
+        release: release.checked,
+        readme: readme.checked,
+        force: list3.some((f2) => f2.exists !== "none")
+      });
+      write.disabled = false;
+      if (!out.ok) return;
+      done(out);
+    }
+    function done(out) {
+      const written = out.written ?? [];
+      const steps = out.steps ?? [];
+      const url = out.url ?? null;
+      const note = out.note ?? null;
+      const message = `Publish the slides on ${HOST_NAMES[host4]}`;
+      const commitBtn = (push) => h(
+        "button",
+        {
+          type: "button",
+          class: push ? "pbtn" : "pbtn primary",
+          onclick: async () => {
+            if (await commit(written, message, push)) closeDialog();
+          }
+        },
+        push ? "Commit and push" : "Commit"
+      );
+      openDialog(
+        `Publishing on ${HOST_NAMES[host4]}`,
+        h(
+          "div",
+          { class: "git-form publish-form" },
+          h(
+            "div",
+            { class: "field" },
+            h("span", { class: "field-label" }, "Written"),
+            h(
+              "div",
+              { class: "git-files" },
+              ...written.map(
+                (p2) => h("code", { class: "git-path" }, p2)
+              )
+            )
+          ),
+          h(
+            "div",
+            { class: "field" },
+            h("span", { class: "field-label" }, "Address"),
+            address(url, note)
+          ),
+          h(
+            "div",
+            { class: "field" },
+            h("span", { class: "field-label" }, "Next"),
+            h(
+              "ol",
+              { class: "publish-steps" },
+              ...steps.map((s2) => h("li", {}, linked(s2)))
+            )
+          ),
+          h(
+            "div",
+            { class: "btn-row end" },
+            h(
+              "button",
+              {
+                type: "button",
+                class: "pbtn",
+                onclick: () => closeDialog()
+              },
+              "Later"
+            ),
+            written.length > 0 && canPush && commitBtn(true),
+            written.length > 0 && commitBtn(false)
+          )
+        ),
+        { wide: true }
+      );
+    }
+    update();
+    openDialog(
+      "Publish the slides",
+      h(
+        "div",
+        { class: "git-form publish-form" },
+        h(
+          "p",
+          { class: "hint" },
+          `Every push to ${info4.branch} builds the deck with inkflow build and puts it online. The files below go in the repository${info4.scope ? ` (at its root, ${info4.root})` : ""}: commit and push them.`
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Host"),
+          h("div", { class: "look-list" }, ...hostButtons)
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Also"),
+          h(
+            "div",
+            {},
+            h(
+              "label",
+              { class: "check-row" },
+              release,
+              "Publish a release at every tag v\u2026 (the slides as one HTML file and a PDF)"
+            ),
+            info4.readme !== "linked" && h(
+              "label",
+              { class: "check-row" },
+              readme,
+              info4.readme === "missing" ? "Write a README.md that links to the slides" : "Add a link to the slides to README.md"
+            )
+          )
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Files"),
+          files2
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Address"),
+          where
+        ),
+        notes,
+        h("div", { class: "btn-row end" }, write)
+      ),
+      { wide: true, hint: info4.remote ?? "no remote yet" }
+    );
+  }
+
   // src/ts/editor/worktreetext.ts
   function branchName(wt) {
     return wt.branch ?? `@${wt.head}`;
@@ -15218,12 +15491,50 @@ Continue?`)) return null;
           () => void historyDialog(),
           !status.hasCommits
         ),
-        menuItem("Compare\u2026", () => void openComparePicker())
+        menuItem("Compare\u2026", () => void openComparePicker()),
+        h("div", { class: "menu-sep" }),
+        ...publishItems()
       );
       if (status.hasCommits) menu5.append(...await worktreeSection());
     }
     const r2 = button3.getBoundingClientRect();
     showMenu(Math.max(8, r2.right - 260), r2.bottom + 4);
+  }
+  function publishItems() {
+    const pages = status.pages;
+    const items = [];
+    if (pages?.url) {
+      items.push(
+        h(
+          "a",
+          {
+            class: "menu-item publish-link",
+            href: pages.url,
+            target: "_blank",
+            rel: "noopener",
+            title: "Open the published slides",
+            onclick: () => closeMenu()
+          },
+          `Published at ${pages.url.replace(/^https:\/\//, "")}`
+        )
+      );
+    }
+    items.push(
+      menuItem(pages ? "Publish\u2026 (update)" : "Publish\u2026", () => {
+        void openPublishDialog(commitFiles, !!status.remotes?.length);
+      })
+    );
+    return items;
+  }
+  async function commitFiles(paths, message, push) {
+    await refreshGit();
+    if (!status.identity) {
+      commitDialog(paths, message);
+      return true;
+    }
+    if (!await git("commit", { message, paths })) return false;
+    if (push) await git("push");
+    return true;
   }
   function lfsFiles() {
     const l2 = status.lfs;
@@ -15310,7 +15621,7 @@ Continue?`)) return null;
       { wide: true }
     );
   }
-  function fileRow(change, checked) {
+  function fileRow2(change, checked) {
     const box = h("input", {
       type: "checkbox",
       value: change.path
@@ -15329,17 +15640,19 @@ Continue?`)) return null;
       (b2) => b2.value
     );
   }
-  function commitDialog() {
+  function commitDialog(ticked, text) {
     const changes = status.changes ?? [];
     const message = h("textarea", {
       class: "git-message",
       rows: "3"
     });
-    message.value = status.suggestedMessage ?? "Update slides";
+    message.value = text ?? status.suggestedMessage ?? "Update slides";
     const files2 = h(
       "div",
       { class: "git-files" },
-      ...changes.map((c2) => fileRow(c2, c2.inDeck))
+      ...changes.map(
+        (c2) => fileRow2(c2, ticked ? ticked.includes(c2.path) : c2.inDeck)
+      )
     );
     const outside = changes.some((c2) => !c2.inDeck);
     const name2 = h("input", {
@@ -15456,7 +15769,7 @@ Continue?`)) return null;
     const files2 = h(
       "div",
       { class: "git-files" },
-      ...changes.map((c2) => fileRow(c2, true))
+      ...changes.map((c2) => fileRow2(c2, true))
     );
     openDialog(
       "Discard changes",
