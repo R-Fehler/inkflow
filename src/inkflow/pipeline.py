@@ -709,6 +709,25 @@ class ProcessedSlide(NamedTuple):
     """Editor facts, when ``DeckContext.editor`` is set."""
 
 
+def zone_origin(
+    name: str,
+    slide: Slide,
+    parsed: ParsedMarkdown | None,
+    zone_ids: set[str],
+    default_zone: str,
+) -> str:
+    """Where a zone's content is written: ``deck`` (``zones={...}``), ``md``
+    (its section of the slide's Markdown) or ``md-file`` (the whole file, shown
+    in the default zone because the slide has no zone its headings name)."""
+    if name in slide.zones:
+        return "deck"
+    displaced = parsed is not None and any(
+        auto in parsed.auto_zones and f"zone-{auto}" not in zone_ids
+        for auto in ("title", "subtitle", "content")
+    )
+    return "md-file" if displaced and name == default_zone else "md"
+
+
 def _zone_origins(
     filled: set[str],
     slide: Slide,
@@ -717,20 +736,10 @@ def _zone_origins(
     default_zone: str,
 ) -> dict[str, str]:
     """Where each filled zone's content was written (see ``SlideEditInfo``)."""
-    displaced = parsed is not None and any(
-        name in parsed.auto_zones and f"zone-{name}" not in zone_ids
-        for name in ("title", "subtitle", "content")
-    )
-    origins: dict[str, str] = {}
-    for zone_id in filled:
-        name = zone_id.removeprefix("zone-")
-        if name in slide.zones:
-            origins[name] = "deck"
-        elif displaced and name == default_zone:
-            origins[name] = "md-file"
-        else:
-            origins[name] = "md"
-    return origins
+    return {
+        name: zone_origin(name, slide, parsed, zone_ids, default_zone)
+        for name in (zone_id.removeprefix("zone-") for zone_id in filled)
+    }
 
 
 def process_slide(
