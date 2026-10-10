@@ -214,7 +214,10 @@ src/
                                `select`); a request's `agent` text labels its step
                                "Agent: …" and `deckHash` must match the build; each
                                result lists `changes` and the step's `seq`, which
-                               `undo` may name to take back only that step),
+                               `undo` may name to take back only that step; the
+                               `rename` action (`from`/`to`, or `slide`/`stem`, `dryRun`
+                               returns the plan) records file moves as `_Move`s without
+                               their bytes and removes the folders a step empties),
                                remote.py (one request from the CLI, any session action:
                                through the server serving the deck over the WebSocket,
                                waiting on `build-status` before and after, else an
@@ -267,6 +270,16 @@ src/
                                (the server's compare views: shared sides, live rebuilds,
                                folder watchers, `/_cmp/<token>/` assets, `take_request`,
                                `compare-sources`; see "The compare view" below),
+                               filerename.py (rename/move a project file with every
+                               reference following: `plan_rename` (no writes) resolves
+                               each reference against the file it is written in (SVG
+                               href/src/poster, CSS url(), inkflow:parent and preview-layer
+                               markers via `_Chains`, Markdown images/links/chart `data:`,
+                               deck.py literals via libcst) and re-expresses it in the same
+                               style (bare layout name, `local:`, path); ids inferred from
+                               renamed files follow (ink moved, `slide:` links rewritten);
+                               `plan_slide_rename` = a slide's own files to one stem;
+                               `reference_counts`/`project_files` for the Files view),
                                previews.py (layout gallery renders; like the model's
                                layout list, `layout.layouts_for`: built-in layouts
                                in the deck's shape, the project's own always),
@@ -338,6 +351,9 @@ src/
                                ops; `remove` takes `indices` for several in one step),
                                types from inkflow.animations + the deck module, targets
                                from the built slide's ids, nearest names on a miss),
+                               files.py (`inkflow mv OLD NEW [-n]`: the session's
+                               `rename` action, through editor/remote.py; slides.py adds
+                               `slide rename-files`),
                                authoring.py
                                (clean, label2id, add, parent group, sync, layouts), color.py (colorize,
                                palette), verify.py, worktree.py (the `worktree` group: add,
@@ -552,6 +568,10 @@ src/
                       folderpicker.ts (the folder picker those and the video picker
                       share: Tab completion, type-to-filter, keyboard list, places,
                       Browse… = system dialog; its pure path maths in pathtext.ts),
+                      rename.ts ("Rename…" beside a file's Open ▾, "Rename files…"
+                      for a slide, the deck menu's "Files…" view: a dialog that
+                      previews the session's `rename` dry run as the name is
+                      typed; path maths in pathtext.ts),
                       git.ts (Git menu; its Worktrees section: rows with
                       Compare = `inkflow:compare` CustomEvent {kind: "path",
                       deck, label} for the compare view, a dialog with what to
@@ -693,6 +713,9 @@ Opt out per-deck: `Deck(embed_fonts=False)`.
 An asset must live under an allowed root: the project dir (canonical prefix `""`), or the active theme's `asset_dir()` (prefix `_theme/`, so a pip-installed theme can ship branding). `locate` matches longest prefix first, which reserves `_theme/` at the project root. A reference that escapes every root is warned about and left as written rather than re-anchored somewhere it never pointed at — the server has always refused paths outside the project, so it was never reachable. Symlink the directory in to bring it back inside; containment collapses `..` without resolving symlinks precisely so that works.
 
 `build`/`export` copy every referenced local file into the output dir, mirroring the source tree; a canonical ref is relative and `..`-free by construction, so `out_dir / ref` always lands inside and needs no rewriting. `_slide_refs` scans the *emitted* SVG and notes rather than walking the deck, so a pruned zone takes its asset with it. A reference that resolves to nothing is a `logger.warning`, not a silent skip. `serve` streams the same refs on demand instead of copying.
+
+**Renaming a file rewrites every reference to it, by the same rule.**
+`editor/filerename.py` finds references where they are written and resolves each against its own file (never by matching a name across the project), then writes the new one in the style it was written: a bare layout name stays a name (`local:` when a `slides/` file would shadow it), a path stays a path relative to its file, a `#page=` stays. SVGs are rewritten by a small tokenizer (only the attribute values change), contents of preview layers are copies and left alone, but their markers are followed through the chain that declared them (`_Chains`: an ancestor's parent is relative to that ancestor). The session applies the plan as one step whose moves are kept without bytes (videos), so undo moves files back and restores the folders; the extension never changes; `styles.css`, `deck.py` and files in hidden folders are refused. `inkflow mv` and `inkflow slide rename-files` are the same action from the CLI.
 
 **PDF figures are a derived asset, converted at build time and never committed.**
 Browsers show no PDF in `<image>`/`<img>`, so `pdf.PdfPages.apply` (a pipeline step after content injection, so SVG pictures, `Image` zones and Markdown images are covered alike) points each PDF reference at its page converted to SVG in `.inkflow/cache/pdf/` (git-ignored, unwatched; named by content hash + page + converter, so a saved PDF converts again and the watcher's rebuild shows it). The cache is a third `AssetRoots` root with the canonical prefix `_pdf/`, reserved like `_theme/`: `serve`, `build` (copied to `out/_pdf/`, not a hidden folder static hosts may refuse), `--inline-assets` and `export` handle a converted page exactly as any picture, with no special case. The PDF reference survives beside it as `data-inkflow-pdf`, which the editor reads instead of the href (`pdfpages.sourceRef`), so nothing it writes back (page change, replace, copy/paste) ever names the cache; moves and crops edit the source SVG, whose href is the PDF. PyMuPDF is optional (`inkflow[pdf]`) and loaded with `importlib` so inkflow stays MIT and type-checks without it; the system tools are the fallback. With no converter the picture becomes a placeholder data URI and the build warns once.

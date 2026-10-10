@@ -849,6 +849,45 @@ print shop that asks for them.
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> | New slide from the layout gallery |
 | <kbd>Ctrl</kbd>+<kbd>Enter</kbd> | Present from this slide (in the presenter, <kbd>Shift</kbd>+<kbd>E</kbd> or its editor button comes back here, at the slide it is on) |
 
+## Renaming files
+
+Inserted files keep the name they arrived with (`assets/IMG_0042.jpg`), and
+files the editor makes get numbered ones (`data/chart-3.csv`,
+`diagrams/diagram-2.drawio.svg`, `slides/slide-4.svg`). To give one a name of
+your own, use **Rename…** next to a picture's, video's, PDF figure's, diagram's
+or chart's file in the properties panel (or **Rename *file*…** in the canvas's
+right-click menu). The dialog has the folder and the name; the extension stays,
+since it says what kind of file it is. As you type, it asks the server what
+would change: *Updates 4 references in 3 files*, each listed under **Show the
+references**. A name that cannot be used (it exists, it leaves the project, it
+goes into `.inkflow/`) is said there instead.
+
+**Rename** moves the file and rewrites every reference to it in the same step,
+each where it is written and relative to that file: an `<image href>` in a
+slide's SVG, CSS `url()`s, a Markdown `![](…)` or link, a ```` ```chart ````
+fence's `data:` line, `Image`/`Video`/`Chart` paths and the slide paths in
+`deck.py`, a layout's `inkflow:parent` (renaming `layouts/a.svg` to
+`layouts/b.svg` turns `parent="a"` into `"b"` and `Slide("a")` into
+`Slide("b")`), and the names of Inkscape preview layers. A PDF keeps its page
+(`plot.pdf#page=2`). A new folder is created and a folder left empty is
+removed. <kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes all of it at once, the folders
+too. Git sees a rename like any other file move: nothing is staged.
+
+**Rename files…** in the slide list's menu (and under *Files* with nothing
+selected) gives a slide's own files one new name: its drawing, Markdown file,
+notes and saved ink, each staying in its folder. A slide's id comes from those
+names, so it changes with them, and its ink and `slide:` links follow; tick
+**Keep the slide id** to write the old id into `deck.py` instead. A slide with
+an `id=` of its own keeps it. Files other slides use too (a layout, a shared
+Markdown file) stay as they are, and the dialog lists them.
+
+**Files…** in the deck menu lists every file the deck can use, folder by folder,
+with how many references name it. Rename any of them from there; files nothing
+uses are marked *unused* and can be deleted (undo brings them back).
+
+References built in code (`Image(ASSETS / "x.png")`) cannot be followed; if
+`deck.py` still names the old path afterwards, the dialog says so.
+
 ## Opening files in other programs
 
 Every file the editor shows has an **Open ▾** button: the slide's drawing,

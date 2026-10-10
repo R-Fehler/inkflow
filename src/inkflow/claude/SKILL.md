@@ -56,6 +56,10 @@ Add, delete, duplicate, move, hide/show or re-id slides with `inkflow slide …`
 slide's Markdown, notes, drawing and ink files along, and with the editor open
 each is a step the author can undo there.
 
+Rename or move a deck's files with `inkflow mv OLD NEW` (`-n` to preview) and a
+slide's own files with `inkflow slide rename-files N NAME`, never by hand: every
+reference to the file is rewritten with it, which a plain `mv` would break.
+
 Sections (`Section("Method", slides=[...])` entries in `slides=[...]`) group
 slides by name: `inkflow slide section add NAME --at N`, `section rename`,
 `section move`, `section remove`, and `inkflow slide move N --section NAME`.

@@ -1357,7 +1357,7 @@ def plan_slide_rename(
         inside = f.path.is_relative_to(root)
         rel = _rel(f.path, root) if inside else slide.src
         if not f.own:
-            parts = set(Path(rel).parts) if inside else set()
+            parts: set[str] = set(Path(rel).parts) if inside else set()
             why = (
                 "a theme layout"
                 if not inside
