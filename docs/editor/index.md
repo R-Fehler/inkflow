@@ -59,6 +59,14 @@ you, read-only.
 Every edit is one undo step (<kbd>Ctrl</kbd>+<kbd>Z</kbd>). A burst of typing is
 one step, not one per keystroke. Undo restores the exact bytes it replaced, and it
 refuses rather than overwrite a file that was changed outside the editor since.
+The Undo and Redo buttons name the step they would take back.
+
+Slide-list changes an agent makes with
+[`inkflow slide`](claude-code.md#changing-the-slide-list) while the editor is
+open go through the editor too: each is an ordinary undo step, labelled
+*Agent: …*, announced at the bottom of the window with an **Undo** button (it
+takes back that change while nothing else came after it; then use
+<kbd>Ctrl</kbd>+<kbd>Z</kbd>).
 
 ## New decks, and switching between them
 

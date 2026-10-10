@@ -219,8 +219,25 @@ function updateZoomLabel(): void {
 }
 
 function updateHistory(): void {
-    ($("btn-undo") as HTMLButtonElement).disabled = !ed.canUndo;
-    ($("btn-redo") as HTMLButtonElement).disabled = !ed.canRedo;
+    const undoBtn = $("btn-undo") as HTMLButtonElement;
+    const redoBtn = $("btn-redo") as HTMLButtonElement;
+    undoBtn.disabled = !ed.canUndo;
+    redoBtn.disabled = !ed.canRedo;
+    // Named after the step, so an agent's edit reads "Undo Agent: …".
+    undoBtn.title = historyTitle("Undo", ed.canUndo && ed.undoLabel, "Ctrl+Z");
+    redoBtn.title = historyTitle(
+        "Redo",
+        ed.canRedo && ed.redoLabel,
+        "Ctrl+Shift+Z",
+    );
+}
+
+function historyTitle(
+    verb: string,
+    label: string | false | null,
+    keys: string,
+): string {
+    return label ? `${verb} ${label} (${keys})` : `${verb} (${keys})`;
 }
 
 function updateTools(): void {

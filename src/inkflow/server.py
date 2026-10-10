@@ -107,6 +107,9 @@ class EditorState(TypedDict):
     """Set when the editor asked to open another deck (see ``serve``)."""
     shutdown: asyncio.Event | None
     """Set to stop the server (the editor's "Quit Inkflow", or idle)."""
+    failed_hash: str | None
+    """Hash of the deck.py whose build failed last (None after a good build),
+    so an agent waiting for its edit to build learns that it never will."""
 
 
 _editor: EditorState = {
@@ -116,6 +119,7 @@ _editor: EditorState = {
     "session": None,
     "switch": None,
     "shutdown": None,
+    "failed_hash": None,
 }
 
 
@@ -191,6 +195,7 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
 
     spin = asyncio.create_task(_animate())
     t0 = time.monotonic()
+    deck_hash: str | None = None
     try:
         # Collected, not printed, so records reach the TUI/browser without racing the
         # Live display. Floored at the lower surface level, then filtered per surface.
@@ -247,6 +252,7 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         _editor["model"] = model
         if _editor["session"] is not None:
             _editor["session"].built_hash = deck_hash
+        _editor["failed_hash"] = None
         _state["error"] = None
         _state["logs"] = browser_logs
         if slides:
@@ -274,6 +280,7 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         logger.exception("rebuild failed")
         tb = traceback.format_exc()
         _state["error"] = tb
+        _editor["failed_hash"] = deck_hash
         ui.set_error(tb)
         await broadcast(json.dumps({"type": "error", "message": tb}))
     finally:
@@ -291,7 +298,20 @@ def _model_message() -> dict[str, object]:
         "history": {
             "canUndo": bool(session and session.history.done),
             "canRedo": bool(session and session.history.undone),
+            **(session.history_labels() if session else {}),
         },
+    }
+
+
+def _build_status() -> dict[str, object]:
+    """Which deck.py the server last built (or failed to): an agent's command
+    (``inkflow slide``) waits for the build of its own edit with this."""
+    session = _editor["session"]
+    return {
+        "type": "build-status",
+        "deckHash": session.built_hash if session else None,
+        "failedHash": _editor["failed_hash"],
+        "error": _state["error"],
     }
 
 
@@ -423,6 +443,19 @@ async def _handle_edit_op(
     await websocket.send(
         json.dumps({"type": "edit-result", "id": request_id, **result})
     )
+    if result.get("ok") and result.get("changes") and msg.get("agent"):
+        # An agent's edit (``inkflow slide``): every open editor says so and
+        # offers to undo that very step.
+        await _send_editors(
+            {
+                "type": "agent-edit",
+                "label": result.get("label"),
+                "step": result.get("step"),
+                **session.history_labels(),
+                "canUndo": bool(session.history.done),
+                "canRedo": bool(session.history.undone),
+            }
+        )
     if session.switch_to is not None and _editor["switch"] is not None:
         _editor["switch"].set()
     if session.quit_requested and _editor["shutdown"] is not None:
@@ -498,6 +531,8 @@ def make_ws_handler(
                         await websocket.send(json.dumps(_model_message()))
                 elif msg_type == "edit-op" and session is not None:
                     await _handle_edit_op(websocket, msg, session)
+                elif msg_type == "build-status":
+                    await websocket.send(json.dumps(_build_status()))
                 elif msg_type == "editor-context" and session is not None:
                     raw_context: object = msg.get("context")
                     context: object = raw_context
@@ -1039,6 +1074,7 @@ async def serve(
         _state["error"] = None
         _editor["deck"] = None
         _editor["model"] = None
+        _editor["failed_hash"] = None
 
 
 async def _quit_when_idle(shutdown: asyncio.Event, delay: float) -> None:

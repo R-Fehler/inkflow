@@ -39,6 +39,8 @@ export const ed = {
     renderPending: false,
     canUndo: false,
     canRedo: false,
+    undoLabel: null as string | null, // what Undo would take back ("Move slide")
+    redoLabel: null as string | null,
     slideSelection: new Set<number>(), // deck indices picked in the slide list
     focus: "canvas" as "canvas" | "sorter", // where Delete / copy apply
     error: null as string | null,

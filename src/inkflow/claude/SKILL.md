@@ -34,6 +34,11 @@ selection. Run it again whenever you need the current state.
 Point the author at something with `inkflow goto N` (1-based slide number)
 and `inkflow select ID [ID…]` (selects elements on the current slide).
 
+Add, delete, duplicate, move, hide/show or re-id slides with `inkflow slide …`
+(`inkflow slide --help`), not by editing `slides=[...]` by hand: they move the
+slide's Markdown, notes, drawing and ink files along, and with the editor open
+each is a step the author can undo there.
+
 ## Files
 
 - `deck.py`: `main()` returns `Deck(slides=[Slide(...), ...])`. Slide order,
@@ -51,8 +56,8 @@ and `inkflow select ID [ID…]` (selects elements on the current slide).
   of the slide. One filled `<path id="ink-…">` per stroke, directly under the
   root; `Slide(ink="…")` names another file. Leave the strokes' outlines alone
   (they are hand-drawn shapes, not something to tidy); deleting a stroke, or
-  the whole file to clear the slide, is fine. If you rename a slide's `.md` or
-  SVG file (which changes its id), rename its ink file to match.
+  the whole file to clear the slide, is fine. To change a slide's id, use
+  `inkflow slide rename`, which moves its ink file and `slide:` links along.
 
 Colours: prefer the theme's classes over hex values so slides follow dark and
 light mode: `class="inkflow-fill-accent"`, `inkflow-stroke-text`, and so on
@@ -61,10 +66,10 @@ orange yellow green teal blue purple pink grey`.
 
 ## Common tasks
 
-- **Add a slide with text on a layout**: write `slides/<id>.md` and put
-  `Slide("<layout>", md="<id>.md")` where it belongs in `slides=[...]` (the
-  `.md` name becomes the slide id; no SVG needed). A leading `# Title` fills
-  the title zone, the text after it the default zone (`content`), and a
+- **Add a slide with text on a layout**: `inkflow slide add --layout two-cols
+  --after 3 --id compare --md -` with the Markdown on stdin (it becomes
+  `slides/compare.md`; the id names the files). A leading `# Title` fills the
+  title zone, the text after it the default zone (`content`), and a
   `::<zone>::` line starts another zone:
 
   ```markdown
@@ -82,9 +87,10 @@ orange yellow green teal blue purple pink grey`.
   Layouts: `content`, `two-cols` (left, right), `three-cols`, `comparison`,
   `media-left`/`media-right` (content, media), `quote`, `section`, `center`,
   `cover`, `end`… (`inkflow layouts` for all of them and their zones).
-- **Reorder or hide**: move the `Slide(...)` within `slides=[...]`;
-  `visible=False` hides it and keeps it. Slide numbers (`outline`,
-  `render -s`, `goto`) count visible slides only.
+- **Reorder, hide, remove**: `inkflow slide move compare --to 2`,
+  `inkflow slide hide 9` (kept, not shown), `inkflow slide delete 9`. Slides
+  are named by number or id; numbers (`outline`, `render -s`, `goto`) count
+  visible slides only, so prefer ids across several commands.
 - **Reveal on click**: in Markdown, a `::step::` line shows what follows on the
   next click; inside `::steps::` … `::steps end::` each list item comes on its
   own click. Drawn elements: `animations=[...]` (below).
