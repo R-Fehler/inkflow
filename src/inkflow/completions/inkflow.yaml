@@ -918,6 +918,81 @@ commands:
         deck: ["$files([\".py\"])"]
         zip: ["$files([\".zip\"])"]
 
+  - name: layout
+    description: The slide master's layouts - copy a theme's, revert, save a slide as one.
+    commands:
+      - name: copy
+        description: Give the deck its own copy of a theme's layout.
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: revert
+        description: Delete the deck's copy; slides go back to the theme's layout.
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: save
+        description: Save a slide as a new layout (a template).
+        flags:
+          -d, --deck=: Path to deck.py
+          --hints: Keep the slide's text as placeholder prompts
+          --pictures: Turn the slide's pictures into picture placeholders
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: rename
+        description: Rename one of the deck's own layouts.
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: delete
+        description: Delete one of the deck's own layouts.
+        flags:
+          -d, --deck=: Path to deck.py
+          --move-to=: Move the slides built on it to this layout first
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+  - name: overlay
+    description: The deck's overlays - what is drawn on top of every slide.
+    commands:
+      - name: new
+        description: Create an empty overlay on top of every slide (or one).
+        flags:
+          -d, --deck=: Path to deck.py
+          --all: On every slide (the default)
+          --slide=: On this slide only
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: copy
+        description: Give the deck its own copy of a theme's overlay.
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: revert
+        description: Delete the deck's copy of a theme's overlay.
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
   - name: layouts
     description: List available layouts with their zones.
     flags:

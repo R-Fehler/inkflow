@@ -21,6 +21,7 @@ for _submodule in (
     "color",
     "files",
     "fonts",
+    "master",
     "present",
     "project",
     "shapes",

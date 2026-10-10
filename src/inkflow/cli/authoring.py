@@ -22,22 +22,27 @@ from inkflow.cli._common import (
     resolve_targets,
     targets_or_deck_slides,
 )
+from inkflow.editor.master import layout_entries, overlay_entries
 from inkflow.label2id import promote_labels_to_ids
 from inkflow.layout import (
     AssetKind,
     PreviewLayers,
     are_preview_layers_current,
     chain_layers,
+    copy_of,
     create_slide,
+    deck_copy,
     discover_layouts,
     discover_overlays,
     inject_preview_layers,
+    label_of,
     layout_zones,
     resolve_chain,
     resolve_parent_path,
     strip_parent,
 )
 from inkflow.logging import console, logger, report
+from inkflow.manifest import Deck
 from inkflow.pipeline import resolve_slide_src
 from inkflow.sizes import PageSize
 from inkflow.svg import with_namespaces
@@ -459,23 +464,53 @@ class _LayoutRow:
     zones: list[str]
     numbered: bool
     default_zone: str
+    slides: int | None = None
+    """Slides built directly on it (None: no deck to count)."""
+    note: str = ""
+    """The deck's copy of a theme's, replaced by such a copy, a typed name."""
 
 
 def _asset_rows(
     kind: AssetKind,
     project_dir: Path | None,
     theme: Theme | None,
+    deck: Deck | None = None,
 ) -> dict[str, list[_LayoutRow]]:
-    """Group discovered layouts or overlays by source, with their chains and zones."""
+    """Group discovered layouts or overlays by source, with their chains and
+    zones, and (with a deck) how many slides use each and which the deck has
+    its own copy of."""
     discover = discover_layouts if kind is AssetKind.LAYOUT else discover_overlays
+    found = discover(project_dir, theme)
+    uses: dict[Path, int] = {}
+    if deck is not None and project_dir is not None:
+        if kind is AssetKind.LAYOUT:
+            for entry in layout_entries(deck, project_dir).values():
+                uses[entry.path.resolve()] = len(entry.slides)
+        else:
+            for overlay in overlay_entries(deck, project_dir):
+                if overlay.path is not None:
+                    uses[overlay.path.resolve()] = len(overlay.slides)
+    local = {p.stem: p for label, p in found if label == "local"}
     groups: dict[str, list[_LayoutRow]] = {}
-    for source_label, path in discover(project_dir, theme):
+    for source_label, path in found:
         try:
             chain = resolve_chain(path, project_dir, theme, kind)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
         parent_str = " → ".join(p.stem for p in chain) if chain else "—"
         info = layout_zones(path, project_dir, theme, kind)
+        notes: list[str] = []
+        if source_label == "local":
+            if marked := copy_of(path):
+                notes.append(f"the deck's copy of {marked}")
+            if typed := label_of(path):
+                notes.append(f"“{typed}”")
+        elif path.stem in local:
+            replaced = deck_copy(path, project_dir, theme, kind) is not None
+            notes.append(
+                "replaced by the deck's copy" if replaced else "shadowed by the deck's"
+            )
+        known = (deck is not None and source_label == "local") or path.stem not in local
         groups.setdefault(source_label, []).append(
             _LayoutRow(
                 path.stem,
@@ -483,6 +518,8 @@ def _asset_rows(
                 info.zones,
                 info.numbered,
                 info.default_zone,
+                uses.get(path.resolve(), 0) if deck is not None and known else None,
+                ", ".join(notes),
             )
         )
     return groups
@@ -492,7 +529,7 @@ def _asset_rows(
 @deck_option
 @no_deck_option
 def layouts_cmd(deck_path: Path, no_deck: bool) -> None:
-    """List available layouts and overlays with their zones and parent chain.
+    """List available layouts and overlays with their zones, parent chain and use.
 
     Discovers both from three sources — built-in, theme, then project-local — and
     prints a table per source with each entry's parent chain and zone names. The
@@ -500,15 +537,20 @@ def layouts_cmd(deck_path: Path, no_deck: bool) -> None:
     (a `zone-slide-number` or `zone-slide-total`). Layouts compose behind a slide,
     overlays on top of it, and the two are separate namespaces. The overlay section
     is omitted when no overlays exist. Pass `--no-deck` to list only the built-ins.
+
+    With a deck, SLIDES counts the slides built directly on each, and NOTE
+    marks the deck's own copies of theme layouts (`inkflow layout copy`), the
+    theme layouts they replace, and a template's typed name.
     """
 
     project = load_project_or_none(deck_path, no_deck)
     project_dir = project.dir if project else None
     theme = project.theme if project else None
 
-    _print_asset_tables(_asset_rows(AssetKind.LAYOUT, project_dir, theme))
+    deck = project.deck if project else None
+    _print_asset_tables(_asset_rows(AssetKind.LAYOUT, project_dir, theme, deck))
 
-    overlay_groups = _asset_rows(AssetKind.OVERLAY, project_dir, theme)
+    overlay_groups = _asset_rows(AssetKind.OVERLAY, project_dir, theme, deck)
     if overlay_groups:
         console.print()
         console.print("[bold]OVERLAYS[/bold] [dim](composited on top)[/dim]")
@@ -544,6 +586,12 @@ def _print_asset_tables(groups: dict[str, list[_LayoutRow]]) -> None:
         table.add_column("PARENT", style="dim", min_width=14)
         table.add_column("ZONES", min_width=20)
         table.add_column("#", justify="center", min_width=1)
+        counted = any(row.slides is not None for row in rows)
+        noted = any(row.note for row in rows)
+        if counted:
+            table.add_column("SLIDES", justify="right")
+        if noted:
+            table.add_column("NOTE", style="dim")
 
         for row in rows:
             zone_parts = [
@@ -553,11 +601,16 @@ def _print_asset_tables(groups: dict[str, list[_LayoutRow]]) -> None:
                 for z in row.zones
             ]
             zones_cell = ", ".join(zone_parts) if zone_parts else "[dim]—[/dim]"
-            table.add_row(
+            cells = [
                 row.name,
                 row.parent,
                 zones_cell,
                 f"[{color}]✓[/{color}]" if row.numbered else "",
-            )
+            ]
+            if counted:
+                cells.append("" if row.slides is None else str(row.slides))
+            if noted:
+                cells.append(row.note)
+            table.add_row(*cells)
 
         console.print(table)

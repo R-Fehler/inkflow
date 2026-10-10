@@ -19,7 +19,9 @@ from inkflow.clean import (
     strip_preview_layers,
 )
 from inkflow.ns import (
+    INKFLOW_COPY_OF,
     INKFLOW_DEFAULT_ZONE,
+    INKFLOW_LABEL,
     INKFLOW_LAYOUT_HASH,
     INKFLOW_LAYOUT_SRC,
     INKFLOW_OVERLAY_HASH,
@@ -87,6 +89,7 @@ def resolve_parent_path(
     project_root: Path | None,
     theme: Theme | None,
     kind: AssetKind = AssetKind.LAYOUT,
+    follow_copies: bool = True,
 ) -> Path:
     """Resolve an inkflow:parent string to an absolute Path.
 
@@ -109,10 +112,20 @@ def resolve_parent_path(
       Levels are skipped when project_root or theme is None.
     Multi-part relative path (has /, no prefix):
       Relative to base_dir.
+
+    Whatever the form, a theme's (or the built-in) file the project has its
+    own copy of resolves to that copy (`deck_copy`), so the theme's own chains
+    (``./base`` in the built-in ``numbered``) go through the deck's copy too.
+    ``follow_copies=False`` names the theme's file itself.
     """
 
     def _with_svg(p: Path) -> Path:
         return p if p.suffix else p.with_suffix(".svg")
+
+    def _ours(p: Path) -> Path:
+        if not follow_copies:
+            return p
+        return deck_copy(p, project_root, theme, kind) or p
 
     if parent_str.startswith("local:"):
         name = parent_str[len("local:") :]
@@ -133,7 +146,7 @@ def resolve_parent_path(
         resolved = _with_svg(theme.asset_dir() / kind / name)
         if not resolved.exists():
             raise ValueError(f"theme:{name} not found at {resolved}")
-        return resolved
+        return _ours(resolved)
 
     if parent_str.startswith("builtin:"):
         name = parent_str[len("builtin:") :]
@@ -142,17 +155,17 @@ def resolve_parent_path(
             raise ValueError(
                 f"builtin:{name} not found — no built-in {kind.singular} named '{name}'"
             )
-        return resolved
+        return _ours(resolved)
 
     if parent_str.startswith(("./", "../")):
-        return _with_svg((base_dir / parent_str).resolve())
+        return _ours(_with_svg((base_dir / parent_str).resolve()))
 
     if Path(parent_str).is_absolute():
-        return _with_svg(Path(parent_str))
+        return _ours(_with_svg(Path(parent_str)))
 
     # Multi-part relative path (has /) — relative to base_dir
     if "/" in parent_str:
-        return _with_svg((base_dir / parent_str).resolve())
+        return _ours(_with_svg((base_dir / parent_str).resolve()))
 
     # Bare single-part name — three-level search; levels skipped when context is absent
     name = parent_str
@@ -165,12 +178,99 @@ def resolve_parent_path(
 
     for candidate in candidates:
         if candidate.exists():
-            return candidate
+            return _ours(candidate)
 
     searched = "\n".join(f"  {c}" for c in candidates)
     raise ValueError(
         f"{kind.singular.capitalize()} '{name}' not found. Searched:\n{searched}"
     )
+
+
+# ── The deck's own copies of theme files ─────────────────────────────────────
+
+
+def _theme_dirs(theme: Theme | None, kind: AssetKind) -> list[tuple[str, Path]]:
+    """The folders of theme files a project may copy, with their prefix."""
+    dirs = [("builtin", (builtin_theme_dir() / kind).resolve())]
+    if theme is not None:
+        dirs.append(("theme", (theme.asset_dir() / kind).resolve()))
+    return dirs
+
+
+def theme_ref(
+    path: Path, theme: Theme | None, kind: AssetKind = AssetKind.LAYOUT
+) -> str | None:
+    """``builtin:<name>`` or ``theme:<name>`` for a file of the built-in theme
+    or the deck's theme; None for any other file (the project's own)."""
+    folder = path.resolve().parent
+    for prefix, directory in _theme_dirs(theme, kind):
+        if folder == directory:
+            return f"{prefix}:{path.stem}"
+    return None
+
+
+_COPY_OF_CACHE: dict[str, tuple[tuple[int, int], str | None]] = {}
+
+
+def copy_of(path: Path) -> str | None:
+    """The `inkflow:copy-of` of a project file (cached by its stat)."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    key = str(path)
+    stamp = (st.st_mtime_ns, st.st_size)
+    cached = _COPY_OF_CACHE.get(key)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    try:
+        value = parse_svg_file(path).get(INKFLOW_COPY_OF)
+    except Exception:
+        value = None
+    _COPY_OF_CACHE[key] = (stamp, value)
+    return value
+
+
+def label_of(path: Path) -> str | None:
+    """A layout's display name (``inkflow:label``), if it has one."""
+    try:
+        return parse_svg_file(path).get(INKFLOW_LABEL)
+    except Exception:
+        return None
+
+
+def deck_copy(
+    path: Path,
+    project_root: Path | None,
+    theme: Theme | None,
+    kind: AssetKind = AssetKind.LAYOUT,
+) -> Path | None:
+    """The project's own copy standing in for the theme's file ``path``.
+
+    A copy is ``<project>/<kind>/<same name>.svg`` carrying `inkflow:copy-of`
+    that names ``path`` (``builtin:agenda``): what the editor's slide master
+    writes when a theme's layout is edited. Only marked copies stand in, so a
+    project layout that merely shares a name with a theme's (an own
+    ``title.svg`` drawn as a title slide) never slips into the theme's chains.
+    """
+    if project_root is None:
+        return None
+    ref = theme_ref(path, theme, kind)
+    if ref is None:
+        return None
+    candidate = project_root / kind / path.name
+    if candidate.resolve() == path.resolve():
+        return None
+    declared = copy_of(candidate)
+    if declared is None or not declared.startswith(("builtin:", "theme:")):
+        return None
+    try:
+        named = resolve_parent_path(
+            declared, candidate.parent, project_root, theme, kind, False
+        )
+    except ValueError:
+        return None
+    return candidate if named.resolve() == path.resolve() else None
 
 
 # ── Chain resolution ──────────────────────────────────────────────────────────
@@ -202,9 +302,18 @@ def resolve_chain(
         parent_path = resolve_parent_path(
             parent_str, current.parent, project_root, theme, kind
         )
-        if parent_path in visited:
-            raise ValueError(f"Circular inkflow:parent chain detected at {parent_path}")
-        visited.add(parent_path)
+        if parent_path.resolve() in visited:
+            # The deck's copy of a theme layout built on that same layout (or
+            # on one built on it) goes on to the theme's own file.
+            plain = resolve_parent_path(
+                parent_str, current.parent, project_root, theme, kind, False
+            )
+            if plain.resolve() in visited:
+                raise ValueError(
+                    f"Circular inkflow:parent chain detected at {parent_path}"
+                )
+            parent_path = plain
+        visited.add(parent_path.resolve())
         chain.insert(0, parent_path)
         current = parent_path
 

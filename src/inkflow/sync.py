@@ -304,3 +304,16 @@ def sync_slides(paths: Iterable[Path], ctx: PreviewContext) -> None:
     """
     for path in paths:
         inject_preview_layers(path, plan_preview(path, ctx).layers)
+
+
+def deck_files(deck_obj: Deck, project_dir: Path, theme: Theme | None) -> list[Path]:
+    """Every project file a whole-deck ``sync`` sweeps: each slide's SVG and
+    its layout ancestors, then the project's overlays (resolved paths)."""
+    backing = slides_by_file(deck_obj, project_dir, theme)
+    overlays = overlay_files(deck_obj, project_dir, theme)
+    root = project_dir.resolve()
+    seen: dict[Path, None] = {}
+    for path in [*backing, *sorted(overlays)]:
+        if path.is_relative_to(root):
+            seen.setdefault(path)
+    return list(seen)

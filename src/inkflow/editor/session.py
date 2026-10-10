@@ -34,7 +34,7 @@ from inkflow import drawio, instances, pdf, publish
 from inkflow import pack as deck_pack
 from inkflow import transitions as transitions_module
 from inkflow.animations import Cue
-from inkflow.assets import AssetRoots
+from inkflow.assets import AssetRoots, AssetSource
 from inkflow.builtin_themes import THEMES, theme_id
 from inkflow.charts import (
     ChartError,
@@ -85,7 +85,22 @@ from inkflow.editor.findreplace import (
     replace_in,
     svg_segments,
 )
-from inkflow.editor.model import MEDIA_HIDDEN_FIELDS
+from inkflow.editor.master import (
+    MasterError,
+    background_name,
+    copy_bytes,
+    copy_target,
+    hint_of,
+    layout_entries,
+    master_slide,
+    master_tree,
+    overlay_bytes,
+    overlay_entries,
+    overlay_name,
+    slug_name,
+    template_bytes,
+)
+from inkflow.editor.model import MEDIA_HIDDEN_FIELDS, is_media_zone, source_infos
 from inkflow.editor.previews import layout_previews
 from inkflow.editor.svgops import (
     SvgFile,
@@ -140,22 +155,37 @@ from inkflow.ink import (
     view_box,
 )
 from inkflow.layout import (
+    AssetKind,
     create_slide,
+    discover_assets,
     discover_layouts,
+    layout_canvas,
     preview_layers_text,
     resolve_chain,
     resolve_parent_path,
+    theme_ref,
 )
-from inkflow.logging import logger
+from inkflow.logging import collect_logs, logger
 from inkflow.manifest import Chart, Deck, Image, Inline, Slide, TextBox, Video
-from inkflow.ns import INKFLOW_SHOW_SHAPE
-from inkflow.pipeline import resolve_slide_src, slide_ids
+from inkflow.ns import INKFLOW_COPY_OF, INKFLOW_LABEL, INKFLOW_SHOW_SHAPE
+from inkflow.overlay import Overlay
+from inkflow.pipeline import (
+    deck_context,
+    process_slide,
+    resolve_slide_src,
+    slide_ids,
+)
 from inkflow.sizes import PageSize
 from inkflow.svgio import parse_svg_file
-from inkflow.sync import build_context, plan_preview
+from inkflow.sync import build_context, deck_files, plan_preview
 from inkflow.titles import resolve_deck_title
 from inkflow.transitions import Transition
-from inkflow.zones import remove_zone_section, replace_zone_text, zone_spans
+from inkflow.zones import (
+    parse_markdown_zones,
+    remove_zone_section,
+    replace_zone_text,
+    zone_spans,
+)
 
 DECK_MODULE = "_inkflow_deck"
 _PROJECT_ACTIONS = (
@@ -450,6 +480,8 @@ _UNLOCKED = frozenset(
         "math",
         "chart-preview",
         "layout-previews",
+        "master-tree",
+        "master-render",
         "find",
         "browse",
     }
@@ -590,6 +622,10 @@ class _Txn:
             gone = [c.path for c in changes if c.after is None]
             _prune_empty([m.src for m in self.moves if not m.copy] + gone, prune)
         return _Step(label, changes, moves=list(self.moves), prune=prune)
+
+
+def _overlay_list(overlays: list[Overlay]) -> str:
+    return "[" + ", ".join(f"Overlay({_py(o.src)})" for o in overlays) + "]"
 
 
 def _slug(text: str) -> str:
@@ -819,6 +855,10 @@ class EditorSession:
             return self._chart_data(msg, deck)
         if action == "layout-previews":
             return {"ok": True, "layouts": layout_previews(deck, self.deck_path)}
+        if action == "master-tree":
+            return {"ok": True, "master": master_tree(deck, self.deck_path)}
+        if action == "master-render":
+            return {"ok": True, **self._master_render(msg, deck)}
         if action == "copy-slides":
             indices = msg.get("slides")
             if not isinstance(indices, list) or not all(
@@ -863,6 +903,7 @@ class EditorSession:
             "ink": self._ink,
             "rename": self._rename,
             "delete-files": self._delete_files,
+            "master": self._master,
         }.get(cast("str", action))
         if handler is None:
             raise EditError(f"unknown action {action!r}")
@@ -876,7 +917,11 @@ class EditorSession:
         ):
             raise EditError("deck.py changed since the last build; try again")
         try:
+            if msg.get("copyLayout") and isinstance(msg.get("file"), str):
+                self._copy_on_write(msg, deck, txn, extra)
             label = handler(msg, deck, txn, extra)
+        except MasterError as exc:
+            raise EditError(str(exc)) from exc
         except (
             DeckEditError,
             SvgOpError,
@@ -898,12 +943,41 @@ class EditorSession:
             self._check_fresh(txn, base)
         if _role(msg) != "owner":
             self._guest_writes(txn)
+        refresh = extra.pop("_previews", None)
         step = txn.commit(label)
+        if isinstance(refresh, Deck):
+            self._refresh_previews(step, refresh)
         coalesce = msg.get("coalesce")
         step.coalesce = coalesce if isinstance(coalesce, str) else None
         if step.changes or step.moves:
             self._record(step)
         return {**self._result(step), **extra}
+
+    def _refresh_previews(self, step: _Step, deck: Deck) -> None:
+        """Bring the Inkscape previews (``inkflow sync``) of the deck's files
+        up to date after a step changed what they show (a layout copied or
+        reverted, a new overlay), as part of that step. ``deck`` is the deck
+        as the step left it. Read from disk, so only after the commit."""
+        changes = {c.path: c for c in step.changes}
+        try:
+            dark = deck.effective_mode == ColorMode.DARK
+            ctx = build_context(deck, self.project_dir, deck.theme, dark)
+            for path in deck_files(deck, self.project_dir, deck.theme):
+                plan = plan_preview(path, ctx)
+                if not plan.swept(path):
+                    continue
+                text = preview_layers_text(path, plan.layers)
+                if text is None:
+                    continue
+                data = text.encode("utf-8")
+                before = path.read_bytes()
+                _ = path.write_bytes(data)
+                if path in changes:
+                    changes[path].after = data
+                else:
+                    step.changes.append(_Change(path, before, data))
+        except (ValueError, OSError) as exc:
+            logger.warning(f"Inkscape previews not updated: {exc}")
 
     # ── Several people at once ──
 
@@ -3634,6 +3708,524 @@ class EditorSession:
         if slide.id:
             overrides["id"] = _py(f"{slide.id}-copy")
         return overrides
+
+    # ── Slide master (editor/master.py) ──
+
+    def _master_render(self, msg: dict[str, object], deck: Deck) -> dict[str, object]:
+        """A layout or an overlay drawn as the master view shows it: the
+        layout with sample text in its zones (its empty zones kept as dashed
+        boxes) and the deck's overlays; an overlay over the background. The
+        result has a slide's shape (``slide``, ``entry``) for the canvas."""
+        kind = "overlay" if msg.get("kind") == "overlay" else "layout"
+        raw = msg.get("path")
+        if not isinstance(raw, str):
+            raise EditError("which layout?")
+        path = Path(raw).resolve()
+        entries = layout_entries(deck, self.project_dir)
+        overlays = overlay_entries(deck, self.project_dir)
+        used_by: dict[str, list[int]] = {
+            str(e.path.resolve()): e.reach for e in entries.values()
+        }
+        used_by.update(
+            {str(o.path.resolve()): o.slides for o in overlays if o.path is not None}
+        )
+        known = (
+            {e.path.resolve() for e in entries.values()}
+            if kind == "layout"
+            else {o.path.resolve() for o in overlays if o.path is not None}
+        )
+        if path not in known:
+            raise EditError(f"{path.name} is not one of the deck's {kind}s")
+        slide, target = master_slide(deck, self.project_dir, kind, path)
+        visible = [s for s in deck.slides if s.visible]
+        ctx = deck_context(deck, self.project_dir, max(1, len(visible)), editor=True)
+        try:
+            with collect_logs(100):
+                processed = process_slide(
+                    slide,
+                    ctx,
+                    1,
+                    None,
+                    AssetSource.for_deck(ctx.assets),
+                    f"master-{path.stem}",
+                    keep_zones=True,
+                )
+        except Exception as exc:
+            raise EditError(f"{path.name} does not build: {exc}") from exc
+        edit = processed.edit
+        if edit is None:
+            raise EditError("nothing to show")
+
+        def hash_of(p: Path) -> str:
+            try:
+                return file_hash(p.read_bytes())
+            except OSError:
+                return ""
+
+        sources = source_infos(edit["sources"], self.project_dir, used_by, hash_of)
+        for info in sources:
+            if info["role"] == "slide":
+                info["role"] = "layout"
+        title = f"{kind.capitalize()} {path.stem}"
+        return {
+            "target": str(target),
+            "slide": {
+                "id": f"master-{path.stem}",
+                "svg": processed.svg,
+                "title": title,
+                "notes": "",
+                "editableFiles": [],
+            },
+            "entry": {
+                "deckIndex": -1,
+                "visible": True,
+                "visibleIndex": None,
+                "src": str(target),
+                "title": title,
+                "explicitId": None,
+                "id": f"master-{path.stem}",
+                "srcPath": str(target),
+                "srcRel": sources[0]["rel"] if sources else target.name,
+                "srcShared": True,
+                "md": None,
+                "notes": {"kind": "none", "path": None, "rel": None, "text": ""},
+                "zones": {},
+                "transition": None,
+                "animations": [],
+                "animationsEditable": False,
+                "fontSize": None,
+                "sources": sources,
+                "emptyZones": edit["emptyZones"],
+                "zoneOrigins": {},
+                "zoneText": {},
+            },
+        }
+
+    def _theme_file_kind(self, path: Path, deck: Deck) -> AssetKind | None:
+        for kind in (AssetKind.LAYOUT, AssetKind.OVERLAY):
+            if theme_ref(path, deck.theme, kind) is not None:
+                return kind
+        return None
+
+    def _copy_on_write(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> None:
+        """An edit of a theme's layout (or overlay) from the slide master goes
+        into the deck's own copy of it, made in the same step: the request is
+        pointed at the copy, whose elements sit where they sat in the theme's
+        file, so the edit's locators still hold."""
+        path = Path(cast("str", msg["file"]))
+        if path.resolve().is_relative_to(self.project_dir.resolve()):
+            return
+        kind = self._theme_file_kind(path, deck)
+        if kind is None:
+            raise EditError(f"{path.name} is outside the project")
+        dest = copy_target(path, self.project_dir, kind)
+        existing = txn.read_optional(dest)
+        if existing is None:
+            expected = msg.get("hash")
+            if (
+                isinstance(expected, str)
+                and expected
+                and file_hash(path.read_bytes()) != expected
+            ):
+                raise EditError(f"{path.name} changed; wait for the reload")
+            txn.write(dest, copy_bytes(path, self.project_dir, deck.theme, kind))
+            extra["copied"] = self._copied(path, dest, kind)
+        else:
+            # Made by an earlier edit the page has not seen rebuilt yet.
+            mark = SvgFile.from_bytes(dest, existing).root.get(INKFLOW_COPY_OF)
+            if mark != theme_ref(path, deck.theme, kind):
+                raise EditError(f"this deck already has its own {dest.name}")
+        msg["file"] = str(dest)
+        _ = msg.pop("hash", None)
+
+    def _copied(self, path: Path, dest: Path, kind: AssetKind) -> dict[str, str]:
+        name = path.stem
+        if kind is AssetKind.OVERLAY:
+            note = f"This deck now has its own copy of the overlay '{name}'"
+        else:
+            note = (
+                f"This deck now has its own copy of '{name}'; "
+                + "slides on it follow your copy"
+            )
+        return {
+            "from": str(path),
+            "to": str(dest),
+            "name": name,
+            "kind": kind.singular,
+            "note": note,
+        }
+
+    def _with_preview(self, dest: Path, data: bytes, deck: Deck) -> bytes:
+        """``data`` for a new file ``dest`` with its Inkscape preview (layout
+        layers, theme colours) as ``inkflow sync`` writes it. The file is
+        written for a moment to compute it, as ``create_slide`` does."""
+        if dest.exists():
+            return data
+        made = not dest.parent.exists()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            _ = dest.write_bytes(data)
+            text = self._inkscape_preview(dest, deck)
+        finally:
+            dest.unlink(missing_ok=True)
+            if made:
+                with contextlib.suppress(OSError):
+                    dest.parent.rmdir()
+        return text.encode("utf-8") if text is not None else data
+
+    def _parent_from(self, raw: str, from_dir: Path, to_dir: Path, deck: Deck) -> str:
+        """An ``inkflow:parent`` written in ``from_dir``, as written in ``to_dir``."""
+        target = resolve_parent_path(raw, from_dir, self.project_dir, deck.theme)
+        try:
+            again = resolve_parent_path(raw, to_dir, self.project_dir, deck.theme)
+            if again.resolve() == target.resolve():
+                return raw
+        except (ValueError, OSError):
+            pass
+        named = theme_ref(target, deck.theme)
+        if named is not None:
+            return named
+        return Path(os.path.relpath(target, to_dir)).as_posix()
+
+    def _zone_hints(self, slide: Slide, txn: _Txn) -> dict[str, str]:
+        """A slide's zone text as one-line placeholder prompts, by zone."""
+        texts: dict[str, str] = {}
+        md_text = ""
+        if isinstance(slide.md, Inline):
+            md_text = str(slide.md)
+        else:
+            md_path = self._md_file(slide)
+            data = txn.read_optional(md_path) if md_path is not None else None
+            md_text = data.decode("utf-8") if data is not None else ""
+        if md_text.strip():
+            for zone, chunks in parse_markdown_zones(md_text).zones.items():
+                texts[zone] = "".join(c for c in chunks if isinstance(c, str))
+        for zone, value in slide.zones.items():
+            if isinstance(value, str):
+                texts[zone] = value
+            elif isinstance(value, TextBox):
+                texts[zone] = value.text or ""
+        return {z: h for z, t in texts.items() if (h := hint_of(t))}
+
+    def _master(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """The slide master's changes (`editor/master.py`): ``copy`` a theme's
+        layout into the deck, ``revert`` to the theme's, ``save`` a slide as a
+        layout, ``rename``/``delete`` a layout of the deck's own, add a
+        ``new-overlay``, ``add-zone`` (a placeholder) to a layout, refresh the
+        Inkscape ``previews``."""
+        op = msg.get("op")
+        kind = AssetKind.OVERLAY if msg.get("kind") == "overlay" else AssetKind.LAYOUT
+        if op == "copy":
+            name = str(msg.get("name") or "").strip()
+            if (self.project_dir / kind / f"{name}.svg").exists():
+                raise EditError(
+                    f"this deck already has its own {kind.singular} {name!r}"
+                )
+            found = [
+                p
+                for label, p in discover_assets(kind, self.project_dir, deck.theme)
+                if p.stem == name and label != "local"
+            ]
+            if not found:
+                raise EditError(f"no theme {kind.singular} named {name!r}")
+            path = found[-1]  # the deck's theme before the built-in one
+            dest = copy_target(path, self.project_dir, kind)
+            data = copy_bytes(path, self.project_dir, deck.theme, kind)
+            txn.write(dest, self._with_preview(dest, data, deck))
+            extra["copied"] = self._copied(path, dest, kind)
+            extra["_previews"] = deck
+            return f"Copy {kind.singular} '{name}' into the deck"
+        if op == "revert":
+            name = str(msg.get("name") or "").strip()
+            path = self.project_dir / kind / f"{name}.svg"
+            data = txn.read_optional(path)
+            if data is None:
+                raise EditError(f"this deck has no own {kind.singular} {name!r}")
+            if SvgFile.from_bytes(path, data).root.get(INKFLOW_COPY_OF) is None:
+                raise EditError(
+                    f"{name!r} is this deck's own {kind.singular}, not a copy of "
+                    + "the theme's: delete it instead"
+                )
+            txn.write(path, None)
+            extra["reverted"] = name
+            extra["_previews"] = deck
+            return f"Revert '{name}' to the theme's {kind.singular}"
+        if op == "save":
+            return self._save_as_layout(msg, deck, txn, extra)
+        if op == "rename":
+            return self._rename_layout(msg, deck, txn, extra)
+        if op == "delete":
+            return self._delete_layout(msg, deck, txn, extra)
+        if op == "new-overlay":
+            return self._new_overlay(msg, deck, txn, extra)
+        if op == "add-zone":
+            return self._add_zone(msg, deck, txn, extra)
+        if op == "previews":
+            extra["_previews"] = deck
+            return "Update Inkscape previews"
+        raise EditError(f"unknown master operation {op!r}")
+
+    def _save_as_layout(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """A layout (a template) made from a slide (see `master.template_bytes`)."""
+        _index, slide = self._deck_slide(deck, msg)
+        typed = str(msg.get("name") or "").strip()
+        stem = slug_name(typed)
+        if not stem:
+            raise EditError("give the layout a name")
+        taken = {p.stem for _, p in discover_layouts(self.project_dir, deck.theme)}
+        if stem in taken:
+            raise EditError(f"a layout named {stem!r} exists already")
+        dest = self.project_dir / "layouts" / f"{stem}.svg"
+        src_path = resolve_slide_src(slide.src, self.project_dir, deck.theme)
+        is_layout = src_path.resolve().parent.name == "layouts" or (
+            theme_ref(src_path, deck.theme) is not None
+        )
+        own: Path | None = None
+        own_data: bytes | None = None
+        parent: str | None
+        if is_layout:
+            parent = self._parent_from(slide.src, self.project_dir, dest.parent, deck)
+        else:
+            own = src_path.resolve()
+            own_data = txn.read(own)
+            raw = SvgFile.from_bytes(own, own_data).root.get("{urn:inkflow}parent")
+            parent = (
+                self._parent_from(raw, own.parent, dest.parent, deck) if raw else None
+            )
+        zones_taken: set[str] = set()
+        with contextlib.suppress(ValueError, OSError):
+            for ancestor in resolve_chain(src_path, self.project_dir, deck.theme):
+                zones_taken |= all_ids(parse_svg_file(ancestor))
+        if is_layout:
+            zones_taken |= all_ids(parse_svg_file(src_path))
+        canvas = layout_canvas(src_path) or deck.effective_size.canvas
+        template = template_bytes(
+            dest=dest,
+            label=typed,
+            own=own,
+            own_data=own_data,
+            parent=parent,
+            canvas=canvas,
+            hints=self._zone_hints(slide, txn) if msg.get("hints") else {},
+            pictures=bool(msg.get("pictures")),
+            zones_taken=zones_taken,
+        )
+        txn.write(dest, self._with_preview(dest, template.data, deck))
+        extra["layout"] = stem
+        extra["template"] = {
+            "name": stem,
+            "label": typed,
+            "path": str(dest),
+            "pictures": template.pictures,
+            "hints": template.hints,
+        }
+        return f"Save slide as layout '{typed}'"
+
+    def _own_layout(
+        self, deck: Deck, msg: dict[str, object], txn: _Txn
+    ) -> tuple[str, Path]:
+        """A layout of the deck's own (not a copy of a theme's), by ``name``."""
+        name = str(msg.get("name") or "").strip()
+        entries = layout_entries(deck, self.project_dir)
+        if name not in entries:
+            raise EditError(f"no layout named {name!r}")
+        path = entries[name].path
+        if not path.resolve().is_relative_to(self.project_dir.resolve()):
+            raise EditError(f"{name!r} is the theme's: the deck has no own copy")
+        if SvgFile.from_bytes(path, txn.read(path)).root.get(INKFLOW_COPY_OF):
+            raise EditError(
+                f"{name!r} is the deck's copy of the theme's layout and keeps its "
+                + "name: revert it, or save a slide as a new layout"
+            )
+        return name, path
+
+    def _rename_layout(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """Rename a layout of the deck's own: its display name and, when that
+        gives another file name, its file, every reference following
+        (`filerename`)."""
+        name, path = self._own_layout(deck, msg, txn)
+        typed = str(msg.get("to") or "").strip()
+        stem = slug_name(typed)
+        if not stem:
+            raise EditError("give the layout a name")
+
+        def labelled(data: bytes) -> bytes:
+            svg = SvgFile.from_bytes(path, data)
+            if typed != stem:
+                svg.root.set(INKFLOW_LABEL, typed)
+            elif INKFLOW_LABEL in svg.root.attrib:
+                del svg.root.attrib[INKFLOW_LABEL]
+            return svg.to_bytes()
+
+        extra["layout"] = stem
+        if stem == name:
+            txn.write(path, labelled(txn.read(path)))
+            return f"Rename layout to '{typed}'"
+        taken = {p.stem for _, p in discover_layouts(self.project_dir, deck.theme)}
+        if stem in taken:
+            raise EditError(f"a layout named {stem!r} exists already")
+        old_rel = self._deck_rel(path)
+        new_rel = PurePosixPath(old_rel).with_name(f"{stem}.svg").as_posix()
+        plan = plan_rename(self.project_dir, self.deck_path, deck, {old_rel: new_rel})
+        moved = {new for _, new in plan.moves}
+        for old_path, new_path in plan.moves:
+            content = plan.writes.get(new_path)
+            if old_path.resolve() == path.resolve():
+                content = labelled(content if content is not None else txn.read(path))
+            txn.move(old_path, new_path, content)
+        for target, data in plan.writes.items():
+            if target not in moved:
+                txn.write(target, data)
+        txn.prune = True
+        extra["structural"] = True
+        extra["rename"] = plan.summary(self.project_dir)
+        return f"Rename layout '{name}' to '{typed}'"
+
+    def _delete_layout(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """Delete a layout of the deck's own. While slides (or other layouts)
+        are built on it, only with ``moveTo``: they move to that layout first."""
+        name, path = self._own_layout(deck, msg, txn)
+        entries = layout_entries(deck, self.project_dir)
+        slides = entries[name].slides
+        children = [e for e in entries.values() if e.parent == name and e.name != name]
+        move_to = msg.get("moveTo")
+        if (slides or children) and not isinstance(move_to, str):
+            users: list[str] = []
+            if slides:
+                users.append(f"{len(slides)} slide{'s' if len(slides) != 1 else ''}")
+            if children:
+                users.append(", ".join(f"layout {c.name!r}" for c in children))
+            raise EditError(
+                f"{' and '.join(users)} use '{name}': move them to another "
+                + "layout first",
+                slides=slides,
+            )
+        if isinstance(move_to, str):
+            if move_to not in entries or move_to == name:
+                raise EditError(f"no other layout named {move_to!r}")
+            source = self._deck_source(txn)
+            for index in slides:
+                slide = deck.slides[index]
+                src = resolve_slide_src(slide.src, self.project_dir, deck.theme)
+                if src.resolve() == path.resolve():
+                    source.set_slide_arg(index, "src", _py(move_to))
+                else:
+                    self._set_parent(src.resolve(), move_to, txn)
+            for child in children:
+                if child.path.resolve().is_relative_to(self.project_dir.resolve()):
+                    self._set_parent(child.path.resolve(), move_to, txn)
+            self._save_deck(txn, source, set())
+        txn.write(path, None)
+        extra["deleted"] = name
+        extra["_previews"] = deck
+        return f"Delete layout '{name}'"
+
+    def _set_parent(self, path: Path, parent: str, txn: _Txn) -> None:
+        svg = SvgFile.from_bytes(path, txn.read(path))
+        svg.root.set("{urn:inkflow}parent", parent)
+        txn.write(path, svg.to_bytes())
+
+    def _new_overlay(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """A new, empty overlay of the deck's canvas in ``overlays/``, added to
+        ``Deck(overlays=[...])`` (or, with ``slide``, to that slide's own list),
+        after the overlays it already gets."""
+        stem = overlay_name(str(msg.get("name") or ""))
+        dest = self.project_dir / "overlays" / f"{stem}.svg"
+        taken = {
+            p.stem
+            for _, p in discover_assets(AssetKind.OVERLAY, self.project_dir, deck.theme)
+        }
+        if dest.exists() or stem in taken:
+            raise EditError(f"an overlay named {stem!r} exists already")
+        entries = layout_entries(deck, self.project_dir)
+        background = background_name(entries)
+        canvas = deck.effective_size.canvas
+        if deck.size is None and background is not None:
+            canvas = layout_canvas(entries[background].path) or canvas
+        data = overlay_bytes(canvas, background)
+        txn.write(dest, self._with_preview(dest, data, deck))
+        source = self._deck_source(txn)
+        scope = msg.get("slide")
+        if isinstance(scope, int) and not isinstance(scope, bool):
+            index, slide = self._deck_slide(deck, msg)
+            current = (
+                slide.overlays
+                if slide.overlays is not None
+                else deck.effective_overlays
+            )
+            listed = [*current, Overlay(stem)]
+            source.set_slide_arg(index, "overlays", _overlay_list(listed))
+            where = f"slide {index + 1}"
+        else:
+            listed = [*deck.effective_overlays, Overlay(stem)]
+            source.set_deck_arg("overlays", _overlay_list(listed))
+            where = "every slide"
+        self._save_deck(txn, source, {"Overlay"})
+        if isinstance(scope, int) and not isinstance(scope, bool):
+            slides = list(deck.slides)
+            slides[scope] = dataclasses.replace(slides[scope], overlays=listed)
+            extra["_previews"] = dataclasses.replace(deck, slides=slides)
+        else:
+            extra["_previews"] = dataclasses.replace(deck, overlays=listed)
+        extra["overlay"] = {"name": stem, "path": str(dest), "where": where}
+        return f"New overlay '{stem}'"
+
+    def _add_zone(
+        self, msg: dict[str, object], deck: Deck, txn: _Txn, extra: dict[str, object]
+    ) -> str:
+        """A placeholder (an empty zone) drawn into a layout or an overlay:
+        a text placeholder, or a picture placeholder (a zone named for media)."""
+        raw = msg.get("file")
+        if not isinstance(raw, str):
+            raise EditError("which layout?")
+        path = Path(raw)
+        data = txn.read(path)
+        expected = msg.get("hash")
+        if isinstance(expected, str) and expected and file_hash(data) != expected:
+            raise EditError(f"{path.name} changed on disk; wait for the reload")
+        svg = SvgFile.from_bytes(path, data)
+        picture = msg.get("zoneKind") == "picture"
+        base = _slug(str(msg.get("name") or "")) if msg.get("name") else ""
+        if not base or base == "slide":
+            base = "picture" if picture else "text"
+        if picture and not is_media_zone(base):
+            base = f"picture-{base}"
+        taken = all_ids(svg.root)
+        with contextlib.suppress(ValueError, OSError):
+            for ancestor in resolve_chain(path, self.project_dir, deck.theme):
+                taken |= all_ids(parse_svg_file(ancestor))
+        for overlay in overlay_entries(deck, self.project_dir):
+            if overlay.path is not None and overlay.path.resolve() != path.resolve():
+                with contextlib.suppress(Exception):
+                    taken |= all_ids(parse_svg_file(overlay.path))
+        zone_id = unique_id(svg.root, f"zone-{base}", taken)
+        box = {
+            k: float(cast("float", msg.get(k))) for k in ("x", "y", "width", "height")
+        }
+        if box["width"] <= 0 or box["height"] <= 0:
+            raise EditError("the placeholder needs a size")
+        xml = (
+            f'<rect id="{zone_id}" x="{box["x"]:g}" y="{box["y"]:g}" '
+            + f'width="{box["width"]:g}" height="{box["height"]:g}"/>'
+        )
+        result = apply_ops(svg, [{"kind": "insert", "parent": "0:", "xml": xml}])
+        txn.write(path, svg.to_bytes())
+        extra["ids"] = result.ids
+        extra["structural"] = True
+        extra["zone"] = zone_id.removeprefix("zone-")
+        return "Add picture placeholder" if picture else "Add text placeholder"
 
     # ── Animations ──
 

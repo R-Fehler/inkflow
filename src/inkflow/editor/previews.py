@@ -13,7 +13,7 @@ from pathlib import Path
 
 from inkflow.assets import AssetSource
 from inkflow.editor.model import is_media_zone
-from inkflow.layout import discover_layouts, layout_zones, layouts_for
+from inkflow.layout import discover_layouts, label_of, layout_zones, layouts_for
 from inkflow.logging import collect_logs
 from inkflow.manifest import Deck, Slide, ZoneContent
 from inkflow.pipeline import deck_context, process_slide
@@ -63,7 +63,8 @@ _SAMPLES: dict[str, str] = {
 _CARD = "### Heading\n\nA sentence or two."
 
 
-def _sample(zone: str) -> str:
+def sample_text(zone: str) -> str:
+    """Sample Markdown showing what a zone of this name is for."""
     if zone in _SAMPLES:
         return _SAMPLES[zone]
     if zone.startswith("card"):
@@ -99,7 +100,7 @@ def layout_previews(deck: Deck, deck_path: Path) -> list[dict[str, object]]:
         try:
             info = layout_zones(path, project_dir, deck.theme)
             zones: dict[str, ZoneContent] = {
-                z: _sample(z) for z in info.zones if not is_media_zone(z)
+                z: sample_text(z) for z in info.zones if not is_media_zone(z)
             }
             slide = Slide(f"{prefix}:{name}", zones=zones)
             # A preview that does not build is skipped rather than reported:
@@ -114,6 +115,7 @@ def layout_previews(deck: Deck, deck_path: Path) -> list[dict[str, object]]:
         out.append(
             {
                 "name": name,
+                "label": label_of(path),
                 "source": source,
                 "zones": info.zones,
                 "svg": svg,
