@@ -34,6 +34,7 @@ import { currentSlide, ed, emit, on } from "./state";
 import { editingHost, editSvgText, editZone, finishTextEdit } from "./textedit";
 import { initTheme } from "./theme";
 import { initToolbar } from "./toolbar";
+import { initTouchZoom } from "./touchzoom";
 
 const INITIAL_MODEL = __MODEL_JSON__;
 const INITIAL_SLIDES = __SLIDES_JSON__;
@@ -136,6 +137,7 @@ function boot(): void {
     initCanvas();
     initInsert();
     initInk();
+    initTouchZoom();
     initSorter();
     initProps();
     initObjects();

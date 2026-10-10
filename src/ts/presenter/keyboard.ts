@@ -38,7 +38,7 @@ import {
     toggleTheme,
 } from "./ui";
 import { openSyncedWindow } from "./windowsync";
-import { keyZoom, smoothResetCamera } from "./zoom";
+import { keyZoom, multiTouch, smoothResetCamera } from "./zoom";
 
 // ── Stage click and status bar buttons ──
 const stageEl = document.getElementById("stage")!;
@@ -115,7 +115,8 @@ document
     );
 
     stageEl.addEventListener("touchend", (e) => {
-        if (e.changedTouches.length !== 1) return;
+        // A pinch (or a finger left over from one) is no swipe.
+        if (e.changedTouches.length !== 1 || multiTouch()) return;
         const dx = e.changedTouches[0].clientX - startX;
         const dy = e.changedTouches[0].clientY - startY;
         if (Math.abs(dx) > SWIPE_MIN_PX && Math.abs(dx) > Math.abs(dy)) {

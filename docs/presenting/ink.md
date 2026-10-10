@@ -31,7 +31,8 @@ A palette appears over the top of the slide:
 still changes it, and a hand resting on a tablet while you write is ignored.
 Turn on the hand button to draw with a mouse or a finger as well; then a click
 on the slide is a dot rather than a step forward, and the keyboard is how you
-move on.
+move on. Two fingers still [zoom](index.md#drawing-attention): a stroke the
+first finger began is dropped as soon as the second one lands.
 
 **Ink belongs to its slide.** Leave a slide and its ink goes with it; come back
 and it is there again. A stroke is drawn in the slide's own coordinates, so it

@@ -28,8 +28,8 @@ Press <kbd>?</kbd> at any time for the full keybinding list.
 | <kbd>.</kbd> | Laser pointer |
 | <kbd>i</kbd> | [Ink](ink.md): draw on the slide with a pen |
 | <kbd>Ctrl</kbd>+<kbd>z</kbd> | Undo the last stroke (in ink mode) |
-| <kbd>Ctrl</kbd> + scroll | Zoom toward the pointer |
-| <kbd>Ctrl</kbd> + drag | Pan |
+| <kbd>Ctrl</kbd> + scroll, trackpad pinch | Zoom toward the pointer |
+| <kbd>Ctrl</kbd> + drag, scroll while zoomed | Pan |
 | <kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> | Zoom in, out, reset |
 | <kbd>b</kbd> | Blackout |
 | <kbd>w</kbd> | Whiteout |
@@ -81,8 +81,15 @@ Ink lasts for the talk and shows in every window of the presentation, or, with
 swipes keep navigating. It has [its own page](ink.md).
 
 **Zoom** magnifies part of a slide.
-Hold <kbd>Ctrl</kbd> and scroll to zoom toward the pointer, or drag to pan.
-<kbd>+</kbd>, <kbd>-</kbd> and <kbd>0</kbd> do the same from the keyboard.
+Pinch on a trackpad, or hold <kbd>Ctrl</kbd> and scroll, to zoom toward the
+pointer; the zoom follows your fingers smoothly, and a mouse wheel's notch is
+one even step. While zoomed in, scrolling (two fingers on a trackpad) or
+<kbd>Ctrl</kbd>+drag pans. On a touchscreen, pinch with two fingers: the slide
+zooms around them and pans with them at once.
+<kbd>+</kbd>, <kbd>-</kbd> and <kbd>0</kbd> do the same from the keyboard,
+and a double-click or double tap goes back to the full slide.
+Scrolling while not zoomed does nothing, so a trackpad's coasting never
+changes the slide.
 
 Zoom is local to the window.
 A second screen or a following window keeps its own view,
@@ -120,6 +127,13 @@ after their toast has gone.
 
 On a touchscreen, swipe left and right to move between slides,
 or tap the left and right edges of the stage.
+Two fingers [zoom](#drawing-attention) instead: when a second finger lands
+right after the first (or before the first has moved), whatever the first one
+began is taken back. A laser trail or an ink stroke it started disappears
+(other windows drop the stroke too), and the gesture ends with no swipe and no
+tap. The finger still down after a pinch does nothing until it lifts.
+Outside the stage (the status bar, the presenter panel) the browser's own
+pinch zoom still works.
 
 A floating control appears with buttons for dark/light, the step indicator
 and fullscreen.

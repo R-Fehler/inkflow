@@ -1,5 +1,223 @@
 "use strict";
 (() => {
+  // src/ts/shared/gestures.ts
+  var DELTA_LINE = 1;
+  var DELTA_PAGE = 2;
+  var LINE_PX = 40;
+  var PAGE_PX = 800;
+  function wheelPixels(delta, mode2, pagePx = PAGE_PX) {
+    if (mode2 === DELTA_LINE) return delta * LINE_PX;
+    if (mode2 === DELTA_PAGE) return delta * pagePx;
+    return delta;
+  }
+  var PINCH_PER_PX = 0.01;
+  var MAX_WHEEL_STEP = Math.log(1.2);
+  function wheelZoomLog(deltaY, deltaMode) {
+    const z = -wheelPixels(deltaY, deltaMode) * PINCH_PER_PX;
+    return Math.min(Math.max(z, -MAX_WHEEL_STEP), MAX_WHEEL_STEP);
+  }
+  function scrollCorrection(now, want) {
+    return { x: now.x - want.x, y: now.y - want.y };
+  }
+  var ZoomAnchor = class {
+    last = null;
+    tolerance;
+    constructor(tolerance = 0.5) {
+      this.tolerance = tolerance;
+    }
+    // The content point to hold under `from`; `measure` reads the one under
+    // a client point now.
+    point(from, measure2) {
+      const l2 = this.last;
+      if (l2 && distance(l2.client, from) <= this.tolerance) return l2.content;
+      return measure2(from);
+    }
+    // This frame put `content` under `to`.
+    settle(to, content2) {
+      this.last = { client: to, content: content2 };
+    }
+    reset() {
+      this.last = null;
+    }
+  };
+  function midpoint(a2, b2) {
+    return { x: (a2.x + b2.x) / 2, y: (a2.y + b2.y) / 2 };
+  }
+  function distance(a2, b2) {
+    return Math.hypot(a2.x - b2.x, a2.y - b2.y);
+  }
+  var TOUCH_DEFAULTS = {
+    windowMs: 200,
+    slopPx: 10,
+    tapMs: 300,
+    doubleTapMs: 350,
+    doubleTapPx: 30
+  };
+  var TouchTracker = class {
+    opts;
+    phase = "idle";
+    fingers = /* @__PURE__ */ new Map();
+    first = null;
+    moved = false;
+    committed = false;
+    pair = null;
+    last = null;
+    lastTap = null;
+    // This sequence had a second finger: nothing it does is a swipe or tap.
+    multi = false;
+    constructor(opts2 = {}) {
+      this.opts = { ...TOUCH_DEFAULTS, ...opts2 };
+    }
+    // Fingers are down and at least one of them is the gesture's (a pinch,
+    // or one left over from it): clicks and swipes are not the page's.
+    get claimed() {
+      return this.phase === "pinch" || this.phase === "spent";
+    }
+    get pinching() {
+      return this.phase === "pinch";
+    }
+    // The sequence in progress has had more than one finger.
+    get multiTouch() {
+      return this.multi;
+    }
+    get active() {
+      return this.phase !== "idle";
+    }
+    // The single finger's id while one finger acts alone.
+    get single() {
+      return this.phase === "single" ? this.first?.id ?? null : null;
+    }
+    get isCommitted() {
+      return this.committed;
+    }
+    has(id) {
+      return this.fingers.has(id);
+    }
+    down(id, at3, t2) {
+      const finger = { id, start: at3, at: at3, t0: t2 };
+      if (this.phase === "idle") {
+        this.fingers.clear();
+        this.fingers.set(id, finger);
+        this.first = finger;
+        this.moved = false;
+        this.committed = false;
+        this.multi = false;
+        this.phase = "single";
+        return { pass: true };
+      }
+      this.fingers.set(id, finger);
+      this.multi = true;
+      if (this.phase === "single" && this.first) {
+        if (this.committed) return { pass: false };
+        this.lastTap = null;
+        this.startPinch(this.first.id, id);
+        return { pass: false, cancelSingle: true, pinchStart: true };
+      }
+      if (this.phase === "spent" && this.fingers.size === 2) {
+        const other = [...this.fingers.keys()].find((k2) => k2 !== id);
+        if (other !== void 0) {
+          this.startPinch(other, id);
+          return { pass: false, pinchStart: true };
+        }
+      }
+      return { pass: false };
+    }
+    startPinch(a2, b2) {
+      this.phase = "pinch";
+      this.pair = [a2, b2];
+      this.last = this.measure();
+    }
+    measure() {
+      if (!this.pair) return null;
+      const a2 = this.fingers.get(this.pair[0]);
+      const b2 = this.fingers.get(this.pair[1]);
+      if (!a2 || !b2) return null;
+      return { mid: midpoint(a2.at, b2.at), dist: distance(a2.at, b2.at) };
+    }
+    move(id, at3, t2) {
+      const f2 = this.fingers.get(id);
+      if (!f2) return { pass: true };
+      f2.at = at3;
+      if (this.phase === "single" && f2 === this.first) {
+        if (!this.moved && distance(at3, f2.start) > this.opts.slopPx)
+          this.moved = true;
+        return { pass: true, commit: this.tryCommit(t2) };
+      }
+      if (this.phase === "pinch" && this.pair?.includes(id)) {
+        const now = this.measure();
+        const before = this.last;
+        if (!now || !before) return { pass: false };
+        this.last = now;
+        const scale2 = before.dist > 0 && now.dist > 0 ? now.dist / before.dist : 1;
+        return {
+          pass: false,
+          pinch: { scale: scale2, from: before.mid, to: now.mid }
+        };
+      }
+      return { pass: false };
+    }
+    // Time passing with no event: a finger that moved past the slop early
+    // commits once the window is over, even if it then holds still.
+    tick(t2) {
+      return { pass: true, commit: this.tryCommit(t2) };
+    }
+    tryCommit(t2) {
+      if (this.phase !== "single" || this.committed || !this.first)
+        return false;
+      if (!this.moved || t2 - this.first.t0 < this.opts.windowMs) return false;
+      this.committed = true;
+      return true;
+    }
+    // `cancelled`: the browser took the pointer back (pointercancel).
+    up(id, at3, t2, cancelled = false) {
+      const f2 = this.fingers.get(id);
+      if (!f2) return { pass: true };
+      f2.at = at3;
+      this.fingers.delete(id);
+      if (this.phase === "single" && f2 === this.first) {
+        const release = !this.committed;
+        if (this.fingers.size) {
+          this.phase = "spent";
+          this.first = null;
+        } else this.reset();
+        const verdict = {
+          pass: true,
+          release,
+          moved: this.moved
+        };
+        if (!cancelled && !this.moved && distance(at3, f2.start) <= this.opts.slopPx && t2 - f2.t0 <= this.opts.tapMs) {
+          verdict.tap = f2.start;
+          const prev = this.lastTap;
+          if (prev && t2 - prev.t <= this.opts.doubleTapMs && distance(prev.at, f2.start) <= this.opts.doubleTapPx) {
+            verdict.doubleTap = f2.start;
+            this.lastTap = null;
+          } else {
+            this.lastTap = { at: f2.start, t: t2 };
+          }
+        } else {
+          this.lastTap = null;
+        }
+        return verdict;
+      }
+      const ended = this.phase === "pinch" && !!this.pair?.includes(id);
+      if (ended) {
+        this.phase = "spent";
+        this.pair = null;
+        this.last = null;
+      }
+      if (this.fingers.size === 0) this.reset();
+      return ended ? { pass: false, pinchEnd: true } : { pass: false };
+    }
+    reset() {
+      this.phase = "idle";
+      this.fingers.clear();
+      this.first = null;
+      this.pair = null;
+      this.last = null;
+      this.committed = false;
+    }
+  };
+
   // src/ts/shared/keyframes.ts
   var templates = /* @__PURE__ */ new Map();
   function parseOffsets(keyText) {
@@ -327,8 +545,8 @@
   function parseBend(value) {
     const m2 = /^([xy]):(-?\d*\.?\d+(?:e[-+]?\d+)?)$/i.exec(value ?? "");
     if (!m2) return null;
-    const at2 = Number(m2[2]);
-    return Number.isFinite(at2) ? { axis: m2[1], at: at2 } : null;
+    const at3 = Number(m2[2]);
+    return Number.isFinite(at3) ? { axis: m2[1], at: at3 } : null;
   }
   function formatBend(b2) {
     return `${b2.axis}:${Math.round(b2.at * 100) / 100}`;
@@ -396,12 +614,12 @@
         mid: { x: (a2.x + k2) / 2, y: m2 }
       });
     }
-    const at2 = bend && bend.axis === axis ? bend.at : fallback;
-    const { pts, mid } = build2(at2);
+    const at3 = bend && bend.axis === axis ? bend.at : fallback;
+    const { pts, mid } = build2(at3);
     return {
       curve: false,
       points: simplify(pts.map((p2) => ({ x: p2.x, y: p2.y }))),
-      bend: { axis, at: at2, mid }
+      bend: { axis, at: at3, mid }
     };
   }
   function simplify(pts) {
@@ -1309,13 +1527,13 @@
       }
     }
     if (dist > threshold) return { delta: 0, at: [] };
-    const at2 = /* @__PURE__ */ new Set();
+    const at3 = /* @__PURE__ */ new Set();
     for (const e2 of edges) {
       for (const t2 of targets2) {
-        if (Math.abs(t2 - (e2 + delta)) < 1e-6) at2.add(t2);
+        if (Math.abs(t2 - (e2 + delta)) < 1e-6) at3.add(t2);
       }
     }
-    return { delta, at: [...at2] };
+    return { delta, at: [...at3] };
   }
   function snapBox(box, targets2, threshold) {
     const x2 = best(
@@ -1404,9 +1622,9 @@
   function scale() {
     const { w: w2, h: h3 } = viewBoxSize();
     if (ed.zoom > 0) return ed.zoom;
-    const pad = 48;
-    const availW = Math.max(100, canvas.clientWidth - pad);
-    const availH = Math.max(100, canvas.clientHeight - pad);
+    const pad2 = 48;
+    const availW = Math.max(100, canvas.clientWidth - pad2);
+    const availH = Math.max(100, canvas.clientHeight - pad2);
     return Math.min(availW / w2, availH / h3);
   }
   function layoutPaper() {
@@ -1423,6 +1641,7 @@
     overlay.setAttribute("height", String(ph));
     overlay.setAttribute("viewBox", `0 0 ${pw} ${ph}`);
     canvas.classList.toggle("zoomed", ed.zoom > 0);
+    canvas.style.padding = ed.zoom > 0 ? `${Math.round(canvas.clientHeight / 2)}px ${Math.round(canvas.clientWidth / 2)}px` : "";
     drawOverlay();
   }
   function render() {
@@ -2883,7 +3102,10 @@
     if (!handle && ed.tool !== "select") {
       if (hooks.toolDown(e2, pt)) return;
     }
-    paper.setPointerCapture(e2.pointerId);
+    try {
+      paper.setPointerCapture(e2.pointerId);
+    } catch {
+    }
     e2.preventDefault();
     ed.interacting = true;
     let clickTarget = null;
@@ -2989,7 +3211,10 @@
   function onDoubleClick(e2) {
     if (hooks.editingHost()?.contains(e2.target)) return;
     const el2 = pick(e2.clientX, e2.clientY);
-    if (!el2) return;
+    if (!el2) {
+      if (ed.tool === "select") setZoom(0);
+      return;
+    }
     if (canTypeInto(el2)) {
       hooks.typeInto(el2);
       return;
@@ -3123,27 +3348,51 @@
       }
     });
     new ResizeObserver(() => layoutPaper()).observe(canvas);
-    canvas.addEventListener(
-      "wheel",
-      (e2) => {
-        if (!(e2.ctrlKey || e2.metaKey)) return;
-        e2.preventDefault();
-        setZoom(scale() * (e2.deltaY < 0 ? 1.1 : 1 / 1.1));
-      },
-      { passive: false }
-    );
     canvas.addEventListener("pointerdown", (e2) => {
       if (e2.target === canvas) {
         enterGroup(null);
         clearSelection();
       }
     });
+    canvas.addEventListener("dblclick", (e2) => {
+      if (e2.target === canvas) setZoom(0);
+    });
     on("model", render);
     on("rerender", render);
   }
-  function setZoom(z) {
-    ed.zoom = z <= 0 ? 0 : Math.max(0.05, Math.min(z, 8));
+  var MIN_ZOOM = 0.05;
+  var MAX_ZOOM = 8;
+  function clampZoom(z) {
+    return z <= 0 ? 0 : Math.max(MIN_ZOOM, Math.min(z, MAX_ZOOM));
+  }
+  function setZoom(z, about) {
+    const c2 = canvas.getBoundingClientRect();
+    const at3 = about ?? { x: c2.left + c2.width / 2, y: c2.top + c2.height / 2 };
+    anchor.reset();
+    zoomTo(clampZoom(z), at3, at3);
+  }
+  function zoomAbout(factor, from, to) {
+    zoomTo(clampZoom(scale() * factor), from, to);
+  }
+  function zoomEnded() {
+    anchor.reset();
+  }
+  var anchor = new ZoomAnchor();
+  function zoomTo(z, from, to) {
+    const p2 = z > 0 && slideRoot() ? anchor.point(from, (c2) => clientToSlide(c2.x, c2.y)) : null;
+    ed.zoom = z;
     layoutPaper();
+    if (p2) {
+      const m2 = rootCTM();
+      const now = {
+        x: m2.a * p2.x + m2.c * p2.y + m2.e,
+        y: m2.b * p2.x + m2.d * p2.y + m2.f
+      };
+      const fix = scrollCorrection(now, to);
+      if (fix.x) canvas.scrollLeft += fix.x;
+      if (fix.y) canvas.scrollTop += fix.y;
+      anchor.settle(to, p2);
+    } else anchor.reset();
     emit("zoom");
   }
 
@@ -3304,15 +3553,15 @@
     });
     return { columns: columns2, rows };
   }
-  function addRow(grid, at2 = grid.rows.length) {
+  function addRow(grid, at3 = grid.rows.length) {
     const rows = grid.rows.map((r2) => [...r2]);
-    rows.splice(at2, 0, blankRow(grid.columns.length));
+    rows.splice(at3, 0, blankRow(grid.columns.length));
     return { columns: [...grid.columns], rows };
   }
-  function removeRow(grid, at2) {
+  function removeRow(grid, at3) {
     return {
       columns: [...grid.columns],
-      rows: grid.rows.filter((_2, i2) => i2 !== at2).map((r2) => [...r2])
+      rows: grid.rows.filter((_2, i2) => i2 !== at3).map((r2) => [...r2])
     };
   }
   function addColumn(grid, name2) {
@@ -3322,11 +3571,11 @@
     ];
     return { columns: columns2, rows: grid.rows.map((r2) => [...r2, ""]) };
   }
-  function removeColumn(grid, at2, s2) {
-    const name2 = grid.columns[at2];
+  function removeColumn(grid, at3, s2) {
+    const name2 = grid.columns[at3];
     const next = {
-      columns: grid.columns.filter((_2, i2) => i2 !== at2),
-      rows: grid.rows.map((r2) => r2.filter((_2, i2) => i2 !== at2))
+      columns: grid.columns.filter((_2, i2) => i2 !== at3),
+      rows: grid.rows.map((r2) => r2.filter((_2, i2) => i2 !== at3))
     };
     return {
       grid: next,
@@ -3338,11 +3587,11 @@
       }
     };
   }
-  function renameColumn(grid, at2, wanted, s2) {
-    const old = grid.columns[at2];
-    const others = grid.columns.filter((_2, i2) => i2 !== at2);
+  function renameColumn(grid, at3, wanted, s2) {
+    const old = grid.columns[at3];
+    const others = grid.columns.filter((_2, i2) => i2 !== at3);
     const name2 = uniqueName(others, wanted.trim() || old);
-    const columns2 = grid.columns.map((c2, i2) => i2 === at2 ? name2 : c2);
+    const columns2 = grid.columns.map((c2, i2) => i2 === at3 ? name2 : c2);
     return {
       grid: { columns: columns2, rows: grid.rows.map((r2) => [...r2]) },
       settings: {
@@ -4553,10 +4802,10 @@
     });
     list3.addEventListener("keydown", (e2) => {
       const items = entries();
-      const at2 = items.indexOf(document.activeElement);
+      const at3 = items.indexOf(document.activeElement);
       if (e2.key === "ArrowDown" || e2.key === "ArrowUp") {
         e2.preventDefault();
-        const next = at2 + (e2.key === "ArrowDown" ? 1 : -1);
+        const next = at3 + (e2.key === "ArrowDown" ? 1 : -1);
         if (next < 0) path.focus();
         else items[Math.min(next, items.length - 1)]?.focus();
       } else if (e2.key === "Backspace") {
@@ -5359,7 +5608,10 @@
     e2.preventDefault();
     clearSelection();
     const paperEl = e2.currentTarget;
-    paperEl.setPointerCapture(e2.pointerId);
+    try {
+      paperEl.setPointerCapture(e2.pointerId);
+    } catch {
+    }
     ed.interacting = true;
     const connecting = tool in CONNECTOR_TOOLS;
     const startHit = connecting && !e2.altKey ? siteAt(start, null) : null;
@@ -5568,9 +5820,9 @@
     const id = `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
     const big = media.size > 3 * CHUNK;
     let result = { ok: false };
-    for (let at2 = 0; at2 < media.size || at2 === 0; at2 += CHUNK) {
-      const last = at2 + CHUNK >= media.size;
-      const data = await readBase64(media.slice(at2, at2 + CHUNK));
+    for (let at3 = 0; at3 < media.size || at3 === 0; at3 += CHUNK) {
+      const last = at3 + CHUNK >= media.size;
+      const data = await readBase64(media.slice(at3, at3 + CHUNK));
       result = await request({
         action: "upload-chunk",
         upload: id,
@@ -5585,7 +5837,7 @@
       if (big) {
         const done = Math.min(
           100,
-          Math.round((at2 + CHUNK) / media.size * 100)
+          Math.round((at3 + CHUNK) / media.size * 100)
         );
         toast(`Copying ${media.name}\u2026 ${done}%`);
       }
@@ -5656,7 +5908,7 @@
   function isImage(file) {
     return file instanceof File && (file.type.startsWith("image/") || file.type === "application/pdf") || /\.(png|jpe?g|gif|webp|svg|pdf)$/i.test(file.name);
   }
-  async function insertVideoFile(file, at2) {
+  async function insertVideoFile(file, at3) {
     if (!await ensureOwnDrawing()) return;
     const up = await upload(file);
     const src = ownSource();
@@ -5669,8 +5921,8 @@
     const k2 = Math.min(vw * 0.6 / size3.w, vh * 0.6 / size3.h);
     const w2 = size3.w * k2;
     const h3 = size3.h * k2;
-    const cx = Math.min(Math.max(at2?.x ?? vw / 2, w2 / 2), vw - w2 / 2);
-    const cy = Math.min(Math.max(at2?.y ?? vh / 2, h3 / 2), vh - h3 / 2);
+    const cx = Math.min(Math.max(at3?.x ?? vw / 2, w2 / 2), vw - w2 / 2);
+    const cy = Math.min(Math.max(at3?.y ?? vh / 2, h3 / 2), vh - h3 / 2);
     const parent = insertParent();
     const a2 = toParent(parent.el, cx - w2 / 2, cy - h3 / 2);
     const b2 = toParent(parent.el, cx + w2 / 2, cy + h3 / 2);
@@ -5701,16 +5953,16 @@
     const file = await pickFile(VIDEO_ACCEPT);
     if (file) await insertVideoFile(file);
   }
-  async function insertFile(file, at2) {
-    const zone = at2 ? mediaZoneAt(at2.clientX, at2.clientY) : null;
+  async function insertFile(file, at3) {
+    const zone = at3 ? mediaZoneAt(at3.clientX, at3.clientY) : null;
     if (zone) {
       await fillZone(zone, file);
       return;
     }
-    if (isImage(file)) await insertImageFile(file, at2);
-    else await insertVideoFile(file, at2);
+    if (isImage(file)) await insertImageFile(file, at3);
+    else await insertVideoFile(file, at3);
   }
-  async function insertImageFile(file, at2) {
+  async function insertImageFile(file, at3) {
     if (!await ensureOwnDrawing()) return;
     const up = await upload(file);
     const src = ownSource();
@@ -5731,8 +5983,8 @@
     const k2 = Math.min(1, maxW / size3.w, maxH / size3.h);
     const w2 = size3.w * k2;
     const h3 = size3.h * k2;
-    const cx = at2?.x ?? (vb?.width || 1920) / 2;
-    const cy = at2?.y ?? (vb?.height || 1080) / 2;
+    const cx = at3?.x ?? (vb?.width || 1920) / 2;
+    const cy = at3?.y ?? (vb?.height || 1080) / 2;
     const parent = insertParent().el;
     const p2 = toParent(parent, cx - w2 / 2, cy - h3 / 2);
     await insertXml(
@@ -5848,13 +6100,13 @@
       const file = e2.dataTransfer?.files?.[0];
       if (!file) return;
       e2.preventDefault();
-      const at2 = {
+      const at3 = {
         ...clientToSlide(e2.clientX, e2.clientY),
         clientX: e2.clientX,
         clientY: e2.clientY
       };
       const path = droppedPath(e2.dataTransfer);
-      void insertFile(path ? { path, name: file.name, file } : file, at2);
+      void insertFile(path ? { path, name: file.name, file } : file, at3);
     });
     document.addEventListener("paste", (e2) => {
       const target = e2.target;
@@ -5907,17 +6159,17 @@
     });
     return input;
   }
-  function newChartBox(at2) {
+  function newChartBox(at3) {
     const vb = slideRoot()?.viewBox.baseVal;
     const vw = vb?.width || 1920;
     const vh = vb?.height || 1080;
     const w2 = Math.round(vw * 0.6);
     const ht = Math.round(w2 * 9 / 16);
-    const cx = Math.min(Math.max(at2?.x ?? vw / 2, w2 / 2), vw - w2 / 2);
-    const cy = Math.min(Math.max(at2?.y ?? vh / 2, ht / 2), vh - ht / 2);
+    const cx = Math.min(Math.max(at3?.x ?? vw / 2, w2 / 2), vw - w2 / 2);
+    const cy = Math.min(Math.max(at3?.y ?? vh / 2, ht / 2), vh - ht / 2);
     return { x: cx - w2 / 2, y: cy - ht / 2, width: w2, height: ht };
   }
-  async function insertChart(at2) {
+  async function insertChart(at3) {
     const slide = currentSlide();
     if (!slide) return;
     if (!ed.model?.deckEditable) {
@@ -5927,7 +6179,7 @@
       );
       return;
     }
-    openChartDialog({ kind: "insert", at: at2 }, sampleGrid(), defaultSettings());
+    openChartDialog({ kind: "insert", at: at3 }, sampleGrid(), defaultSettings());
   }
   async function editChart(zone) {
     const slide = currentSlide();
@@ -7482,13 +7734,13 @@
       video.currentTime = start;
     }
     if (end > 0) {
-      const stop = () => {
+      const stop2 = () => {
         if (video.currentTime >= end) {
           video.pause();
-          video.removeEventListener("timeupdate", stop);
+          video.removeEventListener("timeupdate", stop2);
         }
       };
-      video.addEventListener("timeupdate", stop);
+      video.addEventListener("timeupdate", stop2);
     }
     void video.play().catch(() => {
     });
@@ -9521,7 +9773,7 @@
     };
     const bold = parseInt(cs.fontWeight, 10) >= 600;
     const italic = cs.fontStyle === "italic";
-    const anchor = cs.textAnchor;
+    const anchor2 = cs.textAnchor;
     return section(
       "Text",
       row2(
@@ -9561,19 +9813,19 @@
           "\u27F8",
           "Align start",
           () => setAll({ "text-anchor": null }, "Align"),
-          anchor === "start" ? "on" : ""
+          anchor2 === "start" ? "on" : ""
         ),
         button(
           "\u21D4",
           "Align middle",
           () => setAll({ "text-anchor": "middle" }, "Align"),
-          anchor === "middle" ? "on" : ""
+          anchor2 === "middle" ? "on" : ""
         ),
         button(
           "\u27F9",
           "Align end",
           () => setAll({ "text-anchor": "end" }, "Align"),
-          anchor === "end" ? "on" : ""
+          anchor2 === "end" ? "on" : ""
         ),
         button("Edit", "Edit text (double-click)", () => emit("edit-text"))
       )
@@ -10439,8 +10691,8 @@
   }
   function codeSpan(text) {
     const ticks = text.includes("`") ? "``" : "`";
-    const pad = text.startsWith("`") || text.endsWith("`") ? " " : "";
-    return `${ticks}${pad}${text}${pad}${ticks}`;
+    const pad2 = text.startsWith("`") || text.endsWith("`") ? " " : "";
+    return `${ticks}${pad2}${text}${pad2}${ticks}`;
   }
   function wrap(inner, mark) {
     const m2 = inner.match(/^(\s*)([\s\S]*?)(\s*)$/);
@@ -10580,7 +10832,7 @@
       const task = tasks || cls === TASK_ITEM || box !== void 0;
       const bullet = ordered ? `${n3++}. ` : "- ";
       const marker = `${bullet}${task ? box?.checked ? "[x] " : "[ ] " : ""}`;
-      const pad = " ".repeat(bullet.length);
+      const pad2 = " ".repeat(bullet.length);
       const own = [];
       const nested = [];
       for (const c2 of li.childNodes) {
@@ -10595,11 +10847,11 @@
         }
       }
       const text = own.join("").replace(/(\\\n\s*)+$/, "").trim().replace(/\n/g, `
-${pad}`);
+${pad2}`);
       lines.push(`${marker}${text}`);
       for (const sub of nested) {
         lines.push(
-          sub.split("\n").map((l2) => pad + l2).join("\n")
+          sub.split("\n").map((l2) => pad2 + l2).join("\n")
         );
       }
     }
@@ -10732,7 +10984,7 @@ $$`;
       spellcheck: "true"
     });
     area2.value = original.join("\n");
-    const anchor = style.textAnchor;
+    const anchor2 = style.textAnchor;
     Object.assign(area2.style, {
       left: `${rect.left - 6}px`,
       top: `${rect.top - 4}px`,
@@ -10744,7 +10996,7 @@ $$`;
       fontStyle: style.fontStyle,
       lineHeight: "1.2",
       color: style.fill.startsWith("rgb") ? style.fill : "inherit",
-      textAlign: anchor === "middle" ? "center" : anchor === "end" ? "right" : "left"
+      textAlign: anchor2 === "middle" ? "center" : anchor2 === "end" ? "right" : "left"
     });
     const autosize = () => {
       area2.style.height = "auto";
@@ -10803,11 +11055,11 @@ $$`;
     const { selectionStart: s2, selectionEnd: e2, value } = area2;
     const start = value.lastIndexOf("\n", s2 - 1) + 1;
     const end = value.indexOf("\n", e2);
-    const stop = end === -1 ? value.length : end;
-    const block = value.slice(start, stop).split("\n").map(
+    const stop2 = end === -1 ? value.length : end;
+    const block = value.slice(start, stop2).split("\n").map(
       (line) => line.startsWith(prefix) ? line.slice(prefix.length) : prefix + line
     ).join("\n");
-    area2.value = value.slice(0, start) + block + value.slice(stop);
+    area2.value = value.slice(0, start) + block + value.slice(stop2);
     area2.selectionStart = start;
     area2.selectionEnd = start + block.length;
     area2.dispatchEvent(new Event("input"));
@@ -12914,8 +13166,8 @@ ${rules}`;
   function step(dir) {
     if (!model) return;
     const rows = visibleRows(model.pairs, onlyChanges);
-    const at2 = rows.indexOf(row3);
-    const next = rows[at2 < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, at2 + dir))];
+    const at3 = rows.indexOf(row3);
+    const next = rows[at3 < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, at3 + dir))];
     if (next != null) selectRow(next);
   }
   function renderMain() {
@@ -13101,16 +13353,16 @@ ${rules}`;
     layer2.setAttribute("class", "cmp-outlines");
     layer2.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
     layer2.setAttribute("preserveAspectRatio", "xMidYMid meet");
-    const pad = Math.max(vb.w, vb.h) / 240;
+    const pad2 = Math.max(vb.w, vb.h) / 240;
     const draw = (target, loc, cls, label4) => {
       const box = loc ? locate(target, loc) : null;
       if (!box) return;
       const rect = document.createElementNS(SVG_NS2, "rect");
-      rect.setAttribute("x", String(box[0] - pad));
-      rect.setAttribute("y", String(box[1] - pad));
-      rect.setAttribute("width", String(box[2] + 2 * pad));
-      rect.setAttribute("height", String(box[3] + 2 * pad));
-      rect.setAttribute("rx", String(pad));
+      rect.setAttribute("x", String(box[0] - pad2));
+      rect.setAttribute("y", String(box[1] - pad2));
+      rect.setAttribute("width", String(box[2] + 2 * pad2));
+      rect.setAttribute("height", String(box[3] + 2 * pad2));
+      rect.setAttribute("rx", String(pad2));
       rect.setAttribute("class", `mark ${cls}`);
       const title2 = document.createElementNS(SVG_NS2, "title");
       title2.textContent = label4;
@@ -15646,7 +15898,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       }
       const inv = ctm.inverse();
       const unitsPerPx = Math.hypot(inv.a, inv.b);
-      const at2 = new DOMPoint(e2.clientX, e2.clientY).matrixTransform(inv);
+      const at3 = new DOMPoint(e2.clientX, e2.clientY).matrixTransform(inv);
       if (tool === "eraser") {
         const cursor = document.createElementNS(
           SVG_NS3,
@@ -15654,8 +15906,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         );
         cursor.setAttribute("class", "inkflow-eraser-cursor");
         cursor.setAttribute("r", String(ERASER_RADIUS_PX * unitsPerPx));
-        cursor.setAttribute("cx", String(at2.x));
-        cursor.setAttribute("cy", String(at2.y));
+        cursor.setAttribute("cx", String(at3.x));
+        cursor.setAttribute("cy", String(at3.y));
         cursor.setAttribute("stroke-width", String(1.5 * unitsPerPx));
         svg.appendChild(cursor);
         this.gesture = {
@@ -15687,7 +15939,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         inv,
         minDist: 0.4 * unitsPerPx,
         live,
-        points: [[at2.x, at2.y, simulate ? 0.5 : e2.pressure]],
+        points: [[at3.x, at3.y, simulate ? 0.5 : e2.pressure]],
         predicted: [],
         sent: 0,
         path
@@ -15740,9 +15992,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     erase(clientX, clientY) {
       const g2 = this.gesture;
       if (g2?.kind !== "erase") return;
-      const at2 = new DOMPoint(clientX, clientY).matrixTransform(g2.inv);
-      g2.cursor.setAttribute("cx", String(at2.x));
-      g2.cursor.setAttribute("cy", String(at2.y));
+      const at3 = new DOMPoint(clientX, clientY).matrixTransform(g2.inv);
+      g2.cursor.setAttribute("cx", String(at3.x));
+      g2.cursor.setAttribute("cy", String(at3.y));
       const a2 = new DOMPoint(g2.last.x, g2.last.y);
       const b2 = new DOMPoint(clientX, clientY);
       g2.last = { x: clientX, y: clientY };
@@ -16088,6 +16340,16 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   var SETTINGS_KEY = "inkflow-ink-editor";
   var SVG_NS4 = "http://www.w3.org/2000/svg";
   var settings = loadSettings(SETTINGS_KEY, true);
+  var pad = null;
+  function fingersDraw() {
+    return penActive() && settings.fingers;
+  }
+  function cancelStroke() {
+    pad?.cancel();
+  }
+  function penActive() {
+    return ed.tool === "pen" && ed.step == null && !ed.richEditing;
+  }
   var pending2 = /* @__PURE__ */ new Map();
   function liveLayer(svg) {
     let layer2 = svg.querySelector(":scope > g.inkflow-live-ink");
@@ -16170,9 +16432,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     palette.el.classList.add("editor-ink");
     palette.el.hidden = true;
     document.body.appendChild(palette.el);
-    new InkPad({
+    pad = new InkPad({
       surface: paper2,
-      active: () => ed.tool === "pen" && ed.step == null && !ed.richEditing,
+      active: penActive,
       fingers: () => settings.fingers,
       tool: () => settings.tool,
       svg: () => currentSlide()?.ink ? slideRoot() : null,
@@ -16491,6 +16753,324 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     });
   }
 
+  // src/ts/shared/gesturepad.ts
+  var CLICK_AFTER_MS = 400;
+  var PALM_MS2 = 1500;
+  var WHEEL_END_MS = 160;
+  function at2(e2) {
+    return { x: e2.clientX, y: e2.clientY };
+  }
+  function replica(type, src, pos = src) {
+    return new PointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      pointerId: src.pointerId,
+      pointerType: src.pointerType,
+      isPrimary: src.isPrimary,
+      clientX: pos.clientX,
+      clientY: pos.clientY,
+      screenX: pos.screenX,
+      screenY: pos.screenY,
+      width: pos.width,
+      height: pos.height,
+      pressure: type === "pointerup" ? 0 : pos.pressure || 0.5,
+      button: type === "pointermove" ? -1 : 0,
+      buttons: type === "pointerup" ? 0 : 1,
+      ctrlKey: pos.ctrlKey,
+      shiftKey: pos.shiftKey,
+      altKey: pos.altKey,
+      metaKey: pos.metaKey
+    });
+  }
+  function stop(e2) {
+    e2.stopImmediatePropagation();
+    if (e2.cancelable) e2.preventDefault();
+  }
+  var GesturePad = class {
+    touch;
+    host;
+    // Touch pointers in the current sequence.
+    ours = /* @__PURE__ */ new Set();
+    deferred = null;
+    replaying = false;
+    timer = 0;
+    clicksAfter = -Infinity;
+    penNear = -Infinity;
+    pensDown = /* @__PURE__ */ new Set();
+    // This frame's batch.
+    frame = 0;
+    zoomLog = 0;
+    from = null;
+    to = null;
+    source = "wheel";
+    panX = 0;
+    panY = 0;
+    wheelTimer = 0;
+    safariScale = 1;
+    constructor(host4, tracker = new TouchTracker()) {
+      this.host = host4;
+      this.touch = tracker;
+      const opts2 = { capture: true };
+      window.addEventListener("pointerdown", (e2) => this.down(e2), opts2);
+      window.addEventListener("pointermove", (e2) => this.move(e2), opts2);
+      window.addEventListener("pointerup", (e2) => this.up(e2, false), opts2);
+      window.addEventListener("pointercancel", (e2) => this.up(e2, true), opts2);
+      window.addEventListener("click", (e2) => this.claimClick(e2), opts2);
+      window.addEventListener("dblclick", (e2) => this.claimClick(e2), opts2);
+      const s2 = host4.surface;
+      s2.addEventListener("wheel", (e2) => this.wheel(e2), { passive: false });
+      s2.addEventListener("gesturestart", (e2) => this.gesture(e2, "start"));
+      s2.addEventListener("gesturechange", (e2) => this.gesture(e2, "change"));
+      s2.addEventListener("gestureend", (e2) => this.gesture(e2, "end"));
+    }
+    // The touch sequence in progress (or the one that just ended) had a
+    // second finger: it is no swipe and no tap.
+    get multiTouch() {
+      return this.touch.multiTouch;
+    }
+    // Two fingers are zooming, or one is left over from them.
+    get claimed() {
+      return this.touch.claimed;
+    }
+    // ── Touch ──
+    palm() {
+      return this.pensDown.size > 0 || performance.now() - this.penNear < PALM_MS2;
+    }
+    down(e2) {
+      if (e2.pointerType === "pen") {
+        this.penNear = performance.now();
+        this.pensDown.add(e2.pointerId);
+        return;
+      }
+      if (e2.pointerType !== "touch" || this.replaying) return;
+      const target = e2.target;
+      if (!target || !this.host.surface.contains(target)) return;
+      if (!this.touch.active) {
+        if (this.palm() || this.host.accepts?.(e2) === false) return;
+      }
+      const v2 = this.touch.down(e2.pointerId, at2(e2), performance.now());
+      this.ours.add(e2.pointerId);
+      if (v2.cancelSingle) this.rollback();
+      if (v2.pinchStart) {
+        this.source = "pinch";
+        this.clicksAfter = Infinity;
+      }
+      if (!v2.pass) {
+        stop(e2);
+        return;
+      }
+      if (this.host.defer?.(e2)) {
+        this.deferred = { target, down: e2, last: e2 };
+        stop(e2);
+        clearTimeout(this.timer);
+        this.timer = window.setTimeout(
+          () => this.tick(),
+          this.touch.opts.windowMs + 10
+        );
+      }
+    }
+    rollback() {
+      if (this.deferred) {
+        this.deferred = null;
+        clearTimeout(this.timer);
+      } else {
+        this.host.cancelSingle?.();
+      }
+    }
+    move(e2) {
+      if (e2.pointerType === "pen") {
+        this.penNear = performance.now();
+        return;
+      }
+      if (this.replaying || !this.ours.has(e2.pointerId)) return;
+      const v2 = this.touch.move(e2.pointerId, at2(e2), performance.now());
+      this.queuePinch(v2);
+      if (!v2.pass) {
+        stop(e2);
+        return;
+      }
+      const d2 = this.deferred;
+      if (d2 && d2.down.pointerId === e2.pointerId) {
+        if (v2.commit) {
+          this.replayDown();
+        } else {
+          d2.last = e2;
+          stop(e2);
+        }
+      }
+    }
+    tick() {
+      const d2 = this.deferred;
+      if (!d2) return;
+      const v2 = this.touch.tick(performance.now());
+      if (!v2.commit) {
+        return;
+      }
+      this.replayDown();
+      this.replay(replica("pointermove", d2.down, d2.last), d2.target);
+    }
+    replayDown() {
+      const d2 = this.deferred;
+      if (!d2) return;
+      this.deferred = null;
+      clearTimeout(this.timer);
+      this.replay(replica("pointerdown", d2.down), d2.target);
+    }
+    replay(e2, target) {
+      const aim = target.isConnected ? target : document.elementFromPoint(e2.clientX, e2.clientY);
+      if (!aim) return;
+      this.replaying = true;
+      try {
+        aim.dispatchEvent(e2);
+      } finally {
+        this.replaying = false;
+      }
+    }
+    up(e2, cancelled) {
+      if (e2.pointerType === "pen") {
+        this.penNear = performance.now();
+        this.pensDown.delete(e2.pointerId);
+        return;
+      }
+      if (this.replaying || !this.ours.has(e2.pointerId)) return;
+      const v2 = this.touch.up(
+        e2.pointerId,
+        at2(e2),
+        performance.now(),
+        cancelled
+      );
+      this.ours.delete(e2.pointerId);
+      if (!this.touch.active) this.ours.clear();
+      if (v2.pinchEnd) {
+        this.flush();
+        this.host.zoomEnd?.("pinch");
+      }
+      if (this.touch.multiTouch) {
+        this.clicksAfter = this.touch.active ? Infinity : performance.now() + CLICK_AFTER_MS;
+      }
+      if (!v2.pass) {
+        stop(e2);
+        return;
+      }
+      const d2 = this.deferred;
+      if (d2 && d2.down.pointerId === e2.pointerId) {
+        if (cancelled) {
+          this.deferred = null;
+          clearTimeout(this.timer);
+          stop(e2);
+          return;
+        }
+        this.replayDown();
+        if (v2.moved)
+          this.replay(replica("pointermove", d2.down, e2), d2.target);
+      }
+      if (v2.doubleTap) {
+        this.host.doubleTap?.(v2.doubleTap, e2.target);
+      }
+    }
+    claimClick(e2) {
+      if (this.touch.claimed || performance.now() < this.clicksAfter) {
+        e2.stopImmediatePropagation();
+        e2.preventDefault();
+      }
+    }
+    // ── Wheel and Safari gestures ──
+    wheel(e2) {
+      if (this.host.acceptsWheel?.(e2) === false) return;
+      if (e2.ctrlKey || e2.metaKey) {
+        e2.preventDefault();
+        this.zoomLog += wheelZoomLog(e2.deltaY, e2.deltaMode);
+        this.source = "wheel";
+        this.from = at2(e2);
+        this.to = at2(e2);
+        clearTimeout(this.wheelTimer);
+        this.wheelTimer = window.setTimeout(() => {
+          this.flush();
+          this.host.zoomEnd?.("wheel");
+        }, WHEEL_END_MS);
+        this.schedule();
+        return;
+      }
+      if (!this.host.pan || !this.host.canPan?.(e2)) return;
+      e2.preventDefault();
+      const page = this.host.surface.clientHeight || void 0;
+      this.panX += wheelPixels(e2.deltaX, e2.deltaMode, page);
+      this.panY += wheelPixels(e2.deltaY, e2.deltaMode, page);
+      this.schedule();
+    }
+    gesture(raw, phase) {
+      const e2 = raw;
+      e2.preventDefault();
+      if (this.touch.active) return;
+      if (phase === "start") {
+        this.safariScale = 1;
+        return;
+      }
+      if (phase === "end") {
+        this.flush();
+        this.host.zoomEnd?.("gesture");
+        return;
+      }
+      if (!(e2.scale > 0)) return;
+      this.zoomLog += Math.log(e2.scale / this.safariScale);
+      this.safariScale = e2.scale;
+      this.source = "gesture";
+      this.from = at2(e2);
+      this.to = at2(e2);
+      this.schedule();
+    }
+    // ── Frames ──
+    queuePinch(v2) {
+      if (!v2.pinch) return;
+      this.zoomLog += Math.log(v2.pinch.scale);
+      this.from ??= v2.pinch.from;
+      this.to = v2.pinch.to;
+      this.source = "pinch";
+      this.schedule();
+    }
+    schedule() {
+      if (this.frame) return;
+      this.frame = requestAnimationFrame(() => this.flush());
+    }
+    // Apply this frame's batch now.
+    flush() {
+      if (this.frame) cancelAnimationFrame(this.frame);
+      this.frame = 0;
+      const log = this.zoomLog;
+      const from = this.from;
+      const to = this.to;
+      const dx = this.panX;
+      const dy = this.panY;
+      this.zoomLog = 0;
+      this.from = null;
+      this.to = null;
+      this.panX = 0;
+      this.panY = 0;
+      if (from && to && (log !== 0 || from.x !== to.x || from.y !== to.y)) {
+        this.host.zoom(Math.exp(log), from, to, this.source);
+      }
+      if (dx || dy) this.host.pan?.(dx, dy);
+    }
+  };
+
+  // src/ts/editor/touchzoom.ts
+  function initTouchZoom() {
+    const canvas2 = document.getElementById("canvas");
+    new GesturePad({
+      surface: canvas2,
+      // Text being edited in place keeps the browser's caret and selection.
+      defer: (e2) => !fingersDraw() && !hooks.editingHost()?.contains(e2.target),
+      cancelSingle: cancelStroke,
+      zoom: (factor, from, to) => zoomAbout(factor, from, to),
+      zoomEnd: zoomEnded,
+      doubleTap: (at3) => {
+        if (ed.tool !== "select" || ed.richEditing) return;
+        if (!pick(at3.x, at3.y)) setZoom(0);
+      }
+    });
+  }
+
   // src/ts/editor/main.ts
   var INITIAL_MODEL = __MODEL_JSON__;
   var INITIAL_SLIDES = __SLIDES_JSON__;
@@ -16558,9 +17138,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     ed.error = INITIAL_ERROR;
     readHash();
     hooks.editText = editTextOf;
-    hooks.editZone = (zone, el2, at2) => {
+    hooks.editZone = (zone, el2, at3) => {
       if (currentSlide()?.zones[zone]?.kind === "chart") void editChart(zone);
-      else editZone(zone, el2, { at: at2 });
+      else editZone(zone, el2, { at: at3 });
     };
     hooks.editingHost = editingHost;
     hooks.crop = (el2) => {
@@ -16579,6 +17159,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     initCanvas();
     initInsert();
     initInk();
+    initTouchZoom();
     initSorter();
     initProps();
     initObjects();

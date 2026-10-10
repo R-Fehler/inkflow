@@ -310,11 +310,19 @@ body.offline #conn {
     justify-content: center;
     min-width: 0;
     min-height: 0;
+    /* Pinch and two-finger pan are the editor's (touchzoom.ts), not the
+       browser's page zoom; toolbars and panels keep the browser's. */
+    touch-action: none;
 }
 
+/* Zoomed: scrollable to every edge (centring would cut the paper's top and
+   left off once it is larger); layoutPaper pads the canvas by half its size
+   on every side, so a zoom can hold any point of the paper in place. */
 #canvas.zoomed {
     overflow: auto;
-    display: block;
+    display: grid;
+    place-content: start;
+    place-items: start;
     padding: 24px;
 }
 
@@ -516,10 +524,6 @@ body.previewing #canvas::after {
     padding: 4px 12px;
     border-radius: 12px;
     font-size: 12px;
-}
-
-#canvas.zoomed #paper {
-    margin: 0 auto;
 }
 
 .hidden-note {

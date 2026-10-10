@@ -348,7 +348,11 @@ function onToolDown(e: PointerEvent, start: { x: number; y: number }): boolean {
     e.preventDefault();
     clearSelection();
     const paperEl = e.currentTarget as HTMLElement;
-    paperEl.setPointerCapture(e.pointerId);
+    try {
+        paperEl.setPointerCapture(e.pointerId);
+    } catch {
+        // A touch replayed as it lifts (editor/touchzoom.ts): no capture.
+    }
     ed.interacting = true;
     const connecting = tool in CONNECTOR_TOOLS;
     // Lines and arrows start and end on connection sites when near one.

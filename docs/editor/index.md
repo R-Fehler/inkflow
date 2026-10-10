@@ -290,9 +290,20 @@ slider sets how large the thumbnails are.
   each click selects the next object under the pointer, topmost first.
 - **Edit text** by double-clicking it. Text inside a group is edited directly.
 - **Enter a group** by double-clicking it; <kbd>Esc</kbd> leaves it.
-- **Zoom** with <kbd>Ctrl</kbd>+scroll or <kbd>+</kbd> / <kbd>−</kbd>;
-  <kbd>0</kbd> fits the slide to the window. <kbd>F</kbd> (or the toolbar's
+- **Zoom** by pinching on a trackpad or with <kbd>Ctrl</kbd>+scroll, toward
+  the pointer (the point under it stays put), or with <kbd>+</kbd> /
+  <kbd>−</kbd>; <kbd>0</kbd>, or a double-click on the slide's empty area or the
+  grey around it, fits the slide to the window. Scrolling (two fingers on a
+  trackpad) moves around a zoomed slide. <kbd>F</kbd> (or the toolbar's
   full-screen button) gives the editor the whole screen.
+- **On a touchscreen**, one finger does what the mouse does: tap to select,
+  drag to move, drag on the empty slide for a marquee, and draw with an insert
+  tool. Two fingers pinch to zoom and pan at once, and a double tap on the empty
+  area fits the slide. A finger's touch only takes effect once it has moved a
+  little and a moment has passed, or once it lifts, so a pinch never selects or
+  moves what the first finger landed on. With the pen tool a pen draws while
+  your hand rests on the screen; with *Hand* on, one finger draws and two
+  fingers still zoom (the stroke the first finger began is dropped).
 
 The editor shows every object by default. To see what the audience sees at a given
 click, pick a build step in the toolbar; editing pauses while you preview.

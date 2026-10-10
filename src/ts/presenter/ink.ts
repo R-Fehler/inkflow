@@ -36,7 +36,7 @@ import { type HeldStroke, InkStore, type SlideInk } from "./inkstore";
 import { onSlideLeaving, onSlideMounted } from "./slidehooks";
 import { state } from "./state";
 import { showNotify } from "./ui";
-import { isCameraGesture } from "./zoom";
+import { isCameraGesture, onTouchCancel } from "./zoom";
 
 const SETTINGS_KEY = "inkflow-ink-presenter";
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -51,6 +51,9 @@ let settings: InkSettings = loadSettings(SETTINGS_KEY, false);
 let active = false;
 let palette: InkPalette | null = null;
 let pad: InkPad | null = null;
+// A second finger made the touch a pinch: the stroke its first finger began
+// is abandoned (the other windows drop it too), never kept.
+onTouchCancel(() => pad?.cancel());
 let send: (msg: InkMessage) => void = () => {};
 let saving = false; // a server that may save ink: served, and this machine's
 
