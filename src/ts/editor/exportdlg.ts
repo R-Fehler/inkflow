@@ -9,7 +9,7 @@ import { request } from "./net";
 import { ed } from "./state";
 
 const FORMATS: {
-    format: "html" | "single" | "pdf";
+    format: "html" | "single" | "pdf" | "handout";
     title: string;
     text: string;
     placeholder: (stem: string) => string;
@@ -32,7 +32,53 @@ const FORMATS: {
         text: "One page per slide, every build step shown. Needs Chromium or Chrome on this computer.",
         placeholder: (stem) => `${stem}.pdf`,
     },
+    {
+        format: "handout",
+        title: "Handout (PDF)",
+        text: "Each slide with its speaker notes, to read or hand out: one per page with the notes below, or three per page with the notes beside.",
+        placeholder: (stem) => `${stem}-handout.pdf`,
+    },
 ];
+
+// The handout's layout and paper.
+function handoutOptions(): {
+    line: HTMLElement;
+    layout: HTMLSelectElement;
+    paper: HTMLSelectElement;
+} {
+    const layout = h(
+        "select",
+        {},
+        h("option", { value: "notes" }, "One slide per page, notes below"),
+        h("option", { value: "compact" }, "Three per page, notes beside"),
+    ) as HTMLSelectElement;
+    const paper = h(
+        "select",
+        {},
+        h("option", { value: "a4" }, "A4"),
+        h("option", { value: "letter" }, "Letter"),
+    ) as HTMLSelectElement;
+    const line = h(
+        "div",
+        { class: "export-print" },
+        layout,
+        " ",
+        paper,
+        " ",
+        h(
+            "a",
+            {
+                href: "/handout",
+                target: "_blank",
+                rel: "noopener",
+                class: "link-btn",
+                title: "The handout in a tab of its own, to read or print from the browser",
+            },
+            "Open the handout view",
+        ),
+    );
+    return { line, layout, paper };
+}
 
 function size(bytes: number): string {
     if (bytes > 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
@@ -62,6 +108,7 @@ function printOptions(): { line: HTMLElement; marks: HTMLInputElement } | null {
 
 function option(f: (typeof FORMATS)[number], stem: string): HTMLElement {
     const print = f.format === "pdf" ? printOptions() : null;
+    const handout = f.format === "handout" ? handoutOptions() : null;
     const output = h("input", {
         type: "text",
         placeholder: f.placeholder(stem),
@@ -73,13 +120,17 @@ function option(f: (typeof FORMATS)[number], stem: string): HTMLElement {
     go.addEventListener("click", async () => {
         go.disabled = true;
         status.textContent =
-            f.format === "pdf" ? "Rendering pages…" : "Building…";
+            f.format === "pdf" || f.format === "handout"
+                ? "Rendering pages…"
+                : "Building…";
         status.className = "export-status busy";
         const result = await request({
             action: "export",
             format: f.format,
             output: output.value.trim() || null,
             printMarks: print?.marks.checked ?? false,
+            layout: handout?.layout.value,
+            paper: handout?.paper.value,
         });
         go.disabled = false;
         if (!result.ok) {
@@ -111,6 +162,7 @@ function option(f: (typeof FORMATS)[number], stem: string): HTMLElement {
             h("strong", {}, f.title),
             h("p", { class: "hint" }, f.text),
             print?.line ?? null,
+            handout?.line ?? null,
         ),
         h("div", { class: "export-row" }, output, go),
         status,

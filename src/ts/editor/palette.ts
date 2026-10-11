@@ -94,6 +94,11 @@ function editorCommands(): Command[] {
         { label: "Theme…", group: "Deck", run: () => void openTheme() },
         { label: "Export…", group: "Deck", run: () => openExport() },
         {
+            label: "Handout view (slides with their notes)",
+            group: "Deck",
+            run: () => window.open("/handout", "_blank", "noopener"),
+        },
+        {
             label: "Slide master",
             group: "View",
             run: () => void openMaster(),

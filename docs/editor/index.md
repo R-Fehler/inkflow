@@ -274,6 +274,20 @@ Hover a mark for the files behind it. A slide's right-click menu then has:
   last commit, it asks whether their removal goes in too. The Git menu's
   **Commit slide N only…** does the same for the slide being edited or the
   picked ones.
+- **Discard changes to this slide…** (or to the picked slides) puts them back
+  as they were in the last commit: their own files, and their `Slide(...)`
+  entries in `deck.py` (a new slide is removed, its new files deleted); the
+  other slides keep their changes. Files they share with other slides are
+  offered but left alone unless ticked. It is one step of the editor's
+  history, so **Undo** brings the changes back.
+- **History of this slide…** lists the commits that changed its own files
+  or its `Slide(...)` entry (found in each version of `deck.py` by its id,
+  Markdown file or source), each with **Compare** to see the slide then
+  beside the slide now.
+
+**Changed only (N)** at the top of the grid view shows only the slides with a
+mark, and <kbd>Alt</kbd>+<kbd>F5</kbd> / <kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>F5</kbd>
+go to the next / previous one, as in VS Code.
 
 Discard, pull, switching or creating a branch, merging a worktree, and View, Restore or Revert change
 the deck's files on disk, so the editor's undo and redo history starts over after
@@ -364,6 +378,59 @@ grid, across sections; double-click or <kbd>Enter</kbd> opens a slide,
 <kbd>Esc</kbd> goes back. The size slider sets how large the thumbnails are.
 **Starred only** shows just the slides you [starred](#starred-slides); among
 those, slides are not dragged to a new place.
+
+## Problems
+
+A slide with a problem gets a ⚠ in the slide list and the grid (red for an
+error, amber for a warning), and the toolbar's **⚠ N** opens the **Problems**
+list; click a slide there to go to it, or click a slide's ⚠ for its own.
+Two kinds of check fill it, the same as the command line's:
+
+- What `inkflow verify` finds, checked after every change for the slides it
+  touched: a file that is missing, a zone or an animation target the slide
+  does not have, chart data that cannot be read, an arrow whose shapes have
+  moved away. (Inkscape preview layers being out of date is left out: it only
+  matters in Inkscape.)
+- What `inkflow render --check` measures in a browser: text that does not fit
+  its box even shrunk, objects outside the slide, text too small to read,
+  pictures too coarse for print. It needs Chromium, so it runs once you click
+  **Check the layout**, and from then on after every change, for the slides
+  that changed. **Also check text contrast** adds the contrast check (off by
+  default). **Show hints** lists the milder findings too (smallish text), which
+  get no mark.
+
+## Review comments
+
+Comments let the people working on a deck discuss it on the slides
+themselves.
+
+- <kbd>Shift</kbd>+<kbd>C</kbd> (or **Add comment…** in a slide's menu, or the
+  command palette) starts one: on the selected object, or, with nothing
+  selected, where you click next on the slide (<kbd>Esc</kbd> cancels).
+- Open threads show as numbered pins on the canvas and as 💬 in the slide
+  list and the grid; click either to read them. Each thread can be answered,
+  resolved (it then leaves the canvas) and reopened, and deleted by whoever
+  started it or the deck's owner.
+- Everyone editing through the same server sees them at once (see
+  [Editing together](collaborate.md)). `inkflow outline` shows the open ones
+  on each slide (`COMMENTS n` and a `comment` line each), so you can ask
+  [Claude Code](claude-code.md) to "address the comments", and `inkflow
+  comments` lists them (`--all` with the resolved ones, `--json`).
+
+Like stars, comments are kept by slide id in `.inkflow/comments.json`: not
+part of the deck, not committed, exported or presented, and they follow a
+slide whose id changes.
+
+## Command palette
+
+<kbd>Space</kbd> (where it does nothing else), <kbd>Ctrl</kbd>+<kbd>K</kbd> or
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> (<kbd>⌘</kbd> on a Mac) opens one
+search box over everything the editor does: the toolbar's buttons, the
+slide, Git and deck menus (recent decks too, also in a new tab), the panels
+and views, problems, comments and slide changes, and every slide by its
+number, title or id. Type a few letters of what you want, in order but not
+necessarily together (`ghist` finds Git's History…; `12` goes to slide 12),
+<kbd>↑</kbd> <kbd>↓</kbd> to pick, <kbd>Enter</kbd> to run.
 
 ## Starred slides
 
@@ -1125,11 +1192,17 @@ the result next to `deck.py` (the path can be changed):
 | HTML file | `inkflow build` | one `.html` file with everything inside (pictures, videos, fonts); opens offline, easy to send |
 | Web page with an assets folder | `inkflow build --assets-folder` | `build/`, `index.html` with the deck's media beside it: for a large deck on a web host |
 | PDF | `inkflow export` | one page per slide (needs Chromium or Chrome) |
+| Handout (PDF) | `inkflow export --handout` | every slide with its speaker notes: one per page with the notes below, or three per page with the notes beside; A4 or Letter |
 
 Each result can also be downloaded straight from the dialog (the folder as a
 `.zip`). For a print deck (a poster) the PDF option names the page it prints on
 (*A0 portrait (841 x 1189 mm)*) and offers **3 mm bleed and crop marks** for a
 print shop that asks for them.
+
+**Open the handout view** (in the dialog, or *Handout view* in the command
+palette) shows the same handout in a tab of its own, at `/handout`, to read,
+or to print from the browser (**Print or save as PDF…**). It shows the
+speaker notes, so a view-only link cannot open it.
 
 ## Keyboard
 
@@ -1151,6 +1224,9 @@ print shop that asks for them.
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>H</kbd> | Find / replace |
 | <kbd>G</kbd> | Grid view of all slides |
 | <kbd>S</kbd> | Star / unstar the slide (or the slides picked in the list or the grid) |
+| <kbd>Space</kbd>, <kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> | Command palette |
+| <kbd>Shift</kbd>+<kbd>C</kbd> | Add a review comment (on the selection, else where you click) |
+| <kbd>Alt</kbd>+<kbd>F5</kbd> / <kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>F5</kbd> | Next / previous slide with changes since the last commit |
 | <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> | Hide / show the slide list, the speaker notes, the properties |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> <kbd>I</kbd> <kbd>K</kbd> (in text) | Bold, italic, link |
 | <kbd>Tab</kbd> (in a table) | Next cell |

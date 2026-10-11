@@ -120,6 +120,16 @@ commands:
         output: ["$files"]
         chromium: ["$files"]
 
+  - name: comments
+    description: List the review comments on the slides.
+    flags:
+      -d, --deck=: Path to deck.py
+      --all: Resolved ones too
+      --json: As JSON
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+
   - name: compare
     description: Show which slides differ between two versions of the deck.
     flags:
@@ -912,11 +922,16 @@ commands:
       --size=: Page size for every page (a0, a1-landscape, 841x1189mm, 1920x1080)
       --bleed=: Print the background this far past each edge (3mm)
       --crop-marks: Mark the corners outside the bleed
+      --handout: A handout instead (every slide with its speaker notes)
+      --layout=: Handout layout
+      --paper=: Handout paper size
     completion:
       flag:
         deck: ["$files([\".py\"])"]
         size: ["16:9", "4:3", "9:16", "a0", "a1", "a2", "a3", "a4", "a0-landscape", "a1-landscape", "letter"]
         bleed: ["3mm", "5mm", "0.125in"]
+        layout: ["notes", "compact"]
+        paper: ["a4", "letter"]
 
   - name: sync
     description: Refresh layout layers and preview styles in slide SVGs.

@@ -21734,8 +21734,48 @@ Ctrl+click: open in a new tab`;
       title: "PDF",
       text: "One page per slide, every build step shown. Needs Chromium or Chrome on this computer.",
       placeholder: (stem) => `${stem}.pdf`
+    },
+    {
+      format: "handout",
+      title: "Handout (PDF)",
+      text: "Each slide with its speaker notes, to read or hand out: one per page with the notes below, or three per page with the notes beside.",
+      placeholder: (stem) => `${stem}-handout.pdf`
     }
   ];
+  function handoutOptions() {
+    const layout2 = h(
+      "select",
+      {},
+      h("option", { value: "notes" }, "One slide per page, notes below"),
+      h("option", { value: "compact" }, "Three per page, notes beside")
+    );
+    const paper2 = h(
+      "select",
+      {},
+      h("option", { value: "a4" }, "A4"),
+      h("option", { value: "letter" }, "Letter")
+    );
+    const line = h(
+      "div",
+      { class: "export-print" },
+      layout2,
+      " ",
+      paper2,
+      " ",
+      h(
+        "a",
+        {
+          href: "/handout",
+          target: "_blank",
+          rel: "noopener",
+          class: "link-btn",
+          title: "The handout in a tab of its own, to read or print from the browser"
+        },
+        "Open the handout view"
+      )
+    );
+    return { line, layout: layout2, paper: paper2 };
+  }
   function size3(bytes) {
     if (bytes > 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
     return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
@@ -21761,6 +21801,7 @@ Ctrl+click: open in a new tab`;
   }
   function option(f2, stem) {
     const print = f2.format === "pdf" ? printOptions() : null;
+    const handout = f2.format === "handout" ? handoutOptions() : null;
     const output = h("input", {
       type: "text",
       placeholder: f2.placeholder(stem),
@@ -21771,13 +21812,15 @@ Ctrl+click: open in a new tab`;
     const go = h("button", { type: "button", class: "pbtn primary" }, "Export");
     go.addEventListener("click", async () => {
       go.disabled = true;
-      status3.textContent = f2.format === "pdf" ? "Rendering pages\u2026" : "Building\u2026";
+      status3.textContent = f2.format === "pdf" || f2.format === "handout" ? "Rendering pages\u2026" : "Building\u2026";
       status3.className = "export-status busy";
       const result = await request({
         action: "export",
         format: f2.format,
         output: output.value.trim() || null,
-        printMarks: print?.marks.checked ?? false
+        printMarks: print?.marks.checked ?? false,
+        layout: handout?.layout.value,
+        paper: handout?.paper.value
       });
       go.disabled = false;
       if (!result.ok) {
@@ -21804,7 +21847,8 @@ Ctrl+click: open in a new tab`;
         { class: "export-text" },
         h("strong", {}, f2.title),
         h("p", { class: "hint" }, f2.text),
-        print?.line ?? null
+        print?.line ?? null,
+        handout?.line ?? null
       ),
       h("div", { class: "export-row" }, output, go),
       status3
@@ -23551,7 +23595,8 @@ Ctrl+click: open in a new tab`;
     for (const b2 of document.querySelectorAll(
       "#toolbar button[title]"
     )) {
-      if (b2.disabled || b2.hidden || !b2.offsetParent) continue;
+      if (b2.disabled || b2.hidden || !b2.offsetParent || b2.id === "btn-deck")
+        continue;
       const { label: label4, keys } = fromTitle(b2.title);
       if (!label4 || seen.has(label4)) continue;
       seen.add(label4);
@@ -23583,6 +23628,11 @@ Ctrl+click: open in a new tab`;
       },
       { label: "Theme\u2026", group: "Deck", run: () => void openTheme() },
       { label: "Export\u2026", group: "Deck", run: () => openExport() },
+      {
+        label: "Handout view (slides with their notes)",
+        group: "Deck",
+        run: () => window.open("/handout", "_blank", "noopener")
+      },
       {
         label: "Slide master",
         group: "View",

@@ -337,9 +337,12 @@ def test_a_viewer_watches_and_does_not_edit(shared: tuple[EditorSession, int]) -
     viewer = _cookie(port, server._share.access.viewer_token)  # pyright: ignore[reportPrivateUsage]
     assert _get(port, "/", viewer)[0] == 200
     assert _get(port, "/slides/drawn.svg", viewer)[0] == 200
-    for path in ("/edit", "/edit/", "/_export/x/y.pdf", "/_cmp/x/y.png"):
+    # (The handout shows the speaker notes.)
+    for path in ("/edit", "/edit/", "/_export/x/y.pdf", "/_cmp/x/y.png", "/handout"):
         status, _, body = _get(port, path, viewer)
         assert status == 403 and b"View-only" in body
+    status, _, body = _get(port, "/handout?layout=compact&paper=letter")
+    assert status == 200 and b"layout-compact" in body and b"8.5in 11in" in body
     assert _get(port, "/_inkflow/instance", viewer)[0] == 404
     with _ws(port, viewer) as ws, _ws(port) as owner:
         assert _until(ws, "welcome")["role"] == "viewer"

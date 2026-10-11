@@ -234,6 +234,13 @@ src/
                                index.html, `_headers`, `_guest/boot.js|sw.js` bundled
                                from src/ts/guest), cloudflare/worker.js (bundled from
                                relay/cloudflare/src/worker.ts)
+    handout.py        the slides with their speaker notes: `handout_body`
+                               (`.h-item`s, each svg in a `.trim` for fit.js),
+                               `handout_page` (layouts notes / compact, paper a4 /
+                               letter, `bar` = the view's controls); the server's
+                               `/handout` (editors only: it shows the notes) and
+                               `export.build_handout_pdf` (`inkflow export
+                               --handout`, `Exporters.handout`)
     edit.py           launching external programs on source files: INKFLOW_EDIT_CMD*
                                resolution (extension > kind > default) for the presenter's
                                edit menu, and the editor's "Open" catalog (`open_choices`)
@@ -271,6 +278,9 @@ src/
                                sheet's body size a hint, body text below 0.8) and
                                raster pictures checked at their printed dpi
                                (`low-res`: <150 hint, <100 problem);
+                               `check_built` = the same measurements of slides
+                               already built (no PNG, contrast only when asked),
+                               which the editor's problem marks use;
                                `--check` = no output path; `--by-id` names the
                                images `<id>.png` (`image_name`); the contact sheet
                                (`sheet_layout`/`sheet_pages`/`sheet_html`: ≤1600 px wide,
@@ -512,11 +522,37 @@ src/
                                with every other slide's entry as committed (`Foreign`,
                                comments kept), new ones left out, removed ones put back
                                unless `with_removed`; extra paths = ticked deleted
-                               leftovers (any changed file is accepted); the
+                               leftovers (any changed file is accepted);
+                               `discard_plan`/`discard_writes` = the opposite (own
+                               files from `gitops.head_bytes`, deck.py =
+                               `partial_deck(others, with_removed=True)`, shared
+                               files only when ticked); `slide_log` = commits that
+                               changed its own files or its entry (each deck.py
+                               blob's entries matched to the working entry); the
                                session's git ops `status` + `slides`, `slide-diff`,
-                               `commit-slides` (`dryRun` = the plan; commit local
-                               only), read off `EditorSession.live` = the server's
-                               last editor build),
+                               `slide-log`, `commit-slides` and `discard-slides`
+                               (`dryRun` = the plan; writes local only; a discard
+                               is one History step), read off
+                               `EditorSession.live` = the server's last editor
+                               build),
+                               problems.py (each slide's problems for the editor's
+                               marks: `Problems.verify` = verify_slide for the
+                               entries whose key (salted with deck.py's hash) is new,
+                               stale-preview warnings dropped; `measure` = the
+                               layout check (`Exporters.layout` =
+                               `render.check_built`, handed in: render builds on the
+                               server) for slides whose SVG digest (+ contrast) is
+                               new, once `layout_on`; `json` = per deck index +
+                               layout state; the server runs it after each build
+                               (`_check_problems`) and on `problems-check`, sends
+                               `{"type":"problems"}`),
+                               comments.py (review comments: threads by slide id in
+                               `.inkflow/comments.json` like stars: add (x/y or
+                               `target`) / reply / resolve / delete (its starter
+                               or the owner), `follow` id changes with the stars,
+                               `visible`; the session's `comment` action (no History
+                               step), the model's `comments`, the server's
+                               `{"type":"comments"}` to every editor),
                                worktrees.py (the session's `worktree` action and
                                `inkflow worktree`: `list_worktrees` = every worktree with
                                the deck.py at the same relative path, ahead/behind the
@@ -563,7 +599,9 @@ src/
                                commands are grouped by area: project.py (init, setup-git,
                                setup-pages, completion), present.py (serve, edit, build, export), agent.py
                                (outline, context, render, goto, select, setup-claude),
-                               compare.py (`inkflow compare [LEFT] RIGHT`), master.py
+                               compare.py (`inkflow compare [LEFT] RIGHT`),
+                               comments.py (`inkflow comments [--all] [--json]`),
+                               master.py
                                (`inkflow layout` copy/revert/save/rename/delete,
                                `layout placeholder` add/rename/prompt/remove and
                                `layout placeholders [--json]`, and
@@ -1007,7 +1045,19 @@ src/
                       every git op (`setSlideChanges`, event `slide-git`); the
                       slide menu's Compare with the last commit, Show git diff
                       and Commit this slide / N changed slides…; the
-                      commit-slides dialog) over slidegittext.ts (pure words;
+                      commit-slides, discard and slide history dialogs,
+                      `jumpToChange` (Alt+F5), `isMarked` for the grid's
+                      "Changed only") over slidegittext.ts (pure words;
+                      tested), problems.ts (the ⚠ marks, the toolbar's
+                      `#btn-problems`, the Problems list with the layout
+                      check and its contrast setting: `problems-check`) over
+                      problemstext.ts (pure; tested), comments.ts (Shift+C,
+                      pins via `hooks.drawComments`, the 💬 marks, a slide's
+                      threads dialog) over commentstext.ts (pure; tested),
+                      palette.ts (Space / Ctrl+K / Ctrl+Shift+P: the
+                      toolbar's buttons by title, editor commands,
+                      `gitCommands`, `deckCommands`, every slide) over
+                      palettetext.ts (pure `score`/`rank`/`fromTitle`;
                       tested)
     fit/              main.ts: the PDF export page's script (bundles/fit.js, inlined
                       into pdf.html by export.py): `fitSlide` on every slide, again
@@ -1310,6 +1360,8 @@ A side is a `comparesrc.Source`: `{"kind":"live"}`, `{"kind":"commit","rev"}` (a
   the stamp before writing anything back (`pathtext.assetRef`, `cleanForPaste`)
 - `/_cmp/<token>/<ref>`: a compared deck's picture (comparehub.py), 404 when the
   token is unknown or the ref leaves that deck's roots
+- `/handout?layout=notes|compact&paper=a4|letter`: the handout view
+  (handout.py), editors only like `/edit`
 - WebSocket on the same port at `/_inkflow/ws` (`access.WS_PATH`): the HTTP
   handler reads the request head, checks it, and hands an upgrade to
   `wsbridge.Bridge` (websockets 16.0's `ServerConnection` adopted onto the

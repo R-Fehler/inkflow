@@ -87,6 +87,7 @@ from inkflow.fonts import (
     shipped_font_url,
     ui_fonts_css,
 )
+from inkflow.handout import handout_page
 from inkflow.incremental import SlideCache, as_patch, keys_of, set_keys
 from inkflow.loaders import load_deck_scripts, load_deck_styles
 from inkflow.logging import Levels, collect_logs, logger, report
@@ -1330,6 +1331,24 @@ def build_editor_html(state: State, editor: EditorState, ws_port: int) -> bytes:
     return html.encode("utf-8")
 
 
+def build_handout_html(state: State, request_path: str) -> bytes:
+    """The handout view (handout.py): the served slides with their notes,
+    ``?layout=notes|compact&paper=a4|letter``."""
+    from urllib.parse import parse_qs, urlsplit
+
+    query = parse_qs(urlsplit(request_path).query)
+    page = handout_page(
+        state["slides"],
+        _served_ui_fonts() + "\n" + state["styles_css"],
+        title=state["title"],
+        data_theme="" if state["mode"] == ColorMode.DARK else "light",
+        layout=(query.get("layout") or ["notes"])[0],
+        paper=(query.get("paper") or ["a4"])[0],
+        bar=True,
+    )
+    return page.encode("utf-8")
+
+
 def _is_editor_path(request_path: str) -> bool:
     path = request_path.split("?", 1)[0].split("#", 1)[0]
     return path == "/edit" or path.startswith("/edit/")
@@ -1591,8 +1610,11 @@ def make_http_route(
                 extra=f"Set-Cookie: {cookie}\r\n".encode(),
             )
             return
-        editor_only = _is_editor_path(request_path) or path.startswith(
-            ("/_export/", "/_cmp/")
+        editor_only = (
+            _is_editor_path(request_path)
+            or path.startswith(("/_export/", "/_cmp/"))
+            # The handout shows the speaker notes.
+            or path == "/handout"
         )
         if editor_only and role == "viewer":
             await _refuse(writer, "403 Forbidden", "View-only link", _VIEW_ONLY)
@@ -1661,7 +1683,9 @@ def make_http_route(
                 writer, "404 Not Found", "No deck open", "Nothing is shared yet."
             )
             return
-        if _is_editor_path(request_path) or starting:
+        if path == "/handout" and not starting:
+            body = build_handout_html(_state, request_path)
+        elif _is_editor_path(request_path) or starting:
             body = build_editor_html(_state, _editor, ws_port)
         else:
             # Opening a source file in a program is the owner's alone.

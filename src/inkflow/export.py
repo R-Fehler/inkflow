@@ -687,6 +687,79 @@ def build_pdf(
     )
 
 
+_TAG = re.compile(r"<[^>]+>")
+
+
+def build_handout_pdf(
+    deck_path: Path,
+    output: Path,
+    chromium: str | None = None,
+    no_sandbox: bool = False,
+    layout: str = "notes",
+    paper: str = "a4",
+) -> None:
+    """Print the deck's handout (handout.py: every shown slide with its
+    speaker notes, ``layout`` ``notes`` or ``compact``, on ``paper`` ``a4``
+    or ``letter``) to a PDF."""
+    from inkflow.handout import handout_page
+
+    exe = chromium or find_chromium()
+    if exe is None:
+        raise RuntimeError(
+            "Chromium not found. Install chromium or google-chrome,"
+            + " or pass --chromium PATH."
+        )
+    deck = load_deck(deck_path)
+    project_dir = deck_path.parent
+    slides = process_deck(deck, project_dir, deck_path)
+    if not slides:
+        raise RuntimeError("Cannot export a handout: the deck has no visible slides.")
+    styles_css = load_deck_styles(deck, project_dir)
+    if deck.embed_fonts:
+        font_css = embed_fonts_css_subsetted(
+            slides, project_dir, deck.theme.fonts_dir, styles_css=styles_css
+        )
+        if font_css:
+            styles_css = (font_css + "\n" + styles_css).strip()
+    # The handout's own words (titles, notes) are in the interface's font,
+    # subset to them: the page is printed from a folder, not the server.
+    words = " ".join(
+        f"{s.get('title') or ''} {s.get('id')} {_TAG.sub(' ', s.get('notes') or '')}"
+        for s in slides
+    )
+    styles_css = (
+        f"{ui_fonts_css(words + ' 0123456789 Handout · No notes')}\n{styles_css}"
+    )
+    html = handout_page(
+        slides,
+        styles_css,
+        title=resolve_deck_title(deck, project_dir),
+        data_theme="" if deck.effective_mode == ColorMode.DARK else "light",
+        layout=layout,
+        paper=paper,
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        copy_assets(slides, asset_roots(deck, project_dir), Path(tmp))
+        (Path(tmp) / "handout.html").write_text(html, encoding="utf-8")
+        target = output.resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.unlink(missing_ok=True)
+        with served(Path(tmp)) as url:
+            cmd = [
+                exe,
+                "--headless",
+                "--disable-gpu",
+                "--print-to-pdf-no-header",
+                # (What newer Chromium reads: no date, title, URL, page.)
+                "--no-pdf-header-footer",
+                f"--print-to-pdf={target}",
+                f"{url}/handout.html",
+            ]
+            if no_sandbox:
+                cmd.insert(1, "--no-sandbox")
+            _run_chromium(cmd, target, b"%PDF")
+
+
 def _slide_html(svg: str, page: PdfPage, name: str) -> str:
     bleed_class = ""
     if page.bleed > 0:

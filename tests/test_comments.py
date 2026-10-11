@@ -145,7 +145,7 @@ def test_outline_and_the_cli_list_the_open_ones(project: Path) -> None:
     every = runner.invoke(
         main, ["comments", "--all", "--json", "--deck", str(project / "deck.py")]
     )
-    data = json.loads(every.output)
+    data = cast("list[dict[str, object]]", json.loads(every.output))
     assert [(t["slide"], t["number"], t["resolved"]) for t in data] == [
         ("intro", 1, True),
         ("end", 2, False),

@@ -730,6 +730,18 @@ class PdfBuilder(Protocol):
     ) -> None: ...
 
 
+class HandoutBuilder(Protocol):
+    def __call__(
+        self,
+        deck_path: Path,
+        output: Path,
+        chromium: str | None = None,
+        no_sandbox: bool = False,
+        layout: str = "notes",
+        paper: str = "a4",
+    ) -> None: ...
+
+
 class LayoutChecker(Protocol):
     def __call__(
         self,
@@ -764,6 +776,7 @@ class Exporters:
     html: HtmlBuilder
     pdf: PdfBuilder
     layout: LayoutChecker | None = None
+    handout: HandoutBuilder | None = None
 
 
 class EditorSession:
@@ -5353,6 +5366,7 @@ class EditorSession:
             "html": "build",
             "single": f"{stem}.html",
             "pdf": f"{stem}.pdf",
+            "handout": f"{stem}-handout.pdf",
         }
         if fmt not in defaults:
             raise EditError(f"unknown export format {fmt!r}")
@@ -5386,6 +5400,19 @@ class EditorSession:
                     build_static_html(self.deck_path, Path(tmp))
                     out.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(Path(tmp) / "index.html", out)
+                result = out
+            elif fmt == "handout":
+                if self.exporters.handout is None:
+                    raise EditError("handouts are not available here")
+                if out.suffix.lower() != ".pdf":
+                    out = out.with_suffix(".pdf")
+                self.exporters.handout(
+                    self.deck_path,
+                    out,
+                    no_sandbox=hasattr(os, "geteuid") and os.geteuid() == 0,
+                    layout=str(msg.get("layout") or "notes"),
+                    paper=str(msg.get("paper") or "a4"),
+                )
                 result = out
             else:
                 if out.suffix.lower() != ".pdf":

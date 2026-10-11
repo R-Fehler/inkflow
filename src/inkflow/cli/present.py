@@ -13,7 +13,7 @@ from inkflow import instances
 from inkflow.access import over_ssh
 from inkflow.cli._common import deck_option, main, resolve_deck_path
 from inkflow.editor.session import Exporters
-from inkflow.export import build_pdf, build_static_html
+from inkflow.export import build_handout_pdf, build_pdf, build_static_html
 from inkflow.logging import Levels, report
 from inkflow.render import check_built
 from inkflow.server import DEFAULT_PORT, Sharing, open_browser, pick_port
@@ -21,7 +21,12 @@ from inkflow.server import serve as _serve
 from inkflow.sizes import PageSize
 
 # The editor's Export dialog runs the same builds as the commands below.
-EXPORTERS = Exporters(html=build_static_html, pdf=build_pdf, layout=check_built)
+EXPORTERS = Exporters(
+    html=build_static_html,
+    pdf=build_pdf,
+    layout=check_built,
+    handout=build_handout_pdf,
+)
 
 _host_option = click.option(
     "--host",
@@ -407,6 +412,27 @@ def build_cmd(
     is_flag=True,
     help="Mark each page's corners outside the bleed, where it is to be cut.",
 )
+@click.option(
+    "--handout",
+    is_flag=True,
+    help="A handout instead: every slide with its speaker notes "
+    + "(default output: <deck-stem>-handout.pdf).",
+)
+@click.option(
+    "--layout",
+    type=click.Choice(["notes", "compact"]),
+    default="notes",
+    show_default=True,
+    help="Handout: one slide per page with its notes below, or three per "
+    + "page with the notes beside.",
+)
+@click.option(
+    "--paper",
+    type=click.Choice(["a4", "letter"]),
+    default="a4",
+    show_default=True,
+    help="Handout: the paper size.",
+)
 def export_cmd(
     deck_path: Path,
     output: str | None,
@@ -415,6 +441,9 @@ def export_cmd(
     size: str | None,
     bleed: str | None,
     crop_marks: bool,
+    handout: bool,
+    layout: str,
+    paper: str,
 ) -> None:
     """Export a PDF via headless Chromium — one page per slide, no animations.
 
@@ -427,8 +456,31 @@ def export_cmd(
     Requires a Chromium-based browser on the system; point `--chromium` at it if
     it is not auto-detected. Pass `--no-sandbox` when running as root or in
     Docker. Defaults to `<deck-stem>.pdf` next to `deck.py`.
+
+    With `--handout`, a handout instead: each shown slide with its speaker
+    notes, one per page (`--layout notes`) or three per page (`compact`),
+    on A4 or Letter (`--paper`). The editor shows the same at /handout.
     """
     resolved = resolve_deck_path(deck_path)
+    if handout:
+        target = (
+            Path(output).resolve()
+            if output
+            else resolved.with_name(f"{resolved.stem}-handout.pdf")
+        )
+        try:
+            build_handout_pdf(
+                resolved,
+                target,
+                chromium,
+                no_sandbox or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                layout=layout,
+                paper=paper,
+            )
+        except (RuntimeError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        report("Exported", str(target))
+        return
     out = Path(output).resolve() if output else resolved.with_suffix(".pdf")
     try:
         sheet = PageSize(size) if size is not None else None

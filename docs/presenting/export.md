@@ -200,3 +200,13 @@ run = [
   "uv run mkdocs build",
 ]
 ```
+
+## Handouts
+
+`inkflow export --handout` prints a handout instead: every shown slide with
+its speaker notes (rendered from their Markdown), one per page with the
+notes below (`--layout notes`, the default) or three per page with the notes
+beside (`--layout compact`), on A4 or Letter (`--paper`). It is written to
+`<deck>-handout.pdf` unless `-o` says otherwise. The editor's Export dialog
+makes the same file, and its handout view (`/handout` on the editor's
+server) shows it in the browser.
