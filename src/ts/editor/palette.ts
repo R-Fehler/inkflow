@@ -13,6 +13,7 @@ import { openExport } from "./exportdlg";
 import { openFind } from "./find";
 import { gitCommands } from "./git";
 import { toggleGrid } from "./grid";
+import { keyLabel, matches, openShortcuts } from "./keys";
 import { openMaster } from "./master";
 import { type Command, fromTitle, rank } from "./palettetext";
 import { togglePanel } from "./panels";
@@ -32,7 +33,7 @@ import {
     toggleHidden,
 } from "./sorter";
 import { toggleStar } from "./stars";
-import { ed } from "./state";
+import { ed, on } from "./state";
 import { openTheme } from "./theme";
 import { redo, toggleFullscreen, undo } from "./toolbar";
 
@@ -88,7 +89,7 @@ function editorCommands(): Command[] {
         {
             label: "Find and replace",
             group: "Edit",
-            keys: "Ctrl+F",
+            keys: keyLabel("edit.find"),
             run: () => openFind(),
         },
         { label: "Theme…", group: "Deck", run: () => void openTheme() },
@@ -106,32 +107,38 @@ function editorCommands(): Command[] {
         {
             label: "Grid view",
             group: "View",
-            keys: "G",
+            keys: keyLabel("view.grid"),
             run: () => toggleGrid(),
         },
         {
             label: "Show / hide the slide list",
             group: "View",
-            keys: "1",
+            keys: keyLabel("view.left"),
             run: () => togglePanel("left"),
         },
         {
             label: "Show / hide the notes",
             group: "View",
-            keys: "2",
+            keys: keyLabel("view.bottom"),
             run: () => togglePanel("bottom"),
         },
         {
             label: "Show / hide the properties",
             group: "View",
-            keys: "3",
+            keys: keyLabel("view.right"),
             run: () => togglePanel("right"),
         },
         {
             label: "Full screen",
             group: "View",
-            keys: "F",
+            keys: keyLabel("view.fullscreen"),
             run: () => toggleFullscreen(),
+        },
+        {
+            label: "Keyboard shortcuts…",
+            group: "Help",
+            keys: keyLabel("help.shortcuts"),
+            run: () => openShortcuts(),
         },
         { label: "Problems…", group: "Check", run: () => openProblems() },
         {
@@ -142,7 +149,7 @@ function editorCommands(): Command[] {
         {
             label: "Add comment",
             group: "Comments",
-            keys: "Shift+C",
+            keys: keyLabel("review.comment"),
             run: () => addComment(),
         },
         {
@@ -153,13 +160,13 @@ function editorCommands(): Command[] {
         {
             label: "Next slide with changes",
             group: "Git",
-            keys: "Alt+F5",
+            keys: keyLabel("review.next-change"),
             run: () => jumpToChange(1),
         },
         {
             label: "Previous slide with changes",
             group: "Git",
-            keys: "Shift+Alt+F5",
+            keys: keyLabel("review.prev-change"),
             run: () => jumpToChange(-1),
         },
         {
@@ -186,7 +193,7 @@ function editorCommands(): Command[] {
         {
             label: "Star / unstar this slide",
             group: "Slide",
-            keys: "S",
+            keys: keyLabel("slide.star"),
             run: () => void toggleStar([i]),
         },
     ];
@@ -195,7 +202,7 @@ function editorCommands(): Command[] {
             {
                 label: "New slide like this one",
                 group: "Slide",
-                keys: "Ctrl+M",
+                keys: keyLabel("slide.new"),
                 run: () => void newSlideLike(i),
             },
             {
@@ -340,12 +347,10 @@ export async function openPalette(query = ""): Promise<void> {
 }
 
 function wantsPalette(e: KeyboardEvent): boolean {
-    const mod = e.ctrlKey || e.metaKey;
-    if (mod && !e.altKey && e.code === "KeyK" && !e.shiftKey) return true;
-    if (mod && e.shiftKey && e.code === "KeyP") return true;
-    if (e.key !== " " || mod || e.altKey || e.shiftKey) return false;
-    // Space only where it would do nothing else: not on a button, in a
-    // field, while typing on the slide or in the compare view.
+    if (!matches(e, "help.palette")) return false;
+    if (e.ctrlKey || e.metaKey || e.altKey) return true;
+    // A plain key (Space) only where it would do nothing else: not on a
+    // button, in a field, while typing on the slide or in the compare view.
     const target = e.target as HTMLElement | null;
     if (
         target?.closest(
@@ -357,6 +362,7 @@ function wantsPalette(e: KeyboardEvent): boolean {
 }
 
 export function initPalette(): void {
+    on("palette", () => void openPalette());
     document.addEventListener(
         "keydown",
         (e) => {

@@ -2105,12 +2105,12 @@
         path.value = withSep(folder.path) + prefix;
       }
       const f2 = folder;
-      const matches = startingWith(f2.dirs, prefix);
-      if (matches.length === 1) {
-        await go(joinPath(f2.path, matches[0]));
+      const matches2 = startingWith(f2.dirs, prefix);
+      if (matches2.length === 1) {
+        await go(joinPath(f2.path, matches2[0]));
         return;
       }
-      const common = commonPrefix(matches);
+      const common = commonPrefix(matches2);
       filter = common.length > prefix.length ? common : prefix;
       path.value = withSep(f2.path) + filter;
       renderList4();
@@ -3670,6 +3670,628 @@
 ${lines.join("\n")}`;
   }
 
+  // src/ts/editor/keystext.ts
+  var GROUPS = [
+    "Tools",
+    "Insert",
+    "Edit",
+    "Arrange",
+    "Slides",
+    "View",
+    "Review",
+    "Help"
+  ];
+  var SHORTCUTS = [
+    { id: "tool.select", group: "Tools", label: "Select", keys: ["V"] },
+    { id: "tool.text", group: "Tools", label: "Text", keys: ["T"] },
+    { id: "tool.rect", group: "Tools", label: "Rectangle", keys: ["R"] },
+    { id: "tool.ellipse", group: "Tools", label: "Ellipse", keys: ["O"] },
+    { id: "tool.line", group: "Tools", label: "Line", keys: ["L"] },
+    { id: "tool.arrow", group: "Tools", label: "Arrow", keys: ["A"] },
+    { id: "tool.elbow", group: "Tools", label: "Elbow arrow", keys: ["E"] },
+    { id: "tool.curve", group: "Tools", label: "Curved arrow", keys: ["C"] },
+    { id: "tool.pen", group: "Tools", label: "Pen", keys: ["P"] },
+    { id: "insert.image", group: "Insert", label: "Image", keys: ["I"] },
+    { id: "insert.video", group: "Insert", label: "Video", keys: ["Shift+I"] },
+    {
+      id: "edit.undo",
+      group: "Edit",
+      label: "Undo",
+      keys: ["Ctrl+Z"],
+      fixed: true
+    },
+    {
+      id: "edit.redo",
+      group: "Edit",
+      label: "Redo",
+      keys: ["Ctrl+Shift+Z", "Ctrl+Y"],
+      fixed: true
+    },
+    {
+      id: "edit.clipboard",
+      group: "Edit",
+      label: "Copy, cut, paste (objects, or slides in the slide list)",
+      keys: ["Ctrl+C", "Ctrl+X", "Ctrl+V"],
+      fixed: true
+    },
+    {
+      id: "edit.all",
+      group: "Edit",
+      label: "Select everything on the slide",
+      keys: ["Ctrl+A"],
+      fixed: true
+    },
+    {
+      id: "edit.delete",
+      group: "Edit",
+      label: "Delete the selection (in the slide list: the slides)",
+      keys: ["Delete", "Backspace"],
+      fixed: true
+    },
+    {
+      id: "edit.enter",
+      group: "Edit",
+      label: "Edit the selected text or zone, type into a shape",
+      keys: ["Enter"],
+      fixed: true
+    },
+    {
+      id: "edit.escape",
+      group: "Edit",
+      label: "Back to Select, leave a group, select nothing",
+      keys: ["Escape"],
+      fixed: true
+    },
+    {
+      id: "edit.nudge",
+      group: "Edit",
+      label: "Move the selection (Shift: by 10)",
+      keys: ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"],
+      fixed: true
+    },
+    {
+      id: "edit.duplicate",
+      group: "Edit",
+      label: "Duplicate",
+      keys: ["Ctrl+D"]
+    },
+    {
+      id: "edit.copy-style",
+      group: "Edit",
+      label: "Copy an object's style",
+      keys: ["Ctrl+Alt+C"]
+    },
+    {
+      id: "edit.paste-style",
+      group: "Edit",
+      label: "Paste the style onto the selection",
+      keys: ["Ctrl+Alt+V"]
+    },
+    { id: "edit.find", group: "Edit", label: "Find", keys: ["Ctrl+F"] },
+    { id: "edit.replace", group: "Edit", label: "Replace", keys: ["Ctrl+H"] },
+    { id: "arrange.group", group: "Arrange", label: "Group", keys: ["Ctrl+G"] },
+    {
+      id: "arrange.ungroup",
+      group: "Arrange",
+      label: "Ungroup",
+      keys: ["Ctrl+Shift+G"]
+    },
+    {
+      id: "arrange.forward",
+      group: "Arrange",
+      label: "Bring forward",
+      keys: ["Ctrl+ArrowUp"]
+    },
+    {
+      id: "arrange.backward",
+      group: "Arrange",
+      label: "Send backward",
+      keys: ["Ctrl+ArrowDown"]
+    },
+    {
+      id: "arrange.front",
+      group: "Arrange",
+      label: "Bring to front",
+      keys: ["Ctrl+Shift+ArrowUp"]
+    },
+    {
+      id: "arrange.back",
+      group: "Arrange",
+      label: "Send to back",
+      keys: ["Ctrl+Shift+ArrowDown"]
+    },
+    {
+      id: "slide.next",
+      group: "Slides",
+      label: "Next / previous slide",
+      keys: ["PageDown", "PageUp"],
+      fixed: true
+    },
+    {
+      id: "slide.new",
+      group: "Slides",
+      label: "New slide on this slide's layout",
+      keys: ["Ctrl+M"]
+    },
+    {
+      id: "slide.gallery",
+      group: "Slides",
+      label: "New slide from the layout gallery",
+      keys: ["Ctrl+Shift+M"]
+    },
+    {
+      id: "slide.star",
+      group: "Slides",
+      label: "Star / unstar the slide",
+      keys: ["S"]
+    },
+    {
+      id: "slide.present",
+      group: "Slides",
+      label: "Present from this slide",
+      keys: ["Ctrl+Enter"]
+    },
+    {
+      id: "view.grid",
+      group: "View",
+      label: "Grid view of all slides",
+      keys: ["G"]
+    },
+    {
+      id: "view.fullscreen",
+      group: "View",
+      label: "Full screen",
+      keys: ["F"]
+    },
+    {
+      id: "view.left",
+      group: "View",
+      label: "Hide / show the slide list",
+      keys: ["1"]
+    },
+    {
+      id: "view.bottom",
+      group: "View",
+      label: "Hide / show the speaker notes",
+      keys: ["2"]
+    },
+    {
+      id: "view.right",
+      group: "View",
+      label: "Hide / show the properties",
+      keys: ["3"]
+    },
+    { id: "view.zoom-in", group: "View", label: "Zoom in", keys: ["+", "="] },
+    { id: "view.zoom-out", group: "View", label: "Zoom out", keys: ["-"] },
+    { id: "view.zoom-fit", group: "View", label: "Fit the slide", keys: ["0"] },
+    {
+      id: "review.comment",
+      group: "Review",
+      label: "Add a review comment",
+      keys: ["Shift+C"]
+    },
+    {
+      id: "review.next-change",
+      group: "Review",
+      label: "Next slide with changes since the last commit",
+      keys: ["Alt+F5"]
+    },
+    {
+      id: "review.prev-change",
+      group: "Review",
+      label: "Previous slide with changes",
+      keys: ["Alt+Shift+F5"]
+    },
+    {
+      id: "help.palette",
+      group: "Help",
+      label: "Command palette",
+      keys: ["Space", "Ctrl+K", "Ctrl+Shift+P"]
+    },
+    {
+      id: "help.shortcuts",
+      group: "Help",
+      label: "Keyboard shortcuts",
+      keys: ["?"]
+    }
+  ];
+  function shortcut(id) {
+    return SHORTCUTS.find((s2) => s2.id === id);
+  }
+  var MODIFIERS = /* @__PURE__ */ new Set(["Control", "Meta", "Shift", "Alt", "AltGraph"]);
+  function comboOf(e2) {
+    if (MODIFIERS.has(e2.key)) return "";
+    const ctrl = e2.ctrlKey || e2.metaKey;
+    const mods = [];
+    if (ctrl) mods.push("Ctrl");
+    if (e2.altKey) mods.push("Alt");
+    const letter2 = /^Key([A-Z])$/.exec(e2.code)?.[1];
+    const digit = /^Digit([0-9])$/.exec(e2.code)?.[1];
+    let name2;
+    let shift = e2.shiftKey;
+    if ((ctrl || e2.altKey) && (letter2 || digit)) name2 = letter2 ?? digit;
+    else if (/^[a-z]$/i.test(e2.key)) name2 = e2.key.toUpperCase();
+    else if (/^[0-9]$/.test(e2.key)) name2 = e2.key;
+    else if (e2.key === " ") name2 = "Space";
+    else if (e2.key.length === 1) {
+      if (letter2) name2 = letter2;
+      else {
+        name2 = e2.key;
+        shift = false;
+      }
+    } else name2 = e2.key;
+    if (shift) mods.push("Shift");
+    return [...mods, name2].join("+");
+  }
+  var SYMBOLS = {
+    ArrowUp: "\u2191",
+    ArrowDown: "\u2193",
+    ArrowLeft: "\u2190",
+    ArrowRight: "\u2192",
+    Escape: "Esc",
+    Delete: "Del"
+  };
+  function display(combo, mac = false) {
+    return combo.split(/\+(?=.)/).map((p2) => p2 === "Ctrl" && mac ? "\u2318" : SYMBOLS[p2] ?? p2).join("+");
+  }
+  function effective(overrides2) {
+    const out = {};
+    for (const s2 of SHORTCUTS) {
+      const own = s2.fixed ? void 0 : overrides2[s2.id];
+      out[s2.id] = Array.isArray(own) ? own : s2.keys;
+    }
+    return out;
+  }
+  function commandOf(keys, combo) {
+    if (!combo) return null;
+    for (const s2 of SHORTCUTS) {
+      if (keys[s2.id]?.includes(combo)) return s2.id;
+    }
+    return null;
+  }
+  function parseOverrides(stored2) {
+    if (!stored2) return {};
+    try {
+      const raw = JSON.parse(stored2);
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+      const out = {};
+      for (const [id, keys] of Object.entries(raw)) {
+        const s2 = shortcut(id);
+        if (!s2 || s2.fixed || !Array.isArray(keys)) continue;
+        out[id] = keys.filter(
+          (k2) => typeof k2 === "string" && !!k2
+        );
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+  function assign(overrides2, id, combo) {
+    const s2 = shortcut(id);
+    if (!s2 || s2.fixed)
+      return { ok: false, error: "These keys cannot be changed" };
+    if (!combo)
+      return { ok: false, error: "Press a key, not only Ctrl, Alt or Shift" };
+    if (combo === "Tab" || combo === "Shift+Tab")
+      return {
+        ok: false,
+        error: "Tab moves between fields; pick another key"
+      };
+    const keys = effective(overrides2);
+    const owner = commandOf(keys, combo);
+    if (owner === id) return { ok: true, overrides: overrides2, took: null };
+    const out = { ...overrides2, [id]: [combo] };
+    let took = null;
+    if (owner) {
+      const other = shortcut(owner);
+      if (other.fixed)
+        return { ok: false, error: `${combo} is ${other.label}` };
+      out[owner] = keys[owner].filter((k2) => k2 !== combo);
+      took = owner;
+    }
+    return { ok: true, overrides: tidy(out), took };
+  }
+  function reset(overrides2, id) {
+    const s2 = shortcut(id);
+    if (!s2) return overrides2;
+    const out = { ...overrides2 };
+    delete out[id];
+    const keys = effective(out);
+    for (const other of SHORTCUTS) {
+      if (other.id === id || other.fixed) continue;
+      const kept = keys[other.id].filter((k2) => !s2.keys.includes(k2));
+      if (kept.length !== keys[other.id].length) out[other.id] = kept;
+    }
+    return tidy(out);
+  }
+  function tidy(overrides2) {
+    const out = {};
+    for (const [id, keys] of Object.entries(overrides2)) {
+      const s2 = shortcut(id);
+      if (!s2) continue;
+      if (keys.length === s2.keys.length && keys.every((k2, i2) => k2 === s2.keys[i2]))
+        continue;
+      out[id] = keys;
+    }
+    return out;
+  }
+  function retitle(base2, defaults, now) {
+    const was = [`(${defaults.join(", ")})`, `(${defaults[0]})`].find(
+      (w2) => base2.includes(w2)
+    );
+    if (!was) return base2;
+    if (!now.length) return base2.replace(` ${was}`, "").replace(was, "");
+    return base2.replace(was, `(${now.join(", ")})`);
+  }
+  function filterShortcuts(keys, query2) {
+    const q = query2.trim().toLowerCase();
+    if (!q) return [...SHORTCUTS];
+    return SHORTCUTS.filter(
+      (s2) => `${s2.group} ${s2.label} ${keys[s2.id].join(" ")}`.toLowerCase().includes(q)
+    );
+  }
+
+  // src/ts/editor/keys.ts
+  var KEY = "inkflow-editor-keys";
+  var DOCS = "https://ll-nick.github.io/inkflow/editor/";
+  var overrides = {};
+  var bindings = effective(overrides);
+  function load() {
+    try {
+      overrides = parseOverrides(localStorage.getItem(KEY));
+    } catch {
+      overrides = {};
+    }
+    bindings = effective(overrides);
+  }
+  function save(next) {
+    overrides = next;
+    bindings = effective(overrides);
+    try {
+      if (Object.keys(overrides).length)
+        localStorage.setItem(KEY, JSON.stringify(overrides));
+      else localStorage.removeItem(KEY);
+    } catch {
+    }
+    retitleAll();
+    emit("keys");
+  }
+  function commandFor(e2) {
+    return commandOf(bindings, comboOf(e2));
+  }
+  function matches(e2, id) {
+    const combo = comboOf(e2);
+    return !!combo && (bindings[id] ?? []).includes(combo);
+  }
+  function keyLabel(id) {
+    return (bindings[id] ?? []).map((k2) => display(k2)).join(", ");
+  }
+  function firstKey(id) {
+    const k2 = bindings[id]?.[0];
+    return k2 ? display(k2) : "";
+  }
+  function retitleAll() {
+    for (const el2 of document.querySelectorAll("[data-keys]")) {
+      el2.dataset.baseTitle ??= el2.title;
+      let title3 = el2.dataset.baseTitle;
+      for (const id of (el2.dataset.keys ?? "").split(/\s+/)) {
+        const s2 = shortcut(id);
+        if (!s2) continue;
+        title3 = retitle(
+          title3,
+          s2.keys.map((k2) => display(k2)),
+          (bindings[id] ?? []).map((k2) => display(k2))
+        );
+      }
+      el2.title = title3;
+    }
+  }
+  var recording = null;
+  var redraw = null;
+  function chips(keys) {
+    if (!keys.length) return [h("span", { class: "keys-none" }, "none")];
+    return keys.map((k2) => h("kbd", {}, display(k2)));
+  }
+  function stopRecording() {
+    recording = null;
+    window.removeEventListener("keydown", onRecordKey, true);
+    redraw?.();
+  }
+  function onRecordKey(e2) {
+    if (!recording) return;
+    e2.preventDefault();
+    e2.stopImmediatePropagation();
+    const combo = comboOf(e2);
+    if (!combo) return;
+    const { id } = recording;
+    if (combo === "Escape") {
+      stopRecording();
+      return;
+    }
+    if (combo === "Backspace" || combo === "Delete") {
+      save({ ...overrides, [id]: [] });
+      note(`${shortcut(id)?.label}: no key now`);
+      stopRecording();
+      return;
+    }
+    const result = assign(overrides, id, combo);
+    if (!result.ok) {
+      note(result.error, true);
+      return;
+    }
+    save(result.overrides);
+    note(
+      result.took ? `${display(combo)} was ${shortcut(result.took)?.label}'s; that has no key now` : ""
+    );
+    stopRecording();
+  }
+  var noteEl = null;
+  function note(text, error2 = false) {
+    if (!noteEl) return;
+    noteEl.textContent = text;
+    noteEl.classList.toggle("error", error2);
+  }
+  function row(s2) {
+    const keys = bindings[s2.id] ?? [];
+    const own = s2.id in overrides;
+    const live = recording?.id === s2.id;
+    const cells = [h("span", { class: "keys-label" }, s2.label)];
+    if (s2.fixed) {
+      cells.push(
+        h(
+          "span",
+          { class: "keys-fixed", title: "Fixed: these keys stay" },
+          ...chips(keys)
+        )
+      );
+    } else {
+      const button10 = h(
+        "button",
+        {
+          type: "button",
+          class: `keys-set${live ? " live" : ""}${own ? " own" : ""}`,
+          title: "Click, then press the new keys (Esc: keep them, Backspace: no key)",
+          "data-own-escape": "",
+          onclick: () => {
+            if (live) {
+              stopRecording();
+              return;
+            }
+            recording = { id: s2.id, button: button10 };
+            window.addEventListener("keydown", onRecordKey, true);
+            note("");
+            redraw?.();
+          }
+        },
+        ...live ? [h("span", { class: "keys-press" }, "Press keys\u2026")] : chips(keys)
+      );
+      cells.push(button10);
+      cells.push(
+        own ? h(
+          "button",
+          {
+            type: "button",
+            class: "keys-reset",
+            title: `Back to ${s2.keys.map((k2) => display(k2)).join(", ")}`,
+            onclick: () => {
+              save(reset(overrides, s2.id));
+              note("");
+            }
+          },
+          "\u21BA"
+        ) : h("span", { class: "keys-reset-gap" })
+      );
+    }
+    return h("div", { class: `keys-row${s2.fixed ? " fixed" : ""}` }, ...cells);
+  }
+  function openShortcuts() {
+    const search2 = h("input", {
+      type: "text",
+      class: "keys-search",
+      placeholder: "Search commands or keys",
+      "aria-label": "Search commands or keys"
+    });
+    const list4 = h("div", { class: "keys-list" });
+    noteEl = h("p", { class: "keys-note", role: "status" });
+    const resetAll = h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn",
+        title: "Every command back to its default keys",
+        onclick: () => {
+          save({});
+          note("Every shortcut is back to its default");
+        }
+      },
+      "Reset all"
+    );
+    redraw = () => {
+      clear(list4);
+      const shown3 = filterShortcuts(bindings, search2.value);
+      for (const group2 of GROUPS) {
+        const rows = shown3.filter((s2) => s2.group === group2);
+        if (!rows.length) continue;
+        list4.append(
+          h("h3", { class: "keys-group" }, group2),
+          ...rows.map(row)
+        );
+      }
+      if (!shown3.length)
+        list4.append(h("p", { class: "hint" }, "No command matches"));
+      resetAll.disabled = !Object.keys(overrides).length;
+      if (recording)
+        list4.querySelector(".keys-set.live")?.focus();
+    };
+    search2.addEventListener("input", () => redraw?.());
+    openDialog(
+      "Keyboard shortcuts",
+      h(
+        "div",
+        { class: "keys-dialog" },
+        h("div", { class: "keys-head" }, search2, resetAll),
+        noteEl,
+        list4,
+        h(
+          "p",
+          { class: "hint" },
+          "Click a command's keys and press new ones. Your keys are kept in this browser. Ctrl stands for \u2318 on a Mac. The presenter's keys: press ? there."
+        )
+      ),
+      {
+        wide: true,
+        onClose: () => {
+          if (recording) stopRecording();
+          redraw = null;
+          noteEl = null;
+        }
+      }
+    );
+    redraw();
+    search2.focus();
+  }
+  function openHelpMenu(button10) {
+    closeMenu();
+    const withKeys = (label4, id) => firstKey(id) ? `${label4}  (${firstKey(id)})` : label4;
+    const menu7 = document.getElementById("context-menu");
+    menu7.append(
+      h("div", { class: "menu-title" }, "Settings"),
+      menuItem(
+        withKeys("Keyboard shortcuts\u2026", "help.shortcuts"),
+        () => openShortcuts()
+      ),
+      h("div", { class: "menu-sep" }),
+      h("div", { class: "menu-title" }, "Help"),
+      menuItem(
+        withKeys("Command palette\u2026", "help.palette"),
+        () => emit("palette")
+      ),
+      menuItem(
+        "Editor guide \u2197",
+        () => window.open(DOCS, "_blank", "noopener")
+      )
+    );
+    const r2 = button10.getBoundingClientRect();
+    showMenu(Math.max(8, r2.right - 220), r2.bottom + 4);
+  }
+  function initKeys() {
+    load();
+    retitleAll();
+    const button10 = document.getElementById("btn-help");
+    button10?.addEventListener("click", (e2) => {
+      e2.stopPropagation();
+      openHelpMenu(button10);
+    });
+    window.addEventListener("storage", (e2) => {
+      if (e2.key !== KEY) return;
+      load();
+      retitleAll();
+      emit("keys");
+      if (redraw) redraw();
+    });
+  }
+
   // src/ts/editor/comments.ts
   var canvasEl = document.getElementById("canvas");
   var dialogBody = null;
@@ -3972,7 +4594,7 @@ ${lines.join("\n")}`;
               addComment();
             }
           },
-          "New comment\u2026 (Shift+C)"
+          withKey("New comment\u2026")
         )
       );
     }
@@ -4005,9 +4627,13 @@ ${lines.join("\n")}`;
     if (!slide?.visible) return [];
     const n3 = openCount(threads(), slide.id);
     return [
-      item2("Add comment\u2026 (Shift+C)", () => addComment()),
+      item2(withKey("Add comment\u2026"), () => addComment()),
       ...slideThreads(threads(), slide.id).length ? [item2(`Comments (${n3} open)\u2026`, () => openComments(i2))] : []
     ];
+  }
+  function withKey(label4) {
+    const k2 = firstKey("review.comment");
+    return k2 ? `${label4} (${k2})` : label4;
   }
   function initComments() {
     hooks.drawComments = drawPins;
@@ -4024,9 +4650,11 @@ ${lines.join("\n")}`;
           return;
         }
         const target = e2.target;
-        if (target?.closest("input, textarea, select, [contenteditable]"))
+        if (target?.closest(
+          "input, textarea, select, [contenteditable], #dialog"
+        ))
           return;
-        if (e2.shiftKey && !e2.ctrlKey && !e2.metaKey && !e2.altKey && e2.code === "KeyC") {
+        if (matches(e2, "review.comment")) {
           e2.preventDefault();
           e2.stopImmediatePropagation();
           addComment();
@@ -4855,7 +5483,7 @@ ${lines.join("\n")}`;
       ...body3.filter((b2) => !!b2)
     );
   }
-  function row(label4, ...controls) {
+  function row2(label4, ...controls) {
     return h(
       "label",
       { class: "prop-row" },
@@ -4908,7 +5536,7 @@ ${lines.join("\n")}`;
     const kind = info4?.kind ?? kindOf(name2);
     const src = sourceOf(sel.key);
     const file = src?.path ?? ed.master?.path ?? "";
-    const note = h("p", { class: "hint placeholder-note" });
+    const note2 = h("p", { class: "hint placeholder-note" });
     const nameInput = h("input", {
       type: "text",
       value: name2,
@@ -4916,8 +5544,8 @@ ${lines.join("\n")}`;
       "aria-label": "Placeholder name"
     });
     const say = (text, error2 = false) => {
-      note.textContent = text;
-      note.classList.toggle("error", error2);
+      note2.textContent = text;
+      note2.classList.toggle("error", error2);
     };
     const fills = fillsText(info4?.filled ?? [], slideNumber);
     say(fills);
@@ -5010,7 +5638,7 @@ ${lines.join("\n")}`;
     });
     return section(
       "Placeholder",
-      row(
+      row2(
         "Kind",
         h(
           "span",
@@ -5019,9 +5647,9 @@ ${lines.join("\n")}`;
           info4?.shape ? " \xB7 drawn as a shape" : ""
         )
       ),
-      row("Name", nameInput),
-      note,
-      row("Prompt", prompt),
+      row2("Name", nameInput),
+      note2,
+      row2("Prompt", prompt),
       h(
         "p",
         { class: "hint" },
@@ -5289,7 +5917,7 @@ ${lines.join("\n")}`;
   function current(kind, path) {
     return !!item && item.kind === kind && item.path === path;
   }
-  function row2(kind, entry, title3, sub, depth, thumbName) {
+  function row3(kind, entry, title3, sub, depth, thumbName) {
     const path = entry.path;
     const el2 = h(
       "div",
@@ -5379,7 +6007,7 @@ ${lines.join("\n")}`;
     const background = tree.layouts.find((l2) => l2.name === tree?.background);
     if (background) {
       list4.append(
-        row2(
+        row3(
           "layout",
           background,
           "Background",
@@ -5392,7 +6020,7 @@ ${lines.join("\n")}`;
     const onTop = tree.overlays.filter((o2) => o2.deck);
     for (const o2 of onTop) {
       list4.append(
-        row2(
+        row3(
           "overlay",
           o2,
           `On top \xB7 ${o2.name}`,
@@ -5416,7 +6044,7 @@ ${lines.join("\n")}`;
     );
     for (const o2 of tree.overlays.filter((x2) => !x2.deck)) {
       const sub = o2.slides.length ? `on ${plural2(o2.slides.length, "slide")} of their own` : "not used";
-      list4.append(row2("overlay", o2, o2.name, sub, 0, null));
+      list4.append(row3("overlay", o2, o2.name, sub, 0, null));
     }
     for (const over of tree.overrides) {
       list4.append(
@@ -5430,7 +6058,7 @@ ${lines.join("\n")}`;
     list4.append(h("div", { class: "master-group" }, "Layouts"));
     for (const r2 of layoutRows(tree)) {
       list4.append(
-        row2(
+        row3(
           "layout",
           r2.layout,
           title(r2.layout),
@@ -6093,9 +6721,9 @@ ${lines.join("\n")}`;
     box2.classList.add("problems-dialog");
     drawState();
     renderList2();
-    redraw = drawState;
+    redraw2 = drawState;
   }
-  var redraw = null;
+  var redraw2 = null;
   function initProblems() {
     button2.addEventListener("click", () => openProblems());
     onMessage("problems", (msg) => {
@@ -6104,7 +6732,7 @@ ${lines.join("\n")}`;
       renderButton();
       if (listBody && dialogOpen()) {
         renderList2();
-        redraw?.();
+        redraw2?.();
       }
       emit("problems");
     });
@@ -6990,8 +7618,8 @@ ${lines.join("\n")}`;
       (p2) => p2.right != null && m2.right.slides[p2.right]?.index === index
     );
   }
-  function followRow(before, row6, after) {
-    const old = before?.pairs[row6];
+  function followRow(before, row7, after) {
+    const old = before?.pairs[row7];
     if (!before || !old) return firstRow(after.pairs);
     const lid = old.left != null ? before.left.slides[old.left]?.id : null;
     const rid = old.right != null ? before.right.slides[old.right]?.id : null;
@@ -6999,7 +7627,7 @@ ${lines.join("\n")}`;
       (p2) => lid != null && p2.left != null && after.left.slides[p2.left]?.id === lid || rid != null && p2.right != null && after.right.slides[p2.right]?.id === rid
     );
     if (same >= 0) return same;
-    return Math.min(row6, Math.max(0, after.pairs.length - 1));
+    return Math.min(row7, Math.max(0, after.pairs.length - 1));
   }
   function badge2(p2) {
     if (p2.status === "added")
@@ -7121,8 +7749,8 @@ ${lines.join("\n")}`;
     while (j2 < m2) mid.push({ kind: "ins", text: ys[j2++] });
     return merge([...head, ...mid, ...tail]);
   }
-  function takeState(m2, row6) {
-    const p2 = m2.pairs[row6];
+  function takeState(m2, row7) {
+    const p2 = m2.pairs[row7];
     const liveLeft = m2.left.live && !m2.right.live;
     const liveRight = m2.right.live && !m2.left.live;
     if (!p2 || !(liveLeft || liveRight)) {
@@ -7217,7 +7845,7 @@ ${lines.join("\n")}`;
   var model = null;
   var viewId = 0;
   var open2 = null;
-  var row3 = 0;
+  var row4 = 0;
   var focus = null;
   var onlyChanges = readPref("inkflow-compare-only", "0") === "1";
   var mode = readPref("inkflow-compare-mode", "side") || "side";
@@ -7383,10 +8011,10 @@ ${rules}`;
     if (msg.view !== viewId || view.hidden) return;
     const next = msg;
     const before = model;
-    row3 = before ? followRow(before, row3, next) : firstRow(next.pairs);
+    row4 = before ? followRow(before, row4, next) : firstRow(next.pairs);
     if (focus != null) {
       const at3 = focusRow(next, focus);
-      if (at3 >= 0) row3 = at3;
+      if (at3 >= 0) row4 = at3;
       focus = null;
     }
     model = next;
@@ -7543,7 +8171,7 @@ ${rules}`;
         h(
           "div",
           {
-            class: `cmp-row s-${b2.cls.replace(/ /g, " s-")}${i2 === row3 ? " active" : ""}`,
+            class: `cmp-row s-${b2.cls.replace(/ /g, " s-")}${i2 === row4 ? " active" : ""}`,
             role: "option",
             "data-row": i2,
             title: `${b2.title}${p2.status === "changed" ? `: ${whatChanged(p2).join(", ")}` : ""}`,
@@ -7578,7 +8206,7 @@ ${rules}`;
   }
   function selectRow(i2) {
     if (!model || i2 < 0 || i2 >= model.pairs.length) return;
-    row3 = i2;
+    row4 = i2;
     listEl?.querySelectorAll(".cmp-row").forEach((el2) => {
       el2.classList.toggle(
         "active",
@@ -7590,7 +8218,7 @@ ${rules}`;
   }
   function jump(dir) {
     if (!model) return;
-    const next = nextChange(model.pairs, row3, dir);
+    const next = nextChange(model.pairs, row4, dir);
     if (next == null) {
       toast(dir > 0 ? "No more changes below" : "No more changes above");
       return;
@@ -7600,7 +8228,7 @@ ${rules}`;
   function step(dir) {
     if (!model) return;
     const rows = visibleRows(model.pairs, onlyChanges);
-    const at3 = rows.indexOf(row3);
+    const at3 = rows.indexOf(row4);
     const next = rows[at3 < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, at3 + dir))];
     if (next != null) selectRow(next);
   }
@@ -7608,7 +8236,7 @@ ${rules}`;
     if (!model || !mainEl) return;
     const m2 = model;
     clear(mainEl);
-    const p2 = m2.pairs[row3];
+    const p2 = m2.pairs[row4];
     if (!p2) {
       mainEl.append(h("div", { class: "cmp-empty" }, "Nothing to compare"));
       return;
@@ -7828,7 +8456,7 @@ ${rules}`;
   }
   function info(m2, p2, left, right) {
     const b2 = badge2(p2);
-    const take2 = takeState(m2, row3);
+    const take2 = takeState(m2, row4);
     const what = p2.status === "changed" ? whatChanged(p2) : [];
     const summary2 = p2.status === "added" ? `Only in ${m2.right.label}` : p2.status === "removed" ? `Only in ${m2.left.label}` : p2.status === "same" ? p2.moved ? "The same slide, moved" : "No differences" : `${p2.moved ? "Moved, and changed: " : "Changed: "}${what.join(", ")}`;
     const box2 = h(
@@ -7911,8 +8539,8 @@ ${rules}`;
   async function taking() {
     if (!model) return;
     const m2 = model;
-    const p2 = m2.pairs[row3];
-    const state = takeState(m2, row3);
+    const p2 = m2.pairs[row4];
+    const state = takeState(m2, row4);
     if (!p2 || !state.enabled) return;
     const other = m2.left.live ? m2.right : m2.left;
     const files2 = p2.files.map((f2) => `  ${f2.path}`).join("\n");
@@ -7925,7 +8553,7 @@ Ctrl+Z takes it back.` : `Insert ${other.label}'s slide into the working copy?`;
     if (!confirm(question)) return;
     const res = await edit({
       action: "compare-take",
-      pair: row3,
+      pair: row4,
       left: p2.left,
       right: p2.right
     });
@@ -8602,12 +9230,12 @@ ${UNDO_NOTICE}` : question)) {
       h("code", { class: "git-path" }, path)
     );
   }
-  function address(url, note) {
+  function address(url, note2) {
     return h(
       "div",
       { class: "publish-url" },
       url ? h("a", { href: url, target: "_blank", rel: "noopener" }, url) : h("span", { class: "hint" }, "not known yet"),
-      note ? h("p", { class: "hint publish-note" }, `(${note})`) : null
+      note2 ? h("p", { class: "hint publish-note" }, `(${note2})`) : null
     );
   }
   async function openPublishDialog(commit, canPush) {
@@ -8700,7 +9328,7 @@ ${UNDO_NOTICE}` : question)) {
       const written = out.written ?? [];
       const steps = out.steps ?? [];
       const url = out.url ?? null;
-      const note = out.note ?? null;
+      const note2 = out.note ?? null;
       const message = `Publish the slides on ${HOST_NAMES[host5]}`;
       const commitBtn = (push) => h(
         "button",
@@ -8734,7 +9362,7 @@ ${UNDO_NOTICE}` : question)) {
             "div",
             { class: "field" },
             h("span", { class: "field-label" }, "Address"),
-            address(url, note)
+            address(url, note2)
           ),
           h(
             "div",
@@ -9972,8 +10600,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     if (names2.length) parts.push(names2.join(", "));
     return parts.join(" \xB7 ");
   }
-  function defaultMessage(titles) {
-    const named = titles.map((t2) => `"${t2.trim() || "untitled"}"`);
+  function defaultMessage(titles2) {
+    const named = titles2.map((t2) => `"${t2.trim() || "untitled"}"`);
     if (named.length === 1) return `Update slide ${named[0]}`;
     if (named.length <= 3) {
       const last = named.pop();
@@ -10287,11 +10915,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     );
   }
   document.addEventListener("keydown", (e2) => {
-    if (!e2.altKey || e2.key !== "F5" || e2.ctrlKey || e2.metaKey) return;
+    const dir = matches(e2, "review.next-change") ? 1 : matches(e2, "review.prev-change") ? -1 : 0;
+    if (!dir) return;
     const target = e2.target;
     if (target?.closest("input, textarea, select, [contenteditable]")) return;
     e2.preventDefault();
-    jumpToChange(e2.shiftKey ? -1 : 1);
+    jumpToChange(dir);
   });
   function compareSlide(i2) {
     openCompare(
@@ -11003,23 +11632,23 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   var drawn = [];
   var items = [];
-  function rowFacts(row6) {
+  function rowFacts(row7) {
     const editable = !!ed.model?.deckEditable;
-    if (row6.kind === "header") {
-      const s2 = sections()[row6.section];
-      const text = `h ${row6.section} ${s2?.count} ${isCollapsed(row6.section)} ${editable} ${s2?.name}`;
+    if (row7.kind === "header") {
+      const s2 = sections()[row7.section];
+      const text = `h ${row7.section} ${s2?.count} ${isCollapsed(row7.section)} ${editable} ${s2?.name}`;
       return { text, svg: void 0 };
     }
-    const slide = ed.model?.slides[row6.index];
+    const slide = ed.model?.slides[row7.index];
     const data = slide?.visibleIndex != null ? ed.slides[slide.visibleIndex] : null;
     return {
-      text: `s ${row6.index} ${slide?.visible} ${editable} ${slide?.title ?? slide?.id ?? slide?.src}`,
+      text: `s ${row7.index} ${slide?.visible} ${editable} ${slide?.title ?? slide?.id ?? slide?.src}`,
       svg: data?.svg
     };
   }
-  function rowItem(row6) {
+  function rowItem(row7) {
     const slides = ed.model?.slides ?? [];
-    return row6.kind === "header" ? headerItem(row6.section) : slideItem(slides[row6.index], row6.index);
+    return row7.kind === "header" ? headerItem(row7.section) : slideItem(slides[row7.index], row7.index);
   }
   function markRows() {
     for (const item2 of items) {
@@ -13842,7 +14471,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const body3 = text.replace(/\r\n?/g, "\n").replace(/\n$/, "");
     const sep2 = body3.includes("	") ? "	" : body3.includes(",") ? "," : "	";
     const rows = [];
-    let row6 = [];
+    let row7 = [];
     let cell = "";
     let quoted = false;
     let i2 = 0;
@@ -13861,18 +14490,18 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       }
       if (ch === '"' && cell === "") quoted = true;
       else if (ch === sep2) {
-        row6.push(cell);
+        row7.push(cell);
         cell = "";
       } else if (ch === "\n") {
-        row6.push(cell);
-        rows.push(row6);
-        row6 = [];
+        row7.push(cell);
+        rows.push(row7);
+        row7 = [];
         cell = "";
       } else cell += ch;
       i2++;
     }
-    row6.push(cell);
-    rows.push(row6);
+    row7.push(cell);
+    rows.push(row7);
     return rows;
   }
   function isMultiCell(text) {
@@ -13888,11 +14517,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     while (columns.includes(name2)) name2 = `${base2} ${n3++}`;
     return name2;
   }
-  function pasteCells(grid, row6, col, cells) {
+  function pasteCells(grid, row7, col, cells) {
     const columns = [...grid.columns];
     const rows = grid.rows.map((r2) => [...r2]);
     let body3 = cells;
-    if (row6 < 0) {
+    if (row7 < 0) {
       const head = cells[0] ?? [];
       head.forEach((name2, j2) => {
         const c2 = col + j2;
@@ -13904,7 +14533,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         columns[c2] = name2.trim() || columns[c2];
       });
       body3 = cells.slice(1);
-      row6 = 0;
+      row7 = 0;
     }
     const width = Math.max(
       columns.length,
@@ -13915,9 +14544,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     }
     for (const r2 of rows) while (r2.length < width) r2.push("");
     body3.forEach((line, i2) => {
-      while (rows.length <= row6 + i2) rows.push(blankRow(width));
+      while (rows.length <= row7 + i2) rows.push(blankRow(width));
       line.forEach((value, j2) => {
-        rows[row6 + i2][col + j2] = value;
+        rows[row7 + i2][col + j2] = value;
       });
     });
     return { columns, rows };
@@ -14107,15 +14736,15 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       status3.textContent = "";
       preview2.innerHTML = String(res.svg ?? "");
     }
-    function cellInput(row6, col, value) {
+    function cellInput(row7, col, value) {
       const input = h("input", {
         type: "text",
         value,
-        "data-row": row6,
+        "data-row": row7,
         "data-col": col,
         spellcheck: "false"
       });
-      if (row6 < 0) {
+      if (row7 < 0) {
         input.classList.add("chart-head");
         input.addEventListener("change", () => {
           const r2 = renameColumn(grid, col, input.value, settings2);
@@ -14125,7 +14754,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         });
       } else {
         input.addEventListener("input", () => {
-          grid.rows[row6][col] = input.value;
+          grid.rows[row7][col] = input.value;
           schedule2();
         });
         input.addEventListener("change", renderFields);
@@ -14134,7 +14763,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         if (e2.key === "Enter" || e2.key === "ArrowDown" || e2.key === "ArrowUp") {
           e2.preventDefault();
           const down = e2.key !== "ArrowUp";
-          let next = row6 + (down ? 1 : -1);
+          let next = row7 + (down ? 1 : -1);
           if (down && next >= grid.rows.length && e2.key === "Enter") {
             grid = addRow(grid);
             renderGrid2();
@@ -14145,9 +14774,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       });
       return input;
     }
-    function focusCell2(row6, col) {
+    function focusCell2(row7, col) {
       const input = table.querySelector(
-        `input[data-row="${row6}"][data-col="${col}"]`
+        `input[data-row="${row7}"][data-col="${col}"]`
       );
       input?.focus();
       input?.select();
@@ -14413,7 +15042,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       renderGrid2();
       renderFields();
     }
-    async function save4() {
+    async function save5() {
       const data = trimmed(grid);
       if (!data.rows.length) {
         toast("The chart needs at least one row of data", "error");
@@ -14533,7 +15162,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           {
             type: "button",
             class: "pbtn primary",
-            onclick: () => void save4()
+            onclick: () => void save5()
           },
           target.kind === "insert" ? "Insert chart" : "Save"
         )
@@ -14694,7 +15323,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     let saving = false;
     let loaded = false;
     const status3 = h("p", {}, `Loading draw.io from ${origin2}\u2026`);
-    const note = h(
+    const note2 = h(
       "div",
       { class: "drawio-note" },
       h(
@@ -14725,13 +15354,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         )
       )
     );
-    const wrap2 = h("div", { id: "drawio", class: "drawio" }, frame, note);
+    const wrap2 = h("div", { id: "drawio", class: "drawio" }, frame, note2);
     document.body.append(wrap2);
     open3 = wrap2;
     const slow = window.setTimeout(() => {
       if (loaded) return;
       status3.textContent = `draw.io did not load from ${origin2}. Is this computer offline? Draw the diagram in draw.io desktop instead.`;
-      note.classList.add("failed");
+      note2.classList.add("failed");
     }, 15e3);
     const post = (msg) => frame.contentWindow?.postMessage(JSON.stringify(msg), origin2);
     const close2 = () => {
@@ -14740,7 +15369,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       wrap2.remove();
       open3 = null;
     };
-    const save4 = async (svg) => {
+    const save5 = async (svg) => {
       const first = path === null;
       const step2 = `drawio-save-${Date.now()}`;
       const result = await edit({
@@ -14782,7 +15411,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           break;
         case "init":
           loaded = true;
-          note.remove();
+          note2.remove();
           post({
             action: "load",
             xml: String(res.xml ?? ""),
@@ -14799,7 +15428,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         case "export": {
           const data = String(msg.data ?? "");
           const svg = decodeSvg(data);
-          if (svg) void save4(svg);
+          if (svg) void save5(svg);
           else {
             saving = false;
             toast("draw.io sent something other than an SVG", "error");
@@ -14834,7 +15463,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     redraws.set(id, n3);
     timers.set(
       id,
-      window.setTimeout(() => void redraw2(id, step2, n3), 600)
+      window.setTimeout(() => void redraw3(id, step2, n3), 600)
     );
   }
   var timers = /* @__PURE__ */ new Map();
@@ -14854,7 +15483,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       on("render", done);
     });
   }
-  async function redraw2(id, step2, n3) {
+  async function redraw3(id, step2, n3) {
     const latest = () => redraws.get(id) === n3;
     await rendered(1500);
     const diagram = drawnById(id);
@@ -15280,11 +15909,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     input.focus();
     input.select();
     let done = false;
-    const finish2 = (save4) => {
+    const finish2 = (save5) => {
       if (done) return;
       done = true;
       const v2 = input.value.trim();
-      if (save4 && v2 && v2 !== id) {
+      if (save5 && v2 && v2 !== id) {
         void edit({
           action: "svg",
           file: src.path,
@@ -15328,7 +15957,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     }
     select([el2]);
   }
-  function row4(el2, depth) {
+  function row5(el2, depth) {
     const loc = el2.getAttribute("data-ink") ?? "";
     const src = sourceOf(keyOf(el2));
     const writable = !!src?.writable && (canTransform(el2) || ed.layoutMode || isOwnObject(el2));
@@ -15396,7 +16025,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     item2.addEventListener("mouseleave", () => setHover(null));
     out.push(item2);
     if (open5) {
-      for (const k2 of [...kids].reverse()) out.push(...row4(k2, depth + 1));
+      for (const k2 of [...kids].reverse()) out.push(...row5(k2, depth + 1));
     }
     return out;
   }
@@ -15426,7 +16055,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         "Top of the stack first. Middle-click (or Alt+click) on the slide steps through overlapping objects."
       )
     );
-    for (const el2 of top) host4.append(...row4(el2, 0));
+    for (const el2 of top) host4.append(...row5(el2, 0));
   }
   function showTab(tab) {
     for (const b2 of tabs.querySelectorAll("[data-tab]")) {
@@ -15598,12 +16227,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function showStep(step2) {
     showStepLabel(step2);
-    for (const row6 of document.querySelectorAll(
+    for (const row7 of document.querySelectorAll(
       ".anim-row[data-step]"
     )) {
-      row6.classList.toggle(
+      row7.classList.toggle(
         "playing",
-        step2 != null && row6.dataset.step === String(step2)
+        step2 != null && row7.dataset.step === String(step2)
       );
     }
   }
@@ -15709,7 +16338,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       ...body3.filter((b2) => !!b2)
     );
   }
-  function row5(label4, ...controls) {
+  function row6(label4, ...controls) {
     return h(
       "label",
       { class: "prop-row" },
@@ -15814,7 +16443,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     for (const f2 of schema) {
       const label4 = f2.name.replace(/_/g, " ");
       box2.append(
-        row5(
+        row6(
           label4,
           fieldControl(
             f2,
@@ -15896,7 +16525,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           { value: "off", label: "Never" }
         ];
         rows.push(
-          row5(
+          row6(
             label4,
             selectInput(
               opts2,
@@ -15910,7 +16539,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       if (f2.name === "start" || f2.name === "end") {
         const v2 = values[f2.name];
         rows.push(
-          row5(
+          row6(
             label4,
             numberInput(
               typeof v2 === "number" ? v2 : null,
@@ -15927,7 +16556,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         continue;
       }
       rows.push(
-        row5(
+        row6(
           label4,
           fieldControl(
             f2,
@@ -15991,7 +16620,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       const box2 = h("input", { type: "checkbox" });
       box2.checked = on2;
       box2.addEventListener("change", () => fn(box2.checked));
-      return row5(label4, box2);
+      return row6(label4, box2);
     };
     const series = h("div", { class: "chart-series" });
     const twoAxes = secondAxisAllowed(s2);
@@ -16037,11 +16666,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       } else series.append(entry);
     }
     const rows = [
-      row5(
+      row6(
         "Kind",
         selectInput(CHART_KINDS, s2.kind, (v2) => commit({ kind: v2 }))
       ),
-      row5(
+      row6(
         s2.kind === "scatter" ? "X values" : "Categories",
         selectInput(
           grid.columns.map((c2) => ({ value: c2, label: c2 })),
@@ -16059,7 +16688,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         ),
         series
       ),
-      row5(
+      row6(
         "Title",
         textInput(s2.title ?? "", (v2) => commit({ title: v2 }), "none")
       )
@@ -16100,7 +16729,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     }
     rows.push(
       check("Value labels", s2.labels, (v2) => commit({ labels: v2 })),
-      row5(
+      row6(
         "Legend",
         selectInput(
           [
@@ -16138,7 +16767,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     panel.append(
       section2(
         "Slide",
-        row5(
+        row6(
           "Title",
           textInput(slide.title ?? "", (v2) => {
             void edit({
@@ -16149,7 +16778,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             });
           })
         ),
-        row5(
+        row6(
           "Layout",
           button5(
             `${currentLayout ? layoutLabel(currentLayout) : "None"} \u25BE`,
@@ -16175,7 +16804,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             () => void openMaster()
           ) : null
         ),
-        row5(
+        row6(
           "Font size",
           numberInput(
             slide.fontSize,
@@ -16188,7 +16817,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             { placeholder: "deck default" }
           )
         ),
-        slide.visible && row5(
+        slide.visible && row6(
           "Starred",
           (() => {
             const cb = h("input", { type: "checkbox" });
@@ -16200,7 +16829,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             return cb;
           })()
         ),
-        row5(
+        row6(
           "Hidden",
           (() => {
             const cb = h("input", { type: "checkbox" });
@@ -16307,7 +16936,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     ];
     const send2 = (spec) => void edit({ action: "slide", op: "transition", slide: di, spec });
     const body3 = [
-      row5(
+      row6(
         "Type",
         selectInput(opts2, value, (v2) => {
           if (!v2) send2(null);
@@ -16679,7 +17308,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     swatches.append(
       button5("\u2205", "None", () => send2({ color: "none" }), "none-btn")
     );
-    return row5(prop === "fill" ? "Fill" : "Stroke", swatches);
+    return row6(prop === "fill" ? "Fill" : "Stroke", swatches);
   }
   function styleOps(sel, set, label4) {
     void sendSvgOps(
@@ -16722,7 +17351,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     });
     custom.addEventListener("change", () => pick2(custom.value));
     swatches.append(custom);
-    return row5(label4, swatches);
+    return row6(label4, swatches);
   }
   function renderCellPanel(sel) {
     const el2 = sel.el;
@@ -16754,8 +17383,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     panel.append(
       section2(
         "draw.io shape",
-        row5("Id", h("code", {}, el2.getAttribute("id") ?? "")),
-        row5("Label", area2),
+        row6("Id", h("code", {}, el2.getAttribute("id") ?? "")),
+        row6("Label", area2),
         cellColorRow(
           "Fill",
           hex(look?.fill),
@@ -16766,7 +17395,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           hex(look?.stroke),
           (v2) => style("strokeColor", v2, "Shape line")
         ),
-        row5(
+        row6(
           "Line width",
           numberInput(
             parseFloat(look?.strokeWidth ?? "1") || 1,
@@ -16802,7 +17431,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     panel.append(
       section2(
         tag,
-        row5(
+        row6(
           "Id",
           zone ? h("code", {}, id) : textInput(
             id,
@@ -16967,7 +17596,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           "Style",
           fills && !picture && paintRow([sel], "fill"),
           !picture && el2.localName !== "g" && paintRow([sel], "stroke"),
-          !picture && el2.localName !== "g" && row5(
+          !picture && el2.localName !== "g" && row6(
             "Stroke width",
             numberInput(
               strokeWidth,
@@ -16978,7 +17607,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
               )
             )
           ),
-          row5(
+          row6(
             "Opacity",
             (() => {
               const r2 = h("input", {
@@ -17001,7 +17630,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
               return r2;
             })()
           ),
-          shapeTag === "rect" && row5(
+          shapeTag === "rect" && row6(
             "Corner radius",
             numberInput(
               parseFloat(el2.getAttribute("rx") ?? "0") || 0,
@@ -17098,7 +17727,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     };
     return section2(
       "Connector",
-      row5(
+      row6(
         "Route",
         selectInput(
           [
@@ -17121,7 +17750,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           }
         )
       ),
-      row5(
+      row6(
         "Arrowheads",
         selectInput(
           [
@@ -17183,7 +17812,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const n3 = sitesPerSide(sel.el);
     const box2 = section2(
       "Connection points",
-      row5(
+      row6(
         "Per side",
         selectInput(
           [1, 2, 3, 4, 5, 7, 9].map((k2) => ({
@@ -17256,8 +17885,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const padding = parseFloat(value("--inkflow-padding"));
     return section2(
       "Text box",
-      row5("Draw the box", box2),
-      row5(
+      row6("Draw the box", box2),
+      row6(
         "Padding",
         numberInput(
           Number.isFinite(padding) ? padding : null,
@@ -17273,7 +17902,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           }
         )
       ),
-      row5(
+      row6(
         "Align",
         selectInput(
           [
@@ -17287,7 +17916,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           (v2) => setVar("--inkflow-align", v2 || null, "Text align")
         )
       ),
-      row5(
+      row6(
         "Vertical",
         selectInput(
           [
@@ -17564,7 +18193,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           () => void resetCrop(sel)
         ) : null
       ),
-      row5(
+      row6(
         "Fit",
         selectInput(
           FITS.map((f2) => ({ value: f2.value, label: f2.label })),
@@ -17618,7 +18247,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     );
   }
   function showAsRow(sel, mode2) {
-    return row5(
+    return row6(
       "Show as",
       selectInput(
         DIAGRAM_MODES.map((m2) => ({ value: m2.value, label: m2.label })),
@@ -17676,7 +18305,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       ),
       showAsRow(sel, diagramMode(svg)),
       editShapesRow(sel, svg),
-      row5(
+      row6(
         "Fit",
         selectInput(
           FITS.map((f2) => ({ value: f2.value, label: f2.label })),
@@ -17904,8 +18533,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return section2(
       "Link & alt text",
       slideOptions(),
-      row5("Link", link),
-      row5(
+      row6("Link", link),
+      row6(
         "Alt text",
         textInput(
           title3,
@@ -17948,14 +18577,14 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const anchor2 = cs.textAnchor;
     return section2(
       "Text",
-      row5(
+      row6(
         "Size",
         numberInput(
           parseFloat(cs.fontSize),
           (v2) => setAll({ "font-size": `${v2}px` }, "Font size")
         )
       ),
-      row5(
+      row6(
         "Font",
         textInput(
           cs.fontFamily,
@@ -18031,15 +18660,15 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       h(
         "div",
         { class: "grid2" },
-        row5(
+        row6(
           "X",
           numberInput(box2.x, (v2) => resizeTo({ ...box2, x: v2 }))
         ),
-        row5(
+        row6(
           "Y",
           numberInput(box2.y, (v2) => resizeTo({ ...box2, y: v2 }))
         ),
-        row5(
+        row6(
           "W",
           numberInput(
             box2.width,
@@ -18047,7 +18676,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             { min: 1 }
           )
         ),
-        row5(
+        row6(
           "H",
           numberInput(
             box2.height,
@@ -18056,7 +18685,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           )
         )
       ),
-      sels.length === 1 && row5(
+      sels.length === 1 && row6(
         "Rotation",
         numberInput(
           rot,
@@ -18465,7 +19094,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         lastGroup = group2;
       }
       const where = hit.kind === "deck" ? "deck.py" : `${fileLabel(hit.file)}${on2.length > 1 ? ` \xB7 ${on2.length} slides` : ""}`;
-      const row6 = h(
+      const row7 = h(
         "button",
         {
           type: "button",
@@ -18482,7 +19111,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         ),
         h("span", { class: "find-where" }, where)
       );
-      list4.append(row6);
+      list4.append(row7);
     });
   }
   function goTo(i2) {
@@ -18671,13 +19300,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const me = boxes[i2];
     if (!me) return i2;
     const tops = [...new Set(boxes.map((b2) => b2.top))].sort((a2, b2) => a2 - b2);
-    const row6 = tops.indexOf(me.top) + dir;
-    if (row6 < 0 || row6 >= tops.length) return i2;
+    const row7 = tops.indexOf(me.top) + dir;
+    if (row7 < 0 || row7 >= tops.length) return i2;
     const center = me.left + me.width / 2;
     let best2 = i2;
     let bestD = Number.POSITIVE_INFINITY;
     boxes.forEach((b2, j2) => {
-      if (b2.top !== tops[row6]) return;
+      if (b2.top !== tops[row7]) return;
       const d2 = Math.abs(b2.left + b2.width / 2 - center);
       if (d2 < bestD) {
         best2 = j2;
@@ -19094,16 +19723,14 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   function storeShown(shown3) {
     return JSON.stringify(PANELS.filter((panel4) => !shown3[panel4]));
   }
-  function panelTitle(panel4, shown3) {
+  function panelTitle(panel4, shown3, key = PANEL_KEYS[panel4]) {
     const name2 = PANEL_NAMES[panel4];
-    return `${shown3 ? "Hide" : "Show"} the ${name2} (${PANEL_KEYS[panel4]})`;
-  }
-  function panelOfKey(key) {
-    return PANELS.find((panel4) => PANEL_KEYS[panel4] === key) ?? null;
+    const what = `${shown3 ? "Hide" : "Show"} the ${name2}`;
+    return key ? `${what} (${key})` : what;
   }
 
   // src/ts/editor/panels.ts
-  var KEY = "inkflow-editor-panels";
+  var KEY2 = "inkflow-editor-panels";
   var shown2 = parseShown(null);
   function button6(panel4) {
     return document.getElementById(`btn-panel-${panel4}`);
@@ -19115,22 +19742,34 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       if (!b2) continue;
       b2.classList.toggle("on", shown2[panel4]);
       b2.setAttribute("aria-pressed", String(shown2[panel4]));
-      b2.title = panelTitle(panel4, shown2[panel4]);
     }
+    titles();
     layoutPaper();
     emit("zoom");
   }
   function togglePanel(panel4) {
     shown2 = { ...shown2, [panel4]: !shown2[panel4] };
     try {
-      localStorage.setItem(KEY, storeShown(shown2));
+      localStorage.setItem(KEY2, storeShown(shown2));
     } catch {
     }
     apply2();
   }
+  function titles() {
+    for (const panel4 of PANELS) {
+      const b2 = button6(panel4);
+      if (b2)
+        b2.title = panelTitle(
+          panel4,
+          shown2[panel4],
+          keyLabel(`view.${panel4}`)
+        );
+    }
+  }
   function initPanels() {
+    on("keys", titles);
     try {
-      shown2 = parseShown(localStorage.getItem(KEY));
+      shown2 = parseShown(localStorage.getItem(KEY2));
     } catch {
     }
     for (const panel4 of PANELS) {
@@ -19876,7 +20515,7 @@ ${area2.value.slice(pos)}`;
           return;
         }
         if (!md.trim() && removeEmptyBox(fo, zone, deckIndex)) return;
-        const save4 = (base2) => edit(
+        const save5 = (base2) => edit(
           {
             action: "zone-text",
             slide: deckIndex,
@@ -19888,9 +20527,9 @@ ${area2.value.slice(pos)}`;
           },
           { quietStale: true }
         );
-        let result = await save4(startBuild);
+        let result = await save5(startBuild);
         if (!result.ok && result.stale && await zoneUnchanged(startBuild, deckIndex, zone, start)) {
-          result = await save4(ed.model?.build);
+          result = await save5(ed.model?.build);
         }
         if (!result.ok) emit("rerender");
         if (!result.ok && result.stale) {
@@ -20134,37 +20773,37 @@ ${area2.value.slice(pos)}`;
     return cell;
   }
   function addRow2(cell) {
-    const row6 = cell.parentElement;
-    const table = row6.closest("table");
+    const row7 = cell.parentElement;
+    const table = row7.closest("table");
     let body3 = table.tBodies[0];
     if (!body3) {
       body3 = document.createElement("tbody");
       table.append(body3);
     }
     const tr = document.createElement("tr");
-    for (const c2 of row6.children) tr.append(newCell("td", c2));
-    if (row6.parentElement?.localName === "thead") body3.prepend(tr);
-    else row6.after(tr);
+    for (const c2 of row7.children) tr.append(newCell("td", c2));
+    if (row7.parentElement?.localName === "thead") body3.prepend(tr);
+    else row7.after(tr);
   }
   function addColumn2(cell) {
     const table = cell.closest("table");
     const index = cell.cellIndex;
-    for (const row6 of table.rows) {
-      const ref = row6.cells[index];
-      const tag = row6.parentElement?.localName === "thead" ? "th" : "td";
+    for (const row7 of table.rows) {
+      const ref = row7.cells[index];
+      const tag = row7.parentElement?.localName === "thead" ? "th" : "td";
       const c2 = newCell(tag, ref);
       if (ref) ref.after(c2);
-      else row6.append(c2);
+      else row7.append(c2);
     }
   }
   function deleteRow(cell) {
-    const row6 = cell.parentElement;
-    const table = row6.closest("table");
+    const row7 = cell.parentElement;
+    const table = row7.closest("table");
     if (table.rows.length <= 1) {
       table.remove();
       return;
     }
-    if (row6.parentElement?.localName === "thead") {
+    if (row7.parentElement?.localName === "thead") {
       const next = table.tBodies[0]?.rows[0];
       if (!next) return;
       const head = document.createElement("tr");
@@ -20173,11 +20812,11 @@ ${area2.value.slice(pos)}`;
         th.replaceChildren(...c2.childNodes);
         head.append(th);
       }
-      row6.replaceWith(head);
+      row7.replaceWith(head);
       next.remove();
       return;
     }
-    row6.remove();
+    row7.remove();
   }
   function deleteColumn(cell) {
     const table = cell.closest("table");
@@ -20186,12 +20825,12 @@ ${area2.value.slice(pos)}`;
       table.remove();
       return;
     }
-    for (const row6 of [...table.rows]) row6.cells[index]?.remove();
+    for (const row7 of [...table.rows]) row7.cells[index]?.remove();
   }
   function alignColumn(cell, align2) {
     const table = cell.closest("table");
-    for (const row6 of table.rows) {
-      const c2 = row6.cells[cell.cellIndex];
+    for (const row7 of table.rows) {
+      const c2 = row7.cells[cell.cellIndex];
       if (c2) c2.style.textAlign = align2;
     }
   }
@@ -20406,11 +21045,11 @@ ${area2.value.slice(pos)}`;
   }
   function insertTable(content2) {
     const head = "<th>Header</th><th>Header</th><th>Header</th>";
-    const row6 = "<td><br></td><td><br></td><td><br></td>";
+    const row7 = "<td><br></td><td><br></td><td><br></td>";
     document.execCommand(
       "insertHTML",
       false,
-      `<table><thead><tr>${head}</tr></thead><tbody><tr>${row6}</tr><tr>${row6}</tr></tbody></table><p><br></p>`
+      `<table><thead><tr>${head}</tr></thead><tbody><tr>${row7}</tr><tr>${row7}</tr></tbody></table><p><br></p>`
     );
     const after = caretElement(content2)?.closest("p");
     const table = after?.previousElementSibling;
@@ -20723,7 +21362,9 @@ ${area2.value.slice(pos)}`;
     const on2 = !!document.fullscreenElement;
     const b2 = $("btn-fullscreen");
     b2.classList.toggle("on", on2);
-    b2.title = on2 ? "Leave full screen (F)" : "Full screen (F)";
+    const k2 = firstKey("view.fullscreen");
+    const what = on2 ? "Leave full screen" : "Full screen";
+    b2.title = k2 ? `${what} (${k2})` : what;
   }
   function updateZoomLabel() {
     $("zoom-label").textContent = `${Math.round(scale() * 100)}%`;
@@ -20752,16 +21393,46 @@ ${area2.value.slice(pos)}`;
       b2.classList.toggle("on", b2.dataset.tool === ed.tool);
     });
   }
-  var TOOL_KEYS = {
-    v: "select",
-    t: "text",
-    r: "rect",
-    o: "ellipse",
-    l: "line",
-    a: "arrow",
-    e: "elbow",
-    c: "curve",
-    p: "pen"
+  function newSlide2() {
+    if (ed.model?.deckEditable) void newSlideLike(ed.current);
+    else toast("deck.py builds its slides in code; add slides there", "error");
+  }
+  var COMMANDS = {
+    "tool.select": () => setTool("select"),
+    "tool.text": () => setTool("text"),
+    "tool.rect": () => setTool("rect"),
+    "tool.ellipse": () => setTool("ellipse"),
+    "tool.line": () => setTool("line"),
+    "tool.arrow": () => setTool("arrow"),
+    "tool.elbow": () => setTool("elbow"),
+    "tool.curve": () => setTool("curve"),
+    "tool.pen": () => setTool("pen"),
+    "insert.image": () => void insertImage(),
+    "insert.video": () => void insertVideo(),
+    "edit.duplicate": () => void duplicateSelection(),
+    "edit.copy-style": copyStyle,
+    "edit.paste-style": () => void pasteStyle(),
+    "edit.find": () => openFind(false),
+    "edit.replace": () => openFind(true),
+    "arrange.group": () => void groupSelection(),
+    "arrange.ungroup": () => void ungroupSelection(),
+    "arrange.forward": () => void order("forward"),
+    "arrange.backward": () => void order("backward"),
+    "arrange.front": () => void order("front"),
+    "arrange.back": () => void order("back"),
+    "slide.new": newSlide2,
+    "slide.gallery": () => void openGallery({ mode: "insert", after: ed.current }),
+    "slide.star": starSelection,
+    "slide.present": present,
+    "view.grid": () => toggleGrid(),
+    "view.fullscreen": toggleFullscreen,
+    "view.left": () => togglePanel("left"),
+    "view.bottom": () => togglePanel("bottom"),
+    "view.right": () => togglePanel("right"),
+    "view.zoom-in": () => setZoom(scale() * 1.25),
+    "view.zoom-out": () => setZoom(scale() / 1.25),
+    "view.zoom-fit": () => setZoom(0),
+    "help.shortcuts": openShortcuts
   };
   function readingNotes() {
     const picked = window.getSelection();
@@ -20777,6 +21448,12 @@ ${area2.value.slice(pos)}`;
     const key = e2.key;
     const lower = key.toLowerCase();
     const handled = () => e2.preventDefault();
+    const command = commandFor(e2);
+    if (command && COMMANDS[command]) {
+      handled();
+      COMMANDS[command]();
+      return;
+    }
     if (mod && lower === "z") {
       handled();
       void (e2.shiftKey ? redo() : undo());
@@ -20786,13 +21463,6 @@ ${area2.value.slice(pos)}`;
     } else if (mod && lower === "a") {
       handled();
       selectAll();
-    } else if (mod && lower === "d") {
-      handled();
-      void duplicateSelection();
-    } else if (mod && e2.altKey && (e2.code === "KeyC" || e2.code === "KeyV")) {
-      handled();
-      if (e2.code === "KeyC") copyStyle();
-      else void pasteStyle();
     } else if (mod && lower === "c" && readingNotes()) {
     } else if (mod && lower === "c") {
       handled();
@@ -20802,30 +21472,6 @@ ${area2.value.slice(pos)}`;
       handled();
       if (ed.focus === "sorter") void cutSlides();
       else cut();
-    } else if (mod && (lower === "f" || lower === "h")) {
-      handled();
-      openFind(lower === "h");
-    } else if (mod && lower === "g") {
-      handled();
-      void (e2.shiftKey ? ungroupSelection() : groupSelection());
-    } else if (mod && lower === "m") {
-      handled();
-      if (e2.shiftKey) void openGallery({ mode: "insert", after: ed.current });
-      else if (ed.model?.deckEditable) void newSlideLike(ed.current);
-      else
-        toast(
-          "deck.py builds its slides in code; add slides there",
-          "error"
-        );
-    } else if (mod && key === "Enter") {
-      handled();
-      present();
-    } else if (mod && (key === "ArrowUp" || key === "ArrowDown")) {
-      handled();
-      const up = key === "ArrowUp";
-      void order(
-        e2.shiftKey ? up ? "front" : "back" : up ? "forward" : "backward"
-      );
     } else if ((key === "Delete" || key === "Backspace") && ed.focus === "sorter") {
       handled();
       void deleteSlides();
@@ -20834,6 +21480,7 @@ ${area2.value.slice(pos)}`;
         handled();
         void deleteSelection();
       }
+    } else if (mod) {
     } else if (key.startsWith("Arrow") && ed.selection.length) {
       handled();
       const d2 = e2.shiftKey ? 10 : 1;
@@ -20865,25 +21512,6 @@ ${area2.value.slice(pos)}`;
         isZone(el2) ? "edit-zone" : el2.localName === "text" ? "edit-text" : "noop"
       );
       if (el2.localName === "g") enterGroup(el2);
-    } else if (!mod && (key === "+" || key === "=")) {
-      setZoom(scale() * 1.25);
-    } else if (!mod && key === "-") {
-      setZoom(scale() / 1.25);
-    } else if (!mod && key === "0") {
-      setZoom(0);
-    } else if (!mod && !e2.altKey && lower === "s") {
-      starSelection();
-    } else if (!mod && !e2.altKey && panelOfKey(key)) {
-      togglePanel(panelOfKey(key));
-    } else if (!mod && !e2.altKey && lower in TOOL_KEYS) {
-      setTool(TOOL_KEYS[lower]);
-    } else if (!mod && !e2.altKey && lower === "g") {
-      toggleGrid();
-    } else if (!mod && !e2.altKey && lower === "f") {
-      handled();
-      toggleFullscreen();
-    } else if (!mod && lower === "i") {
-      void (e2.shiftKey ? insertVideo() : insertImage());
     }
   }
   function initToolbar() {
@@ -20909,6 +21537,7 @@ ${area2.value.slice(pos)}`;
     on("render", updateZoomLabel);
     on("zoom", updateZoomLabel);
     on("history", updateHistory);
+    on("keys", updateFullscreen);
     on("tool", updateTools);
     on("delete", () => void deleteSelection());
     on("duplicate", () => void duplicateSelection());
@@ -22889,7 +23518,7 @@ Ctrl+click: open in a new tab`;
       }
     }
   }
-  async function save(stroke) {
+  async function save2(stroke) {
     const slide = currentSlide();
     if (!slide) return;
     pending3.set(stroke.id, { deckIndex: slide.deckIndex, stroke });
@@ -22966,7 +23595,7 @@ Ctrl+click: open in a new tab`;
           ".inkflow-ink path[id], .inkflow-live-ink path[id]"
         );
       },
-      onStroke: (stroke) => void save(stroke),
+      onStroke: (stroke) => void save2(stroke),
       onErase: (ids, hidden) => void erase(ids, hidden)
     });
     on("tool", () => {
@@ -23010,7 +23639,7 @@ Ctrl+click: open in a new tab`;
   var sent = "";
   var burst = "";
   var reading = false;
-  async function save2() {
+  async function save3() {
     window.clearTimeout(timer5);
     const slide = ed.model?.slides[slideIndex];
     if (!slide || area.value === sent) return;
@@ -23028,10 +23657,10 @@ Ctrl+click: open in a new tab`;
     );
     if (!result.ok) {
       sent = before;
-      timer5 = window.setTimeout(() => void save2(), 800);
+      timer5 = window.setTimeout(() => void save3(), 800);
     }
   }
-  function load() {
+  function load2() {
     const slide = currentSlide();
     if (!slide) return;
     showPreview();
@@ -23088,7 +23717,7 @@ Ctrl+click: open in a new tab`;
     }
     if (!read3) return;
     delete preview.dataset.shown;
-    void save2();
+    void save3();
     showPreview();
   }
   function followLink(e2) {
@@ -23156,9 +23785,9 @@ Ctrl+click: open in a new tab`;
     });
     area.addEventListener("input", () => {
       window.clearTimeout(timer5);
-      timer5 = window.setTimeout(() => void save2(), 600);
+      timer5 = window.setTimeout(() => void save3(), 600);
     });
-    area.addEventListener("blur", () => void save2());
+    area.addEventListener("blur", () => void save3());
     area.addEventListener("keydown", (e2) => e2.stopPropagation());
     writeBtn.addEventListener("click", () => {
       setView(false);
@@ -23182,9 +23811,9 @@ Ctrl+click: open in a new tab`;
     if (stored2 != null) setHeight(stored2, false);
     if (view3 === "read") setView(true, false);
     on("slide", () => {
-      void save2().then(load);
+      void save3().then(load2);
     });
-    on("model", load);
+    on("model", load2);
   }
 
   // src/ts/editor/palettetext.ts
@@ -23288,11 +23917,11 @@ Ctrl+click: open in a new tab`;
     probe.remove();
     return `#${rgb.slice(0, 3).map((n3) => Number(n3).toString(16).padStart(2, "0")).join("")}`;
   }
-  async function save3(body3, label4) {
+  async function save4(body3, label4) {
     await edit({ action: "theme-set", label: label4, ...body3 });
   }
   function setToken(group2, name2, value) {
-    void save3({ changes: { [group2]: { [name2]: value } } }, "Theme");
+    void save4({ changes: { [group2]: { [name2]: value } } }, "Theme");
   }
   function colorCell(mode2, name2) {
     const t2 = info3;
@@ -23427,7 +24056,7 @@ Ctrl+click: open in a new tab`;
     theme.disabled = !ed.model?.deckEditable;
     theme.addEventListener(
       "change",
-      () => void save3({ theme: theme.value }, "Theme")
+      () => void save4({ theme: theme.value }, "Theme")
     );
     const mode2 = h("select", {});
     for (const [v2, l2] of [
@@ -23441,7 +24070,7 @@ Ctrl+click: open in a new tab`;
     mode2.disabled = !ed.model?.deckEditable;
     mode2.addEventListener(
       "change",
-      () => void save3({ mode: mode2.value || null }, "Colour mode")
+      () => void save4({ mode: mode2.value || null }, "Colour mode")
     );
     const size4 = h("input", {
       type: "number",
@@ -23453,7 +24082,7 @@ Ctrl+click: open in a new tab`;
     size4.disabled = !ed.model?.deckEditable;
     size4.addEventListener("change", () => {
       const n3 = parseInt(size4.value, 10);
-      void save3({ fontSize: Number.isFinite(n3) ? n3 : null }, "Font size");
+      void save4({ fontSize: Number.isFinite(n3) ? n3 : null }, "Font size");
     });
     const list4 = h("datalist", { id: "theme-font-list" });
     for (const f2 of ["sans-serif", "serif", "monospace", ...t2.fonts]) {
@@ -23649,7 +24278,7 @@ Ctrl+click: open in a new tab`;
       {
         label: "Find and replace",
         group: "Edit",
-        keys: "Ctrl+F",
+        keys: keyLabel("edit.find"),
         run: () => openFind()
       },
       { label: "Theme\u2026", group: "Deck", run: () => void openTheme() },
@@ -23667,32 +24296,38 @@ Ctrl+click: open in a new tab`;
       {
         label: "Grid view",
         group: "View",
-        keys: "G",
+        keys: keyLabel("view.grid"),
         run: () => toggleGrid()
       },
       {
         label: "Show / hide the slide list",
         group: "View",
-        keys: "1",
+        keys: keyLabel("view.left"),
         run: () => togglePanel("left")
       },
       {
         label: "Show / hide the notes",
         group: "View",
-        keys: "2",
+        keys: keyLabel("view.bottom"),
         run: () => togglePanel("bottom")
       },
       {
         label: "Show / hide the properties",
         group: "View",
-        keys: "3",
+        keys: keyLabel("view.right"),
         run: () => togglePanel("right")
       },
       {
         label: "Full screen",
         group: "View",
-        keys: "F",
+        keys: keyLabel("view.fullscreen"),
         run: () => toggleFullscreen()
+      },
+      {
+        label: "Keyboard shortcuts\u2026",
+        group: "Help",
+        keys: keyLabel("help.shortcuts"),
+        run: () => openShortcuts()
       },
       { label: "Problems\u2026", group: "Check", run: () => openProblems() },
       {
@@ -23703,7 +24338,7 @@ Ctrl+click: open in a new tab`;
       {
         label: "Add comment",
         group: "Comments",
-        keys: "Shift+C",
+        keys: keyLabel("review.comment"),
         run: () => addComment()
       },
       {
@@ -23714,13 +24349,13 @@ Ctrl+click: open in a new tab`;
       {
         label: "Next slide with changes",
         group: "Git",
-        keys: "Alt+F5",
+        keys: keyLabel("review.next-change"),
         run: () => jumpToChange(1)
       },
       {
         label: "Previous slide with changes",
         group: "Git",
-        keys: "Shift+Alt+F5",
+        keys: keyLabel("review.prev-change"),
         run: () => jumpToChange(-1)
       },
       {
@@ -23746,7 +24381,7 @@ Ctrl+click: open in a new tab`;
       {
         label: "Star / unstar this slide",
         group: "Slide",
-        keys: "S",
+        keys: keyLabel("slide.star"),
         run: () => void toggleStar([i2])
       }
     ];
@@ -23755,7 +24390,7 @@ Ctrl+click: open in a new tab`;
         {
           label: "New slide like this one",
           group: "Slide",
-          keys: "Ctrl+M",
+          keys: keyLabel("slide.new"),
           run: () => void newSlideLike(i2)
         },
         {
@@ -23823,7 +24458,7 @@ Ctrl+click: open in a new tab`;
       at3 = Math.min(at3, Math.max(0, shown3.length - 1));
       clear(list4);
       shown3.forEach((c2, k2) => {
-        const row6 = h(
+        const row7 = h(
           "div",
           {
             class: `palette-row${k2 === at3 ? " on" : ""}`,
@@ -23843,7 +24478,7 @@ Ctrl+click: open in a new tab`;
           h("span", { class: "palette-group" }, c2.group),
           c2.keys ? h("kbd", {}, c2.keys) : null
         );
-        list4.append(row6);
+        list4.append(row7);
       });
       if (!shown3.length)
         list4.append(
@@ -23890,10 +24525,8 @@ Ctrl+click: open in a new tab`;
     draw();
   }
   function wantsPalette(e2) {
-    const mod = e2.ctrlKey || e2.metaKey;
-    if (mod && !e2.altKey && e2.code === "KeyK" && !e2.shiftKey) return true;
-    if (mod && e2.shiftKey && e2.code === "KeyP") return true;
-    if (e2.key !== " " || mod || e2.altKey || e2.shiftKey) return false;
+    if (!matches(e2, "help.palette")) return false;
+    if (e2.ctrlKey || e2.metaKey || e2.altKey) return true;
     const target = e2.target;
     if (target?.closest(
       "input, textarea, select, button, a, [contenteditable], #dialog"
@@ -23902,6 +24535,7 @@ Ctrl+click: open in a new tab`;
     return !document.body.classList.contains("compare-mode") && !ed.richEditing;
   }
   function initPalette() {
+    on("palette", () => void openPalette());
     document.addEventListener(
       "keydown",
       (e2) => {
@@ -23929,10 +24563,10 @@ Ctrl+click: open in a new tab`;
       _moduleCount = _typeNumber * 4 + 17;
       _modules = (function(moduleCount) {
         const modules = new Array(moduleCount);
-        for (let row6 = 0; row6 < moduleCount; row6 += 1) {
-          modules[row6] = new Array(moduleCount);
+        for (let row7 = 0; row7 < moduleCount; row7 += 1) {
+          modules[row7] = new Array(moduleCount);
           for (let col = 0; col < moduleCount; col += 1) {
-            modules[row6][col] = null;
+            modules[row7][col] = null;
           }
         }
         return modules;
@@ -23951,15 +24585,15 @@ Ctrl+click: open in a new tab`;
       }
       mapData(_dataCache, maskPattern);
     };
-    const setupPositionProbePattern = function(row6, col) {
+    const setupPositionProbePattern = function(row7, col) {
       for (let r2 = -1; r2 <= 7; r2 += 1) {
-        if (row6 + r2 <= -1 || _moduleCount <= row6 + r2) continue;
+        if (row7 + r2 <= -1 || _moduleCount <= row7 + r2) continue;
         for (let c2 = -1; c2 <= 7; c2 += 1) {
           if (col + c2 <= -1 || _moduleCount <= col + c2) continue;
           if (0 <= r2 && r2 <= 6 && (c2 == 0 || c2 == 6) || 0 <= c2 && c2 <= 6 && (r2 == 0 || r2 == 6) || 2 <= r2 && r2 <= 4 && 2 <= c2 && c2 <= 4) {
-            _modules[row6 + r2][col + c2] = true;
+            _modules[row7 + r2][col + c2] = true;
           } else {
-            _modules[row6 + r2][col + c2] = false;
+            _modules[row7 + r2][col + c2] = false;
           }
         }
       }
@@ -23995,17 +24629,17 @@ Ctrl+click: open in a new tab`;
       const pos = QRUtil.getPatternPosition(_typeNumber);
       for (let i2 = 0; i2 < pos.length; i2 += 1) {
         for (let j2 = 0; j2 < pos.length; j2 += 1) {
-          const row6 = pos[i2];
+          const row7 = pos[i2];
           const col = pos[j2];
-          if (_modules[row6][col] != null) {
+          if (_modules[row7][col] != null) {
             continue;
           }
           for (let r2 = -2; r2 <= 2; r2 += 1) {
             for (let c2 = -2; c2 <= 2; c2 += 1) {
               if (r2 == -2 || r2 == 2 || c2 == -2 || c2 == 2 || r2 == 0 && c2 == 0) {
-                _modules[row6 + r2][col + c2] = true;
+                _modules[row7 + r2][col + c2] = true;
               } else {
-                _modules[row6 + r2][col + c2] = false;
+                _modules[row7 + r2][col + c2] = false;
               }
             }
           }
@@ -24050,7 +24684,7 @@ Ctrl+click: open in a new tab`;
     };
     const mapData = function(data, maskPattern) {
       let inc = -1;
-      let row6 = _moduleCount - 1;
+      let row7 = _moduleCount - 1;
       let bitIndex = 7;
       let byteIndex = 0;
       const maskFunc = QRUtil.getMaskFunction(maskPattern);
@@ -24058,16 +24692,16 @@ Ctrl+click: open in a new tab`;
         if (col == 6) col -= 1;
         while (true) {
           for (let c2 = 0; c2 < 2; c2 += 1) {
-            if (_modules[row6][col - c2] == null) {
+            if (_modules[row7][col - c2] == null) {
               let dark = false;
               if (byteIndex < data.length) {
                 dark = (data[byteIndex] >>> bitIndex & 1) == 1;
               }
-              const mask = maskFunc(row6, col - c2);
+              const mask = maskFunc(row7, col - c2);
               if (mask) {
                 dark = !dark;
               }
-              _modules[row6][col - c2] = dark;
+              _modules[row7][col - c2] = dark;
               bitIndex -= 1;
               if (bitIndex == -1) {
                 byteIndex += 1;
@@ -24075,9 +24709,9 @@ Ctrl+click: open in a new tab`;
               }
             }
           }
-          row6 += inc;
-          if (row6 < 0 || _moduleCount <= row6) {
-            row6 -= inc;
+          row7 += inc;
+          if (row7 < 0 || _moduleCount <= row7) {
+            row7 -= inc;
             inc = -inc;
             break;
           }
@@ -24189,11 +24823,11 @@ Ctrl+click: open in a new tab`;
       _dataList.push(newData);
       _dataCache = null;
     };
-    _this.isDark = function(row6, col) {
-      if (row6 < 0 || _moduleCount <= row6 || col < 0 || _moduleCount <= col) {
-        throw row6 + "," + col;
+    _this.isDark = function(row7, col) {
+      if (row7 < 0 || _moduleCount <= row7 || col < 0 || _moduleCount <= col) {
+        throw row7 + "," + col;
       }
-      return _modules[row6][col];
+      return _modules[row7][col];
     };
     _this.getModuleCount = function() {
       return _moduleCount;
@@ -24434,10 +25068,10 @@ Ctrl+click: open in a new tab`;
     _this.renderTo2dContext = function(context, cellSize) {
       cellSize = cellSize || 2;
       const length = _this.getModuleCount();
-      for (let row6 = 0; row6 < length; row6++) {
+      for (let row7 = 0; row7 < length; row7++) {
         for (let col = 0; col < length; col++) {
-          context.fillStyle = _this.isDark(row6, col) ? "black" : "white";
-          context.fillRect(col * cellSize, row6 * cellSize, cellSize, cellSize);
+          context.fillStyle = _this.isDark(row7, col) ? "black" : "white";
+          context.fillRect(col * cellSize, row7 * cellSize, cellSize, cellSize);
         }
       }
     };
@@ -24687,12 +25321,12 @@ Ctrl+click: open in a new tab`;
     _this.getLostPoint = function(qrcode2) {
       const moduleCount = qrcode2.getModuleCount();
       let lostPoint = 0;
-      for (let row6 = 0; row6 < moduleCount; row6 += 1) {
+      for (let row7 = 0; row7 < moduleCount; row7 += 1) {
         for (let col = 0; col < moduleCount; col += 1) {
           let sameCount = 0;
-          const dark = qrcode2.isDark(row6, col);
+          const dark = qrcode2.isDark(row7, col);
           for (let r2 = -1; r2 <= 1; r2 += 1) {
-            if (row6 + r2 < 0 || moduleCount <= row6 + r2) {
+            if (row7 + r2 < 0 || moduleCount <= row7 + r2) {
               continue;
             }
             for (let c2 = -1; c2 <= 1; c2 += 1) {
@@ -24702,7 +25336,7 @@ Ctrl+click: open in a new tab`;
               if (r2 == 0 && c2 == 0) {
                 continue;
               }
-              if (dark == qrcode2.isDark(row6 + r2, col + c2)) {
+              if (dark == qrcode2.isDark(row7 + r2, col + c2)) {
                 sameCount += 1;
               }
             }
@@ -24713,36 +25347,36 @@ Ctrl+click: open in a new tab`;
         }
       }
       ;
-      for (let row6 = 0; row6 < moduleCount - 1; row6 += 1) {
+      for (let row7 = 0; row7 < moduleCount - 1; row7 += 1) {
         for (let col = 0; col < moduleCount - 1; col += 1) {
           let count = 0;
-          if (qrcode2.isDark(row6, col)) count += 1;
-          if (qrcode2.isDark(row6 + 1, col)) count += 1;
-          if (qrcode2.isDark(row6, col + 1)) count += 1;
-          if (qrcode2.isDark(row6 + 1, col + 1)) count += 1;
+          if (qrcode2.isDark(row7, col)) count += 1;
+          if (qrcode2.isDark(row7 + 1, col)) count += 1;
+          if (qrcode2.isDark(row7, col + 1)) count += 1;
+          if (qrcode2.isDark(row7 + 1, col + 1)) count += 1;
           if (count == 0 || count == 4) {
             lostPoint += 3;
           }
         }
       }
-      for (let row6 = 0; row6 < moduleCount; row6 += 1) {
+      for (let row7 = 0; row7 < moduleCount; row7 += 1) {
         for (let col = 0; col < moduleCount - 6; col += 1) {
-          if (qrcode2.isDark(row6, col) && !qrcode2.isDark(row6, col + 1) && qrcode2.isDark(row6, col + 2) && qrcode2.isDark(row6, col + 3) && qrcode2.isDark(row6, col + 4) && !qrcode2.isDark(row6, col + 5) && qrcode2.isDark(row6, col + 6)) {
+          if (qrcode2.isDark(row7, col) && !qrcode2.isDark(row7, col + 1) && qrcode2.isDark(row7, col + 2) && qrcode2.isDark(row7, col + 3) && qrcode2.isDark(row7, col + 4) && !qrcode2.isDark(row7, col + 5) && qrcode2.isDark(row7, col + 6)) {
             lostPoint += 40;
           }
         }
       }
       for (let col = 0; col < moduleCount; col += 1) {
-        for (let row6 = 0; row6 < moduleCount - 6; row6 += 1) {
-          if (qrcode2.isDark(row6, col) && !qrcode2.isDark(row6 + 1, col) && qrcode2.isDark(row6 + 2, col) && qrcode2.isDark(row6 + 3, col) && qrcode2.isDark(row6 + 4, col) && !qrcode2.isDark(row6 + 5, col) && qrcode2.isDark(row6 + 6, col)) {
+        for (let row7 = 0; row7 < moduleCount - 6; row7 += 1) {
+          if (qrcode2.isDark(row7, col) && !qrcode2.isDark(row7 + 1, col) && qrcode2.isDark(row7 + 2, col) && qrcode2.isDark(row7 + 3, col) && qrcode2.isDark(row7 + 4, col) && !qrcode2.isDark(row7 + 5, col) && qrcode2.isDark(row7 + 6, col)) {
             lostPoint += 40;
           }
         }
       }
       let darkCount = 0;
       for (let col = 0; col < moduleCount; col += 1) {
-        for (let row6 = 0; row6 < moduleCount; row6 += 1) {
-          if (qrcode2.isDark(row6, col)) {
+        for (let row7 = 0; row7 < moduleCount; row7 += 1) {
+          if (qrcode2.isDark(row7, col)) {
             darkCount += 1;
           }
         }
@@ -26408,7 +27042,7 @@ Ctrl+click: open in a new tab`;
       "aria-label": "Access token",
       autocomplete: "off"
     });
-    const save4 = () => {
+    const save5 = () => {
       editingRelay = false;
       sendRaw({
         type: "share",
@@ -26437,7 +27071,7 @@ Ctrl+click: open in a new tab`;
         token,
         h(
           "button",
-          { type: "button", class: "pbtn primary", onclick: save4 },
+          { type: "button", class: "pbtn primary", onclick: save5 },
           "Use this relay"
         ),
         o2.relay ? h(
@@ -26908,6 +27542,7 @@ Ctrl+click: open in a new tab`;
     initProps();
     initObjects();
     initNotes();
+    initKeys();
     initPanels();
     initStars();
     initToolbar();

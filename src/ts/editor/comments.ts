@@ -24,6 +24,7 @@ import {
 } from "./commentstext";
 import { closeDialog, dialogOpen, openDialog } from "./dialog";
 import { clear, h, svgEl, toast } from "./dom";
+import { firstKey, matches } from "./keys";
 import { edit, onMessage } from "./net";
 import { ed, emit, on } from "./state";
 
@@ -375,7 +376,7 @@ function renderDialog(): void {
                         addComment();
                     },
                 },
-                "New comment… (Shift+C)",
+                withKey("New comment…"),
             ),
         );
     }
@@ -423,11 +424,16 @@ export function commentItems(
     if (!slide?.visible) return [];
     const n = openCount(threads(), slide.id);
     return [
-        item("Add comment… (Shift+C)", () => addComment()),
+        item(withKey("Add comment…"), () => addComment()),
         ...(slideThreads(threads(), slide.id).length
             ? [item(`Comments (${n} open)…`, () => openComments(i))]
             : []),
     ];
+}
+
+function withKey(label: string): string {
+    const k = firstKey("review.comment");
+    return k ? `${label} (${k})` : label;
 }
 
 export function initComments(): void {
@@ -445,15 +451,13 @@ export function initComments(): void {
                 return;
             }
             const target = e.target as HTMLElement | null;
-            if (target?.closest("input, textarea, select, [contenteditable]"))
-                return;
             if (
-                e.shiftKey &&
-                !e.ctrlKey &&
-                !e.metaKey &&
-                !e.altKey &&
-                e.code === "KeyC"
-            ) {
+                target?.closest(
+                    "input, textarea, select, [contenteditable], #dialog",
+                )
+            )
+                return;
+            if (matches(e, "review.comment")) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 addComment();

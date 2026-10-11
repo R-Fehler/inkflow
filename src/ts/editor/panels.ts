@@ -7,6 +7,7 @@
 // height, the list's scroll) is as it was when it comes back.
 
 import { layoutPaper } from "./canvas";
+import { keyLabel } from "./keys";
 import {
     PANELS,
     type Panel,
@@ -15,7 +16,7 @@ import {
     type Shown,
     storeShown,
 } from "./panelstext";
-import { emit } from "./state";
+import { emit, on } from "./state";
 
 const KEY = "inkflow-editor-panels";
 
@@ -32,8 +33,8 @@ function apply(): void {
         if (!b) continue;
         b.classList.toggle("on", shown[panel]);
         b.setAttribute("aria-pressed", String(shown[panel]));
-        b.title = panelTitle(panel, shown[panel]);
     }
+    titles();
     // The slide is laid out for the canvas's new size (its ResizeObserver
     // does so too, a frame later), and the zoom shown is the new one.
     layoutPaper();
@@ -54,7 +55,20 @@ export function panelShown(panel: Panel): boolean {
     return shown[panel];
 }
 
+function titles(): void {
+    for (const panel of PANELS) {
+        const b = button(panel);
+        if (b)
+            b.title = panelTitle(
+                panel,
+                shown[panel],
+                keyLabel(`view.${panel}`),
+            );
+    }
+}
+
 export function initPanels(): void {
+    on("keys", titles);
     try {
         shown = parseShown(localStorage.getItem(KEY));
     } catch {

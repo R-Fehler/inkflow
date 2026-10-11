@@ -26,9 +26,9 @@ import { openFind } from "./find";
 import { openGallery } from "./gallery";
 import { toggleGrid } from "./grid";
 import { insertImage, insertVideo, setTool, typeInto } from "./insert";
+import { commandFor, firstKey, openShortcuts } from "./keys";
 import { edit } from "./net";
 import { togglePanel } from "./panels";
-import { type Panel, panelOfKey } from "./panelstext";
 import { alignSelection } from "./props";
 import {
     deleteSlide,
@@ -189,7 +189,9 @@ function updateFullscreen(): void {
     const on = !!document.fullscreenElement;
     const b = $("btn-fullscreen");
     b.classList.toggle("on", on);
-    b.title = on ? "Leave full screen (F)" : "Full screen (F)";
+    const k = firstKey("view.fullscreen");
+    const what = on ? "Leave full screen" : "Full screen";
+    b.title = k ? `${what} (${k})` : what;
 }
 
 function updateZoomLabel(): void {
@@ -229,16 +231,50 @@ function updateTools(): void {
     });
 }
 
-const TOOL_KEYS: Record<string, Tool> = {
-    v: "select",
-    t: "text",
-    r: "rect",
-    o: "ellipse",
-    l: "line",
-    a: "arrow",
-    e: "elbow",
-    c: "curve",
-    p: "pen",
+function newSlide(): void {
+    if (ed.model?.deckEditable) void newSlideLike(ed.current);
+    else toast("deck.py builds its slides in code; add slides there", "error");
+}
+
+// What each changeable shortcut does (keystext.ts names them and their
+// default keys; keys.ts says which a press is).
+const COMMANDS: Record<string, () => void> = {
+    "tool.select": () => setTool("select"),
+    "tool.text": () => setTool("text"),
+    "tool.rect": () => setTool("rect"),
+    "tool.ellipse": () => setTool("ellipse"),
+    "tool.line": () => setTool("line"),
+    "tool.arrow": () => setTool("arrow"),
+    "tool.elbow": () => setTool("elbow"),
+    "tool.curve": () => setTool("curve"),
+    "tool.pen": () => setTool("pen"),
+    "insert.image": () => void insertImage(),
+    "insert.video": () => void insertVideo(),
+    "edit.duplicate": () => void duplicateSelection(),
+    "edit.copy-style": copyStyle,
+    "edit.paste-style": () => void pasteStyle(),
+    "edit.find": () => openFind(false),
+    "edit.replace": () => openFind(true),
+    "arrange.group": () => void groupSelection(),
+    "arrange.ungroup": () => void ungroupSelection(),
+    "arrange.forward": () => void order("forward"),
+    "arrange.backward": () => void order("backward"),
+    "arrange.front": () => void order("front"),
+    "arrange.back": () => void order("back"),
+    "slide.new": newSlide,
+    "slide.gallery": () =>
+        void openGallery({ mode: "insert", after: ed.current }),
+    "slide.star": starSelection,
+    "slide.present": present,
+    "view.grid": () => toggleGrid(),
+    "view.fullscreen": toggleFullscreen,
+    "view.left": () => togglePanel("left"),
+    "view.bottom": () => togglePanel("bottom"),
+    "view.right": () => togglePanel("right"),
+    "view.zoom-in": () => setZoom(scale() * 1.25),
+    "view.zoom-out": () => setZoom(scale() / 1.25),
+    "view.zoom-fit": () => setZoom(0),
+    "help.shortcuts": openShortcuts,
 };
 
 /** Whether the page's text selection is in the notes as read (notes.ts). */
@@ -265,6 +301,12 @@ function onKey(e: KeyboardEvent): void {
     const key = e.key;
     const lower = key.toLowerCase();
     const handled = () => e.preventDefault();
+    const command = commandFor(e);
+    if (command && COMMANDS[command]) {
+        handled();
+        COMMANDS[command]();
+        return;
+    }
     if (mod && lower === "z") {
         handled();
         void (e.shiftKey ? redo() : undo());
@@ -274,14 +316,6 @@ function onKey(e: KeyboardEvent): void {
     } else if (mod && lower === "a") {
         handled();
         selectAll();
-    } else if (mod && lower === "d") {
-        handled();
-        void duplicateSelection();
-    } else if (mod && e.altKey && (e.code === "KeyC" || e.code === "KeyV")) {
-        // Copy / paste an object's style (e.key is a symbol with Option).
-        handled();
-        if (e.code === "KeyC") copyStyle();
-        else void pasteStyle();
     } else if (mod && lower === "c" && readingNotes()) {
         // Text picked in the notes preview: the browser's own copy.
     } else if (mod && lower === "c") {
@@ -292,31 +326,6 @@ function onKey(e: KeyboardEvent): void {
         handled();
         if (ed.focus === "sorter") void cutSlides();
         else cut();
-    } else if (mod && (lower === "f" || lower === "h")) {
-        handled();
-        openFind(lower === "h");
-    } else if (mod && lower === "g") {
-        handled();
-        void (e.shiftKey ? ungroupSelection() : groupSelection());
-    } else if (mod && lower === "m") {
-        handled();
-        // Ctrl+M: a new slide on this slide's layout; with Shift, pick one.
-        if (e.shiftKey) void openGallery({ mode: "insert", after: ed.current });
-        else if (ed.model?.deckEditable) void newSlideLike(ed.current);
-        else
-            toast(
-                "deck.py builds its slides in code; add slides there",
-                "error",
-            );
-    } else if (mod && key === "Enter") {
-        handled();
-        present();
-    } else if (mod && (key === "ArrowUp" || key === "ArrowDown")) {
-        handled();
-        const up = key === "ArrowUp";
-        void order(
-            e.shiftKey ? (up ? "front" : "back") : up ? "forward" : "backward",
-        );
     } else if (
         (key === "Delete" || key === "Backspace") &&
         ed.focus === "sorter"
@@ -328,6 +337,8 @@ function onKey(e: KeyboardEvent): void {
             handled();
             void deleteSelection();
         }
+    } else if (mod) {
+        // (Ctrl with any other key: the browser's.)
     } else if (key.startsWith("Arrow") && ed.selection.length) {
         handled();
         const d = e.shiftKey ? 10 : 1;
@@ -377,25 +388,6 @@ function onKey(e: KeyboardEvent): void {
                   : "noop",
         );
         if (el.localName === "g") enterGroup(el as unknown as SVGGElement);
-    } else if (!mod && (key === "+" || key === "=")) {
-        setZoom(scale() * 1.25);
-    } else if (!mod && key === "-") {
-        setZoom(scale() / 1.25);
-    } else if (!mod && key === "0") {
-        setZoom(0);
-    } else if (!mod && !e.altKey && lower === "s") {
-        starSelection();
-    } else if (!mod && !e.altKey && panelOfKey(key)) {
-        togglePanel(panelOfKey(key) as Panel);
-    } else if (!mod && !e.altKey && lower in TOOL_KEYS) {
-        setTool(TOOL_KEYS[lower]);
-    } else if (!mod && !e.altKey && lower === "g") {
-        toggleGrid();
-    } else if (!mod && !e.altKey && lower === "f") {
-        handled();
-        toggleFullscreen();
-    } else if (!mod && lower === "i") {
-        void (e.shiftKey ? insertVideo() : insertImage());
     }
 }
 
@@ -422,6 +414,7 @@ export function initToolbar(): void {
     on("render", updateZoomLabel);
     on("zoom", updateZoomLabel);
     on("history", updateHistory);
+    on("keys", updateFullscreen);
     on("tool", updateTools);
     on("delete", () => void deleteSelection());
     on("duplicate", () => void duplicateSelection());

@@ -1206,6 +1206,17 @@ speaker notes, so a view-only link cannot open it.
 
 ## Keyboard
 
+The **?** button at the right of the toolbar is the Help and settings menu:
+**Keyboard shortcuts…** (also <kbd>?</kbd>), the command palette and this guide.
+The Keyboard shortcuts dialog lists every command with its keys and a search
+box. Click a command's keys and press new ones to change them: keys another
+command had are taken from it (the dialog says which), <kbd>Backspace</kbd>
+leaves the command without a key, <kbd>Esc</kbd> keeps what it had, ↺ puts its
+default back and **Reset all** every default. The keys every program shares
+(undo, the clipboard, Delete, Enter, Esc, the arrows, PageUp/PageDown) stay as
+they are. Your keys are kept in this browser, and the toolbar's tooltips, the
+menus and the command palette show them. The defaults:
+
 | Key | Action |
 |---|---|
 | <kbd>V</kbd> <kbd>T</kbd> <kbd>R</kbd> <kbd>O</kbd> <kbd>L</kbd> <kbd>A</kbd> <kbd>E</kbd> <kbd>C</kbd> <kbd>P</kbd> <kbd>I</kbd> | Select, text, rectangle, ellipse, line, arrow, elbow arrow, curved arrow, pen, image |
@@ -1227,6 +1238,8 @@ speaker notes, so a view-only link cannot open it.
 | <kbd>Space</kbd>, <kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> | Command palette |
 | <kbd>Shift</kbd>+<kbd>C</kbd> | Add a review comment (on the selection, else where you click) |
 | <kbd>Alt</kbd>+<kbd>F5</kbd> / <kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>F5</kbd> | Next / previous slide with changes since the last commit |
+| <kbd>?</kbd> | Keyboard shortcuts (see and change them) |
+| <kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd> | Zoom in / out / fit the slide |
 | <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> | Hide / show the slide list, the speaker notes, the properties |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> <kbd>I</kbd> <kbd>K</kbd> (in text) | Bold, italic, link |
 | <kbd>Tab</kbd> (in a table) | Next cell |

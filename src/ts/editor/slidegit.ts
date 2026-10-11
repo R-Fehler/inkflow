@@ -12,6 +12,7 @@ import { openCompare } from "./compare";
 import { closeDialog, openDialog } from "./dialog";
 import { h, toast } from "./dom";
 import { gitStatus, runGit } from "./git";
+import { matches } from "./keys";
 import { edit, request } from "./net";
 import {
     type CommitPlan,
@@ -360,11 +361,16 @@ async function historyDialog(i: number): Promise<void> {
 }
 
 document.addEventListener("keydown", (e) => {
-    if (!e.altKey || e.key !== "F5" || e.ctrlKey || e.metaKey) return;
+    const dir = matches(e, "review.next-change")
+        ? 1
+        : matches(e, "review.prev-change")
+          ? -1
+          : 0;
+    if (!dir) return;
     const target = e.target as HTMLElement | null;
     if (target?.closest("input, textarea, select, [contenteditable]")) return;
     e.preventDefault();
-    jumpToChange(e.shiftKey ? -1 : 1);
+    jumpToChange(dir);
 });
 
 /** Slide `i` beside its last committed version (compare.ts). */

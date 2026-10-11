@@ -43,9 +43,14 @@ export function storeShown(shown: Shown): string {
     return JSON.stringify(PANELS.filter((panel) => !shown[panel]));
 }
 
-export function panelTitle(panel: Panel, shown: boolean): string {
+export function panelTitle(
+    panel: Panel,
+    shown: boolean,
+    key: string = PANEL_KEYS[panel],
+): string {
     const name = PANEL_NAMES[panel];
-    return `${shown ? "Hide" : "Show"} the ${name} (${PANEL_KEYS[panel]})`;
+    const what = `${shown ? "Hide" : "Show"} the ${name}`;
+    return key ? `${what} (${key})` : what;
 }
 
 /** The panel a key hides and shows, if it is one's. */

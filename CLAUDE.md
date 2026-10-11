@@ -1054,6 +1054,13 @@ src/
                       problemstext.ts (pure; tested), comments.ts (Shift+C,
                       pins via `hooks.drawComments`, the 💬 marks, a slide's
                       threads dialog) over commentstext.ts (pure; tested),
+                      keys.ts (the shortcuts on the page: `commandFor`/
+                      `matches`/`keyLabel` over the person's own keys in
+                      localStorage, `data-keys` titles retitled, the Keyboard
+                      shortcuts dialog, the toolbar's ? Help menu
+                      `#btn-help`; toolbar.ts's `COMMANDS` run them) over
+                      keystext.ts (pure: `SHORTCUTS` with defaults, fixed
+                      ones only shown, `comboOf`, `assign`/`reset`; tested),
                       palette.ts (Space / Ctrl+K / Ctrl+Shift+P: the
                       toolbar's buttons by title, editor commands,
                       `gitCommands`, `deckCommands`, every slide) over

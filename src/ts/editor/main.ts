@@ -27,6 +27,7 @@ import { initGit } from "./git";
 import { initGrid } from "./grid";
 import { initInk } from "./ink";
 import { afterRender, initInsert } from "./insert";
+import { initKeys } from "./keys";
 import { initMaster } from "./master";
 import { connect } from "./net";
 import { initNotes } from "./notes";
@@ -157,6 +158,7 @@ function boot(): void {
     initProps();
     initObjects();
     initNotes();
+    initKeys();
     initPanels();
     initStars();
     initToolbar();
