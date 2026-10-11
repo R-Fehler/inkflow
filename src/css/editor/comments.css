@@ -97,3 +97,81 @@ body.placing-comment #canvas {
     align-items: flex-end;
     margin-top: 6px;
 }
+
+/* The command palette (src/ts/editor/palette.ts). */
+
+#palette {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding-top: 12vh;
+    background: rgb(0 0 0 / 0.35);
+}
+
+.palette-box {
+    width: min(640px, calc(100vw - 32px));
+    background: var(--ui-panel);
+    border: 1px solid var(--ui-line);
+    border-radius: 10px;
+    box-shadow: 0 16px 48px rgb(0 0 0 / 0.45);
+    overflow: hidden;
+}
+
+.palette-input {
+    width: 100%;
+    padding: 12px 14px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--ui-line);
+    color: var(--text);
+    font: 15px var(--font-ui);
+    outline: none;
+}
+
+.palette-list {
+    max-height: 52vh;
+    overflow-y: auto;
+    padding: 4px;
+}
+
+.palette-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.palette-row.on {
+    background: var(--sel-soft);
+}
+
+.palette-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.palette-group {
+    color: var(--subtext);
+    font-size: 12px;
+}
+
+.palette-row kbd {
+    padding: 1px 6px;
+    border: 1px solid var(--ui-line);
+    border-radius: 4px;
+    color: var(--subtext);
+    font: 11px var(--font-ui-mono);
+}
+
+.palette-empty {
+    padding: 10px;
+    color: var(--subtext);
+}

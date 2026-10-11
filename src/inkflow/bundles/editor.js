@@ -114,10 +114,10 @@
     if (neededHeight(laidOut(wrapper)) > avail + SLACK) return true;
     const width = content2.clientWidth;
     for (const el2 of Array.from(content2.querySelectorAll("pre, table"))) {
-      const box = el2;
-      if (box.localName === "pre") {
-        if (box.scrollWidth > box.clientWidth + SLACK) return true;
-      } else if (box.offsetWidth > width + SLACK) {
+      const box2 = el2;
+      if (box2.localName === "pre") {
+        if (box2.scrollWidth > box2.clientWidth + SLACK) return true;
+      } else if (box2.offsetWidth > width + SLACK) {
         return true;
       }
     }
@@ -1118,12 +1118,12 @@
   function isAxisAligned(m2) {
     return Math.abs(m2.b) < EPS && Math.abs(m2.c) < EPS;
   }
-  function transformBox(m2, box) {
+  function transformBox(m2, box2) {
     const pts = [
-      apply(m2, { x: box.x, y: box.y }),
-      apply(m2, { x: box.x + box.width, y: box.y }),
-      apply(m2, { x: box.x, y: box.y + box.height }),
-      apply(m2, { x: box.x + box.width, y: box.y + box.height })
+      apply(m2, { x: box2.x, y: box2.y }),
+      apply(m2, { x: box2.x + box2.width, y: box2.y }),
+      apply(m2, { x: box2.x, y: box2.y + box2.height }),
+      apply(m2, { x: box2.x + box2.width, y: box2.y + box2.height })
     ];
     const xs = pts.map((p2) => p2.x);
     const ys = pts.map((p2) => p2.y);
@@ -1536,7 +1536,7 @@
   function openDialog(title3, body3, opts2 = {}) {
     closeDialog();
     onClose = opts2.onClose ?? null;
-    const box = h(
+    const box2 = h(
       "div",
       {
         class: `dialog-box${opts2.large ? " large" : opts2.wide ? " wide" : ""}`,
@@ -1560,9 +1560,9 @@
       ),
       h("div", { class: "dialog-body" }, body3)
     );
-    host.append(box);
+    host.append(box2);
     host.classList.add("open");
-    return box;
+    return box2;
   }
   function closeDialog() {
     if (!host.classList.contains("open")) return;
@@ -2888,23 +2888,23 @@
         fill: "none"
       });
     } else {
-      const box = transformBox(m2, {
+      const box2 = transformBox(m2, {
         x: Math.min(a2.x, b2.x),
         y: Math.min(a2.y, b2.y),
         width: Math.abs(b2.x - a2.x),
         height: Math.abs(b2.y - a2.y)
       });
       draft = tool === "ellipse" ? svgEl("ellipse", {
-        cx: box.x + box.width / 2,
-        cy: box.y + box.height / 2,
-        rx: box.width / 2,
-        ry: box.height / 2,
+        cx: box2.x + box2.width / 2,
+        cy: box2.y + box2.height / 2,
+        rx: box2.width / 2,
+        ry: box2.height / 2,
         class: "draft"
       }) : svgEl("rect", {
-        x: box.x,
-        y: box.y,
-        width: box.width,
-        height: box.height,
+        x: box2.x,
+        y: box2.y,
+        width: box2.width,
+        height: box2.height,
         class: "draft"
       });
     }
@@ -3056,15 +3056,15 @@
     if (!slide) return;
     const vb = slideRoot()?.viewBox.baseVal;
     const vw = vb?.width || 1920;
-    let box = {
+    let box2 = {
       x: Math.min(a2.x, b2.x),
       y: Math.min(a2.y, b2.y),
       width: Math.abs(b2.x - a2.x),
       height: Math.abs(b2.y - a2.y)
     };
-    if (box.width < 40 || box.height < 20) {
+    if (box2.width < 40 || box2.height < 20) {
       const k2 = textScale();
-      box = {
+      box2 = {
         x: a2.x,
         y: a2.y - 40 * k2,
         width: Math.max(300 * k2, Math.min(900 * k2, vw - a2.x - 60 * k2)),
@@ -3082,8 +3082,8 @@
     const current3 = currentSlide();
     if (!src || !current3) return;
     const parent = insertParent();
-    const p0 = toParent(parent.el, box.x, box.y);
-    const p1 = toParent(parent.el, box.x + box.width, box.y + box.height);
+    const p0 = toParent(parent.el, box2.x, box2.y);
+    const p1 = toParent(parent.el, box2.x + box2.width, box2.y + box2.height);
     const result = await edit({
       action: "insert-textbox",
       slide: current3.deckIndex,
@@ -3865,7 +3865,7 @@ ${lines.join("\n")}`;
     );
   }
   function threadView(t2, k2) {
-    const box = h(
+    const box2 = h(
       "div",
       {
         class: `comment-thread${t2.resolved ? " resolved" : ""}${t2.id === focusThread ? " focus" : ""}`,
@@ -3923,7 +3923,7 @@ ${lines.join("\n")}`;
       )
     );
     if (!t2.resolved) {
-      box.append(
+      box2.append(
         composer(
           "Reply\u2026",
           "Reply",
@@ -3931,7 +3931,7 @@ ${lines.join("\n")}`;
         )
       );
     }
-    return box;
+    return box2;
   }
   function renderDialog() {
     if (!dialogBody || dialogSlide == null) return;
@@ -4218,9 +4218,9 @@ ${lines.join("\n")}`;
           "data-delete": "files"
         });
         let plan2 = null;
-        const box = check;
-        box.addEventListener("change", async () => {
-          if (!box.checked) {
+        const box2 = check;
+        box2.addEventListener("change", async () => {
+          if (!box2.checked) {
             details.replaceChildren();
             return;
           }
@@ -4233,7 +4233,7 @@ ${lines.join("\n")}`;
           );
           plan2 ??= option2.load();
           const found = await plan2;
-          if (!box.checked) return;
+          if (!box2.checked) return;
           if (!found) {
             details.replaceChildren(
               h(
@@ -4355,12 +4355,12 @@ ${lines.join("\n")}`;
     return cache;
   }
   function thumbnail(p2) {
-    const box = h("div", { class: "gallery-thumb" });
-    box.innerHTML = p2.svg;
-    const svg = box.querySelector("svg");
+    const box2 = h("div", { class: "gallery-thumb" });
+    box2.innerHTML = p2.svg;
+    const svg = box2.querySelector("svg");
     if (svg) {
       const vb = parseViewBox(svg.getAttribute("viewBox"));
-      box.style.aspectRatio = `${vb.w} / ${vb.h}`;
+      box2.style.aspectRatio = `${vb.w} / ${vb.h}`;
       svg.setAttribute("width", "100%");
       svg.setAttribute("height", "100%");
       svg.querySelectorAll(".anim-pending").forEach((el2) => {
@@ -4368,7 +4368,7 @@ ${lines.join("\n")}`;
       });
       for (const z of p2.emptyZones) {
         if (z.zone === "slide-number" || z.zone === "slide-total") continue;
-        box.append(
+        box2.append(
           h(
             "div",
             {
@@ -4380,7 +4380,7 @@ ${lines.join("\n")}`;
         );
       }
     }
-    return box;
+    return box2;
   }
   function lostZones(p2) {
     const slide = currentSlide();
@@ -5264,11 +5264,11 @@ ${lines.join("\n")}`;
     }
   }
   function thumb(name2) {
-    const box = h("div", { class: "master-thumb" });
+    const box2 = h("div", { class: "master-thumb" });
     const svg = name2 ? thumbs.get(name2) : void 0;
     if (svg) {
-      box.innerHTML = svg;
-      const el2 = box.querySelector("svg");
+      box2.innerHTML = svg;
+      const el2 = box2.querySelector("svg");
       el2?.setAttribute("width", "100%");
       el2?.setAttribute("height", "100%");
       el2?.querySelectorAll(".anim-pending").forEach((x2) => {
@@ -5276,7 +5276,7 @@ ${lines.join("\n")}`;
       });
       if (el2) scheduleFit(el2);
     }
-    return box;
+    return box2;
   }
   function badge(of) {
     const o2 = origin(of);
@@ -6046,7 +6046,7 @@ ${lines.join("\n")}`;
       renderList2();
     });
     listBody = h("div", { class: "problem-body" });
-    const box = openDialog(
+    const box2 = openDialog(
       only != null ? `Problems on slide ${only + 1}` : "Problems",
       h(
         "div",
@@ -6090,7 +6090,7 @@ ${lines.join("\n")}`;
         }
       }
     );
-    box.classList.add("problems-dialog");
+    box2.classList.add("problems-dialog");
     drawState();
     renderList2();
     redraw = drawState;
@@ -6139,9 +6139,9 @@ ${lines.join("\n")}`;
     return `Updates ${plural(p2.references, "reference")} in ${plural(p2.files, "file")}.`;
   }
   function previewBody(p2, opts2) {
-    const box = h("div", { class: "rename-preview" });
+    const box2 = h("div", { class: "rename-preview" });
     if (opts2.moves && p2.moves.length) {
-      box.append(
+      box2.append(
         h("p", { class: "rename-msg rename-head" }, "Files"),
         h(
           "ul",
@@ -6159,7 +6159,7 @@ ${lines.join("\n")}`;
       );
     }
     if (p2.shared.length) {
-      box.append(
+      box2.append(
         h("p", { class: "rename-msg rename-head" }, "Stay as they are"),
         h(
           "ul",
@@ -6170,9 +6170,9 @@ ${lines.join("\n")}`;
         )
       );
     }
-    box.append(h("p", { class: "rename-msg rename-summary" }, summaryLine(p2)));
+    box2.append(h("p", { class: "rename-msg rename-summary" }, summaryLine(p2)));
     for (const [old, now] of Object.entries(p2.ids)) {
-      box.append(
+      box2.append(
         h(
           "p",
           { class: "hint" },
@@ -6211,7 +6211,7 @@ ${lines.join("\n")}`;
           )
         );
       }
-      box.append(
+      box2.append(
         h(
           "details",
           { class: "rename-details" },
@@ -6221,9 +6221,9 @@ ${lines.join("\n")}`;
       );
     }
     for (const w2 of p2.warnings) {
-      box.append(h("p", { class: "rename-msg rename-warning" }, w2));
+      box2.append(h("p", { class: "rename-msg rename-warning" }, w2));
     }
-    return box;
+    return box2;
   }
   function renameDialog(opts2) {
     const status3 = h("div", { class: "rename-status" });
@@ -6554,10 +6554,10 @@ ${lines.join("\n")}`;
         title: "Unused files and those only unused files name; not templates",
         onclick: () => {
           for (const f2 of unused) picked.add(f2.path);
-          for (const box of list4.querySelectorAll(
+          for (const box2 of list4.querySelectorAll(
             "input[data-path]"
           )) {
-            box.checked = picked.has(box.dataset.path ?? "");
+            box2.checked = picked.has(box2.dataset.path ?? "");
           }
           sync();
         }
@@ -7770,12 +7770,12 @@ ${rules}`;
       if (!el2) break;
     }
     if (el2 && el2 !== svg && el2.localName.toLowerCase() === loc.tag.toLowerCase()) {
-      const box = toSlideBox(
+      const box2 = toSlideBox(
         el2.getBoundingClientRect(),
         svg.getBoundingClientRect(),
         parseViewBox(svg.getAttribute("viewBox"))
       );
-      if (box && box[2] > 0 && box[3] > 0) return box;
+      if (box2 && box2[2] > 0 && box2[3] > 0) return box2;
     }
     return loc.box;
   }
@@ -7789,13 +7789,13 @@ ${rules}`;
     layer2.setAttribute("preserveAspectRatio", "xMidYMid meet");
     const pad2 = Math.max(vb.w, vb.h) / 240;
     const draw = (target, loc, cls, label4) => {
-      const box = loc ? locate(target, loc) : null;
-      if (!box) return;
+      const box2 = loc ? locate(target, loc) : null;
+      if (!box2) return;
       const rect = document.createElementNS(SVG_NS2, "rect");
-      rect.setAttribute("x", String(box[0] - pad2));
-      rect.setAttribute("y", String(box[1] - pad2));
-      rect.setAttribute("width", String(box[2] + 2 * pad2));
-      rect.setAttribute("height", String(box[3] + 2 * pad2));
+      rect.setAttribute("x", String(box2[0] - pad2));
+      rect.setAttribute("y", String(box2[1] - pad2));
+      rect.setAttribute("width", String(box2[2] + 2 * pad2));
+      rect.setAttribute("height", String(box2[3] + 2 * pad2));
       rect.setAttribute("rx", String(pad2));
       rect.setAttribute("class", `mark ${cls}`);
       const title3 = document.createElementNS(SVG_NS2, "title");
@@ -7831,7 +7831,7 @@ ${rules}`;
     const take2 = takeState(m2, row3);
     const what = p2.status === "changed" ? whatChanged(p2) : [];
     const summary2 = p2.status === "added" ? `Only in ${m2.right.label}` : p2.status === "removed" ? `Only in ${m2.left.label}` : p2.status === "same" ? p2.moved ? "The same slide, moved" : "No differences" : `${p2.moved ? "Moved, and changed: " : "Changed: "}${what.join(", ")}`;
-    const box = h(
+    const box2 = h(
       "div",
       { class: "cmp-info" },
       h(
@@ -7854,7 +7854,7 @@ ${rules}`;
       )
     );
     if (p2.files.length) {
-      box.append(
+      box2.append(
         h("h4", {}, "Files"),
         h(
           "div",
@@ -7872,7 +7872,7 @@ ${rules}`;
       );
     }
     if (p2.settings.length) {
-      box.append(
+      box2.append(
         h("h4", {}, "In deck.py"),
         h(
           "div",
@@ -7883,7 +7883,7 @@ ${rules}`;
     }
     if (p2.elements.length) {
       const n3 = (k2) => p2.elements.filter((e2) => e2.change === k2).length;
-      box.append(
+      box2.append(
         h(
           "div",
           { class: "hint cmp-elcount" },
@@ -7895,7 +7895,7 @@ ${rules}`;
       const a2 = left?.notes ?? "";
       const bText = right?.notes ?? "";
       const parts = wordDiff(a2, bText);
-      box.append(
+      box2.append(
         h("h4", {}, p2.notes ? "Speaker notes (changed)" : "Speaker notes"),
         parts.length ? h(
           "div",
@@ -7906,7 +7906,7 @@ ${rules}`;
         ) : h("div", { class: "hint" }, "No notes")
       );
     }
-    return box;
+    return box2;
   }
   async function taking() {
     if (!model) return;
@@ -8338,7 +8338,7 @@ ${UNDO_NOTICE}` : question)) {
   function commitGate(summary2, packAndCommit, commitAnyway) {
     const remaining = remainingLines(summary2.items);
     const busy = (b2) => {
-      for (const btn of box.querySelectorAll("button"))
+      for (const btn of box2.querySelectorAll("button"))
         btn.disabled = b2;
     };
     const primary = h(
@@ -8355,7 +8355,7 @@ ${UNDO_NOTICE}` : question)) {
       },
       "Pack and commit"
     );
-    const box = openDialog(
+    const box2 = openDialog(
       "Commit: pack the deck first?",
       h(
         "div",
@@ -8936,6 +8936,46 @@ Continue?`)) return null;
     void refreshGit();
     return res;
   }
+  async function gitCommands() {
+    await refreshGit();
+    if (!status.git) return [];
+    const group2 = "Git";
+    if (!status.repo) {
+      return [
+        {
+          label: "Create a git repository",
+          group: group2,
+          run: () => void git("init")
+        }
+      ];
+    }
+    const out = [];
+    const n3 = status.changes?.length ?? 0;
+    if (n3 && status.branch)
+      out.push({ label: "Commit\u2026", group: group2, run: () => commitDialog() });
+    if (status.remotes?.length && status.branch)
+      out.push({ label: "Push", group: group2, run: () => void git("push") });
+    if (status.upstream)
+      out.push({ label: "Pull", group: group2, run: () => void git("pull") });
+    if ((status.changes ?? []).some((c2) => c2.inDeck))
+      out.push({
+        label: "Discard changes\u2026",
+        group: group2,
+        run: () => discardDialog()
+      });
+    if (status.hasCommits) {
+      out.push(
+        { label: "Branches\u2026", group: group2, run: () => void branchesDialog() },
+        { label: "History\u2026", group: group2, run: () => void historyDialog() }
+      );
+    }
+    out.push({
+      label: "Compare with\u2026",
+      group: group2,
+      run: () => void openComparePicker()
+    });
+    return out;
+  }
   var runGit = git;
   async function openMenu2() {
     await refreshGit();
@@ -9181,15 +9221,15 @@ Continue?`)) return null;
     );
   }
   function fileRow2(change, checked) {
-    const box = h("input", {
+    const box2 = h("input", {
       type: "checkbox",
       value: change.path
     });
-    box.checked = checked;
+    box2.checked = checked;
     return h(
       "label",
       { class: `git-file${change.inDeck ? "" : " outside"}` },
-      box,
+      box2,
       h("span", { class: `git-status s-${change.status}` }, change.status),
       h("code", { class: "git-path" }, change.path)
     );
@@ -10107,18 +10147,18 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       );
     }
     const sharedRows = plan2.shared.map((f2) => {
-      const box = h("input", {
+      const box2 = h("input", {
         type: "checkbox",
         value: f2.path
       });
-      box.addEventListener("change", () => {
-        if (box.checked) shared.add(f2.path);
+      box2.addEventListener("change", () => {
+        if (box2.checked) shared.add(f2.path);
         else shared.delete(f2.path);
       });
       return h(
         "label",
         { class: "git-file" },
-        box,
+        box2,
         h("span", { class: `git-status s-${f2.status}` }, f2.status),
         h("code", { class: "git-path" }, f2.path),
         h("span", { class: "hint" }, "other slides change too")
@@ -10386,19 +10426,19 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       );
       offers.replaceChildren(
         ...p2.offered.map((o2) => {
-          const box = h("input", {
+          const box2 = h("input", {
             type: "checkbox",
             value: o2.path
           });
-          box.checked = ticked.has(o2.path);
-          box.addEventListener("change", () => {
-            if (box.checked) ticked.add(o2.path);
+          box2.checked = ticked.has(o2.path);
+          box2.addEventListener("change", () => {
+            if (box2.checked) ticked.add(o2.path);
             else ticked.delete(o2.path);
           });
           return h(
             "label",
             { class: "git-file" },
-            box,
+            box2,
             h("span", { class: `git-status s-${o2.status}` }, o2.status),
             h("code", { class: "git-path" }, o2.path)
           );
@@ -10729,16 +10769,16 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       this.used = /* @__PURE__ */ new Map();
     }
     end() {
-      for (const [key, box] of this.cache) {
-        if (this.used.get(key) !== box) this.watch?.unobserve(box);
+      for (const [key, box2] of this.cache) {
+        if (this.used.get(key) !== box2) this.watch?.unobserve(box2);
       }
       this.cache = this.used;
     }
     /** A thumbnail taken out of its view by hand is no longer kept. */
     forget(svg) {
-      const box = svg == null ? void 0 : this.cache.get(svg);
-      if (!box || box.isConnected) return;
-      this.watch?.unobserve(box);
+      const box2 = svg == null ? void 0 : this.cache.get(svg);
+      if (!box2 || box2.isConnected) return;
+      this.watch?.unobserve(box2);
       this.cache.delete(svg);
     }
     observer() {
@@ -10758,17 +10798,17 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       );
       return this.watch;
     }
-    empty(box) {
-      if (!this.drawn.has(box)) return;
-      this.drawn.delete(box);
-      box.replaceChildren();
+    empty(box2) {
+      if (!this.drawn.has(box2)) return;
+      this.drawn.delete(box2);
+      box2.replaceChildren();
     }
-    draw(box) {
-      const markup = this.svgs.get(box);
-      if (markup == null || this.drawn.get(box) === markup) return;
-      this.drawn.set(box, markup);
-      box.innerHTML = markup;
-      const svg = box.querySelector("svg");
+    draw(box2) {
+      const markup = this.svgs.get(box2);
+      if (markup == null || this.drawn.get(box2) === markup) return;
+      this.drawn.set(box2, markup);
+      box2.innerHTML = markup;
+      const svg = box2.querySelector("svg");
       if (!svg) return;
       const vb = parseViewBox(svg.getAttribute("viewBox"));
       svg.setAttribute("width", "100%");
@@ -10784,27 +10824,27 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       scheduleFit(svg);
     }
     thumb(slide) {
-      const box = h("div", { class: "thumb" });
+      const box2 = h("div", { class: "thumb" });
       if (slide.visibleIndex == null) {
-        box.append(h("div", { class: "thumb-hidden" }, icon("eyeOff", 18)));
-        return box;
+        box2.append(h("div", { class: "thumb-hidden" }, icon("eyeOff", 18)));
+        return box2;
       }
       const data = ed.slides[slide.visibleIndex];
-      if (!data) return box;
+      if (!data) return box2;
       const key = data.svg;
       const cached = this.cache.get(key);
       if (cached && !this.used.has(key)) {
         this.used.set(key, cached);
         return cached;
       }
-      this.used.set(key, box);
-      this.svgs.set(box, data.svg);
+      this.used.set(key, box2);
+      this.svgs.set(box2, data.svg);
       const vb = parseViewBox(rootViewBox(data.svg));
-      box.style.aspectRatio = `${vb.w} / ${vb.h}`;
+      box2.style.aspectRatio = `${vb.w} / ${vb.h}`;
       const watch = this.observer();
-      if (watch) watch.observe(box);
-      else this.draw(box);
-      return box;
+      if (watch) watch.observe(box2);
+      else this.draw(box2);
+      return box2;
     }
   };
   var ROOT_VIEWBOX = /^<svg\b[^>]*?\sviewBox="([^"]*)"/;
@@ -11615,10 +11655,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     emit("history");
   }
   function sentAway(reason) {
-    const box = document.getElementById("build-error");
-    if (box) {
-      box.textContent = `Disconnected: ${reason || "this link no longer opens the deck"}. Ask the person sharing it for a new link.`;
-      box.classList.add("show");
+    const box2 = document.getElementById("build-error");
+    if (box2) {
+      box2.textContent = `Disconnected: ${reason || "this link no longer opens the deck"}. Ask the person sharing it for a new link.`;
+      box2.classList.add("show");
     }
   }
   function agentEdit(msg) {
@@ -11773,14 +11813,14 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     }
     return { delta, at: [...at3] };
   }
-  function snapBox(box, targets2, threshold) {
+  function snapBox(box2, targets2, threshold) {
     const x2 = best(
-      [box.x, box.x + box.width / 2, box.x + box.width],
+      [box2.x, box2.x + box2.width / 2, box2.x + box2.width],
       targets2.xs,
       threshold
     );
     const y2 = best(
-      [box.y, box.y + box.height / 2, box.y + box.height],
+      [box2.y, box2.y + box2.height / 2, box2.y + box2.height],
       targets2.ys,
       threshold
     );
@@ -12115,9 +12155,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const parentCTM = parent?.getScreenCTM?.();
     const attrs2 = {};
     for (const a2 of GEOM_ATTRS) attrs2[a2] = el2.getAttribute(a2);
-    let box = { x: 0, y: 0, width: 0, height: 0 };
+    let box2 = { x: 0, y: 0, width: 0, height: 0 };
     try {
-      box = measure(el2)?.bbox ?? box;
+      box2 = measure(el2)?.bbox ?? box2;
     } catch {
     }
     return {
@@ -12126,7 +12166,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       attrs: attrs2,
       own: parseTransform(el2.getAttribute("transform")),
       parentToSlide: parentCTM ? multiply(invert(rootCTM()), mat(parentCTM)) : { ...IDENTITY },
-      localBox: box
+      localBox: box2
     };
   }
   function isZone(el2) {
@@ -12430,7 +12470,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const transformable = ed.selection.filter((s2) => canTransform(s2.el));
     const lone = ed.selection.length === 1 ? ed.selection[0].el : null;
     const connector = lone && isConnector(lone) && canTransform(lone) ? lone : null;
-    const box = !connector && transformable.length === ed.selection.length ? selectionBox() : null;
+    const box2 = !connector && transformable.length === ed.selection.length ? selectionBox() : null;
     if (connector && ed.step == null) {
       const m2 = slideToPaper();
       for (const which of ["start", "end"]) {
@@ -12462,8 +12502,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         overlay2.append(handle2);
       }
     }
-    if (box && ed.step == null) {
-      const pb = toPaperBox(box);
+    if (box2 && ed.step == null) {
+      const pb = toPaperBox(box2);
       if (ed.selection.length > 1) {
         overlay2.append(
           svgEl("rect", {
@@ -12619,8 +12659,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       if (!src || z.zone === "slide-number" || z.zone === "slide-total")
         continue;
       const own = parseTransform(z.transform);
-      const box = transformBox(own, z);
-      const pb = toPaperBox(box);
+      const box2 = transformBox(own, z);
+      const pb = toPaperBox(box2);
       const media = MEDIA_ZONES.test(z.zone);
       const outline = svgEl("rect", {
         x: pb.x,
@@ -13609,12 +13649,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       }
       if (moved) {
         const offset = pageOffset(diagram);
-        const box = offset ? pageBox(el2, offset) : null;
-        if (offset && box) {
+        const box2 = offset ? pageBox(el2, offset) : null;
+        if (offset && box2) {
           ops.push({
             kind: "cell-geometry",
             cell,
-            ...box,
+            ...box2,
             offset: [offset.x, offset.y]
           });
         }
@@ -14035,8 +14075,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     let size4 = newChartBox();
     if (target.kind === "edit") {
       const el2 = slideRoot()?.querySelector(`[id="zone-${target.zone}"]`);
-      const box = el2 ? slideBox(el2) : null;
-      if (box) size4 = { ...size4, width: box.width, height: box.height };
+      const box2 = el2 ? slideBox(el2) : null;
+      if (box2) size4 = { ...size4, width: box2.width, height: box2.height };
     }
     const table = h("table", { class: "chart-grid" });
     const fields = h("div", { class: "chart-fields" });
@@ -14188,13 +14228,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       renderAll();
     });
     function check(label4, on2, set) {
-      const box = h("input", { type: "checkbox" });
-      box.checked = on2;
-      box.addEventListener("change", () => {
-        set(box.checked);
+      const box2 = h("input", { type: "checkbox" });
+      box2.checked = on2;
+      box2.addEventListener("change", () => {
+        set(box2.checked);
         renderFields();
       });
-      return h("label", { class: "chart-check" }, box, label4);
+      return h("label", { class: "chart-check" }, box2, label4);
     }
     function select2(options, value, set) {
       const sel = h("select", {});
@@ -14256,13 +14296,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       const twoAxes = secondAxisAllowed(settings2);
       for (const c2 of choices) {
         const usable = numeric.includes(c2);
-        const box = check(c2, shown3.includes(c2), (on2) => {
+        const box2 = check(c2, shown3.includes(c2), (on2) => {
           settings2.y = toggleSeries(grid, settings2, c2, on2);
           if (!on2) settings2.y2 = toggleRight(settings2, c2, false);
         });
         if (!usable) {
-          box.classList.add("off");
-          box.title = "Not all numbers";
+          box2.classList.add("off");
+          box2.title = "Not all numbers";
         }
         if (twoAxes && usable && shown3.includes(c2)) {
           const right = check(
@@ -14275,9 +14315,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           right.classList.add("chart-right");
           right.title = `Draw ${c2} against a second axis, on the right`;
           series.append(
-            h("span", { class: "chart-series-row" }, box, right)
+            h("span", { class: "chart-series-row" }, box2, right)
           );
-        } else series.append(box);
+        } else series.append(box2);
       }
       fields.append(
         h(
@@ -14394,10 +14434,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       const src = ownSource();
       const slide = currentSlide();
       if (!src || !slide) return;
-      const box = newChartBox(target.at);
+      const box2 = newChartBox(target.at);
       const parent = insertParent();
-      const a2 = toParent(parent.el, box.x, box.y);
-      const b2 = toParent(parent.el, box.x + box.width, box.y + box.height);
+      const a2 = toParent(parent.el, box2.x, box2.y);
+      const b2 = toParent(parent.el, box2.x + box2.width, box2.y + box2.height);
       const res = await edit({
         action: "insert-chart",
         slide: slide.deckIndex,
@@ -14836,8 +14876,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     }
     const now = drawnById(id);
     const src = now ? sourceOf(keyOf(now)) : null;
-    const box = now ? alignedBox(now, svg) : null;
-    if (!now || !src || !box || !latest()) return;
+    const box2 = now ? alignedBox(now, svg) : null;
+    if (!now || !src || !box2 || !latest()) return;
     const result = await edit(
       {
         action: "drawio-save",
@@ -14849,7 +14889,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           hash: src.hash,
           loc: now.getAttribute("data-ink") ?? ""
         },
-        box,
+        box: box2,
         coalesce: step2
       },
       { retrying: true }
@@ -15770,10 +15810,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     }
   }
   function fieldsEditor(schema, values, commit) {
-    const box = h("div", { class: "fields" });
+    const box2 = h("div", { class: "fields" });
     for (const f2 of schema) {
       const label4 = f2.name.replace(/_/g, " ");
-      box.append(
+      box2.append(
         row5(
           label4,
           fieldControl(
@@ -15784,7 +15824,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         )
       );
     }
-    return box;
+    return box2;
   }
   var MEDIA_LABELS = {
     fit: "Fit",
@@ -15948,29 +15988,29 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const x2 = xColumn(grid, s2);
     const shown3 = s2.y ?? numeric.filter((c2) => c2 !== x2);
     const check = (label4, on2, fn) => {
-      const box = h("input", { type: "checkbox" });
-      box.checked = on2;
-      box.addEventListener("change", () => fn(box.checked));
-      return row5(label4, box);
+      const box2 = h("input", { type: "checkbox" });
+      box2.checked = on2;
+      box2.addEventListener("change", () => fn(box2.checked));
+      return row5(label4, box2);
     };
     const series = h("div", { class: "chart-series" });
     const twoAxes = secondAxisAllowed(s2);
     for (const c2 of grid.columns.filter((c3) => c3 !== x2)) {
-      const box = h("input", { type: "checkbox" });
-      box.checked = shown3.includes(c2);
-      box.disabled = !numeric.includes(c2);
-      box.addEventListener("change", () => {
+      const box2 = h("input", { type: "checkbox" });
+      box2.checked = shown3.includes(c2);
+      box2.disabled = !numeric.includes(c2);
+      box2.addEventListener("change", () => {
         const next = grid.columns.filter(
-          (n3) => n3 === c2 ? box.checked : shown3.includes(n3)
+          (n3) => n3 === c2 ? box2.checked : shown3.includes(n3)
         );
         const auto = numeric.filter((n3) => n3 !== x2);
         const same = next.length === auto.length && next.every((n3, i2) => n3 === auto[i2]);
         commit({
           y: same ? null : next,
-          ...box.checked ? {} : { y2: toggleRight(s2, c2, false) }
+          ...box2.checked ? {} : { y2: toggleRight(s2, c2, false) }
         });
       });
-      const entry = h("label", { class: "chart-check" }, box, c2);
+      const entry = h("label", { class: "chart-check" }, box2, c2);
       if (twoAxes && shown3.includes(c2) && numeric.includes(c2)) {
         const right = h("input", { type: "checkbox" });
         right.checked = (s2.y2 ?? []).includes(c2);
@@ -17141,7 +17181,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function connectionPointsSection(sel) {
     const n3 = sitesPerSide(sel.el);
-    const box = section2(
+    const box2 = section2(
       "Connection points",
       row5(
         "Per side",
@@ -17171,12 +17211,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         )
       )
     );
-    box.addEventListener(
+    box2.addEventListener(
       "mouseenter",
       () => showSites([{ el: sel.el, active: null }])
     );
-    box.addEventListener("mouseleave", () => showSites([]));
-    return box;
+    box2.addEventListener("mouseleave", () => showSites([]));
+    return box2;
   }
   function textBoxSection(sel) {
     const el2 = sel.el;
@@ -17191,9 +17231,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       label4
     );
     const shown3 = el2.hasAttribute("inkflow:show-shape");
-    const box = h("input", { type: "checkbox" });
-    box.checked = shown3;
-    box.addEventListener(
+    const box2 = h("input", { type: "checkbox" });
+    box2.checked = shown3;
+    box2.addEventListener(
       "change",
       () => void sendSvgOps(
         [
@@ -17204,19 +17244,19 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
                 kind: "attrs",
                 loc: sel.loc,
                 set: {
-                  "inkflow:show-shape": box.checked ? "true" : null
+                  "inkflow:show-shape": box2.checked ? "true" : null
                 }
               }
             ]
           }
         ],
-        box.checked ? "Show box" : "Hide box"
+        box2.checked ? "Show box" : "Hide box"
       )
     );
     const padding = parseFloat(value("--inkflow-padding"));
     return section2(
       "Text box",
-      row5("Draw the box", box),
+      row5("Draw the box", box2),
       row5(
         "Padding",
         numberInput(
@@ -17380,9 +17420,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       h("span", { class: "prop-label" }, "Text size"),
       h("span", { class: "text-size" }, down, value, up)
     );
-    const box = h("input", { type: "checkbox" });
-    box.checked = fitting;
-    box.addEventListener("change", () => setFit(box.checked));
+    const box2 = h("input", { type: "checkbox" });
+    box2.checked = fitting;
+    box2.addEventListener("change", () => setFit(box2.checked));
     const shrunk = Number.parseFloat(fo.getAttribute("data-inkflow-fit") ?? "");
     const overflow = fo.hasAttribute("data-inkflow-overflow");
     const status3 = [];
@@ -17440,7 +17480,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return section2(
       "Text size",
       sizeRow,
-      h("label", { class: "fit-check" }, box, "Shrink text to fit"),
+      h("label", { class: "fit-check" }, box2, "Shrink text to fit"),
       ...status3
     );
   }
@@ -17682,9 +17722,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function editShapesRow(sel, svg) {
     const on2 = shapesEditable(svg);
-    const box = h("input", { type: "checkbox" });
-    box.checked = on2;
-    box.addEventListener("change", () => {
+    const box2 = h("input", { type: "checkbox" });
+    box2.checked = on2;
+    box2.addEventListener("change", () => {
       void sendSvgOps(
         [
           {
@@ -17694,19 +17734,19 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
                 kind: "attrs",
                 loc: sel.loc,
                 set: {
-                  "inkflow:drawio-edit": box.checked ? "shapes" : null
+                  "inkflow:drawio-edit": box2.checked ? "shapes" : null
                 }
               }
             ]
           }
         ],
-        box.checked ? "Edit diagram shapes here" : "Edit diagram in draw.io"
+        box2.checked ? "Edit diagram shapes here" : "Edit diagram in draw.io"
       );
     });
     return h(
       "div",
       {},
-      h("label", { class: "check-row" }, box, " Edit shapes here"),
+      h("label", { class: "check-row" }, box2, " Edit shapes here"),
       h(
         "p",
         { class: "hint" },
@@ -17964,16 +18004,16 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     );
   }
   function geometrySection(sels) {
-    const box = sels.length === 1 ? slideBox(sels[0].el) : selectionBox();
-    if (!box) return h("div");
+    const box2 = sels.length === 1 ? slideBox(sels[0].el) : selectionBox();
+    if (!box2) return h("div");
     const resizeTo = (to) => {
       const plans = sels.map((s2) => {
         const b2 = slideBox(s2.el);
-        const sx = box.width ? to.width / box.width : 1;
-        const sy = box.height ? to.height / box.height : 1;
+        const sx = box2.width ? to.width / box2.width : 1;
+        const sy = box2.height ? to.height / box2.height : 1;
         const target = {
-          x: to.x + (b2.x - box.x) * sx,
-          y: to.y + (b2.y - box.y) * sy,
+          x: to.x + (b2.x - box2.x) * sx,
+          y: to.y + (b2.y - box2.y) * sy,
           width: b2.width * sx,
           height: b2.height * sy
         };
@@ -17993,25 +18033,25 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         { class: "grid2" },
         row5(
           "X",
-          numberInput(box.x, (v2) => resizeTo({ ...box, x: v2 }))
+          numberInput(box2.x, (v2) => resizeTo({ ...box2, x: v2 }))
         ),
         row5(
           "Y",
-          numberInput(box.y, (v2) => resizeTo({ ...box, y: v2 }))
+          numberInput(box2.y, (v2) => resizeTo({ ...box2, y: v2 }))
         ),
         row5(
           "W",
           numberInput(
-            box.width,
-            (v2) => resizeTo({ ...box, width: Math.max(1, v2) }),
+            box2.width,
+            (v2) => resizeTo({ ...box2, width: Math.max(1, v2) }),
             { min: 1 }
           )
         ),
         row5(
           "H",
           numberInput(
-            box.height,
-            (v2) => resizeTo({ ...box, height: Math.max(1, v2) }),
+            box2.height,
+            (v2) => resizeTo({ ...box2, height: Math.max(1, v2) }),
             { min: 1 }
           )
         )
@@ -18023,8 +18063,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           (v2) => {
             const s2 = sels[0];
             const center = {
-              x: box.x + box.width / 2,
-              y: box.y + box.height / 2
+              x: box2.x + box2.width / 2,
+              y: box2.y + box2.height / 2
             };
             const plan2 = planRotate(
               elementGeom(s2.el),
@@ -19290,10 +19330,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       if (!plain(li, cls === TASK_ITEM || !cls ? ["class"] : [])) {
         throw new Unsupported("li with attributes");
       }
-      const box = [...li.childNodes].find(isCheckbox);
-      const task = tasks || cls === TASK_ITEM || box !== void 0;
+      const box2 = [...li.childNodes].find(isCheckbox);
+      const task = tasks || cls === TASK_ITEM || box2 !== void 0;
       const bullet = ordered ? `${n3++}. ` : "- ";
-      const marker = `${bullet}${task ? box?.checked ? "[x] " : "[ ] " : ""}`;
+      const marker = `${bullet}${task ? box2?.checked ? "[x] " : "[ ] " : ""}`;
       const pad2 = " ".repeat(bullet.length);
       const own = [];
       const nested = [];
@@ -19756,10 +19796,10 @@ ${area2.value.slice(pos)}`;
     fo.classList.add("rich-editing");
     fo.style.overflow = "visible";
     content2.contentEditable = "true";
-    for (const box of content2.querySelectorAll(
+    for (const box2 of content2.querySelectorAll(
       "input[type=checkbox]"
     )) {
-      box.disabled = false;
+      box2.disabled = false;
     }
     content2.addEventListener("input", () => fixChecklists(content2));
     content2.spellcheck = true;
@@ -20288,11 +20328,11 @@ ${area2.value.slice(pos)}`;
     pop.style.top = `${Math.min(r2.bottom + 8, window.innerHeight - 140)}px`;
   }
   function checkbox() {
-    const box = h("input", {
+    const box2 = h("input", {
       type: "checkbox",
       class: "task-list-item-checkbox"
     });
-    return box;
+    return box2;
   }
   function fixChecklists(content2) {
     for (const li of content2.querySelectorAll("ul.contains-task-list > li")) {
@@ -21114,7 +21154,7 @@ ${area2.value.slice(pos)}`;
       step: ed.step,
       layoutMode: ed.layoutMode,
       selection: ed.selection.map((s2) => {
-        const box = slideBox(s2.el);
+        const box2 = slideBox(s2.el);
         const text = (s2.el.textContent ?? "").replace(/\s+/g, " ").trim();
         return {
           id: s2.el.getAttribute("id"),
@@ -21122,11 +21162,11 @@ ${area2.value.slice(pos)}`;
           zone: isZone(s2.el) ? zoneName(s2.el) : null,
           file: sourceOf(s2.key)?.rel,
           locator: s2.loc,
-          box: box && {
-            x: Math.round(box.x),
-            y: Math.round(box.y),
-            width: Math.round(box.width),
-            height: Math.round(box.height)
+          box: box2 && {
+            x: Math.round(box2.x),
+            y: Math.round(box2.y),
+            width: Math.round(box2.width),
+            height: Math.round(box2.height)
           },
           text: text.slice(0, 200) || null
         };
@@ -21293,6 +21333,36 @@ Ctrl+click: open in a new tab`;
       toast(`Open it at ${url}`, "error");
     }
     return true;
+  }
+  async function deckCommands() {
+    const data = await info2();
+    if (!data) return [];
+    const group2 = "Deck";
+    const out = [
+      { label: "New deck\u2026", group: group2, run: () => newDeckDialog(data) },
+      { label: "Open deck\u2026", group: group2, run: () => openDeckDialog(data) }
+    ];
+    for (const path of data.recent) {
+      const name2 = baseName2(path.replace(/[\\/]deck\.py$/, ""));
+      out.push(
+        {
+          label: `Open ${name2}`,
+          group: group2,
+          hint: path,
+          run: () => void openDeck(path)
+        },
+        {
+          label: `Open ${name2} in a new tab`,
+          group: group2,
+          hint: path,
+          run: () => void openDeckInTab(path)
+        }
+      );
+    }
+    if (ed.model)
+      out.push({ label: "Files\u2026", group: group2, run: () => void openFiles() });
+    out.push({ label: "Quit Inkflow", group: group2, run: () => void quit() });
+    return out;
   }
   async function openDeck(path) {
     const res = await request({ action: "open-deck", path });
@@ -22046,19 +22116,19 @@ Ctrl+click: open in a new tab`;
     return out;
   }
   function bboxOf(poly2) {
-    const box = {
+    const box2 = {
       minX: Infinity,
       minY: Infinity,
       maxX: -Infinity,
       maxY: -Infinity
     };
     for (let i2 = 0; i2 + 1 < poly2.length; i2 += 2) {
-      box.minX = Math.min(box.minX, poly2[i2]);
-      box.maxX = Math.max(box.maxX, poly2[i2]);
-      box.minY = Math.min(box.minY, poly2[i2 + 1]);
-      box.maxY = Math.max(box.maxY, poly2[i2 + 1]);
+      box2.minX = Math.min(box2.minX, poly2[i2]);
+      box2.maxX = Math.max(box2.maxX, poly2[i2]);
+      box2.minY = Math.min(box2.minY, poly2[i2 + 1]);
+      box2.maxY = Math.max(box2.maxY, poly2[i2 + 1]);
     }
-    return box;
+    return box2;
   }
   function insidePolygon(poly2, x2, y2) {
     let winding = 0;
@@ -22096,8 +22166,8 @@ Ctrl+click: open in a new tab`;
     const d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
     return d1 * d2 < 0 && d3 * d4 < 0;
   }
-  function eraserHits(poly2, box, a2, b2, r2) {
-    if (Math.max(a2.x, b2.x) + r2 < box.minX || Math.min(a2.x, b2.x) - r2 > box.maxX || Math.max(a2.y, b2.y) + r2 < box.minY || Math.min(a2.y, b2.y) - r2 > box.maxY) {
+  function eraserHits(poly2, box2, a2, b2, r2) {
+    if (Math.max(a2.x, b2.x) + r2 < box2.minX || Math.min(a2.x, b2.x) - r2 > box2.maxX || Math.max(a2.y, b2.y) + r2 < box2.minY || Math.min(a2.y, b2.y) - r2 > box2.maxY) {
       return false;
     }
     if (insidePolygon(poly2, a2.x, a2.y) || insidePolygon(poly2, b2.x, b2.y)) {
@@ -23045,6 +23115,727 @@ Ctrl+click: open in a new tab`;
       void save2().then(load);
     });
     on("model", load);
+  }
+
+  // src/ts/editor/palettetext.ts
+  function score(query2, text) {
+    const q = query2.toLowerCase().replace(/\s+/g, " ").trim();
+    if (!q) return 0;
+    const t2 = text.toLowerCase();
+    const direct = t2.indexOf(q);
+    if (direct === 0) return 1e3 - t2.length;
+    if (direct > 0) {
+      const wordStart = /[\s\-_/.:(]/.test(t2[direct - 1]);
+      return (wordStart ? 800 : 600) - direct - t2.length / 10;
+    }
+    let s2 = 0;
+    let at3 = 0;
+    let run = 0;
+    for (const ch of q) {
+      if (ch === " ") continue;
+      const found = t2.indexOf(ch, at3);
+      if (found < 0) return null;
+      const start = found === 0 || /[\s\-_/.:(]/.test(t2[found - 1]);
+      run = found === at3 ? run + 1 : 0;
+      s2 += 10 + (start ? 15 : 0) + run * 5 - Math.min(found - at3, 10);
+      at3 = found + 1;
+    }
+    return s2 - t2.length / 10;
+  }
+  function rank2(entries, query2, limit = 60) {
+    const scored = [];
+    entries.forEach((e2, k2) => {
+      const best2 = Math.max(
+        score(query2, e2.label) ?? -Infinity,
+        (score(query2, `${e2.group} ${e2.label}`) ?? -Infinity) - 50,
+        e2.hint ? (score(query2, e2.hint) ?? -Infinity) - 100 : -Infinity
+      );
+      if (best2 > -Infinity) scored.push({ e: e2, s: best2, k: k2 });
+    });
+    const n3 = /^\d+$/.test(query2.trim()) ? Number(query2.trim()) : null;
+    if (n3 != null) {
+      for (const item2 of scored) {
+        if (item2.e.group === "Slide" && item2.e.label.startsWith(`${n3} `))
+          item2.s += 5e3;
+      }
+    }
+    scored.sort((a2, b2) => b2.s - a2.s || a2.k - b2.k);
+    return scored.slice(0, limit).map((x2) => x2.e);
+  }
+  function fromTitle(title3) {
+    const m2 = /^(.*?)\s*\(([^()]*)\)\s*$/.exec(title3.split("\n")[0]);
+    if (m2 && /^(Ctrl|Shift|Alt|⌘|[A-Z0-9]$|F\d|Esc)/.test(m2[2])) {
+      return { label: m2[1].trim(), keys: m2[2].trim() };
+    }
+    return { label: title3.split("\n")[0].trim() };
+  }
+
+  // src/ts/editor/theme.ts
+  var SEMANTIC = [
+    ["bg", "Background"],
+    ["surface", "Surface (cards)"],
+    ["border", "Border"],
+    ["text", "Text"],
+    ["text_muted", "Muted text"],
+    ["heading", "Headings"],
+    ["accent", "Accent"],
+    ["accent_fg", "Text on accent"],
+    ["link", "Links"],
+    ["code_bg", "Code background"],
+    ["code_text", "Code text"],
+    ["blockquote", "Quote bar"]
+  ];
+  var NAMED = [
+    "red",
+    "orange",
+    "yellow",
+    "green",
+    "teal",
+    "blue",
+    "purple",
+    "pink",
+    "grey"
+  ];
+  var FONTS = [
+    ["body_font", "Body", "sans-serif"],
+    ["heading_font", "Headings", "sans-serif"],
+    ["mono_font", "Code", "monospace"],
+    ["math_font", "Maths", "math"]
+  ];
+  var info3 = null;
+  var report2 = null;
+  var content = null;
+  var cssVar = (name2) => `--inkflow-${name2.replace(/_/g, "-")}`;
+  function toHex(value) {
+    if (/^#[0-9a-f]{6}$/i.test(value)) return value.toLowerCase();
+    if (/^#[0-9a-f]{3}$/i.test(value)) {
+      return `#${[...value.slice(1)].map((c2) => c2 + c2).join("")}`.toLowerCase();
+    }
+    const probe = h("span", {});
+    probe.style.color = value;
+    document.body.append(probe);
+    const rgb = getComputedStyle(probe).color.match(/\d+/g) ?? ["0", "0", "0"];
+    probe.remove();
+    return `#${rgb.slice(0, 3).map((n3) => Number(n3).toString(16).padStart(2, "0")).join("")}`;
+  }
+  async function save3(body3, label4) {
+    await edit({ action: "theme-set", label: label4, ...body3 });
+  }
+  function setToken(group2, name2, value) {
+    void save3({ changes: { [group2]: { [name2]: value } } }, "Theme");
+  }
+  function colorCell(mode2, name2) {
+    const t2 = info3;
+    const own = t2.overrides[mode2][name2];
+    const value = own ?? t2.values[mode2][name2] ?? "#000000";
+    const input = h("input", {
+      type: "color",
+      value: toHex(value),
+      title: `${cssVar(name2)} (${mode2})${own ? " \xB7 changed" : ""}`
+    });
+    input.addEventListener("input", () => {
+      const showing = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+      if (showing === mode2) {
+        document.documentElement.style.setProperty(
+          cssVar(name2),
+          input.value
+        );
+      }
+    });
+    input.addEventListener("change", () => setToken(mode2, name2, input.value));
+    return h(
+      "span",
+      { class: `theme-color${own ? " changed" : ""}` },
+      input,
+      own ? h(
+        "button",
+        {
+          type: "button",
+          class: "theme-reset",
+          title: "Back to the theme's colour",
+          onclick: () => setToken(mode2, name2, null)
+        },
+        "\u21BA"
+      ) : null
+    );
+  }
+  function colorsTable() {
+    const rows = [
+      h(
+        "div",
+        { class: "theme-row head" },
+        h("span", {}, ""),
+        h("span", {}, "Dark"),
+        h("span", {}, "Light")
+      )
+    ];
+    const add = (name2, label4) => rows.push(
+      h(
+        "div",
+        { class: "theme-row" },
+        h("span", { class: "theme-label" }, label4),
+        colorCell("dark", name2),
+        colorCell("light", name2)
+      )
+    );
+    for (const [name2, label4] of SEMANTIC) add(name2, label4);
+    rows.push(h("div", { class: "theme-sub" }, "Named colours"));
+    for (const name2 of NAMED) add(name2, name2[0].toUpperCase() + name2.slice(1));
+    return h("div", { class: "theme-colors" }, ...rows);
+  }
+  function fontRow(name2, label4, generic) {
+    const t2 = info3;
+    const own = t2.overrides.typography[name2];
+    const value = own ?? t2.values.typography[name2] ?? generic;
+    const input = h("input", {
+      type: "text",
+      list: "theme-font-list",
+      value,
+      placeholder: generic,
+      spellcheck: "false"
+    });
+    input.addEventListener("change", () => {
+      const v2 = input.value.trim();
+      if (!v2) {
+        setToken("typography", name2, null);
+        return;
+      }
+      void (async () => {
+        const res = await edit({
+          action: "fonts",
+          op: "set",
+          role: name2.replace(/_font$/, ""),
+          family: v2,
+          label: `Font: ${label4}`
+        });
+        if (!res.ok) {
+          input.value = value;
+          return;
+        }
+        const bundle = res.bundle;
+        if (bundle?.families?.length) {
+          toast(`Copied ${bundle.families.join(", ")} into fonts/`, "ok");
+        } else if (typeof res.note === "string") {
+          toast(res.note, "info");
+        }
+      })();
+    });
+    const sample = h("span", { class: "theme-font-sample" }, "Aa Bb 123");
+    sample.style.fontFamily = value;
+    return h(
+      "div",
+      { class: "theme-font" },
+      h("span", { class: "theme-label" }, label4),
+      input,
+      sample,
+      own ? h(
+        "button",
+        {
+          type: "button",
+          class: "theme-reset",
+          title: "Back to the theme's font",
+          onclick: () => setToken("typography", name2, null)
+        },
+        "\u21BA"
+      ) : null
+    );
+  }
+  function render4() {
+    if (!content || !info3) return;
+    const t2 = info3;
+    clear(content);
+    const theme = h("select", {});
+    for (const { id, label: label4 } of t2.themes) {
+      theme.append(h("option", { value: id }, label4));
+    }
+    if (t2.theme === null) {
+      theme.append(
+        h("option", { value: "", disabled: true }, `${t2.name} (deck.py)`)
+      );
+    }
+    theme.value = t2.theme ?? "";
+    theme.disabled = !ed.model?.deckEditable;
+    theme.addEventListener(
+      "change",
+      () => void save3({ theme: theme.value }, "Theme")
+    );
+    const mode2 = h("select", {});
+    for (const [v2, l2] of [
+      ["", `Theme default (${t2.themeMode})`],
+      ["dark", "Dark"],
+      ["light", "Light"]
+    ]) {
+      mode2.append(h("option", { value: v2 }, l2));
+    }
+    mode2.value = t2.deckMode ?? "";
+    mode2.disabled = !ed.model?.deckEditable;
+    mode2.addEventListener(
+      "change",
+      () => void save3({ mode: mode2.value || null }, "Colour mode")
+    );
+    const size4 = h("input", {
+      type: "number",
+      min: 8,
+      max: 200,
+      value: t2.fontSize ?? "",
+      placeholder: String(t2.themeFontSize)
+    });
+    size4.disabled = !ed.model?.deckEditable;
+    size4.addEventListener("change", () => {
+      const n3 = parseInt(size4.value, 10);
+      void save3({ fontSize: Number.isFinite(n3) ? n3 : null }, "Font size");
+    });
+    const list4 = h("datalist", { id: "theme-font-list" });
+    for (const f2 of ["sans-serif", "serif", "monospace", ...t2.fonts]) {
+      list4.append(h("option", { value: f2 }));
+    }
+    content.append(
+      h(
+        "div",
+        { class: "theme-top" },
+        h("label", {}, h("span", {}, "Theme"), theme),
+        h("label", {}, h("span", {}, "Colour mode"), mode2),
+        h("label", {}, h("span", {}, "Base font size (px)"), size4)
+      ),
+      h("h3", {}, "Fonts"),
+      list4,
+      ...FONTS.map(([n3, l2, g2]) => fontRow(n3, l2, g2)),
+      h(
+        "p",
+        { class: "hint" },
+        "Inter, JetBrains Mono, STIX Two Math and Twemoji come with inkflow and look the same everywhere. Fonts found in fonts/, the theme or this computer are embedded in the deck too."
+      ),
+      fontsReport(),
+      h("h3", {}, "Colours"),
+      colorsTable(),
+      h(
+        "p",
+        { class: "hint" },
+        "Changes are written to styles.css (one marked block) and deck.py; \u21BA goes back to the theme."
+      )
+    );
+  }
+  var WHERE = {
+    project: "in the deck (fonts/)",
+    theme: "ships with inkflow / the theme",
+    machine: "this computer only",
+    missing: "not installed",
+    generic: "each machine's own"
+  };
+  function fontsReport() {
+    const families = report2?.families ?? [];
+    const box2 = h("div", { class: "theme-fonts-report" });
+    if (!report2) {
+      box2.append(
+        h("p", { class: "hint" }, "Checking where the fonts come from\u2026")
+      );
+      return box2;
+    }
+    if (!families.length) {
+      box2.append(h("p", { class: "hint" }, "The deck names no font."));
+      return box2;
+    }
+    box2.append(
+      h(
+        "div",
+        { class: "theme-sub" },
+        "Where each font comes from (on another machine only the deck's and inkflow's fonts are there)"
+      ),
+      ...families.map(
+        (f2) => h(
+          "div",
+          {
+            class: `font-source ${f2.where}`,
+            "data-family": f2.family,
+            title: f2.message || f2.files.map((x2) => x2.path).join("\n")
+          },
+          h("span", { class: "font-family" }, f2.family),
+          h("span", { class: `font-where ${f2.where}` }, WHERE[f2.where]),
+          h("span", { class: "font-faces" }, f2.faces.join(", ")),
+          f2.message ? h("span", { class: "font-message hint" }, f2.message) : null
+        )
+      )
+    );
+    const machine = families.filter((f2) => f2.where === "machine");
+    const bundle = h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn",
+        "data-fonts": "bundle",
+        title: "Copy the fonts only this computer has into the deck's fonts/, with their licences",
+        onclick: () => void bundleFonts()
+      },
+      "Bundle fonts into the deck"
+    );
+    bundle.disabled = machine.length === 0;
+    box2.append(h("div", { class: "btn-row" }, bundle));
+    return box2;
+  }
+  async function bundleFonts() {
+    const plan2 = await request({ action: "fonts", op: "bundle", dryRun: true });
+    if (!plan2.ok) {
+      toast(plan2.error ?? "cannot bundle fonts", "error");
+      return;
+    }
+    const b2 = plan2.bundle;
+    if (!b2.copies.length) {
+      toast("No font comes from this computer only", "info");
+      return;
+    }
+    const question = [
+      `Copy ${b2.families.join(", ")} into fonts/ (${b2.copies.length} file${b2.copies.length === 1 ? "" : "s"})?`,
+      ...b2.warnings.map((w2) => `\u26A0 ${w2}`)
+    ].join("\n\n");
+    if (!confirm(question)) return;
+    const res = await edit({ action: "fonts", op: "bundle" });
+    if (res.ok) {
+      toast(`Copied ${b2.families.join(", ")} into fonts/`, "ok");
+      await refresh2();
+    }
+  }
+  async function refresh2() {
+    const result = await request({ action: "theme-get" });
+    if (!result.ok) return;
+    info3 = result.theme;
+    render4();
+    const fonts = await request({ action: "fonts" });
+    if (fonts.ok) {
+      report2 = fonts.fonts;
+      render4();
+    }
+  }
+  async function openTheme() {
+    report2 = null;
+    content = h(
+      "div",
+      { class: "theme-body" },
+      h("p", { class: "hint" }, "Loading\u2026")
+    );
+    openDialog("Theme", content, {
+      hint: "Colours, fonts and size for the whole deck",
+      onClose: () => {
+        content = null;
+        document.documentElement.removeAttribute("style");
+      }
+    });
+    await refresh2();
+  }
+  function initTheme() {
+    document.getElementById("btn-theme-panel")?.addEventListener("click", () => {
+      void openTheme();
+    });
+    on("model", () => {
+      document.documentElement.removeAttribute("style");
+      if (content) void refresh2();
+    });
+  }
+
+  // src/ts/editor/palette.ts
+  var box = null;
+  function slideCommands() {
+    const slides = ed.model?.slides ?? [];
+    return slides.map((s2, i2) => ({
+      label: `${i2 + 1} ${s2.title ?? s2.id ?? s2.src}${s2.visible ? "" : " (hidden)"}`,
+      group: "Slide",
+      hint: `${s2.id ?? ""} ${s2.src}`,
+      run: () => {
+        ed.slideSelection.clear();
+        gotoSlide(i2);
+      }
+    }));
+  }
+  function toolbarCommands() {
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const b2 of document.querySelectorAll(
+      "#toolbar button[title]"
+    )) {
+      if (b2.disabled || b2.hidden || !b2.offsetParent) continue;
+      const { label: label4, keys } = fromTitle(b2.title);
+      if (!label4 || seen.has(label4)) continue;
+      seen.add(label4);
+      out.push({ label: label4, group: "Toolbar", keys, run: () => b2.click() });
+    }
+    return out;
+  }
+  function editorCommands() {
+    const i2 = ed.current;
+    const editable = !!ed.model?.deckEditable;
+    const out = [
+      {
+        label: "Undo",
+        group: "Edit",
+        keys: "Ctrl+Z",
+        run: () => void undo()
+      },
+      {
+        label: "Redo",
+        group: "Edit",
+        keys: "Ctrl+Shift+Z",
+        run: () => void redo()
+      },
+      {
+        label: "Find and replace",
+        group: "Edit",
+        keys: "Ctrl+F",
+        run: () => openFind()
+      },
+      { label: "Theme\u2026", group: "Deck", run: () => void openTheme() },
+      { label: "Export\u2026", group: "Deck", run: () => openExport() },
+      {
+        label: "Slide master",
+        group: "View",
+        run: () => void openMaster()
+      },
+      {
+        label: "Grid view",
+        group: "View",
+        keys: "G",
+        run: () => toggleGrid()
+      },
+      {
+        label: "Show / hide the slide list",
+        group: "View",
+        keys: "1",
+        run: () => togglePanel("left")
+      },
+      {
+        label: "Show / hide the notes",
+        group: "View",
+        keys: "2",
+        run: () => togglePanel("bottom")
+      },
+      {
+        label: "Show / hide the properties",
+        group: "View",
+        keys: "3",
+        run: () => togglePanel("right")
+      },
+      {
+        label: "Full screen",
+        group: "View",
+        keys: "F",
+        run: () => toggleFullscreen()
+      },
+      { label: "Problems\u2026", group: "Check", run: () => openProblems() },
+      {
+        label: "Problems on this slide\u2026",
+        group: "Check",
+        run: () => openProblems(i2)
+      },
+      {
+        label: "Add comment",
+        group: "Comments",
+        keys: "Shift+C",
+        run: () => addComment()
+      },
+      {
+        label: "Comments on this slide\u2026",
+        group: "Comments",
+        run: () => openComments(i2)
+      },
+      {
+        label: "Next slide with changes",
+        group: "Git",
+        keys: "Alt+F5",
+        run: () => jumpToChange(1)
+      },
+      {
+        label: "Previous slide with changes",
+        group: "Git",
+        keys: "Shift+Alt+F5",
+        run: () => jumpToChange(-1)
+      },
+      {
+        label: "Compare this slide with the last commit",
+        group: "Git",
+        run: () => compareSlide(i2)
+      },
+      {
+        label: "Commit this slide\u2026",
+        group: "Git",
+        run: () => void commitSlides([i2])
+      },
+      {
+        label: "Discard changes to this slide\u2026",
+        group: "Git",
+        run: () => void discardSlides([i2])
+      },
+      {
+        label: "Compare the deck with the last commit",
+        group: "Git",
+        run: () => openCompare({ kind: "commit", rev: "HEAD" }, { kind: "live" })
+      },
+      {
+        label: "Star / unstar this slide",
+        group: "Slide",
+        keys: "S",
+        run: () => void toggleStar([i2])
+      }
+    ];
+    if (editable) {
+      out.push(
+        {
+          label: "New slide like this one",
+          group: "Slide",
+          keys: "Ctrl+M",
+          run: () => void newSlideLike(i2)
+        },
+        {
+          label: "Duplicate this slide",
+          group: "Slide",
+          run: () => void duplicateSlide(i2)
+        },
+        {
+          label: "Hide / show this slide",
+          group: "Slide",
+          run: () => void toggleHidden(i2)
+        },
+        {
+          label: "Delete this slide",
+          group: "Slide",
+          run: () => void deleteSlide(i2)
+        },
+        {
+          label: "Add a section here",
+          group: "Slide",
+          run: () => void addSectionAt(i2)
+        }
+      );
+    }
+    return out;
+  }
+  function closePalette() {
+    box?.remove();
+    box = null;
+  }
+  async function openPalette(query2 = "") {
+    if (box) {
+      box.querySelector("input")?.focus();
+      return;
+    }
+    const input = h("input", {
+      type: "text",
+      class: "palette-input",
+      placeholder: "Type a command or a slide\u2026",
+      "aria-label": "Command or slide"
+    });
+    input.value = query2;
+    const list4 = h("div", { class: "palette-list", role: "listbox" });
+    box = h(
+      "div",
+      {
+        id: "palette",
+        onpointerdown: (e2) => {
+          if (e2.target === box) closePalette();
+        }
+      },
+      h("div", { class: "palette-box" }, input, list4)
+    );
+    document.body.append(box);
+    input.focus();
+    let all = [
+      ...editorCommands(),
+      ...toolbarCommands(),
+      ...slideCommands()
+    ];
+    let shown3 = [];
+    let at3 = 0;
+    const draw = () => {
+      shown3 = rank2(all, input.value);
+      at3 = Math.min(at3, Math.max(0, shown3.length - 1));
+      clear(list4);
+      shown3.forEach((c2, k2) => {
+        const row6 = h(
+          "div",
+          {
+            class: `palette-row${k2 === at3 ? " on" : ""}`,
+            role: "option",
+            "aria-selected": String(k2 === at3),
+            onpointerdown: (e2) => {
+              e2.preventDefault();
+              run(c2);
+            },
+            onpointermove: () => {
+              if (at3 === k2) return;
+              at3 = k2;
+              mark();
+            }
+          },
+          h("span", { class: "palette-label" }, c2.label),
+          h("span", { class: "palette-group" }, c2.group),
+          c2.keys ? h("kbd", {}, c2.keys) : null
+        );
+        list4.append(row6);
+      });
+      if (!shown3.length)
+        list4.append(
+          h("div", { class: "palette-empty" }, "Nothing matches")
+        );
+    };
+    const mark = () => {
+      list4.querySelectorAll(".palette-row").forEach((r2, k2) => {
+        r2.classList.toggle("on", k2 === at3);
+        r2.setAttribute("aria-selected", String(k2 === at3));
+      });
+      list4.children[at3]?.scrollIntoView({ block: "nearest" });
+    };
+    const run = (c2) => {
+      closePalette();
+      c2.run();
+    };
+    input.addEventListener("input", () => {
+      at3 = 0;
+      draw();
+    });
+    input.addEventListener("keydown", (e2) => {
+      if (e2.key === "ArrowDown" || e2.key === "ArrowUp") {
+        e2.preventDefault();
+        const n3 = shown3.length;
+        if (n3) at3 = (at3 + (e2.key === "ArrowDown" ? 1 : n3 - 1)) % n3;
+        mark();
+      } else if (e2.key === "Enter") {
+        e2.preventDefault();
+        if (shown3[at3]) run(shown3[at3]);
+      } else if (e2.key === "Escape") {
+        e2.preventDefault();
+        closePalette();
+      }
+      e2.stopPropagation();
+    });
+    draw();
+    const more = await Promise.all([
+      gitCommands().catch(() => []),
+      deckCommands().catch(() => [])
+    ]);
+    if (!box) return;
+    all = [...all, ...more.flat()];
+    draw();
+  }
+  function wantsPalette(e2) {
+    const mod = e2.ctrlKey || e2.metaKey;
+    if (mod && !e2.altKey && e2.code === "KeyK" && !e2.shiftKey) return true;
+    if (mod && e2.shiftKey && e2.code === "KeyP") return true;
+    if (e2.key !== " " || mod || e2.altKey || e2.shiftKey) return false;
+    const target = e2.target;
+    if (target?.closest(
+      "input, textarea, select, button, a, [contenteditable], #dialog"
+    ))
+      return false;
+    return !document.body.classList.contains("compare-mode") && !ed.richEditing;
+  }
+  function initPalette() {
+    document.addEventListener(
+      "keydown",
+      (e2) => {
+        if (!wantsPalette(e2)) return;
+        e2.preventDefault();
+        e2.stopImmediatePropagation();
+        void openPalette();
+      },
+      true
+    );
   }
 
   // node_modules/.pnpm/qrcode-generator@2.0.4/node_modules/qrcode-generator/dist/qrcode.mjs
@@ -24940,7 +25731,7 @@ Ctrl+click: open in a new tab`;
     );
   }
   function setupPicture(here) {
-    const box = (title3, lines, mark) => h(
+    const box2 = (title3, lines, mark) => h(
       "div",
       { class: `ssh-box${mark ? " here" : ""}` },
       mark ? h("span", { class: "ssh-here" }, "you are here") : null,
@@ -24967,19 +25758,19 @@ Ctrl+click: open in a new tab`;
       h(
         "div",
         { class: "ssh-machines" },
-        box(
+        box2(
           "Your computer",
           ["a browser", "opens the owner link"],
           here === "laptop"
         ),
         tunnel("right"),
-        box(
+        box2(
           "The server",
           ["runs inkflow", "holds the deck (a git clone)"],
           here === "server"
         ),
         tunnel("left"),
-        box(
+        box2(
           "Each collaborator's computer",
           ["a browser + ssh", "opens an editor or view link"],
           false
@@ -25254,7 +26045,7 @@ Ctrl+click: open in a new tab`;
     ssh = sshView(status2, {
       back: () => {
         ssh = null;
-        render4();
+        render5();
       },
       copy: copy2,
       turnOn: () => sendRaw({ type: "share", op: "on" })
@@ -25289,7 +26080,7 @@ Ctrl+click: open in a new tab`;
     }
     return s2.sharing ? "Shared on the network: people with a link below can join." : "Only this computer can open the deck. Share it to give people on the same network (or VPN) a link.";
   }
-  function render4() {
+  function render5() {
     if (!body2 || !status2) return;
     if (ssh) {
       ssh.update(status2);
@@ -25515,7 +26306,7 @@ Ctrl+click: open in a new tab`;
             title: sharing ? "Stop sharing online to change the relay" : null,
             onclick: () => {
               editingRelay = true;
-              render4();
+              render5();
             }
           },
           "Change relay\u2026"
@@ -25580,7 +26371,7 @@ Ctrl+click: open in a new tab`;
             class: "pbtn",
             onclick: () => {
               editingRelay = false;
-              render4();
+              render5();
             }
           },
           "Cancel"
@@ -25604,7 +26395,7 @@ Ctrl+click: open in a new tab`;
       );
     }
     if (status2.error) toast(status2.error, "error");
-    if (body2 && dialogOpen()) render4();
+    if (body2 && dialogOpen()) render5();
   }
   function openShare() {
     body2 = h("div", { class: "share-dialog" }, h("p", {}, "\u2026"));
@@ -25617,372 +26408,11 @@ Ctrl+click: open in a new tab`;
       }
     });
     sendRaw({ type: "share", op: "status" });
-    render4();
+    render5();
   }
   function initShare() {
     onMessage("share-status", setStatus);
     button9?.addEventListener("click", openShare);
-  }
-
-  // src/ts/editor/theme.ts
-  var SEMANTIC = [
-    ["bg", "Background"],
-    ["surface", "Surface (cards)"],
-    ["border", "Border"],
-    ["text", "Text"],
-    ["text_muted", "Muted text"],
-    ["heading", "Headings"],
-    ["accent", "Accent"],
-    ["accent_fg", "Text on accent"],
-    ["link", "Links"],
-    ["code_bg", "Code background"],
-    ["code_text", "Code text"],
-    ["blockquote", "Quote bar"]
-  ];
-  var NAMED = [
-    "red",
-    "orange",
-    "yellow",
-    "green",
-    "teal",
-    "blue",
-    "purple",
-    "pink",
-    "grey"
-  ];
-  var FONTS = [
-    ["body_font", "Body", "sans-serif"],
-    ["heading_font", "Headings", "sans-serif"],
-    ["mono_font", "Code", "monospace"],
-    ["math_font", "Maths", "math"]
-  ];
-  var info3 = null;
-  var report2 = null;
-  var content = null;
-  var cssVar = (name2) => `--inkflow-${name2.replace(/_/g, "-")}`;
-  function toHex(value) {
-    if (/^#[0-9a-f]{6}$/i.test(value)) return value.toLowerCase();
-    if (/^#[0-9a-f]{3}$/i.test(value)) {
-      return `#${[...value.slice(1)].map((c2) => c2 + c2).join("")}`.toLowerCase();
-    }
-    const probe = h("span", {});
-    probe.style.color = value;
-    document.body.append(probe);
-    const rgb = getComputedStyle(probe).color.match(/\d+/g) ?? ["0", "0", "0"];
-    probe.remove();
-    return `#${rgb.slice(0, 3).map((n3) => Number(n3).toString(16).padStart(2, "0")).join("")}`;
-  }
-  async function save3(body3, label4) {
-    await edit({ action: "theme-set", label: label4, ...body3 });
-  }
-  function setToken(group2, name2, value) {
-    void save3({ changes: { [group2]: { [name2]: value } } }, "Theme");
-  }
-  function colorCell(mode2, name2) {
-    const t2 = info3;
-    const own = t2.overrides[mode2][name2];
-    const value = own ?? t2.values[mode2][name2] ?? "#000000";
-    const input = h("input", {
-      type: "color",
-      value: toHex(value),
-      title: `${cssVar(name2)} (${mode2})${own ? " \xB7 changed" : ""}`
-    });
-    input.addEventListener("input", () => {
-      const showing = document.documentElement.dataset.theme === "light" ? "light" : "dark";
-      if (showing === mode2) {
-        document.documentElement.style.setProperty(
-          cssVar(name2),
-          input.value
-        );
-      }
-    });
-    input.addEventListener("change", () => setToken(mode2, name2, input.value));
-    return h(
-      "span",
-      { class: `theme-color${own ? " changed" : ""}` },
-      input,
-      own ? h(
-        "button",
-        {
-          type: "button",
-          class: "theme-reset",
-          title: "Back to the theme's colour",
-          onclick: () => setToken(mode2, name2, null)
-        },
-        "\u21BA"
-      ) : null
-    );
-  }
-  function colorsTable() {
-    const rows = [
-      h(
-        "div",
-        { class: "theme-row head" },
-        h("span", {}, ""),
-        h("span", {}, "Dark"),
-        h("span", {}, "Light")
-      )
-    ];
-    const add = (name2, label4) => rows.push(
-      h(
-        "div",
-        { class: "theme-row" },
-        h("span", { class: "theme-label" }, label4),
-        colorCell("dark", name2),
-        colorCell("light", name2)
-      )
-    );
-    for (const [name2, label4] of SEMANTIC) add(name2, label4);
-    rows.push(h("div", { class: "theme-sub" }, "Named colours"));
-    for (const name2 of NAMED) add(name2, name2[0].toUpperCase() + name2.slice(1));
-    return h("div", { class: "theme-colors" }, ...rows);
-  }
-  function fontRow(name2, label4, generic) {
-    const t2 = info3;
-    const own = t2.overrides.typography[name2];
-    const value = own ?? t2.values.typography[name2] ?? generic;
-    const input = h("input", {
-      type: "text",
-      list: "theme-font-list",
-      value,
-      placeholder: generic,
-      spellcheck: "false"
-    });
-    input.addEventListener("change", () => {
-      const v2 = input.value.trim();
-      if (!v2) {
-        setToken("typography", name2, null);
-        return;
-      }
-      void (async () => {
-        const res = await edit({
-          action: "fonts",
-          op: "set",
-          role: name2.replace(/_font$/, ""),
-          family: v2,
-          label: `Font: ${label4}`
-        });
-        if (!res.ok) {
-          input.value = value;
-          return;
-        }
-        const bundle = res.bundle;
-        if (bundle?.families?.length) {
-          toast(`Copied ${bundle.families.join(", ")} into fonts/`, "ok");
-        } else if (typeof res.note === "string") {
-          toast(res.note, "info");
-        }
-      })();
-    });
-    const sample = h("span", { class: "theme-font-sample" }, "Aa Bb 123");
-    sample.style.fontFamily = value;
-    return h(
-      "div",
-      { class: "theme-font" },
-      h("span", { class: "theme-label" }, label4),
-      input,
-      sample,
-      own ? h(
-        "button",
-        {
-          type: "button",
-          class: "theme-reset",
-          title: "Back to the theme's font",
-          onclick: () => setToken("typography", name2, null)
-        },
-        "\u21BA"
-      ) : null
-    );
-  }
-  function render5() {
-    if (!content || !info3) return;
-    const t2 = info3;
-    clear(content);
-    const theme = h("select", {});
-    for (const { id, label: label4 } of t2.themes) {
-      theme.append(h("option", { value: id }, label4));
-    }
-    if (t2.theme === null) {
-      theme.append(
-        h("option", { value: "", disabled: true }, `${t2.name} (deck.py)`)
-      );
-    }
-    theme.value = t2.theme ?? "";
-    theme.disabled = !ed.model?.deckEditable;
-    theme.addEventListener(
-      "change",
-      () => void save3({ theme: theme.value }, "Theme")
-    );
-    const mode2 = h("select", {});
-    for (const [v2, l2] of [
-      ["", `Theme default (${t2.themeMode})`],
-      ["dark", "Dark"],
-      ["light", "Light"]
-    ]) {
-      mode2.append(h("option", { value: v2 }, l2));
-    }
-    mode2.value = t2.deckMode ?? "";
-    mode2.disabled = !ed.model?.deckEditable;
-    mode2.addEventListener(
-      "change",
-      () => void save3({ mode: mode2.value || null }, "Colour mode")
-    );
-    const size4 = h("input", {
-      type: "number",
-      min: 8,
-      max: 200,
-      value: t2.fontSize ?? "",
-      placeholder: String(t2.themeFontSize)
-    });
-    size4.disabled = !ed.model?.deckEditable;
-    size4.addEventListener("change", () => {
-      const n3 = parseInt(size4.value, 10);
-      void save3({ fontSize: Number.isFinite(n3) ? n3 : null }, "Font size");
-    });
-    const list4 = h("datalist", { id: "theme-font-list" });
-    for (const f2 of ["sans-serif", "serif", "monospace", ...t2.fonts]) {
-      list4.append(h("option", { value: f2 }));
-    }
-    content.append(
-      h(
-        "div",
-        { class: "theme-top" },
-        h("label", {}, h("span", {}, "Theme"), theme),
-        h("label", {}, h("span", {}, "Colour mode"), mode2),
-        h("label", {}, h("span", {}, "Base font size (px)"), size4)
-      ),
-      h("h3", {}, "Fonts"),
-      list4,
-      ...FONTS.map(([n3, l2, g2]) => fontRow(n3, l2, g2)),
-      h(
-        "p",
-        { class: "hint" },
-        "Inter, JetBrains Mono, STIX Two Math and Twemoji come with inkflow and look the same everywhere. Fonts found in fonts/, the theme or this computer are embedded in the deck too."
-      ),
-      fontsReport(),
-      h("h3", {}, "Colours"),
-      colorsTable(),
-      h(
-        "p",
-        { class: "hint" },
-        "Changes are written to styles.css (one marked block) and deck.py; \u21BA goes back to the theme."
-      )
-    );
-  }
-  var WHERE = {
-    project: "in the deck (fonts/)",
-    theme: "ships with inkflow / the theme",
-    machine: "this computer only",
-    missing: "not installed",
-    generic: "each machine's own"
-  };
-  function fontsReport() {
-    const families = report2?.families ?? [];
-    const box = h("div", { class: "theme-fonts-report" });
-    if (!report2) {
-      box.append(
-        h("p", { class: "hint" }, "Checking where the fonts come from\u2026")
-      );
-      return box;
-    }
-    if (!families.length) {
-      box.append(h("p", { class: "hint" }, "The deck names no font."));
-      return box;
-    }
-    box.append(
-      h(
-        "div",
-        { class: "theme-sub" },
-        "Where each font comes from (on another machine only the deck's and inkflow's fonts are there)"
-      ),
-      ...families.map(
-        (f2) => h(
-          "div",
-          {
-            class: `font-source ${f2.where}`,
-            "data-family": f2.family,
-            title: f2.message || f2.files.map((x2) => x2.path).join("\n")
-          },
-          h("span", { class: "font-family" }, f2.family),
-          h("span", { class: `font-where ${f2.where}` }, WHERE[f2.where]),
-          h("span", { class: "font-faces" }, f2.faces.join(", ")),
-          f2.message ? h("span", { class: "font-message hint" }, f2.message) : null
-        )
-      )
-    );
-    const machine = families.filter((f2) => f2.where === "machine");
-    const bundle = h(
-      "button",
-      {
-        type: "button",
-        class: "pbtn",
-        "data-fonts": "bundle",
-        title: "Copy the fonts only this computer has into the deck's fonts/, with their licences",
-        onclick: () => void bundleFonts()
-      },
-      "Bundle fonts into the deck"
-    );
-    bundle.disabled = machine.length === 0;
-    box.append(h("div", { class: "btn-row" }, bundle));
-    return box;
-  }
-  async function bundleFonts() {
-    const plan2 = await request({ action: "fonts", op: "bundle", dryRun: true });
-    if (!plan2.ok) {
-      toast(plan2.error ?? "cannot bundle fonts", "error");
-      return;
-    }
-    const b2 = plan2.bundle;
-    if (!b2.copies.length) {
-      toast("No font comes from this computer only", "info");
-      return;
-    }
-    const question = [
-      `Copy ${b2.families.join(", ")} into fonts/ (${b2.copies.length} file${b2.copies.length === 1 ? "" : "s"})?`,
-      ...b2.warnings.map((w2) => `\u26A0 ${w2}`)
-    ].join("\n\n");
-    if (!confirm(question)) return;
-    const res = await edit({ action: "fonts", op: "bundle" });
-    if (res.ok) {
-      toast(`Copied ${b2.families.join(", ")} into fonts/`, "ok");
-      await refresh2();
-    }
-  }
-  async function refresh2() {
-    const result = await request({ action: "theme-get" });
-    if (!result.ok) return;
-    info3 = result.theme;
-    render5();
-    const fonts = await request({ action: "fonts" });
-    if (fonts.ok) {
-      report2 = fonts.fonts;
-      render5();
-    }
-  }
-  async function openTheme() {
-    report2 = null;
-    content = h(
-      "div",
-      { class: "theme-body" },
-      h("p", { class: "hint" }, "Loading\u2026")
-    );
-    openDialog("Theme", content, {
-      hint: "Colours, fonts and size for the whole deck",
-      onClose: () => {
-        content = null;
-        document.documentElement.removeAttribute("style");
-      }
-    });
-    await refresh2();
-  }
-  function initTheme() {
-    document.getElementById("btn-theme-panel")?.addEventListener("click", () => {
-      void openTheme();
-    });
-    on("model", () => {
-      document.documentElement.removeAttribute("style");
-      if (content) void refresh2();
-    });
   }
 
   // src/ts/shared/gesturepad.ts
@@ -26416,6 +26846,7 @@ Ctrl+click: open in a new tab`;
     initGit();
     initProblems();
     initComments();
+    initPalette();
     initCanvasMenu();
     initCompare();
     initMaster();

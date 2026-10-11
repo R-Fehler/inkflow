@@ -22,6 +22,7 @@ import {
     packCheck,
 } from "./pack";
 import { commitPaths } from "./packtext";
+import type { Command } from "./palettetext";
 import { openPublishDialog } from "./publish";
 import { changedSlideCount, commitPicked, setSlideChanges } from "./slidegit";
 import { closeMenu, menuItem, showMenu } from "./sorter";
@@ -201,6 +202,48 @@ async function git(
     // asked for again here.
     void refreshGit();
     return res;
+}
+
+/** The Git menu's actions for the command palette. */
+export async function gitCommands(): Promise<Command[]> {
+    await refreshGit();
+    if (!status.git) return [];
+    const group = "Git";
+    if (!status.repo) {
+        return [
+            {
+                label: "Create a git repository",
+                group,
+                run: () => void git("init"),
+            },
+        ];
+    }
+    const out: Command[] = [];
+    const n = status.changes?.length ?? 0;
+    if (n && status.branch)
+        out.push({ label: "Commit…", group, run: () => commitDialog() });
+    if (status.remotes?.length && status.branch)
+        out.push({ label: "Push", group, run: () => void git("push") });
+    if (status.upstream)
+        out.push({ label: "Pull", group, run: () => void git("pull") });
+    if ((status.changes ?? []).some((c) => c.inDeck))
+        out.push({
+            label: "Discard changes…",
+            group,
+            run: () => discardDialog(),
+        });
+    if (status.hasCommits) {
+        out.push(
+            { label: "Branches…", group, run: () => void branchesDialog() },
+            { label: "History…", group, run: () => void historyDialog() },
+        );
+    }
+    out.push({
+        label: "Compare with…",
+        group,
+        run: () => void openComparePicker(),
+    });
+    return out;
 }
 
 /** One git operation, as the Git menu runs it (for slidegit.ts). */

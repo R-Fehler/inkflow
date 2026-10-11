@@ -31,6 +31,7 @@ import { initMaster } from "./master";
 import { connect } from "./net";
 import { initNotes } from "./notes";
 import { initObjects } from "./objects";
+import { initPalette } from "./palette";
 import { initPanels } from "./panels";
 import { initProblems } from "./problems";
 import { focusCellLabel, initProps } from "./props";
@@ -170,6 +171,7 @@ function boot(): void {
     initGit();
     initProblems();
     initComments();
+    initPalette();
     initCanvasMenu();
     initCompare();
     initMaster();

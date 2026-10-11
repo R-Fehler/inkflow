@@ -7,6 +7,7 @@ import { closeDialog, openDialog } from "./dialog";
 import { clear, h, toast } from "./dom";
 import { folderPicker, type Places } from "./folderpicker";
 import { request, stopReconnecting, whenConnected } from "./net";
+import type { Command } from "./palettetext";
 import { openFiles } from "./rename";
 import { closeMenu, menuItem, showMenu } from "./sorter";
 import { ed, on } from "./state";
@@ -193,6 +194,38 @@ export async function openDeckInTab(path: string): Promise<boolean> {
         toast(`Open it at ${url}`, "error");
     }
     return true;
+}
+
+/** The deck menu's actions for the command palette, recent decks too. */
+export async function deckCommands(): Promise<Command[]> {
+    const data = await info();
+    if (!data) return [];
+    const group = "Deck";
+    const out: Command[] = [
+        { label: "New deck…", group, run: () => newDeckDialog(data) },
+        { label: "Open deck…", group, run: () => openDeckDialog(data) },
+    ];
+    for (const path of data.recent) {
+        const name = baseName(path.replace(/[\\/]deck\.py$/, ""));
+        out.push(
+            {
+                label: `Open ${name}`,
+                group,
+                hint: path,
+                run: () => void openDeck(path),
+            },
+            {
+                label: `Open ${name} in a new tab`,
+                group,
+                hint: path,
+                run: () => void openDeckInTab(path),
+            },
+        );
+    }
+    if (ed.model)
+        out.push({ label: "Files…", group, run: () => void openFiles() });
+    out.push({ label: "Quit Inkflow", group, run: () => void quit() });
+    return out;
 }
 
 async function openDeck(path: string): Promise<boolean> {
