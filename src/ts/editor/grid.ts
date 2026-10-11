@@ -128,7 +128,6 @@ function gridItem(slide: SlideModel, i: number): HTMLElement {
         pickSlide(i, e);
         ed.focus = "sorter";
     });
-    item.addEventListener("dblclick", () => open(i));
     item.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         if (!ed.slideSelection.has(i)) {
@@ -373,6 +372,45 @@ function setSize(px: number): void {
     }
 }
 
+// A double-click opens the slide. Told from two presses on the same tile
+// by the list itself, which outlives its tiles: the first click goes to the
+// slide, which draws the grid again, and when that lands between the two
+// presses neither tile gets the browser's own dblclick.
+const DOUBLE_MS = 450;
+let lastPress: { index: number; at: number; x: number; y: number } | null =
+    null;
+
+function onListPress(e: PointerEvent): void {
+    if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) {
+        lastPress = null;
+        return;
+    }
+    const target = e.target as HTMLElement;
+    // (The star and the marks under a tile are buttons of their own.)
+    if (target.closest("button, .git-mark, .problem-mark, .comment-mark")) {
+        lastPress = null;
+        return;
+    }
+    const tile = target.closest<HTMLElement>(".grid-item");
+    if (!tile) {
+        lastPress = null;
+        return;
+    }
+    const index = Number(tile.dataset.index);
+    const prev = lastPress;
+    lastPress = { index, at: e.timeStamp, x: e.clientX, y: e.clientY };
+    if (
+        prev &&
+        prev.index === index &&
+        e.timeStamp - prev.at < DOUBLE_MS &&
+        Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 8
+    ) {
+        lastPress = null;
+        e.preventDefault();
+        open(index);
+    }
+}
+
 function initListDrop(): void {
     list.addEventListener("dragover", (e) => {
         const drag = dragging.now;
@@ -412,6 +450,7 @@ export function initGrid(): void {
     setSize(saved);
     sizeInput.addEventListener("input", () => setSize(Number(sizeInput.value)));
     initListDrop();
+    list.addEventListener("pointerdown", onListPress);
     on("model", renderGrid);
     on("slide", renderGrid);
     on("slide-selection", renderGrid);

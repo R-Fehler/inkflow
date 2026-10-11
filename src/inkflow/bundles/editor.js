@@ -18756,7 +18756,6 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       pickSlide(i2, e2);
       ed.focus = "sorter";
     });
-    item2.addEventListener("dblclick", () => open4(i2));
     item2.addEventListener("contextmenu", (e2) => {
       e2.preventDefault();
       if (!ed.slideSelection.has(i2)) {
@@ -18987,6 +18986,32 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     } catch {
     }
   }
+  var DOUBLE_MS = 450;
+  var lastPress = null;
+  function onListPress(e2) {
+    if (e2.button !== 0 || e2.shiftKey || e2.ctrlKey || e2.metaKey || e2.altKey) {
+      lastPress = null;
+      return;
+    }
+    const target = e2.target;
+    if (target.closest("button, .git-mark, .problem-mark, .comment-mark")) {
+      lastPress = null;
+      return;
+    }
+    const tile = target.closest(".grid-item");
+    if (!tile) {
+      lastPress = null;
+      return;
+    }
+    const index = Number(tile.dataset.index);
+    const prev = lastPress;
+    lastPress = { index, at: e2.timeStamp, x: e2.clientX, y: e2.clientY };
+    if (prev && prev.index === index && e2.timeStamp - prev.at < DOUBLE_MS && Math.hypot(e2.clientX - prev.x, e2.clientY - prev.y) < 8) {
+      lastPress = null;
+      e2.preventDefault();
+      open4(index);
+    }
+  }
   function initListDrop2() {
     list3.addEventListener("dragover", (e2) => {
       const drag = dragging.now;
@@ -19020,6 +19045,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     setSize(saved);
     sizeInput.addEventListener("input", () => setSize(Number(sizeInput.value)));
     initListDrop2();
+    list3.addEventListener("pointerdown", onListPress);
     on("model", renderGrid);
     on("slide", renderGrid);
     on("slide-selection", renderGrid);
