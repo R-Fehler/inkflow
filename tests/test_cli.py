@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import textwrap
 from importlib.resources import files
 from pathlib import Path
@@ -11,6 +12,7 @@ import yaml
 from click.testing import CliRunner
 
 from inkflow.cli import main
+from inkflow.cli.verify import verify_summary
 
 ROOT = "<root>"
 FlagsByCommand = dict[str, dict[str, bool]]
@@ -425,6 +427,33 @@ class TestSyncBareSlides:
 
 
 class TestVerify:
+    @pytest.mark.usefixtures("project")
+    def test_each_line_names_its_slide_and_a_summary_ends_the_run(
+        self, runner: CliRunner
+    ) -> None:
+        Path("slides/intro.md").write_text("# Intro\n", encoding="utf-8")
+        Path("deck.py").write_text(
+            _DECK_PY.replace(
+                'Slide("slides/01.svg")',
+                'Slide("slides/01.svg"), Slide("content", md="intro.md"),'
+                + ' Slide("content", md="intro.md", visible=False)',
+            ),
+            encoding="utf-8",
+        )
+        result = runner.invoke(main, ["verify", "--no-portable", "--all"])
+        assert result.exit_code == 0, result.output
+        lines = [" ".join(line.split()) for line in result.output.splitlines()]
+        # Number and id; the layout too when the id does not say it; a hidden
+        # slide has no number.
+        assert lines[:3] == ["ok 1 01", "ok 2 intro (content)", "ok - intro (content)"]
+        assert lines[-1] == "no problems in 3 slides"
+
+    def test_the_summary_counts_errors_and_warnings(self) -> None:
+        assert verify_summary(1, 0, 0) == "no problems in 1 slide"
+        assert verify_summary(12, 1, 0) == "1 error in 12 slides"
+        assert verify_summary(12, 2, 3) == "2 errors and 3 warnings in 12 slides"
+        assert verify_summary(12, 0, 1) == "1 warning in 12 slides"
+
     def test_missing_src_exits_1(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -487,6 +516,37 @@ class TestLayouts:
         result = runner.invoke(main, ["layouts", "--no-deck"])
         assert result.exit_code == 0
         assert "base" in result.output
+
+    def test_plain_is_one_line_per_layout_without_a_table(
+        self, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(main, ["layouts", "--no-deck", "--plain"])
+        assert result.exit_code == 0
+        lines = result.output.splitlines()
+        content = next(line for line in lines if line.startswith("content  "))
+        assert content == (
+            "content  [builtin]  parents: base > numbered > title"
+            + "  zones: content*, title  numbered"
+        )
+        assert not any(ch in result.output for ch in "│╭╰─┃")
+
+    @pytest.mark.usefixtures("project")
+    def test_json_lists_layouts_with_their_use_in_the_deck(
+        self, runner: CliRunner
+    ) -> None:
+        Path("layouts").mkdir()
+        Path("layouts/mine.svg").write_text(_SLIDE_SVG, encoding="utf-8")
+        result = runner.invoke(main, ["layouts", "--json"])
+        assert result.exit_code == 0
+        data = cast("dict[str, list[dict[str, object]]]", json.loads(result.output))
+        assert set(data) == {"layouts", "overlays"}
+        by_name = {(e["source"], e["name"]): e for e in data["layouts"]}
+        content = by_name[("builtin", "content")]
+        assert content["parents"] == ["base", "numbered", "title"]
+        assert content["zones"] == ["content", "title"]
+        assert content["defaultZone"] == "content" and content["numbered"] is True
+        mine = by_name[("local", "mine")]
+        assert mine["parents"] == [] and mine["slides"] == 0
 
 
 class TestInitGit:

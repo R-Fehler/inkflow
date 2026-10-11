@@ -152,6 +152,8 @@ inkflow layouts
 
 It prints every layout and overlay with its parent chain, its zones and how
 many slides use it, and marks the deck's own copies of the theme's layouts.
+`inkflow layouts --plain` prints one line per layout instead of tables (for a
+narrow terminal, or a program reading it), `--json` the same as data.
 
 ## Changing a theme's layout: the deck's own copy
 

@@ -23,7 +23,8 @@ A slide the author starred in the editor says `STARRED`; when asked about
 `inkflow outline -s N` adds full zone texts, zone boxes and the canvas size
 (to place shapes), the element ids animations can target, and each animation
 as deck.py writes it. Read it instead of opening every file; open only the
-files you change. `inkflow layouts` lists every layout with its zones.
+files you change. `inkflow layouts --plain` lists every layout with its zones,
+one line each (`--json` for data).
 
 To place or size something against text, use the boxes the browser actually
 drew, not guesses: `inkflow render --boxes -s N` prints each element's box in

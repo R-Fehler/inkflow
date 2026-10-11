@@ -1141,3 +1141,5 @@ commands:
     flags:
       -d, --deck=: Path to deck.py
       --no-deck: Operate without a deck.py
+      --plain: One line per layout, no table
+      --json: Print the list as JSON

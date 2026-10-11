@@ -178,7 +178,7 @@ layouts: a copy of `base` is the background of every built-in layout).
 
 | Command | What it does |
 |---|---|
-| `inkflow layouts` | Every layout and overlay with its zones, parent chain, how many slides use it, and which are the deck's own copies of the theme's. |
+| `inkflow layouts` | Every layout and overlay with its zones, parent chain, how many slides use it, and which are the deck's own copies of the theme's. `--plain` prints one line per layout instead of tables (what an agent's tool output keeps whole), `--json` the same as data. |
 | `inkflow layout copy NAME` | `layouts/NAME.svg`, the deck's copy of the theme's layout (`inkflow:copy-of`); edit it in Inkscape or with `inkflow shape -s N` on a slide drawn from it. |
 | `inkflow layout revert NAME` | Deletes the deck's copy: slides go back to the theme's layout. |
 | `inkflow layout save N NAME [--hints] [--pictures]` | Slide `N` as a new layout: `customCodeExamples` → `layouts/custom-code-examples.svg`, its drawing and parent kept, its zones empty (`--hints`: their text kept as placeholder prompts; `--pictures`: pictures become picture placeholders). Then `inkflow slide add --layout custom-code-examples`. |

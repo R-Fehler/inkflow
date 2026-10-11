@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import click
 from lxml import etree as _etree
@@ -525,10 +527,60 @@ def _asset_rows(
     return groups
 
 
+def _rows_json(groups: dict[str, list[_LayoutRow]]) -> list[dict[str, object]]:
+    return [
+        {
+            "name": row.name,
+            "source": source,
+            "parents": [] if row.parent == "—" else row.parent.split(" → "),
+            "zones": row.zones,
+            "defaultZone": row.default_zone or None,
+            "numbered": row.numbered,
+            "slides": row.slides,
+            "note": row.note or None,
+        }
+        for source, _, _ in _SOURCE_STYLES
+        for row in groups.get(source, [])
+    ]
+
+
+def _plain_rows(groups: dict[str, list[_LayoutRow]]) -> list[str]:
+    """One line per layout, nothing drawn around it: name, where it is from,
+    its parents (nearest last), its zones (the default one starred), then
+    what else there is to say."""
+    lines: list[str] = []
+    for entry in _rows_json(groups):
+        zones = [
+            f"{zone}*" if zone == entry["defaultZone"] else zone
+            for zone in cast("list[str]", entry["zones"])
+        ]
+        parts = [
+            str(entry["name"]),
+            f"[{entry['source']}]",
+            "parents: " + (" > ".join(cast("list[str]", entry["parents"])) or "-"),
+            "zones: " + (", ".join(zones) or "-"),
+        ]
+        if entry["numbered"]:
+            parts.append("numbered")
+        if entry["slides"] is not None:
+            parts.append(f"slides: {entry['slides']}")
+        if entry["note"]:
+            parts.append(f"note: {entry['note']}")
+        lines.append("  ".join(parts))
+    return lines
+
+
 @main.command("layouts")
 @deck_option
 @no_deck_option
-def layouts_cmd(deck_path: Path, no_deck: bool) -> None:
+@click.option(
+    "--plain",
+    is_flag=True,
+    help="One line per layout on stdout, no table: for a narrow terminal or a"
+    + " program reading it.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Print the list as JSON.")
+def layouts_cmd(deck_path: Path, no_deck: bool, plain: bool, as_json: bool) -> None:
     """List available layouts and overlays with their zones, parent chain and use.
 
     Discovers both from three sources — built-in, theme, then project-local — and
@@ -541,6 +593,10 @@ def layouts_cmd(deck_path: Path, no_deck: bool) -> None:
     With a deck, SLIDES counts the slides built directly on each, and NOTE
     marks the deck's own copies of theme layouts (`inkflow layout copy`), the
     theme layouts they replace, and a template's typed name.
+
+    `--plain` prints the same as one line per layout (`name  [source]
+    parents: …  zones: …`, the default zone starred), and `--json` as
+    `{"layouts": [...], "overlays": [...]}`; both go to stdout.
     """
 
     project = load_project_or_none(deck_path, no_deck)
@@ -548,9 +604,25 @@ def layouts_cmd(deck_path: Path, no_deck: bool) -> None:
     theme = project.theme if project else None
 
     deck = project.deck if project else None
-    _print_asset_tables(_asset_rows(AssetKind.LAYOUT, project_dir, theme, deck))
-
+    layout_groups = _asset_rows(AssetKind.LAYOUT, project_dir, theme, deck)
     overlay_groups = _asset_rows(AssetKind.OVERLAY, project_dir, theme, deck)
+    if as_json:
+        data = {
+            "layouts": _rows_json(layout_groups),
+            "overlays": _rows_json(overlay_groups),
+        }
+        indent = 1 if sys.stdout.isatty() else None
+        click.echo(json.dumps(data, indent=indent, ensure_ascii=False))
+        return
+    if plain:
+        lines = _plain_rows(layout_groups)
+        if overlay_groups:
+            lines += ["", "overlays (composited on top):"]
+            lines += _plain_rows(overlay_groups)
+        click.echo("\n".join(lines))
+        return
+    _print_asset_tables(layout_groups)
+
     if overlay_groups:
         console.print()
         console.print("[bold]OVERLAYS[/bold] [dim](composited on top)[/dim]")
