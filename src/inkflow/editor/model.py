@@ -210,6 +210,9 @@ def build_model(
     except Exception:
         source, calls = None, None
     deck_editable = calls is not None
+    # Read off the slide list once: asking the source slide by slide walks
+    # deck.py once per slide, which on a 300-slide deck took most of a rebuild.
+    counts = source.animation_counts() if source is not None and calls else None
 
     # Which deck slides each file feeds, for "shared layout" warnings.
     used_by: dict[str, list[int]] = {}
@@ -266,9 +269,9 @@ def build_model(
         )
         entry["animations"] = [_cue_json(c, deck_module) for c in slide.animations]
         entry["animationsEditable"] = bool(
-            source is not None
-            and calls is not None
-            and source.animation_count(deck_index) == len(slide.animations)
+            counts is not None
+            and deck_index < len(counts)
+            and counts[deck_index] == len(slide.animations)
         )
         entry["fontSize"] = slide.font_size
         if slide.visible:

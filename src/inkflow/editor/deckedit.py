@@ -706,6 +706,7 @@ class DeckSource:
 
     def __init__(self, code: str) -> None:
         self.module = cst.parse_module(code)
+        self._found: tuple[cst.Module, _Finder] | None = None
 
     @classmethod
     def read(cls, path: Path) -> DeckSource:
@@ -716,9 +717,15 @@ class DeckSource:
         return self.module.code
 
     def _find(self) -> _Finder:
-        finder = _Finder()
-        self.module.visit(finder)
-        return finder
+        """What the module holds, walked once per version of it: every edit
+        replaces ``module``, and a walk of a big deck.py takes long enough
+        that one per slide made the editor's model the slowest part of a
+        rebuild (`animation_count` for each of 300 slides)."""
+        if self._found is None or self._found[0] is not self.module:
+            finder = _Finder()
+            _ = self.module.visit(finder)
+            self._found = (self.module, finder)
+        return self._found[1]
 
     def slides_list(self) -> cst.List | None:
         finder = self._find()
@@ -896,6 +903,23 @@ class DeckSource:
         except DeckEditError:
             return None
         return 0 if anims is None else len(anims.elements)
+
+    def animation_counts(self) -> list[int | None] | None:
+        """`animation_count` of every slide, the slide list read once (None:
+        the list is not a plain literal)."""
+        calls = self.slide_calls()
+        if calls is None:
+            return None
+        counts: list[int | None] = []
+        for call in calls:
+            arg = _kwarg(call, "animations")
+            if arg is None:
+                counts.append(0)
+            elif isinstance(arg.value, cst.List):
+                counts.append(len(arg.value.elements))
+            else:
+                counts.append(None)
+        return counts
 
     def edit_animations(
         self,

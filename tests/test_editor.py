@@ -1893,6 +1893,49 @@ def test_model_describes_slides_and_types(project: Path) -> None:
     ]
 
 
+def test_model_reads_the_slide_list_once(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Walking deck.py once per slide made the model the slowest part of a
+    rebuild on a big deck: the animation counts come from one read."""
+    deck_py = project / "deck.py"
+    deck_py.write_text(
+        deck_py.read_text(encoding="utf-8").replace(
+            'Slide("two", md="text.md"),',
+            'Slide("two", md="text.md", animations=CUES),',
+        )
+        + "\nCUES = [animations.FadeIn('zone-title')]\n",
+        encoding="utf-8",
+    )
+    deck = _deck(project)
+    slides = process_deck(deck, project, deck_py, editor=True)
+    walks = 0
+    visit = DeckSource._find  # pyright: ignore[reportPrivateUsage]
+
+    def counted(self: DeckSource) -> object:
+        nonlocal walks
+        fresh = self._found is None  # pyright: ignore[reportPrivateUsage]
+        walks += fresh
+        return visit(self)
+
+    monkeypatch.setattr(DeckSource, "_find", counted)
+    model = build_model(deck, deck_py, slides)
+    assert walks == 1
+    entries = cast("list[dict[str, object]]", model["slides"])
+    # A literal list (or none) is editable; one built elsewhere is not.
+    assert [e["animationsEditable"] for e in entries] == [True, False, True]
+
+
+def test_deck_source_counts_animations_like_one_slide_at_a_time() -> None:
+    source = DeckSource(DECK.replace('zones={"title": "Hello"}', "animations=CUES"))
+    counts = source.animation_counts()
+    assert counts == [1, 0, None]
+    assert counts == [source.animation_count(i) for i in range(3)]
+    # An edit replaces the module: what was found in the old one is not reused.
+    source.set_slide_arg(1, "animations", "[animations.FadeIn('a')]")
+    assert source.animation_counts() == [1, 1, None]
+
+
 # ── Context for agents ───────────────────────────────────────────────────────
 
 
