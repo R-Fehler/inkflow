@@ -22,7 +22,7 @@ from inkflow import drawio
 from inkflow import transitions as transitions_module
 from inkflow.animations import Animation, Cue, PlayVideo
 from inkflow.colors import SVG_TOKENS
-from inkflow.deps import Stamp, Stamps, note, recording
+from inkflow.deps import Stamp, Stamps, note, recording, stamp
 from inkflow.editor.chartedit import chart_json
 from inkflow.editor.codegen import field_schema, to_json
 from inkflow.editor.deckedit import DeckSource
@@ -342,16 +342,22 @@ def build_model(
         srcs.append(path)
         used_by.setdefault(str(path), []).append(i)
 
-    hashes: dict[str, str] = {}
+    hashes: dict[str, tuple[Stamp, str]] = {}
 
     def hash_of(path: Path) -> str:
+        """The file's hash, read once per build while the file is the same
+        (a slide notes the file's stamp before asking: a hash older than
+        that stamp would stay in the model)."""
         key = str(path)
-        if key not in hashes:
+        now = stamp(key)
+        cached = hashes.get(key)
+        if cached is None or cached[0] != now:
             try:
-                hashes[key] = file_hash(path.read_bytes())
+                cached = (now, file_hash(path.read_bytes()))
             except OSError:
-                hashes[key] = ""
-        return hashes[key]
+                cached = (now, "")
+            hashes[key] = cached
+        return cached[1]
 
     stamps = Stamps()
     seen: set[object] = set()

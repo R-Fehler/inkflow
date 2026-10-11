@@ -108,11 +108,16 @@ def frozen(value: object, depth: int = 0) -> object:
         members = cast("set[object]", value)
         return (kind, tuple(sorted(repr(frozen(v, depth + 1)) for v in members)))
     if dataclasses.is_dataclass(value):
+        names = [f.name for f in dataclasses.fields(value)]
+        # And what was set on it besides its fields (an animation's cue is
+        # written from everything it holds).
+        extra = cast("dict[str, object]", getattr(value, "__dict__", {}))
+        names += [name for name in extra if name not in names]
         return (
             kind,
             tuple(
-                (f.name, frozen(cast("object", getattr(value, f.name)), depth + 1))
-                for f in dataclasses.fields(value)
+                (name, frozen(cast("object", getattr(value, name)), depth + 1))
+                for name in names
             ),
         )
     if isinstance(value, type):
@@ -201,6 +206,7 @@ class _Notes:
     key: object
     deps: dict[str, Stamp]
     html: str
+    warnings: list[tuple[int, str]]
 
 
 @dataclass
@@ -271,7 +277,7 @@ class Build:
         logger.addHandler(capture)
         try:
             before = len(pages.unconverted)
-            with recording() as deps:
+            with recording(self.deck_path) as deps:
                 stand_in = replace(self.ctx, total_slides=_TOTAL)
                 built = build_slide(slide, stand_in, _NUMBER, slide_id, self.deck_path)
             result: _Template | BuiltSlide = _Template(built)
@@ -281,7 +287,7 @@ class Build:
                 # and kept only while those stay.
                 capture.records.clear()
                 del pages.unconverted[before:]
-                with recording() as deps:
+                with recording(self.deck_path) as deps:
                     result = build_slide(
                         slide, self.ctx, number, slide_id, self.deck_path
                     )
@@ -295,14 +301,24 @@ class Build:
 
     def notes(self, slide: Slide, slide_id: str) -> str:
         """`slide_notes`, from the cache while the notes file is the same."""
-        key = (str(self.ctx.project_dir), frozen(slide.notes))
+        # Where its pictures are looked for is the project's and the theme's.
+        roots = (str(self.ctx.project_dir), str(self.ctx.theme.asset_dir()))
+        key = (roots, frozen(slide.notes))
         entry = self.cache.notes.get(slide_id)
         if entry is None or entry.key != key or not self.stamps.unchanged(entry.deps):
-            with recording() as deps:
-                html = slide_notes(slide, self.ctx)
-            entry = _Notes(key, deps, html)
+            capture = _Capture()
+            logger.addHandler(capture)
+            try:
+                with recording() as deps:
+                    html = slide_notes(slide, self.ctx)
+            finally:
+                logger.removeHandler(capture)
+            entry = _Notes(key, deps, html, capture.records)
             self.cache.notes[slide_id] = entry
             self.cache.notes_read.append(slide_id)
+        else:
+            for level, message in entry.warnings:
+                logger.log(level, message)
         return entry.html
 
     def finish(self) -> None:

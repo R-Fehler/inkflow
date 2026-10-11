@@ -183,6 +183,8 @@ def resolve_parent_path(
         return _ours(resolved)
 
     if parent_str.startswith(("./", "../")):
+        # As written too: a link on the way that is pointed elsewhere.
+        note(_with_svg(base_dir / parent_str))
         return _ours(_with_svg((base_dir / parent_str).resolve()))
 
     if Path(parent_str).is_absolute():
@@ -190,6 +192,7 @@ def resolve_parent_path(
 
     # Multi-part relative path (has /) — relative to base_dir
     if "/" in parent_str:
+        note(_with_svg(base_dir / parent_str))
         return _ours(_with_svg((base_dir / parent_str).resolve()))
 
     # Bare single-part name — three-level search; levels skipped when context is absent

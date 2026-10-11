@@ -19,7 +19,7 @@ from inkflow.charts import (
     expand_fences,
     resolve,
 )
-from inkflow.deps import note_class
+from inkflow.deps import note_class, note_code
 from inkflow.enums import Align, Trigger, VAlign
 from inkflow.logging import logger
 from inkflow.manifest import (
@@ -192,6 +192,9 @@ def _all_animation_subclasses() -> Iterator[type[Animation]]:
 
 
 def _resolve_animation_type(name: str) -> type[Animation]:
+    # Found or not, a built-in or the deck's own: the answer is deck.py's to
+    # change (a class defined there later, one of the same name).
+    note_code()
     for cls in _all_animation_subclasses():
         if cls.__name__ == name:
             note_class(cls)

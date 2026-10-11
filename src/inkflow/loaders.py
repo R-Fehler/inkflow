@@ -100,6 +100,9 @@ def load_md(md: Content, project_dir: Path) -> LoadedText | None:
         return LoadedText(str(md), None)
     path = resolve_content_src(str(md), project_dir)
     note(path)
+    if not Path(str(md)).is_absolute():
+        # As written too: a link on the way that is pointed elsewhere.
+        note(project_dir / str(md))
     return LoadedText(path.read_text(encoding="utf-8"), path)
 
 

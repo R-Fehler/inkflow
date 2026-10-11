@@ -162,6 +162,11 @@ def _nowhere(_name: str) -> str | None:
     return None
 
 
+def _somewhere(name: str) -> str | None:
+    """`shutil.which` on a machine that has every program."""
+    return f"/usr/bin/{name}"
+
+
 def _by_id(slides: list[SlideData]) -> dict[str, SlideData]:
     return {s["id"]: s for s in slides}
 
@@ -381,6 +386,45 @@ def test_a_markdown_reveal_naming_a_deck_class_follows_deck_py(
     assert "2.5" in _by_id(project.full())["one"]["svg"] or project.rebuilt() == ["one"]
 
 
+def test_a_reveal_type_defined_later_reaches_the_slide_naming_it(
+    project: Project,
+) -> None:
+    _ = gc.collect()  # no class of an earlier test's deck is left to find
+    # Named before deck.py has it: drawn as the default, with a warning.
+    _ = project.write("slides/one.md", "# One\n\n::step type=Drop::\n\nLater\n")
+    with collect_logs(0) as said:
+        assert project.rebuilt() == ["one"]
+    assert any("unknown animation type 'Drop'" in e.message for e in said)
+    assert "anim-fade-in" in _by_id(project.full())["one"]["svg"]
+    project.edit(
+        "deck.py",
+        "def main()",
+        "from dataclasses import dataclass\n"
+        + "from inkflow.animations import Enter\n\n\n"
+        + "@dataclass\nclass Drop(Enter):\n    pass\n\n\n"
+        + "def main()",
+    )
+    # A slide that looked a class up by name is deck.py's to change.
+    assert project.rebuilt() == ["one"]
+    assert "anim-drop" in _by_id(project.full())["one"]["svg"]
+    # A built-in named in Markdown is looked up the same way.
+    _ = project.write("slides/five.md", "# Five\n\n::step type=FadeIn::\n\nLater\n")
+    assert project.rebuilt() == ["five"]
+    project.edit("deck.py", "class Drop(Enter):", "class Drop(Enter):  # same")
+    assert project.rebuilt() == ["one", "five"]
+
+
+def test_what_is_set_on_an_animation_besides_its_fields_counts() -> None:
+    from inkflow.animations import FadeIn
+
+    plain, marked = FadeIn("box"), FadeIn("box")
+    marked.glow = 3  # pyright: ignore[reportAttributeAccessIssue]
+    # A cue is written from everything the animation holds.
+    assert frozen(Slide("two", animations=[plain])) != frozen(
+        Slide("two", animations=[marked])
+    )
+
+
 # ── Numbers ──────────────────────────────────────────────────────────────────
 
 
@@ -518,7 +562,51 @@ def test_a_page_committed_beside_its_pdf_rebuilds_the_slide(
     assert "plot.pdf.p1.svg" not in _by_id(project.full())["drawing"]["svg"]
 
 
+def test_a_page_that_could_not_be_converted_is_tried_again(
+    project: Project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tried: list[Path] = []
+
+    def failing(pdf_path: Path, _page: int, _project: Path, _tool: str) -> Path:
+        tried.append(pdf_path)
+        raise pdf.PdfError("the converter timed out")
+
+    monkeypatch.setattr(pdf, "_pymupdf", lambda: None)
+    monkeypatch.setattr("shutil.which", _somewhere)
+    monkeypatch.setattr(pdf, "convert", failing)
+    _ = project.write("figures/plot.pdf", b"%PDF-1.4 one")
+    project.edit(
+        "slides/drawing.svg",
+        "<text",
+        '<image id="fig" href="../figures/plot.pdf" width="300" height="160"/><text',
+    )
+    _ = project.rebuilt()
+    tried.clear()
+    # A failure that may pass (a timeout, a full disk) is not kept: the
+    # slide is processed again, as a full build would try again.
+    assert "drawing" in project.rebuilt()
+    assert tried
+
+
 # ── Warnings ─────────────────────────────────────────────────────────────────
+
+
+def test_a_notes_warning_is_said_again_and_its_pictures_follow_the_theme(
+    project: Project,
+) -> None:
+    _ = project.write("notes/two.md", "A picture: ![far](../../outside.png)\n")
+    with collect_logs(0) as first:
+        assert project.rebuilt() == []
+    assert project.cache.notes_read == ["two"]
+    with collect_logs(0) as second:
+        assert project.rebuilt() == []
+    assert project.cache.notes_read == []
+
+    def outside(entries: list[object]) -> int:
+        return sum("outside the project" in str(e) for e in entries)
+
+    assert outside(cast("list[object]", first)) == 2  # this build + the full one
+    assert outside(cast("list[object]", second)) == 2
 
 
 def test_a_kept_slides_warnings_are_said_again(project: Project) -> None:
@@ -666,6 +754,25 @@ def test_the_model_follows_moves_without_reading_again(project: Project) -> None
         'Slide("two", md="one.md", visible=False),',
     )
     assert _model(project, cache) == _model(project, None)
+
+
+def test_the_model_sees_a_file_made_read_only(project: Project) -> None:
+    cache = ModelCache()
+    _ = _model(project, cache)
+    path = project.root / "slides" / "drawing.svg"
+    path.chmod(0o444)
+    try:
+        model = _model(project, cache)
+        assert model == _model(project, None)
+        if os.access(path, os.W_OK):
+            pytest.skip("this user writes read-only files (root)")
+        # Permissions move the file's change time, which a stamp holds.
+        assert cache.read == [0]
+        entries = cast("list[dict[str, object]]", model["slides"])
+        sources = cast("list[dict[str, object]]", entries[0]["sources"])
+        assert sources[0]["writable"] is False
+    finally:
+        path.chmod(0o644)
 
 
 def test_the_model_says_whether_animations_are_written_out(

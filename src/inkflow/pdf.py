@@ -43,7 +43,7 @@ from urllib.parse import unquote
 
 from inkflow import ns
 from inkflow.assets import PDF_CACHE, AssetRoots
-from inkflow.deps import note
+from inkflow.deps import note, retry
 from inkflow.editor.context import context_dir
 from inkflow.logging import logger
 from inkflow.svgio import SvgElement
@@ -246,7 +246,7 @@ def _converted(tool: str, pdf: Path, page: int, out: Path) -> None:
 
 
 @functools.lru_cache(maxsize=256)
-def _digest(path: str, _mtime_ns: int, _size: int) -> str:
+def _digest(path: str, _mtime_ns: int, _size: int, _inode: int) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
         while chunk := f.read(1024 * 1024):
@@ -257,7 +257,7 @@ def _digest(path: str, _mtime_ns: int, _size: int) -> str:
 def digest(pdf: Path) -> str:
     """The PDF's content hash (remembered while its size and time are the same)."""
     stat = pdf.stat()
-    return _digest(str(pdf), stat.st_mtime_ns, stat.st_size)
+    return _digest(str(pdf), stat.st_mtime_ns, stat.st_size, stat.st_ino)
 
 
 def _slug(text: str) -> str:
@@ -435,6 +435,8 @@ class PdfPages:
             converted = convert(pdf, page, self.roots.project_dir, self.tool)
         except (PdfError, OSError) as exc:
             logger.warning(f"{name}: {exc}")
+            # It may work next time (a timeout, a full disk): not kept.
+            retry()
             return None, f"page {page} could not be converted"
         # The cache is a folder anyone may empty: the page gone is a change.
         note(converted)

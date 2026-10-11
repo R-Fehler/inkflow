@@ -3,6 +3,7 @@ from __future__ import annotations
 import html as html_module
 import json
 import re
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TypeAlias, TypedDict, cast
@@ -166,9 +167,11 @@ def _render_codeblock(
 
 # ── Step-aware markdown rendering ─────────────────────────────────────────────
 
-# Module-level fence render queue (safe: asyncio single-threaded, sync render).
+# Module-level fence render queue, one render at a time: a build renders on
+# a worker thread while the editor's requests render on others (`_rendering`).
 _fence_queue: list[_FenceEntry] = []
 _fence_pos = [0]
+_rendering = threading.RLock()
 
 
 def _fence_renderer(
@@ -235,27 +238,32 @@ def render_md_with_steps(md: str, base_step: int) -> tuple[str, int]:
     "step" here counts code-highlight stages, distinct from the ``::step::``
     content-reveal steps owned by ``inkflow.zones``.
     """
-    tokens = _md.parse(md, {})
+    with _rendering:
+        tokens = _md.parse(md, {})
 
-    step = base_step
-    _fence_queue.clear()
-    for token in tokens:
-        if token.type == "fence":
-            lang, spec = _parse_fence_info(token.info.strip() if token.info else "")
-            _fence_queue.append(_FenceEntry(step, lang, spec))
-            if spec is not None:
-                step += len(spec) - 1
+        step = base_step
+        _fence_queue.clear()
+        for token in tokens:
+            if token.type == "fence":
+                lang, spec = _parse_fence_info(token.info.strip() if token.info else "")
+                _fence_queue.append(_FenceEntry(step, lang, spec))
+                if spec is not None:
+                    step += len(spec) - 1
 
-    _fence_pos[0] = 0
-    html = cast(str, _md.renderer.render(tokens, _md.options, {}))
-    return html, step
+        _fence_pos[0] = 0
+        html = cast(str, _md.renderer.render(tokens, _md.options, {}))
+        return html, step
 
 
 # ── Markdown rendering ────────────────────────────────────────────────────────
 
 
 def markdown_to_html(md_str: str) -> str:
-    return cast(str, _md.render(md_str))
+    with _rendering:
+        # No queue: each fence is rendered from its own info string.
+        _fence_queue.clear()
+        _fence_pos[0] = 0
+        return cast(str, _md.render(md_str))
 
 
 # lxml's HTML parser lowercases every name; inside an inline ``<svg>`` (a drawn

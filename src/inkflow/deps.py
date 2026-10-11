@@ -28,10 +28,13 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
-Stamp = tuple[int, int, int] | None
-"""A file as a build saw it: (mtime in ns, size, inode), or None when it is
-not there. The inode tells a file replaced by another of the same size and
-time (a save by rename, a checkout) from the one read."""
+Stamp = tuple[int, int, int, int] | None
+"""A file as a build saw it: (mtime, ctime, size, inode; times in ns), or
+None when it is not there. The inode tells a file replaced by another of the
+same size and time (a save by rename, a checkout) from the one read; the
+change time moves with anything done to the file, its permissions and a
+rewrite that puts the old modification time back (`cp -p`, `rsync -t`)
+included."""
 
 RACY_NS = 20_000_000
 """A file changed this recently may change again without its time moving
@@ -39,12 +42,20 @@ RACY_NS = 20_000_000
 trusted, so the slide is processed again next time. The watcher waits longer
 than this before a rebuild starts, so an edit does not land here."""
 
-_NEVER: Stamp = (-1, -1, -1)
+COARSE_NS = 2_100_000_000
+"""The same, on a file system that keeps time in whole seconds or two (FAT,
+some network shares): told by a time without a fraction of a millisecond."""
+
+_NEVER: Stamp = (-1, -1, -1, -1)
 """A stamp no file has: what a file too fresh to trust is recorded as."""
+
+RETRY = "\0retry"
+"""Recorded in place of a path by `retry`: never as it was."""
 
 _recording: ContextVar[dict[str, Stamp] | None] = ContextVar(
     "inkflow_deps", default=None
 )
+_code: ContextVar[Path | None] = ContextVar("inkflow_deps_code", default=None)
 
 
 def stamp(path: str | Path) -> Stamp:
@@ -53,12 +64,16 @@ def stamp(path: str | Path) -> Stamp:
         st = os.stat(path)
     except OSError:
         return None
-    return (st.st_mtime_ns, st.st_size, st.st_ino)
+    return (st.st_mtime_ns, st.st_ctime_ns, st.st_size, st.st_ino)
 
 
 def settled(now: Stamp) -> bool:
     """Whether a stamp can be trusted to change when the file does."""
-    return now is not None and time.time_ns() - now[0] >= RACY_NS
+    if now is None:
+        return False
+    changed = max(now[0], now[1])
+    window = COARSE_NS if changed % 1_000_000 == 0 else RACY_NS
+    return time.time_ns() - changed >= window
 
 
 def note(path: str | Path) -> None:
@@ -75,6 +90,24 @@ def note(path: str | Path) -> None:
     deps[key] = now if now is None or settled(now) else _NEVER
 
 
+def retry() -> None:
+    """Say that what is being built fell short for a reason that may pass (a
+    converter that timed out, a cache folder that could not be written): it
+    is built again next time rather than kept as it came out."""
+    deps = _recording.get()
+    if deps is not None:
+        deps[RETRY] = _NEVER
+
+
+def note_code() -> None:
+    """Say that what is being built looked a class up by its name (a
+    Markdown reveal's ``type=Shake``), found or not: it depends on the code
+    that may define one, which for a deck is deck.py."""
+    code = _code.get()
+    if code is not None:
+        note(code)
+
+
 def note_class(cls: type) -> None:
     """Say that what is being built depends on a class found by its name (a
     Markdown reveal's ``type=Shake``): on the file defining it, which for a
@@ -87,14 +120,17 @@ def note_class(cls: type) -> None:
 
 
 @contextmanager
-def recording() -> Generator[dict[str, Stamp]]:
+def recording(code: Path | None = None) -> Generator[dict[str, Stamp]]:
     """Collect the files noted inside the block (and only on this thread or
-    task: other requests' reads are theirs)."""
+    task: other requests' reads are theirs). ``code`` is the file `note_code`
+    stands for (deck.py)."""
     deps: dict[str, Stamp] = {}
     token = _recording.set(deps)
+    code_token = _code.set(code)
     try:
         yield deps
     finally:
+        _code.reset(code_token)
         _recording.reset(token)
 
 
@@ -107,7 +143,7 @@ class Stamps:
 
     def of(self, path: str) -> Stamp:
         if path not in self._seen:
-            self._seen[path] = stamp(path)
+            self._seen[path] = None if path == RETRY else stamp(path)
         return self._seen[path]
 
     def unchanged(self, deps: dict[str, Stamp]) -> bool:
