@@ -439,11 +439,32 @@ def _specs_from_tokens(styles_css: str, add: Callable[[_FontSpec], None]) -> Non
                     add(_FontSpec(family, weight, italic, need))
 
 
+_SLIDE_SPECS: dict[str, tuple[list[_FontSpec], frozenset[str]]] = {}
+"""The font specs (and the families it defines itself) of each slide of the
+last deck looked at, by its SVG text: a served deck's rebuild parses the
+slides that changed, not all of them again."""
+
+
+def _slide_font_specs(svg: str) -> tuple[list[_FontSpec], frozenset[str]]:
+    found, add = _spec_collector()
+    defined: set[str] = set()
+    _collect_specs(parse_svg(svg), add, defined)
+    return found, frozenset(defined)
+
+
 def extract_font_specs(slides: list[SlideData]) -> list[_FontSpec]:
     result, add = _spec_collector()
     defined: set[str] = set()
+    seen: dict[str, tuple[list[_FontSpec], frozenset[str]]] = {}
     for slide in slides:
-        _collect_specs(parse_svg(slide["svg"]), add, defined)
+        svg = slide["svg"]
+        specs = seen.get(svg) or _SLIDE_SPECS.get(svg) or _slide_font_specs(svg)
+        seen[svg] = specs
+        for spec in specs[0]:
+            add(spec)
+        defined |= specs[1]
+    _SLIDE_SPECS.clear()
+    _SLIDE_SPECS.update(seen)
     return [s for s in result if _family_key(s.family) not in defined]
 
 
