@@ -918,6 +918,61 @@ tooltip.
 
 Renaming an object keeps the slide's animations pointing at it.
 
+## Speaker notes
+
+The panel under the slide holds the slide's speaker notes, written in
+Markdown and saved as you type: into the slide's notes file, which the first
+word creates (`notes/<slide id>.md`), or into `deck.py` for notes written
+there as `Inline(...)`. A whole stretch of typing is one undo step.
+
+- **Write / Preview** (top right of the panel) switches between the Markdown
+  and the notes as the [presenter panel](../presenting/presenter-panel.md)
+  shows them: paragraphs, lists, inline code, pictures, and links you can
+  click. A `slide:<id>` link opens that slide in the editor, a web link opens
+  in a new tab. The preview is the HTML the build rendered, including any
+  `::notes::` part of the slide's own Markdown, so it cannot differ from what
+  you will read while presenting. Double-click the preview to go back to
+  writing.
+- **Drag the panel's top edge** to make it taller or shorter (double-click:
+  the usual height; with the edge focused, <kbd>↑</kbd> / <kbd>↓</kbd> move
+  it). The slide above always keeps some room.
+
+Height and view are yours, not the slide's: they stay as you go from slide to
+slide and when the page is reloaded.
+
+## Big decks
+
+A change costs what it touches, not what the deck holds. When a file changes,
+inkflow processes only the slides that read that file and sends the open pages
+only those slides, so a deck of several hundred slides answers an edit as fast
+as one of ten:
+
+| You change… | …and inkflow processes |
+|---|---|
+| A slide's drawing, Markdown, chart data, ink, or its `Slide(...)` in `deck.py` | That slide |
+| Speaker notes | No slide: only the notes are rendered again |
+| A layout or an overlay | The slides built on it |
+| `styles.css`, theme colours and fonts | No slide: the pages get the new stylesheet |
+| A picture or video shown on slides | No slide: each picture's address carries its file's time, so pages load it anew |
+| A deck setting (`overlays=`, `font_size=`, `mode=`, `size=`, `theme=`, `style=`) | Every slide |
+| Adding, moving, hiding or deleting slides | The new slide; the others are renumbered as they are |
+
+The terminal says how many slides a rebuild processed (`built 274 slides in
+0.09s (1 changed)`). A slide is kept only while every file it read, and every
+place it looked for one, is as it was: a file that appears where a name is
+searched (a `slides/title.svg` that now shadows the layout `title`, a layout
+copied into the deck, a page committed beside its PDF) counts as a change.
+<kbd>r</kbd> in the terminal builds every slide again from the files, whatever
+is kept.
+
+In the browser, the slide list and the grid draw the thumbnails near what is
+on screen, and a rebuild that did not change the slide you are looking at
+leaves it alone, so typing notes never redraws anything.
+
+One kind of slide is processed on every load of `deck.py`: a slide using an
+animation class that `deck.py` defines itself, since a class is a new one
+each time its file runs and nothing says it is what it was.
+
 ## Objects
 
 The **Objects** tab next to Properties lists every object on the slide, topmost
