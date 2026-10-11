@@ -107,6 +107,8 @@ export const hooks = {
         false,
     // Draws the others' selections on this slide (collab.ts).
     drawPeers: (_overlay: SVGSVGElement): void => {},
+    // Draws the review comments' pins on this slide (comments.ts).
+    drawComments: (_overlay: SVGSVGElement): void => {},
 };
 
 // ── Rendering ──
@@ -852,6 +854,7 @@ export function drawOverlay(): void {
     drawPlaceholders();
     drawOverflowBadges();
     hooks.drawPeers(overlay);
+    hooks.drawComments(overlay);
     if (ed.scope) {
         const c = elementCorners(ed.scope);
         if (c) overlay.append(poly(c, "scope-outline"));

@@ -7,6 +7,7 @@
 // slides; double-click or Enter opens a slide for editing.
 
 import { verticalNeighbor } from "../shared/sections";
+import { commentBadge } from "./comments";
 import { clear, h } from "./dom";
 import { problemBadge } from "./problems";
 import {
@@ -119,6 +120,7 @@ function gridItem(slide: SlideModel, i: number): HTMLElement {
                 : null,
             changeBadge(i),
             problemBadge(i),
+            commentBadge(i),
         ),
     );
     item.classList.toggle("starred", isStarred(i));
@@ -416,6 +418,7 @@ export function initGrid(): void {
     on("stars", renderGrid);
     on("slide-git", renderGrid);
     on("problems", renderGrid);
+    on("comments", renderGrid);
     try {
         starredOnly = localStorage.getItem(STARRED_KEY) === "1";
     } catch {

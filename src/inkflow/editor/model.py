@@ -23,6 +23,7 @@ from inkflow import transitions as transitions_module
 from inkflow.animations import Animation, Cue, PlayVideo
 from inkflow.colors import SVG_TOKENS
 from inkflow.deps import Stamp, Stamps, note, recording, stamp
+from inkflow.editor import comments
 from inkflow.editor.chartedit import chart_json
 from inkflow.editor.codegen import field_schema, to_json
 from inkflow.editor.deckedit import DeckSource
@@ -445,7 +446,18 @@ def build_model(
         "colorTokens": list(SVG_TOKENS),
         "deckSize": size_json(deck),
         "stars": starred_ids(project_dir, out_slides),
+        "comments": comment_threads(project_dir, out_slides),
     }
+
+
+def comment_threads(
+    project_dir: Path, entries: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """The review comments on the deck's shown slides (editor/comments.py)."""
+    return comments.visible(
+        comments.read_threads(project_dir),
+        [str(e["id"]) for e in entries if e.get("id")],
+    )
 
 
 def starred_ids(project_dir: Path, entries: list[dict[str, object]]) -> list[str]:

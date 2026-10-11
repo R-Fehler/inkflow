@@ -3632,6 +3632,410 @@
     await pasteText(text);
   }
 
+  // src/ts/editor/commentstext.ts
+  function slideThreads(threads2, slideId2) {
+    return threads2.filter((t2) => slideId2 != null && t2.slide === slideId2).sort(
+      (a2, b2) => Number(a2.resolved) - Number(b2.resolved) || a2.created - b2.created
+    );
+  }
+  function openCount(threads2, slideId2) {
+    return slideThreads(threads2, slideId2).filter((t2) => !t2.resolved).length;
+  }
+  function ago(at3, now = Date.now() / 1e3) {
+    const s2 = Math.max(0, now - at3);
+    if (s2 < 60) return "just now";
+    if (s2 < 3600) return `${Math.floor(s2 / 60)} min ago`;
+    if (s2 < 86400) return `${Math.floor(s2 / 3600)} h ago`;
+    if (s2 < 86400 * 7) {
+      const d2 = Math.floor(s2 / 86400);
+      return `${d2} day${d2 === 1 ? "" : "s"} ago`;
+    }
+    return new Date(at3 * 1e3).toISOString().slice(0, 10);
+  }
+  function whereWords(t2) {
+    if (t2.target) return `on #${t2.target}`;
+    if (t2.x != null && t2.y != null)
+      return `at ${Math.round(t2.x)}, ${Math.round(t2.y)}`;
+    return "on the slide";
+  }
+  function commentTitle(threads2) {
+    const open5 = threads2.filter((t2) => !t2.resolved);
+    if (!open5.length) return "";
+    const lines = open5.map((t2) => {
+      const first = t2.messages[0];
+      const more = t2.messages.length > 1 ? ` (+${t2.messages.length - 1})` : "";
+      return `${first?.name || "someone"}: ${(first?.text ?? "").slice(0, 80)}${more}`;
+    });
+    return `${open5.length} open comment${open5.length === 1 ? "" : "s"}
+${lines.join("\n")}`;
+  }
+
+  // src/ts/editor/comments.ts
+  var canvasEl = document.getElementById("canvas");
+  var dialogBody = null;
+  var dialogSlide = null;
+  var focusThread = null;
+  var draft2 = null;
+  var placing = null;
+  function threads() {
+    return ed.model?.comments ?? [];
+  }
+  function slideId(i2) {
+    return ed.model?.slides[i2]?.id;
+  }
+  function setThreads(next) {
+    if (!ed.model || !Array.isArray(next)) return;
+    ed.model.comments = next;
+    emit("comments");
+  }
+  function paint(badge4, i2) {
+    const n3 = openCount(threads(), slideId(i2));
+    badge4.textContent = n3 ? `\u{1F4AC}${n3 > 1 ? n3 : ""}` : "";
+    if (n3)
+      badge4.setAttribute(
+        "title",
+        commentTitle(slideThreads(threads(), slideId(i2)))
+      );
+    else badge4.removeAttribute("title");
+  }
+  function commentBadge(i2) {
+    const badge4 = h("span", { class: "comment-mark" });
+    paint(badge4, i2);
+    badge4.addEventListener("click", (e2) => {
+      if (!badge4.textContent) return;
+      e2.stopPropagation();
+      openComments(i2);
+    });
+    return badge4;
+  }
+  function markComments(item2, i2) {
+    const badge4 = item2.querySelector(".comment-mark");
+    if (badge4) paint(badge4, i2);
+  }
+  function pinPoint(t2) {
+    const svg = slideRoot();
+    if (!svg) return null;
+    if (t2.target) {
+      const el2 = svg.querySelector(`#${CSS.escape(t2.target)}`);
+      if (el2 instanceof SVGGraphicsElement) {
+        const c2 = outlineOf(el2);
+        if (c2) {
+          return {
+            x: Math.max(...c2.map((p2) => p2.x)),
+            y: Math.min(...c2.map((p2) => p2.y))
+          };
+        }
+      }
+    }
+    const m2 = slideToPaper();
+    if (t2.x != null && t2.y != null) {
+      return {
+        x: m2.a * t2.x + m2.c * t2.y + m2.e,
+        y: m2.b * t2.x + m2.d * t2.y + m2.f
+      };
+    }
+    return { x: m2.e + 24, y: m2.f + 24 };
+  }
+  function drawPins(overlay3) {
+    if (ed.master || ed.step != null) return;
+    const list4 = slideThreads(threads(), slideId(ed.current)).filter(
+      (t2) => !t2.resolved
+    );
+    list4.forEach((t2, k2) => {
+      const p2 = pinPoint(t2);
+      if (!p2) return;
+      const g2 = svgEl("g", {
+        class: "comment-pin",
+        transform: `translate(${p2.x} ${p2.y})`
+      });
+      g2.append(svgEl("circle", { r: 11 }));
+      const label4 = svgEl("text", { "text-anchor": "middle", y: 4 });
+      label4.textContent = String(k2 + 1);
+      g2.append(label4);
+      const title3 = svgEl("title", {});
+      title3.textContent = commentTitle([t2]);
+      g2.append(title3);
+      g2.addEventListener("pointerdown", (e2) => e2.stopPropagation());
+      g2.addEventListener("click", (e2) => {
+        e2.stopPropagation();
+        openComments(ed.current, t2.id);
+      });
+      overlay3.append(g2);
+    });
+  }
+  function stopPlacing() {
+    if (placing) canvasEl.removeEventListener("pointerdown", placing, true);
+    placing = null;
+    document.body.classList.remove("placing-comment");
+  }
+  function addComment() {
+    if (ed.master) {
+      toast("Comments go on slides, not on the slide master", "error");
+      return;
+    }
+    const slide = ed.model?.slides[ed.current];
+    if (!slide?.visible) {
+      toast("A hidden slide takes no comments: show it first", "error");
+      return;
+    }
+    const sel = ed.selection.length === 1 ? ed.selection[0].el : null;
+    if (sel) {
+      const id = sel.getAttribute("id");
+      if (id) {
+        openComments(ed.current, null, { slide: ed.current, target: id });
+        return;
+      }
+      const mid = middle(sel);
+      if (mid) {
+        openComments(ed.current, null, { slide: ed.current, ...mid });
+        return;
+      }
+    }
+    stopPlacing();
+    document.body.classList.add("placing-comment");
+    toast("Click on the slide where the comment goes (Esc: cancel)");
+    placing = (e2) => {
+      if (!slideRoot()?.contains(e2.target)) {
+        stopPlacing();
+        return;
+      }
+      e2.preventDefault();
+      e2.stopPropagation();
+      stopPlacing();
+      const pt = clientPoint(e2);
+      openComments(ed.current, null, { slide: ed.current, ...pt });
+    };
+    canvasEl.addEventListener("pointerdown", placing, true);
+  }
+  function middle(el2) {
+    const root2 = slideRoot()?.getScreenCTM();
+    const own = el2.getScreenCTM?.();
+    if (!root2 || !own) return null;
+    try {
+      const b2 = el2.getBBox();
+      const p2 = new DOMPoint(b2.x + b2.width / 2, b2.y + b2.height / 2).matrixTransform(own).matrixTransform(root2.inverse());
+      return { x: p2.x, y: p2.y };
+    } catch {
+      return null;
+    }
+  }
+  function clientPoint(e2) {
+    const svg = slideRoot();
+    const m2 = svg?.getScreenCTM();
+    if (!m2) return { x: 0, y: 0 };
+    const p2 = new DOMPoint(e2.clientX, e2.clientY).matrixTransform(m2.inverse());
+    return { x: p2.x, y: p2.y };
+  }
+  async function send(req) {
+    const res = await edit({ action: "comment", ...req });
+    if (!res.ok) return false;
+    setThreads(res.comments);
+    return true;
+  }
+  function composer(placeholder, label4, onSend) {
+    const text = h("textarea", {
+      class: "git-message",
+      rows: "2",
+      placeholder
+    });
+    const go = async () => {
+      if (!text.value.trim()) return;
+      if (await onSend(text.value)) text.value = "";
+    };
+    text.addEventListener("keydown", (e2) => {
+      if (e2.key === "Enter" && (e2.ctrlKey || e2.metaKey)) {
+        e2.preventDefault();
+        void go();
+      }
+    });
+    return h(
+      "div",
+      { class: "comment-compose" },
+      text,
+      h(
+        "button",
+        {
+          type: "button",
+          class: "pbtn primary",
+          title: "Ctrl+Enter",
+          onclick: () => void go()
+        },
+        label4
+      )
+    );
+  }
+  function threadView(t2, k2) {
+    const box = h(
+      "div",
+      {
+        class: `comment-thread${t2.resolved ? " resolved" : ""}${t2.id === focusThread ? " focus" : ""}`,
+        "data-thread": t2.id
+      },
+      h(
+        "div",
+        { class: "comment-head" },
+        h(
+          "span",
+          { class: "comment-num" },
+          t2.resolved ? "\u2713" : String(k2 + 1)
+        ),
+        h("span", { class: "hint" }, whereWords(t2)),
+        h("span", { class: "cmp-spacer" }),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "link-btn",
+            onclick: () => void send({
+              op: "resolve",
+              thread: t2.id,
+              on: !t2.resolved
+            })
+          },
+          t2.resolved ? "Reopen" : "Resolve"
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "link-btn",
+            onclick: () => {
+              if (confirm("Delete this thread and its replies?"))
+                void send({ op: "delete", thread: t2.id });
+            }
+          },
+          "Delete"
+        )
+      ),
+      ...t2.messages.map(
+        (m2) => h(
+          "div",
+          { class: "comment-msg" },
+          h(
+            "div",
+            { class: "comment-who" },
+            h("strong", {}, m2.name || "someone"),
+            " ",
+            h("span", { class: "hint" }, ago(m2.at))
+          ),
+          h("div", { class: "comment-text" }, m2.text)
+        )
+      )
+    );
+    if (!t2.resolved) {
+      box.append(
+        composer(
+          "Reply\u2026",
+          "Reply",
+          (text) => send({ op: "reply", thread: t2.id, text })
+        )
+      );
+    }
+    return box;
+  }
+  function renderDialog() {
+    if (!dialogBody || dialogSlide == null) return;
+    clear(dialogBody);
+    if (draft2) {
+      const d2 = draft2;
+      const where = d2.target ? `on #${d2.target}` : d2.x != null && d2.y != null ? `at ${Math.round(d2.x)}, ${Math.round(d2.y)}` : "on the slide";
+      dialogBody.append(
+        h("div", { class: "hint" }, `New comment ${where}`),
+        composer("Write a comment\u2026", "Comment", async (text) => {
+          const ok = await send({ op: "add", ...d2, text });
+          if (ok) draft2 = null;
+          renderDialog();
+          return ok;
+        })
+      );
+    }
+    const list4 = slideThreads(threads(), slideId(dialogSlide));
+    let open5 = 0;
+    for (const t2 of list4) {
+      dialogBody.append(threadView(t2, t2.resolved ? -1 : open5));
+      if (!t2.resolved) open5 += 1;
+    }
+    if (!list4.length && !draft2) {
+      dialogBody.append(
+        h("p", { class: "hint" }, "No comments on this slide yet.")
+      );
+    }
+    if (!draft2) {
+      dialogBody.append(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            onclick: () => {
+              closeDialog();
+              addComment();
+            }
+          },
+          "New comment\u2026 (Shift+C)"
+        )
+      );
+    }
+    dialogBody.querySelector(".comment-thread.focus")?.scrollIntoView({ block: "nearest" });
+    dialogBody.querySelector(
+      ".comment-compose textarea"
+    )?.focus();
+  }
+  function openComments(i2, thread = null, start = null) {
+    dialogSlide = i2;
+    focusThread = thread;
+    draft2 = start;
+    dialogBody = h("div", { class: "comment-body" });
+    const slide = ed.model?.slides[i2];
+    openDialog(
+      `Comments on slide ${i2 + 1}: ${slide?.title ?? slide?.id ?? ""}`,
+      dialogBody,
+      {
+        wide: true,
+        onClose: () => {
+          dialogBody = null;
+          draft2 = null;
+        }
+      }
+    );
+    renderDialog();
+  }
+  function commentItems(i2, item2) {
+    const slide = ed.model?.slides[i2];
+    if (!slide?.visible) return [];
+    const n3 = openCount(threads(), slide.id);
+    return [
+      item2("Add comment\u2026 (Shift+C)", () => addComment()),
+      ...slideThreads(threads(), slide.id).length ? [item2(`Comments (${n3} open)\u2026`, () => openComments(i2))] : []
+    ];
+  }
+  function initComments() {
+    hooks.drawComments = drawPins;
+    onMessage("comments", (msg) => setThreads(msg.comments));
+    on("comments", () => {
+      drawOverlay();
+      if (dialogBody && dialogOpen()) renderDialog();
+    });
+    document.addEventListener(
+      "keydown",
+      (e2) => {
+        if (e2.key === "Escape" && placing) {
+          stopPlacing();
+          return;
+        }
+        const target = e2.target;
+        if (target?.closest("input, textarea, select, [contenteditable]"))
+          return;
+        if (e2.shiftKey && !e2.ctrlKey && !e2.metaKey && !e2.altKey && e2.code === "KeyC") {
+          e2.preventDefault();
+          e2.stopImmediatePropagation();
+          addComment();
+        }
+      },
+      true
+    );
+  }
+
   // src/ts/editor/deletetext.ts
   function plural(n3, word) {
     return `${n3} ${word}${n3 === 1 ? "" : "s"}`;
@@ -4388,8 +4792,8 @@
       e2.preventDefault();
       if (!check()) return;
       ok.disabled = true;
-      const send = shape ? makePlaceholder(shape, src, chosen, name2.value, prompt.value) : addPlaceholder(src, chosen, name2.value, prompt.value);
-      void send.then((done) => {
+      const send2 = shape ? makePlaceholder(shape, src, chosen, name2.value, prompt.value) : addPlaceholder(src, chosen, name2.value, prompt.value);
+      void send2.then((done) => {
         if (done) closeDialog();
         else ok.disabled = false;
       });
@@ -5526,7 +5930,7 @@
   function slideProblems(i2) {
     return problems.length === (ed.model?.slides.length ?? -1) ? problems[i2] ?? [] : [];
   }
-  function paint(badge4, list4) {
+  function paint2(badge4, list4) {
     const shown3 = marked(list4);
     const level = worst(shown3);
     badge4.textContent = shown3.length ? "\u26A0" : "";
@@ -5536,7 +5940,7 @@
   }
   function problemBadge(i2) {
     const badge4 = h("span", { class: "problem-mark" });
-    paint(badge4, slideProblems(i2));
+    paint2(badge4, slideProblems(i2));
     badge4.addEventListener("click", (e2) => {
       if (!badge4.textContent) return;
       e2.stopPropagation();
@@ -5546,7 +5950,7 @@
   }
   function markProblems(item2, i2) {
     const badge4 = item2.querySelector(".problem-mark");
-    if (badge4) paint(badge4, slideProblems(i2));
+    if (badge4) paint2(badge4, slideProblems(i2));
   }
   function renderButton() {
     const n3 = countMarked(problems);
@@ -6756,8 +7160,8 @@
     if (m2.right.live && !m2.left.live) return m2.left.branch;
     return null;
   }
-  async function mergeBranch(branch, send) {
-    const res = await send({ action: "worktree", op: "merge", branch });
+  async function mergeBranch(branch, send2) {
+    const res = await send2({ action: "worktree", op: "merge", branch });
     if (!res.ok) {
       return {
         ok: false,
@@ -9590,10 +9994,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function changeBadge(i2) {
     const badge4 = h("span", { class: "git-mark" });
-    paint2(badge4, slideChange(i2));
+    paint3(badge4, slideChange(i2));
     return badge4;
   }
-  function paint2(badge4, c2) {
+  function paint3(badge4, c2) {
     const state = c2?.state ?? "";
     badge4.textContent = letter(c2?.state ?? null);
     badge4.className = `git-mark${state ? ` m-${state}` : ""}`;
@@ -9602,7 +10006,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function markChange(item2, i2) {
     const badge4 = item2.querySelector(".git-mark");
-    if (badge4) paint2(badge4, slideChange(i2));
+    if (badge4) paint3(badge4, slideChange(i2));
   }
   function slideGitItems(i2, item2) {
     const status3 = gitStatus();
@@ -10458,7 +10862,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       thumbs3.thumb(slide),
       slide.visible ? starButton(i2) : null,
       changeBadge(i2),
-      problemBadge(i2)
+      problemBadge(i2),
+      commentBadge(i2)
     );
     item2.classList.toggle("starred", isStarred(i2));
     item2.addEventListener("click", (e2) => pickSlide(i2, e2));
@@ -10585,6 +10990,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       markStar(item2, i2);
       markChange(item2, i2);
       markProblems(item2, i2);
+      markComments(item2, i2);
     }
   }
   function renderSorter(anew = false) {
@@ -10786,6 +11192,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     menu4.append(
       menuItem("Add section here\u2026", () => void addSectionAt(i2), !editable)
     );
+    const notes = commentItems(i2, menuItem);
+    if (notes.length) menu4.append(h("div", { class: "menu-sep" }), ...notes);
     menu4.append(...slideGitItems(i2, menuItem));
     showMenu(x2, y2);
   }
@@ -10815,6 +11223,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     on("stars", () => renderSorter());
     on("slide-git", () => renderSorter());
     on("problems", () => renderSorter());
+    on("comments", () => renderSorter());
     on("sections", () => renderSorter(true));
     initListDrop();
     addBtn.addEventListener("click", () => {
@@ -11441,6 +11850,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     toolDown: (_e, _pt) => false,
     // Draws the others' selections on this slide (collab.ts).
     drawPeers: (_overlay) => {
+    },
+    // Draws the review comments' pins on this slide (comments.ts).
+    drawComments: (_overlay) => {
     }
   };
   function slideRoot() {
@@ -11993,6 +12405,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     drawPlaceholders();
     drawOverflowBadges();
     hooks.drawPeers(overlay2);
+    hooks.drawComments(overlay2);
     if (ed.scope) {
       const c2 = elementCorners(ed.scope);
       if (c2) overlay2.append(poly(c2, "scope-outline"));
@@ -15852,13 +16265,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       { value: "", label: `Deck default (${model2.defaultTransition.type})` },
       ...types.map((t2) => ({ value: t2.type, label: t2.type }))
     ];
-    const send = (spec) => void edit({ action: "slide", op: "transition", slide: di, spec });
+    const send2 = (spec) => void edit({ action: "slide", op: "transition", slide: di, spec });
     const body3 = [
       row5(
         "Type",
         selectInput(opts2, value, (v2) => {
-          if (!v2) send(null);
-          else send({ type: v2, fields: {} });
+          if (!v2) send2(null);
+          else send2({ type: v2, fields: {} });
         })
       )
     ];
@@ -15869,7 +16282,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           fieldsEditor(
             info4.fields,
             current3.fields,
-            (fields) => send({ type: current3.type, fields })
+            (fields) => send2({ type: current3.type, fields })
           )
         );
       }
@@ -16053,7 +16466,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       if (!elementName || cue.element !== (cue.kind === "video" ? zoneName(sel.el) : id))
         return;
       const info4 = typeInfo(model2.animationTypes, cue.type);
-      const send = (type, fields) => void edit({
+      const send2 = (type, fields) => void edit({
         action: "anim",
         slide: di,
         op: "replace",
@@ -16070,7 +16483,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             label: t2.type
           })),
           cue.type,
-          (v2) => send(v2, {
+          (v2) => send2(v2, {
             trigger: cue.fields.trigger ?? "on-click"
           })
         ) : h("span", {}, cue.type),
@@ -16097,7 +16510,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           info4 && editable ? fieldsEditor(
             info4.fields,
             cue.fields,
-            (f2) => send(cue.type, f2)
+            (f2) => send2(cue.type, f2)
           ) : null
         )
       );
@@ -16194,12 +16607,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const shown3 = boxShown(first);
     const token = shown3 ? tokenOf(first, prop) : null;
     const computed = shown3 ? getComputedStyle(first)[prop] : "none";
-    const send = (paint3) => {
+    const send2 = (paint4) => {
       const plans = sel.map((s2) => ({
         sel: s2,
         ops: [
           ...boxOps(s2),
-          { kind: "paint", loc: s2.loc, prop, ...paint3 }
+          { kind: "paint", loc: s2.loc, prop, ...paint4 }
         ]
       }));
       void sendSvgOps(plans, prop === "fill" ? "Fill" : "Stroke");
@@ -16212,7 +16625,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           class: `swatch${t2 === token ? " active" : ""}`,
           title: t2,
           style: `background: var(--inkflow-${t2})`,
-          onclick: () => send({ token: t2 })
+          onclick: () => send2({ token: t2 })
         })
       );
     }
@@ -16221,10 +16634,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       value: computed && computed !== "none" ? rgbToHex(computed) : "#000000",
       title: "Custom colour"
     });
-    custom.addEventListener("change", () => send({ color: custom.value }));
+    custom.addEventListener("change", () => send2({ color: custom.value }));
     swatches.append(custom);
     swatches.append(
-      button5("\u2205", "None", () => send({ color: "none" }), "none-btn")
+      button5("\u2205", "None", () => send2({ color: "none" }), "none-btn")
     );
     return row5(prop === "fill" ? "Fill" : "Stroke", swatches);
   }
@@ -16275,8 +16688,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const el2 = sel.el;
     const cell = el2.getAttribute("data-cell-id") ?? "";
     const themed = el2.closest("svg[data-drawio]")?.getAttribute("data-drawio-mode") === "themed";
-    const send = (op, label4) => void sendSvgOps([{ sel, ops: [op] }], label4);
-    const style = (key, value, label4) => send({ kind: "cell-style", cell, key, value }, label4);
+    const send2 = (op, label4) => void sendSvgOps([{ sel, ops: [op] }], label4);
+    const style = (key, value, label4) => send2({ kind: "cell-style", cell, key, value }, label4);
     const painted2 = cellShape(el2).querySelector(
       "rect, ellipse, path, polygon, circle"
     );
@@ -16290,7 +16703,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     area2.value = cellLabel(el2);
     area2.addEventListener(
       "change",
-      () => send({ kind: "cell-label", cell, text: area2.value }, "Shape label")
+      () => send2({ kind: "cell-label", cell, text: area2.value }, "Shape label")
     );
     area2.addEventListener("keydown", (e2) => {
       if (e2.key === "Enter" && !e2.shiftKey) {
@@ -16627,7 +17040,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const el2 = sel.el;
     const has = (attr) => (el2.getAttribute(attr) ?? "").includes("inkflow-arrow");
     const heads = has("marker-start") ? has("marker-end") ? "both" : "start" : has("marker-end") ? "end" : "none";
-    const send = (set, label4, marker = false) => void sendSvgOps(
+    const send2 = (set, label4, marker = false) => void sendSvgOps(
       [
         {
           sel,
@@ -16657,7 +17070,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           (v2) => {
             const style = v2;
             const d2 = connectorPath(el2, {}, style, null);
-            send(
+            send2(
               {
                 "inkflow:connector": v2,
                 "inkflow:bend": null,
@@ -16678,7 +17091,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             { value: "both", label: "Both ends" }
           ],
           heads,
-          (v2) => send(
+          (v2) => send2(
             {
               "marker-start": v2 === "start" || v2 === "both" ? ARROW : null,
               "marker-end": v2 === "end" || v2 === "both" ? ARROW : null
@@ -16706,7 +17119,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           "Put the elbow's middle segment back where it goes by default",
           () => {
             const d2 = connectorPath(el2, {}, "elbow", null);
-            send(
+            send2(
               { "inkflow:bend": null, ...d2 ? { d: d2 } : {} },
               "Reset bend"
             );
@@ -16715,7 +17128,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         button5(
           "Detach",
           "Free both ends",
-          () => send(
+          () => send2(
             {
               "inkflow:connect-start": null,
               "inkflow:connect-end": null
@@ -18294,7 +18707,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           "\u2726"
         ) : null,
         changeBadge(i2),
-        problemBadge(i2)
+        problemBadge(i2),
+        commentBadge(i2)
       )
     );
     item2.classList.toggle("starred", isStarred(i2));
@@ -18572,6 +18986,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     on("stars", renderGrid);
     on("slide-git", renderGrid);
     on("problems", renderGrid);
+    on("comments", renderGrid);
     try {
       starredOnly = localStorage.getItem(STARRED_KEY) === "1";
     } catch {
@@ -19162,7 +19577,7 @@ $$`;
       }
     };
     on("model", follow);
-    const send = async () => {
+    const send2 = async () => {
       window.clearTimeout(timer6);
       if (area2.value === sent2) return;
       const before = sent2;
@@ -19183,7 +19598,7 @@ $$`;
       if (!result.ok && result.stale && await zoneUnchanged(refused, deckIndex, zone, before)) {
         base2 = ed.model?.build;
         sent2 = before;
-        void send();
+        void send2();
         return;
       }
       if (!result.ok && result.stale) {
@@ -19200,14 +19615,14 @@ $$`;
       if (!result.ok) {
         sent2 = before;
         timer6 = window.setTimeout(() => {
-          if (!stopped2) void send();
+          if (!stopped2) void send2();
         }, 800);
       }
     };
     let stopped2 = false;
     area2.addEventListener("input", () => {
       window.clearTimeout(timer6);
-      timer6 = window.setTimeout(() => void send(), 450);
+      timer6 = window.setTimeout(() => void send2(), 450);
     });
     const button10 = (name2, title3, fn) => h(
       "button",
@@ -19261,7 +19676,7 @@ ${area2.value.slice(pos)}`;
     area2.focus();
     active2 = {
       commit: async () => {
-        await send();
+        await send2();
         off("model", follow);
       },
       cancel: () => {
@@ -19269,7 +19684,7 @@ ${area2.value.slice(pos)}`;
         off("model", follow);
         if (sent2 !== original) {
           area2.value = original;
-          void send();
+          void send2();
         }
       }
     };
@@ -26000,6 +26415,7 @@ Ctrl+click: open in a new tab`;
     initDecks();
     initGit();
     initProblems();
+    initComments();
     initCanvasMenu();
     initCompare();
     initMaster();

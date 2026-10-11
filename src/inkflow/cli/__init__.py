@@ -17,6 +17,7 @@ for _submodule in (
     "agent",
     "anim",
     "authoring",
+    "comments",
     "compare",
     "color",
     "files",

@@ -1,6 +1,8 @@
 // The editor model sent by the server (inkflow/editor/model.py build_model).
 // Field names mirror the Python side exactly; see that module for meanings.
 
+import type { Thread } from "./commentstext";
+
 export interface SourceInfo {
     path: string;
     rel: string;
@@ -158,6 +160,8 @@ export interface EditorModel {
     deckSize?: DeckSize;
     // The ids of the starred slides (stars.ts), in deck order.
     stars?: string[];
+    // The review comments on the shown slides (comments.ts).
+    comments?: Thread[];
 }
 
 // The deck's size (`Deck(size=)`, inkflow/sizes.py): the canvas a new slide

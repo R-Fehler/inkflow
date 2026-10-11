@@ -114,6 +114,10 @@ class SlideOutline:
     """Index into ``DeckOutline.sections``; ``None`` before the first section."""
     starred: bool = False
     """The author starred it in the editor (editor/stars.py)."""
+    comments: list[str] = field(default_factory=list)
+    """Its open review comments (editor/comments.py), each as
+    ``name: text`` with the replies after ``|``, and ``@target`` or
+    ``@x,y`` when pinned."""
 
 
 @dataclass
@@ -374,12 +378,28 @@ def _built_zones(entry: dict[str, object], root: SvgElement) -> list[ZoneOutline
     return zones
 
 
+def _thread_line(thread: dict[str, object]) -> str:
+    """One open comment thread as a line: where, then each message."""
+    where = ""
+    if isinstance(thread.get("target"), str):
+        where = f"@{thread['target']} "
+    elif isinstance(thread.get("x"), int | float):
+        where = f"@{thread['x']:g},{thread.get('y', 0):g} "
+    messages = cast("list[dict[str, object]]", thread.get("messages") or [])
+    said = " | ".join(
+        f"{m.get('name') or 'someone'}: {' '.join(str(m.get('text', '')).split())}"
+        for m in messages
+    )
+    return f"{where}{said}"
+
+
 def build_outline(deck: Deck, deck_path: Path, slides: list[SlideData]) -> DeckOutline:
     """The deck's outline. ``slides`` must come from ``process_deck(editor=True)``."""
     project_dir = deck_path.parent
     model = build_model(deck, deck_path, slides)
     entries = cast("list[dict[str, object]]", model["slides"])
     starred = set(cast("list[str]", model["stars"]))
+    threads = cast("list[dict[str, object]]", model.get("comments") or [])
     out: list[SlideOutline] = []
     canvas: list[float] | None = None
     for slide, entry in zip(deck.slides, entries, strict=True):
@@ -413,6 +433,11 @@ def build_outline(deck: Deck, deck_path: Path, slides: list[SlideData]) -> DeckO
             notes_text=str(notes.get("text") or ""),
             section=deck.section_of(index),
             starred=entry.get("id") in starred,
+            comments=[
+                _thread_line(t)
+                for t in threads
+                if t.get("slide") == entry.get("id") and not t.get("resolved")
+            ],
         )
         if visible is None:
             item.zones = _hidden_zones(entry)
@@ -511,6 +536,8 @@ def _slide_lines(s: SlideOutline, full: bool) -> list[str]:
         head += " HIDDEN"
     if s.starred:
         head += " STARRED"
+    if s.comments:
+        head += f" COMMENTS {len(s.comments)}"
     if s.transition:
         head += f"  {s.transition}"
     lines = [head]
@@ -544,6 +571,8 @@ def _slide_lines(s: SlideOutline, full: bool) -> list[str]:
             lines.append(f"  anims {len(s.animations)}{clicks}: {tokens}")
     elif s.steps:
         lines.append(f"  {s.steps} click{'s' if s.steps != 1 else ''}")
+    for comment in s.comments:
+        lines.append("  comment " + (comment if full else _preview(comment, 160)))
     if full:
         if s.ids:
             lines.append("  ids: " + " ".join(s.ids))

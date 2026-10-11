@@ -968,6 +968,13 @@ async def _handle_edit_op(
         # No file of the deck changed and nothing rebuilds: every editor
         # page is told which slides are starred now.
         await _send_editors({"type": "stars", "stars": _stars()})
+    if result.get("ok") and msg.get("action") == "comment":
+        # Likewise every editor page is told the review comments now.
+        threads = result.get("comments")
+        for held in (_editor["model"], _editor["model_patch"]):
+            if held is not None:
+                held["comments"] = threads
+        await _send_editors({"type": "comments", "comments": threads})
     if result.get("ok") and (
         result.get("changes") or msg.get("action") in ("undo", "redo")
     ):

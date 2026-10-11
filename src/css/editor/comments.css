@@ -1,0 +1,99 @@
+/* Review comments (src/ts/editor/comments.ts): the count on a slide's row
+   and tile, the pins on the canvas and the slide's comments. */
+
+.comment-mark {
+    font-size: 10px;
+    line-height: 1;
+    color: var(--sel);
+    cursor: pointer;
+}
+
+.comment-mark:empty {
+    display: none;
+}
+
+.sorter-item .comment-mark {
+    position: absolute;
+    left: 0;
+    top: 72px;
+    width: 18px;
+    text-align: right;
+}
+
+.comment-pin {
+    pointer-events: all;
+    cursor: pointer;
+}
+
+.comment-pin circle {
+    fill: var(--sel);
+    stroke: var(--ui-bg);
+    stroke-width: 2;
+}
+
+.comment-pin text {
+    fill: #fff;
+    font: 600 11px var(--font-ui);
+}
+
+body.placing-comment #canvas {
+    cursor: crosshair;
+}
+
+.comment-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.comment-thread {
+    padding: 8px 10px;
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-line);
+    border-radius: 6px;
+}
+
+.comment-thread.focus {
+    border-color: var(--sel);
+}
+
+.comment-thread.resolved {
+    opacity: 0.6;
+}
+
+.comment-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.comment-num {
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--sel);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.comment-msg {
+    padding: 4px 0;
+}
+
+.comment-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.comment-compose {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    margin-top: 6px;
+}

@@ -13,6 +13,7 @@ import {
     followPastedSlides,
     pasteFromClipboard,
 } from "./clipboard";
+import { commentBadge, commentItems, markComments } from "./comments";
 import { askSlideDelete } from "./deletedlg";
 import { slideQuestion } from "./deletetext";
 import { clear, h, icon, toast } from "./dom";
@@ -303,6 +304,7 @@ function slideItem(slide: SlideModel, i: number): HTMLElement {
         slide.visible ? starButton(i) : null,
         changeBadge(i),
         problemBadge(i),
+        commentBadge(i),
     );
     item.classList.toggle("starred", isStarred(i));
     item.addEventListener("click", (e) => pickSlide(i, e));
@@ -446,6 +448,7 @@ function markRows(): void {
         markStar(item, i);
         markChange(item, i);
         markProblems(item, i);
+        markComments(item, i);
     }
 }
 
@@ -678,6 +681,8 @@ export function openSlideMenu(x: number, y: number, i: number): void {
     menu.append(
         menuItem("Add section here…", () => void addSectionAt(i), !editable),
     );
+    const notes = commentItems(i, menuItem);
+    if (notes.length) menu.append(h("div", { class: "menu-sep" }), ...notes);
     menu.append(...slideGitItems(i, menuItem));
     showMenu(x, y);
 }
@@ -709,6 +714,7 @@ export function initSorter(): void {
     on("stars", () => renderSorter());
     on("slide-git", () => renderSorter());
     on("problems", () => renderSorter());
+    on("comments", () => renderSorter());
     on("sections", () => renderSorter(true));
     initListDrop();
     addBtn.addEventListener("click", () => {

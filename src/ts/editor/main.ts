@@ -12,6 +12,7 @@ import {
 import { initCanvasMenu } from "./canvasmenu";
 import { editChart } from "./chart";
 import { initCollab } from "./collab";
+import { initComments } from "./comments";
 import { initCompare } from "./compare";
 import { initContext } from "./context";
 import { isCropped, setCropMode, startCrop } from "./crop";
@@ -168,6 +169,7 @@ function boot(): void {
     initDecks();
     initGit();
     initProblems();
+    initComments();
     initCanvasMenu();
     initCompare();
     initMaster();

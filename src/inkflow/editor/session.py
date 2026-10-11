@@ -46,6 +46,7 @@ from inkflow.charts import (
 from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, open_with
 from inkflow.editor import (
     chartedit,
+    comments,
     gitops,
     media,
     nativedialog,
@@ -867,15 +868,16 @@ class EditorSession:
             step = self.history.undo(seq if isinstance(seq, int) else None, self.author)
             self._wrote(step, undo=True)
             if step.ids:
-                stars.follow(
-                    self.project_dir, {new: old for old, new in step.ids.items()}
-                )
+                back = {new: old for old, new in step.ids.items()}
+                stars.follow(self.project_dir, back)
+                comments.follow(self.project_dir, back)
             return self._result(step, undo=True)
         if action == "redo":
             step = self.history.redo(self.author)
             self._wrote(step)
             if step.ids:
                 stars.follow(self.project_dir, step.ids)
+                comments.follow(self.project_dir, step.ids)
             return self._result(step)
         if action == "upload":
             return self._upload(msg)
@@ -961,6 +963,8 @@ class EditorSession:
             return {"ok": True, **self._file_list(deck)}
         if action == "star":
             return self._star(msg, deck)
+        if action == "comment":
+            return self._comment(msg, deck)
         txn = _Txn(self.project_dir)
         extra: dict[str, object] = {}
         handler = {
@@ -1050,6 +1054,7 @@ class EditorSession:
             # The stars stay on their slides through a change of ids.
             step.ids = moved_ids
             stars.follow(self.project_dir, moved_ids, new_ids)
+            comments.follow(self.project_dir, moved_ids)
         if isinstance(refresh, Deck):
             self._refresh_previews(step, refresh)
         coalesce = msg.get("coalesce")
@@ -4096,6 +4101,59 @@ class EditorSession:
             elif old_id != new_id:
                 moves[old_id] = new_id
         return moves, created
+
+    def _comment(self, msg: dict[str, object], deck: Deck) -> dict[str, object]:
+        """Review comments (editor/comments.py): ``add`` (``slide``: a deck
+        index; ``x``/``y`` or ``target``; ``text``), ``reply`` / ``resolve``
+        (``on``) / ``delete`` a thread (``thread``). Not a History step: a
+        comment is no part of the deck."""
+        op = msg.get("op")
+        who = self.author
+        name = getattr(self._who, "name", "") or ("owner" if who == OWNER else "")
+        visible = [s for s in deck.slides if s.visible]
+        shown = dict(zip(map(id, visible), slide_ids(visible), strict=True))
+        try:
+            if op == "add":
+                index = msg.get("slide")
+                if not isinstance(index, int) or not 0 <= index < len(deck.slides):
+                    raise EditError("which slide?")
+                slide_id = shown.get(id(deck.slides[index]))
+                if slide_id is None:
+                    raise EditError("a hidden slide takes no comments: show it first")
+                thread = comments.add(
+                    self.project_dir,
+                    slide_id,
+                    msg.get("text"),
+                    who,
+                    name,
+                    x=msg.get("x"),
+                    y=msg.get("y"),
+                    target=msg.get("target"),
+                )
+                extra: dict[str, object] = {"thread": thread["id"]}
+            elif op == "reply":
+                comments.reply(
+                    self.project_dir, msg.get("thread"), msg.get("text"), who, name
+                )
+                extra = {}
+            elif op == "resolve":
+                comments.resolve(
+                    self.project_dir, msg.get("thread"), msg.get("on") is not False
+                )
+                extra = {}
+            elif op == "delete":
+                comments.delete(
+                    self.project_dir, msg.get("thread"), who, _role(msg) == "owner"
+                )
+                extra = {}
+            else:
+                raise EditError(f"unknown comment operation {op!r}")
+        except comments.CommentError as exc:
+            raise EditError(str(exc)) from exc
+        threads = comments.visible(
+            comments.read_threads(self.project_dir), shown.values()
+        )
+        return {"ok": True, **extra, "comments": threads}
 
     def _star(self, msg: dict[str, object], deck: Deck) -> dict[str, object]:
         """Star or unstar slides (``slides``: deck indices; ``on``: true,
