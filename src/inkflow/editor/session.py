@@ -1086,21 +1086,35 @@ class EditorSession:
         (``baseBuild``) so a write to a file changed since is refused."""
         with self._lock:
             files: dict[str, tuple[int, int]] = {}
-            root = self.project_dir
-            for folder, dirs, names in os.walk(root):
-                dirs[:] = [
-                    d
-                    for d in dirs
-                    if not d.startswith(".")
-                    and d not in ("build", "node_modules", "__pycache__")
-                ]
-                for name in names:
-                    path = Path(folder, name)
+            # Taken before every build: each folder's real path is found
+            # once, and only a file that is itself a link is resolved.
+            skipped = ("build", "node_modules", "__pycache__")
+            folders = [(str(self.project_dir), os.path.realpath(self.project_dir))]
+            while folders and len(files) <= 20000:
+                folder, real = folders.pop()
+                try:
+                    entries = list(os.scandir(folder))
+                except OSError:
+                    continue
+                for entry in entries:
                     with contextlib.suppress(OSError):
-                        st = path.stat()
-                        files[str(path.resolve())] = (st.st_mtime_ns, st.st_size)
-                if len(files) > 20000:
-                    break
+                        if entry.is_dir():
+                            # A linked folder is not gone into (as os.walk).
+                            if (
+                                not entry.is_symlink()
+                                and not entry.name.startswith(".")
+                                and entry.name not in skipped
+                            ):
+                                inner = os.path.join(real, entry.name)
+                                folders.append((entry.path, inner))
+                            continue
+                        st = entry.stat()
+                        key = (
+                            os.path.realpath(entry.path)
+                            if entry.is_symlink()
+                            else os.path.join(real, entry.name)
+                        )
+                        files[key] = (st.st_mtime_ns, st.st_size)
             self.build_id += 1
             self.snapshots[self.build_id] = files
             for old in [k for k in self.snapshots if k <= self.build_id - 30]:
