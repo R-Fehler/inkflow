@@ -18,6 +18,7 @@ import dataclasses
 import importlib.resources
 import json
 import math
+import re
 import tempfile
 from dataclasses import dataclass, field
 from html import escape as escape_html
@@ -68,6 +69,7 @@ class Finding:
     slide: int
     slide_id: str
     kind: str  # overflow | clipped | outside | small-text | low-res | contrast
+    # | uneven-fit
     target: str
     top: int = 0
     right: int = 0
@@ -101,7 +103,7 @@ class Finding:
             return self.problem
         if self.kind == "contrast":
             return self.ratio < 3
-        return self.kind != "small-text"
+        return self.kind not in ("small-text", "uneven-fit")
 
     def _sides(self) -> list[str]:
         return [side for side in _SIDES if getattr(self, side) > 0]
@@ -137,6 +139,13 @@ class Finding:
                 + (", pixelated" if self.problem else ", soft")
                 + f" (below {self.minimum:g} dpi at its printed size):"
                 + " use a larger image, or a vector one (SVG, PDF)"
+            )
+        elif self.kind == "uneven-fit":
+            said = (
+                f"its text is shrunk to {self.size:.0%} to fit while {self.text}"
+                + f" beside it is at {self.minimum:.0%}: the two read at different"
+                + " sizes (shorten this one, or give both the same size,"
+                + f" e.g. size={self.size:.0%} on each)"
             )
         elif self.kind == "contrast":
             said = (
@@ -179,6 +188,7 @@ def parse_findings(slide: int, slide_id: str, raw: object) -> list[Finding]:
             "small-text",
             "low-res",
             "contrast",
+            "uneven-fit",
         ):
             continue
         if not isinstance(target, str):
@@ -529,6 +539,20 @@ def _slide_page(template: str, svg: str, print_: dict[str, float] | None = None)
     return html.replace("__W__", str(w)).replace("__H__", str(h))
 
 
+_UNSAFE_NAME = re.compile(r"[^\w.-]+")
+
+
+def image_name(number: int, slide_id: str, by_id: bool = False) -> str:
+    """The PNG a slide is written to in a folder: ``slide-<number>.png``, or
+    with ``by_id`` ``<id>.png``, which stays the slide's when slides are
+    added or moved before it (an id is unique in a deck; what a file name
+    cannot hold becomes ``-``)."""
+    if not by_id:
+        return f"slide-{number}.png"
+    name = _UNSAFE_NAME.sub("-", slide_id).strip(".-") or f"slide-{number}"
+    return f"{name}.png"
+
+
 @dataclass
 class RenderResult:
     images: list[Path] = field(default_factory=list)
@@ -549,6 +573,7 @@ def render_slides(
     no_sandbox: bool = False,
     boxes: bool = False,
     contrast: bool = True,
+    by_id: bool = False,
 ) -> RenderResult:
     """Render slides (1-based, as the presenter numbers them; ``None`` = all).
 
@@ -635,7 +660,8 @@ def render_slides(
                 (Path(tmp) / shots[n]).write_bytes(png)
                 continue
             assert output is not None
-            target = (output if single else output / f"slide-{n}.png").resolve()
+            name = image_name(n, slides[n - 1]["id"], by_id)
+            target = (output if single else output / name).resolve()
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(png)
             result.images.append(target)

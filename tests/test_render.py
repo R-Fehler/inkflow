@@ -15,6 +15,7 @@ from inkflow.render import (
     SHEET_WIDTH,
     Finding,
     RenderResult,
+    image_name,
     parse_findings,
     render_slides,
     sheet_columns,
@@ -77,6 +78,17 @@ class TestFindingMessages:
             'text 10px tall is likely too small to read (below 13.5px): "tiny footnote"'
         )
 
+    def test_columns_shrunk_to_different_sizes_are_a_hint(self) -> None:
+        f = _finding(
+            "uneven-fit", target="#zone-right", size=0.72, min=1, text="#zone-left"
+        )
+        assert not f.is_problem
+        assert f.message().endswith(
+            "#zone-right: its text is shrunk to 72% to fit while #zone-left beside"
+            + " it is at 100%: the two read at different sizes (shorten this one,"
+            + " or give both the same size, e.g. size=72% on each)"
+        )
+
     def test_unknown_and_malformed_entries_are_dropped(self) -> None:
         raw = [
             {"kind": "sparkles", "target": "#a"},
@@ -87,6 +99,14 @@ class TestFindingMessages:
         found = parse_findings(1, "a", raw)
         assert [(f.target, f.bottom) for f in found] == [("#b", 0)]
         assert parse_findings(1, "a", None) == []
+
+
+def test_images_are_named_by_number_or_by_id() -> None:
+    assert image_name(7, "intro") == "slide-7.png"
+    assert image_name(7, "intro", by_id=True) == "intro.png"
+    # An id may hold what a file name may not.
+    assert image_name(7, "a/../b c", by_id=True) == "a-..-b-c.png"
+    assert image_name(7, "...", by_id=True) == "slide-7.png"
 
 
 def test_summary_counts_problems_and_hints() -> None:

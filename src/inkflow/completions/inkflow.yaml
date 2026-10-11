@@ -107,6 +107,7 @@ commands:
       --sheet: One contact-sheet PNG of the slides
       --check: Only measure the layout; exit 1 on a problem
       -o, --output=: PNG file or directory
+      --by-id: Name the images <id>.png instead of slide-N.png
       --scale=: Image scale
       --boxes: Print every element's rendered box (no images unless -o)
       --no-contrast: Skip the text contrast check

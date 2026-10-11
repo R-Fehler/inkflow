@@ -92,6 +92,12 @@ rather than drawn over the labels. Use it to zoom into a narrow band
 (`y_min=90` for values between 92 and 98), or to give several charts the same
 scale.
 
+### Units
+
+An axis has no label of its own. Say the unit where the reader looks first:
+in the `title` (`title="TOPO-F1 (%)"`), or, with several series, in the
+columns' names, which the legend shows (`revenue (k€)` as the CSV's header).
+
 ### A second axis
 
 Two measures of different size (revenue in thousands, a margin in percent)

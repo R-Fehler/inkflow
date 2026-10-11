@@ -53,7 +53,7 @@ right away.
 |---|---|
 | `inkflow outline` | Prints what is on every slide in a few lines each: its files and layout chain, each zone with where its text is written and how it starts, the animations and clicks. `--slide N` shows one slide in full (zone texts and boxes, canvas size, element ids to animate, animations as `deck.py` writes them); `--json` for the whole structure. A slide you [starred](index.md#starred-slides) in the editor says `STARRED`, and `--starred` prints only those. Claude starts here instead of reading every file. |
 | `inkflow context` | Prints what the editor has selected right now (`--json` for the raw data). |
-| `inkflow render` | Writes PNGs of slides at any build step to `.inkflow/render/`, the editor's current slide by default (`--slide N`, `--all`, `--step S`), and reports layout problems. Claude looks at them to check its own work. `--sheet` puts the slides on one contact sheet; `--check` only measures (see below). `--boxes` prints where the browser drew every element instead ([below](#placing-against-real-text)). |
+| `inkflow render` | Writes PNGs of slides at any build step to `.inkflow/render/`, the editor's current slide by default (`--slide N`, `--all`, `--step S`), and reports layout problems. Claude looks at them to check its own work. `--sheet` puts the slides on one contact sheet; `--check` only measures (see below). The images are `slide-N.png`; `--by-id` names them `<id>.png`, which stays a slide's name when slides are added before it. `--boxes` prints where the browser drew every element instead ([below](#placing-against-real-text)). |
 | `inkflow verify` | Checks the deck for authoring mistakes. |
 | `inkflow goto N` | Shows slide `N` in the editor open on this deck. |
 | `inkflow select ID…` | Selects elements by id in the editor open on this deck, so Claude can point at what it means. |
@@ -370,13 +370,17 @@ slide 8 (morph): #logo: lies 40px outside the slide (right)
 slide 8 (morph): #lost: lies entirely outside the slide (right), so it is not shown
 slide 3 (interface): #zone-content: text 10px tall is likely too small to read (below 13.5px): "tiny footnote"
 slide 1 (title): #subtitle: contrast 2.4:1 against its background (needs 3:1): #8839ef on #203341 "Your editor, your style."
+slide 5 (compare): #zone-right: its text is shrunk to 72% to fit while #zone-left beside it is at 100%: the two read at different sizes (shorten this one, or give both the same size, e.g. size=72% on each)
 ```
 
 Lengths are in slide units, the numbers in the SVG. A zone's text is compared
 with the zone's box; a drawn object with the slide's edges, except a background
 or a band spanning the whole slide, and anything clipped on purpose (a crop, a
-media zone). Small text (below 1/80 of the slide's height) is a hint, the rest
-are problems.
+media zone). Small text (below 1/80 of the slide's height) is a hint, and so is
+a text box [shrunk to fit](index.md#text-size-and-shrinking-to-fit) a tenth or
+more further than the box beside it (two columns that start at the same height
+and are as tall): each fits, but they read at different sizes. The rest are
+problems.
 
 **Contrast** is measured against what is really behind each piece of text, in
 the rendered slide: the slide is shot once as shown and once with its text made

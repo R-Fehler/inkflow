@@ -226,6 +226,13 @@ def _current_slide(project_dir: Path) -> int:
     + " (default: .inkflow/render/).",
 )
 @click.option(
+    "--by-id",
+    "by_id",
+    is_flag=True,
+    help="Name the images after the slides' ids (`<id>.png`) instead of their"
+    + " numbers (`slide-N.png`): a name that stays when slides are added.",
+)
+@click.option(
     "--scale",
     type=float,
     default=0.5,
@@ -258,6 +265,7 @@ def render(
     sheet: bool,
     check: bool,
     output: str | None,
+    by_id: bool,
     scale: float,
     boxes: bool,
     no_contrast: bool,
@@ -320,6 +328,7 @@ def render(
             no_sandbox=no_sandbox or _running_as_root(),
             boxes=boxes,
             contrast=not no_contrast,
+            by_id=by_id,
         )
     except (RuntimeError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

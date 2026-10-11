@@ -12,6 +12,7 @@ import {
     significant,
     snippet,
     spansCanvas,
+    unevenFits,
     union,
 } from "./measure";
 
@@ -196,5 +197,78 @@ describe("print checks", () => {
             },
         ];
         expect(mergeFindings(found)).toEqual([found[1]]);
+    });
+});
+
+describe("unevenFits", () => {
+    const left = { target: "#zone-left", box: box(80, 200, 920, 980) };
+    const right = { target: "#zone-right", box: box(1000, 200, 1840, 980) };
+    const title = { target: "#zone-title", box: box(80, 60, 1840, 160) };
+
+    test("names the column shrunk further than the one beside it", () => {
+        const found = unevenFits([
+            { ...title, scale: 1 },
+            { ...left, scale: 1 },
+            { ...right, scale: 0.72 },
+        ]);
+        expect(found).toEqual([
+            {
+                kind: "uneven-fit",
+                target: "#zone-right",
+                size: 0.72,
+                min: 1,
+                text: "#zone-left",
+            },
+        ]);
+    });
+
+    test("lets columns of nearly the same size be", () => {
+        expect(
+            unevenFits([
+                { ...left, scale: 0.95 },
+                { ...right, scale: 0.9 },
+            ]),
+        ).toEqual([]);
+        expect(
+            unevenFits([
+                { ...left, scale: 0.7 },
+                { ...right, scale: 0.7 },
+            ]),
+        ).toEqual([]);
+    });
+
+    test("only compares boxes that stand side by side", () => {
+        // A shrunk title above full-size text, a box of another height, one
+        // box inside another: not columns.
+        expect(
+            unevenFits([
+                { ...title, scale: 0.6 },
+                { ...left, scale: 1 },
+                {
+                    target: "#zone-note",
+                    box: box(1000, 200, 1840, 500),
+                    scale: 0.5,
+                },
+                {
+                    target: "#zone-inner",
+                    box: box(100, 200, 500, 980),
+                    scale: 0.5,
+                },
+            ]),
+        ).toEqual([]);
+    });
+
+    test("compares each of three columns with the largest", () => {
+        const found = unevenFits([
+            { target: "#a", box: box(0, 0, 600, 800), scale: 1 },
+            { target: "#b", box: box(640, 0, 1240, 800), scale: 0.8 },
+            { target: "#c", box: box(1280, 0, 1880, 800), scale: 0.6 },
+        ]);
+        expect(
+            found.map((f) => [f.target, f.kind === "uneven-fit" && f.text]),
+        ).toEqual([
+            ["#b", "#a"],
+            ["#c", "#a"],
+        ]);
     });
 });

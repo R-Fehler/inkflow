@@ -322,6 +322,31 @@
   }
 
   // src/ts/render/measure.ts
+  var UNEVEN_FIT = 0.9;
+  function unevenFits(zones) {
+    const out = [];
+    for (const zone of zones) {
+      const height = zone.box.bottom - zone.box.top;
+      const near = Math.max(TOLERANCE * 2, height * 0.02);
+      const beside = zones.filter(
+        (other) => other !== zone && Math.abs(other.box.top - zone.box.top) <= near && Math.abs(other.box.bottom - zone.box.bottom) <= near && (other.box.left >= zone.box.right || other.box.right <= zone.box.left)
+      );
+      const largest = beside.reduce(
+        (best, other) => !best || other.scale > best.scale ? other : best,
+        null
+      );
+      if (largest && zone.scale < largest.scale * UNEVEN_FIT) {
+        out.push({
+          kind: "uneven-fit",
+          target: zone.target,
+          size: zone.scale,
+          min: largest.scale,
+          text: largest.target
+        });
+      }
+    }
+    return out;
+  }
   var PRINT_DPI_HINT = 150;
   var PRINT_DPI_PROBLEM = 100;
   var BODY_TEXT = /* @__PURE__ */ new Set(["p", "li", "td", "dd", "blockquote"]);
@@ -395,7 +420,7 @@
         }
       } else if (seen.kind === "low-res" && f.kind === "low-res") {
         if (f.dpi < seen.dpi) Object.assign(seen, f);
-      } else if (seen.kind !== "small-text" && f.kind !== "small-text" && seen.kind !== "low-res" && f.kind !== "low-res") {
+      } else if (seen.kind !== "small-text" && f.kind !== "small-text" && seen.kind !== "low-res" && f.kind !== "low-res" && seen.kind !== "uneven-fit" && f.kind !== "uneven-fit") {
         for (const side of ["top", "right", "bottom", "left"]) {
           seen[side] = Math.max(seen[side], f[side]);
         }
@@ -461,6 +486,8 @@
     print;
     natural;
     findings = [];
+    /** The text zones met, for `unevenFits`. */
+    fitted = [];
     canvas;
     toSlide;
     /** Slide units per screen px. */
@@ -468,6 +495,7 @@
     minText;
     run() {
       this.walk(this.svg, 1);
+      this.findings.push(...unevenFits(this.fitted));
       return mergeFindings(this.findings);
     }
     /** A screen rect as a box in slide units. */
@@ -663,6 +691,14 @@
       );
       if (wrapper) {
         visit(wrapper);
+        const fit = Number.parseFloat(
+          fo.getAttribute("data-inkflow-fit") ?? ""
+        );
+        this.fitted.push({
+          target,
+          box: zoneBox,
+          scale: fit > 0 ? fit : 1
+        });
       } else if (fo.querySelector(":scope > img, :scope > video")) {
         for (const img of Array.from(fo.querySelectorAll("img"))) {
           if (getComputedStyle(img).display !== "none") {

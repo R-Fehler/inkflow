@@ -54,7 +54,61 @@ export type Finding =
           min: number;
           problem: boolean;
           text: string;
+      }
+    /** A text box shrunk to fit visibly further than the one beside it (two
+     * columns that read at different sizes): `size` is its factor, `min` the
+     * neighbour's, `text` the neighbour. A hint. */
+    | {
+          kind: "uneven-fit";
+          target: string;
+          size: number;
+          min: number;
+          text: string;
       };
+
+/** A text zone as fitted: its box and the factor its text was shrunk by. */
+export interface FittedZone {
+    target: string;
+    box: Box;
+    scale: number;
+}
+
+/** A column a tenth smaller than its neighbour reads as a different size. */
+export const UNEVEN_FIT = 0.9;
+
+/** The zones shrunk to fit visibly further than a zone beside them: beside
+ * = starting at the same height, as tall, and not overlapping (the columns
+ * of a comparison or a two-column layout, not a title above its text). One
+ * finding per such zone, naming the neighbour that kept the largest size. */
+export function unevenFits(zones: FittedZone[]): Finding[] {
+    const out: Finding[] = [];
+    for (const zone of zones) {
+        const height = zone.box.bottom - zone.box.top;
+        const near = Math.max(TOLERANCE * 2, height * 0.02);
+        const beside = zones.filter(
+            (other) =>
+                other !== zone &&
+                Math.abs(other.box.top - zone.box.top) <= near &&
+                Math.abs(other.box.bottom - zone.box.bottom) <= near &&
+                (other.box.left >= zone.box.right ||
+                    other.box.right <= zone.box.left),
+        );
+        const largest = beside.reduce<FittedZone | null>(
+            (best, other) => (!best || other.scale > best.scale ? other : best),
+            null,
+        );
+        if (largest && zone.scale < largest.scale * UNEVEN_FIT) {
+            out.push({
+                kind: "uneven-fit",
+                target: zone.target,
+                size: zone.scale,
+                min: largest.scale,
+                text: largest.target,
+            });
+        }
+    }
+    return out;
+}
 
 /** How a printed slide is checked (`inkflow render` on a print deck). */
 export interface PrintCheck {
@@ -193,7 +247,9 @@ export function mergeFindings(findings: Finding[]): Finding[] {
             seen.kind !== "small-text" &&
             f.kind !== "small-text" &&
             seen.kind !== "low-res" &&
-            f.kind !== "low-res"
+            f.kind !== "low-res" &&
+            seen.kind !== "uneven-fit" &&
+            f.kind !== "uneven-fit"
         ) {
             for (const side of ["top", "right", "bottom", "left"] as const) {
                 seen[side] = Math.max(seen[side], f[side]);
@@ -245,6 +301,8 @@ const PAINTED_SHAPES = new Set([
 
 class Measurer {
     readonly findings: Finding[] = [];
+    /** The text zones met, for `unevenFits`. */
+    private fitted: FittedZone[] = [];
     private readonly canvas: Box;
     private readonly toSlide: DOMMatrix;
     /** Slide units per screen px. */
@@ -277,6 +335,7 @@ class Measurer {
 
     run(): Finding[] {
         this.walk(this.svg, 1);
+        this.findings.push(...unevenFits(this.fitted));
         return mergeFindings(this.findings);
     }
 
@@ -505,6 +564,14 @@ class Measurer {
         );
         if (wrapper) {
             visit(wrapper);
+            const fit = Number.parseFloat(
+                fo.getAttribute("data-inkflow-fit") ?? "",
+            );
+            this.fitted.push({
+                target,
+                box: zoneBox,
+                scale: fit > 0 ? fit : 1,
+            });
         } else if (fo.querySelector(":scope > img, :scope > video")) {
             // A media zone: object-fit keeps it inside; a picture is still
             // checked for its printed resolution (the shown one of a pair).
