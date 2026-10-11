@@ -1515,6 +1515,7 @@ body.offline #conn {
   align-items: center;
   justify-content: center;
   pointer-events: none;
+  contain: layout paint;
 }
 .thumb svg {
   display: block;

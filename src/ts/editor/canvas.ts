@@ -158,12 +158,46 @@ interface SelKey {
     id: string | null;
 }
 
+// What the canvas last drew: the slide's markup and what the model says of
+// it (but its notes).
+let drawnSvg: string | null = null;
+let drawnFacts = "";
+
+function canvasFacts(): string {
+    const slide = currentSlide();
+    if (!slide) return "";
+    return JSON.stringify({ ...slide, notes: null, key: null });
+}
+
+// A rebuild arrived. One that changed nothing the canvas shows (another
+// slide's edit, this slide's notes as they are typed) leaves the slide as it
+// is drawn: drawing and fitting it again for every rebuild made typing notes
+// stutter on a big deck. The panels still read the new model.
+function rebuilt(): void {
+    const data = currentRendered();
+    const same =
+        !ed.interacting &&
+        !ed.richEditing &&
+        !ed.renderPending &&
+        !ed.restyled &&
+        (data?.svg ?? null) === drawnSvg &&
+        canvasFacts() === drawnFacts;
+    if (!same) {
+        render();
+        return;
+    }
+    ed.structuralPending = false;
+    ed.rebuilt = false;
+    emit("selection");
+}
+
 export function render(): void {
     if (ed.interacting || ed.richEditing) {
         ed.renderPending = true;
         return;
     }
     ed.renderPending = false;
+    ed.restyled = false;
     const keep: SelKey[] = ed.selection.map((s) => ({
         loc: s.loc,
         id: s.el.getAttribute("id"),
@@ -174,6 +208,8 @@ export function render(): void {
     if (ed.rebuilt) ed.structuralPending = false;
     ed.rebuilt = false;
     const data = currentRendered();
+    drawnSvg = data?.svg ?? null;
+    drawnFacts = canvasFacts();
     host.innerHTML = data ? data.svg : "";
     const hidden = currentSlide();
     if (!data && hidden && !hidden.visible) {
@@ -2460,7 +2496,7 @@ export function initCanvas(): void {
     canvas.addEventListener("dblclick", (e) => {
         if (e.target === canvas) setZoom(0);
     });
-    on("model", render);
+    on("model", rebuilt);
     on("rerender", render);
 }
 

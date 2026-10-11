@@ -99,6 +99,9 @@ export interface TypeInfo {
 }
 
 export interface SlideModel {
+    // The entry's digest: a rebuild names the entries the page holds by it
+    // (shared/patch.ts). Dropped when the page changes the entry itself.
+    key?: string;
     deckIndex: number;
     visible: boolean;
     visibleIndex: number | null;

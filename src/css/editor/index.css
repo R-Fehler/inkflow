@@ -249,6 +249,9 @@ body.offline #conn {
     align-items: center;
     justify-content: center;
     pointer-events: none;
+    /* Its size never depends on what is drawn in it: fitting a thumbnail's
+       text (many measurements) then lays out the thumbnail, not the list. */
+    contain: layout paint;
 }
 
 .thumb svg {

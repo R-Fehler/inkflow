@@ -40,7 +40,7 @@ import type { SlideModel } from "./types";
 const view = document.getElementById("grid-view")!;
 const list = document.getElementById("grid-list")!;
 const sizeInput = document.getElementById("grid-size") as HTMLInputElement;
-const thumbs = new Thumbs();
+const thumbs = new Thumbs(list);
 
 export function gridOpen(): boolean {
     return !view.hidden;

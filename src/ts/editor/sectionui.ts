@@ -247,6 +247,12 @@ function startRename(k: number, nameEl: HTMLElement): void {
 
 let renameNext: number | null = null;
 
+/** Whether a header waits to be drawn in a state of its own (a section just
+ * added, opened for its name on the next draw). */
+export function headerPending(): boolean {
+    return renameNext != null;
+}
+
 // ── The header and its menu ──
 
 export function openSectionMenu(x: number, y: number, k: number): void {

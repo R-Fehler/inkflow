@@ -3,6 +3,7 @@
 // (editor-model, editor-command).
 
 import { applyDeckStyles } from "../shared/deck-styles";
+import { applyPatch, isWhole, type Keyed, type Patch } from "../shared/patch";
 import type { SlideData } from "../shared/types";
 import { setDeckCanvas } from "../shared/viewbox";
 import { openSocket, SENT_AWAY } from "../shared/wsurl";
@@ -10,13 +11,28 @@ import type { Person } from "./collab";
 import { presenceConnected, setPeople, welcome } from "./collab";
 import { toast } from "./dom";
 import { ed, emit, off, on } from "./state";
-import type { EditorModel, EditRequest, EditResult } from "./types";
+import type { EditorModel, EditRequest, EditResult, SlideModel } from "./types";
 
 let ws: WebSocket | null = null;
 let nextId = 1;
 const pending = new Map<number, (r: EditResult) => void>();
 let commandHandler: (msg: Record<string, unknown>) => void = () => {};
 let pendingSlides: SlideData[] | null = null;
+// The page found it does not hold what a patch named and asked for the whole
+// deck: patches sent before the server heard that are of no use.
+let resyncing = false;
+
+/** The list a rebuild sent, put together from what the page holds; null
+ * (and the whole deck asked for) when it names something the page lacks. */
+function take<T extends Keyed>(held: readonly T[], sent: Patch<T>): T[] | null {
+    if (resyncing && !isWhole(sent)) return null;
+    const list = applyPatch(held, sent);
+    if (!list && !resyncing) {
+        resyncing = true;
+        sendRaw({ type: "resync" });
+    }
+    return list;
+}
 
 // The deck's canvas: the fallback for a slide without a viewBox, and the shape
 // of a thumbnail before its slide is drawn (`--deck-ar`).
@@ -74,7 +90,10 @@ export function connect(port: number): void {
     ws = sock;
     sock.onopen = () => {
         presenceConnected();
-        sock.send(JSON.stringify({ type: "hello", role: "editor" }));
+        resyncing = false;
+        sock.send(
+            JSON.stringify({ type: "hello", role: "editor", patch: true }),
+        );
         document.body.classList.remove("offline");
         for (const resolve of waiting) resolve();
         waiting = [];
@@ -103,14 +122,23 @@ export function connect(port: number): void {
             return;
         }
         switch (msg.type) {
-            case "update":
-                // Rendered slides; the model that matches them follows at once.
-                pendingSlides = msg.slides as SlideData[];
+            case "update": {
+                // Rendered slides (the ones that changed; the rest by key);
+                // the model that matches them follows at once.
+                const slides = take(
+                    pendingSlides ?? ed.slides,
+                    msg.slides as Patch<SlideData>,
+                );
+                if (slides) pendingSlides = slides;
+                if (msg.styles !== undefined || msg.mode !== undefined) {
+                    ed.restyled = true;
+                }
                 applyDeckStyles(msg as { styles?: string; mode?: string });
                 ed.error = null;
                 emit("error");
                 break;
-            case "editor-model":
+            }
+            case "editor-model": {
                 // The server opened another deck (or the first one, from
                 // the start page): start the page afresh.
                 if (
@@ -123,11 +151,21 @@ export function connect(port: number): void {
                     location.assign("/edit");
                     return;
                 }
+                const model = msg.model as EditorModel;
+                const entries = take(
+                    ed.model?.slides ?? [],
+                    model.slides as Patch<SlideModel>,
+                );
+                if (!entries) return;
+                if (isWhole(model.slides as Patch<SlideModel>)) {
+                    resyncing = false;
+                }
+                model.slides = entries;
                 if (pendingSlides) {
                     ed.slides = pendingSlides;
                     pendingSlides = null;
                 }
-                ed.model = msg.model as EditorModel;
+                ed.model = model;
                 applyDeckSize(ed.model);
                 ed.rebuilt = true;
                 if (msg.history) {
@@ -135,6 +173,7 @@ export function connect(port: number): void {
                 }
                 emit("model");
                 break;
+            }
             case "error":
                 ed.error = String(msg.message ?? "build error");
                 emit("error");
@@ -354,7 +393,10 @@ function updateHashes(hashes: Record<string, string>): void {
     const shown = ed.master ? [ed.master.slide] : [];
     for (const slide of [...(ed.model?.slides ?? []), ...shown]) {
         for (const src of slide.sources ?? []) {
-            if (src.path in hashes) src.hash = hashes[src.path];
+            if (!(src.path in hashes)) continue;
+            src.hash = hashes[src.path];
+            // No longer the entry the server means by this key.
+            slide.key = undefined;
         }
     }
 }

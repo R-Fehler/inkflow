@@ -68,6 +68,7 @@ export const ed = {
     // A structural edit was sent and its rebuild has not been rendered yet.
     structuralPending: false,
     rebuilt: false, // a model arrived since the last render
+    restyled: false, // so did a new stylesheet or colour mode (text fits anew)
 };
 
 type Listener = () => void;

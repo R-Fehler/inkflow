@@ -1,3 +1,4 @@
+import type { Patch } from "./patch";
 import type { SectionRef } from "./sections";
 
 // Every field is always emitted by the Python side (pipeline.py process_deck),
@@ -17,6 +18,9 @@ export interface SlideData {
     editableFiles: EditableFile[];
     // The Section(...) the slide is in (absent before the first section).
     section?: SectionRef;
+    // A served slide's digest, by which a rebuild names the slides a page
+    // already holds (patch.ts); absent in a static build.
+    key?: string;
 }
 
 // Whether the server has a configured edit command for each file kind (env vars
@@ -107,7 +111,8 @@ export type WsMessage =
       }
     | {
           type: "update";
-          slides: SlideData[];
+          // As a patch (patch.ts) for a page that said `hello` with `patch`.
+          slides: Patch<SlideData>;
           transitions: TransitionData[];
           logs: LogEntry[];
           // Sent only when they changed (a theme edit): the deck's stylesheet

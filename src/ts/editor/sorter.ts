@@ -23,11 +23,13 @@ import { renameSlideFiles } from "./rename";
 import {
     dropOnHeader,
     dropOnSlide,
+    type Row,
     sectionGapAtSlide,
     sorterRows,
 } from "./sections";
 import {
     addSectionAt,
+    headerPending,
     isCollapsed,
     moveSectionToGap,
     moveSlidesTo,
@@ -100,19 +102,90 @@ export function gotoSlide(deckIndex: number): void {
     emit("slide");
 }
 
-// Thumbnails keyed by their SVG: an edit re-renders only the slides it changed.
-// Each view (the slide list, the grid) keeps its own cache, since a DOM node can
-// only be in one place.
+// Thumbnails keyed by their slide: an edit re-renders only the slides it
+// changed. A thumbnail is drawn when it comes near the part of its list that
+// is on screen and emptied again when it leaves, so a deck of hundreds of
+// slides costs the page what a screenful does (every slide drawn at once was
+// most of a 300-slide deck's load time, and of every switch of slide).
+// Each view (the slide list, the grid) keeps its own cache, since a DOM node
+// can only be in one place.
 export class Thumbs {
     private cache = new Map<string, HTMLElement>();
     private used = new Map<string, HTMLElement>();
+    private drawn = new WeakMap<Element, string>();
+    private svgs = new WeakMap<Element, string>();
+    private watch: IntersectionObserver | null = null;
+
+    /** `scroller` is the element the thumbnails scroll in. */
+    constructor(private scroller: HTMLElement) {}
 
     begin(): void {
         this.used = new Map();
     }
 
     end(): void {
+        for (const [key, box] of this.cache) {
+            if (this.used.get(key) !== box) this.watch?.unobserve(box);
+        }
         this.cache = this.used;
+    }
+
+    /** A thumbnail taken out of its view by hand is no longer kept. */
+    forget(svg: string | undefined): void {
+        const box = svg == null ? undefined : this.cache.get(svg);
+        if (!box || box.isConnected) return;
+        this.watch?.unobserve(box);
+        this.cache.delete(svg as string);
+    }
+
+    private observer(): IntersectionObserver | null {
+        if (this.watch || typeof IntersectionObserver === "undefined") {
+            return this.watch;
+        }
+        this.watch = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    if (entry.isIntersecting) this.draw(entry.target);
+                    else this.empty(entry.target);
+                }
+            },
+            // A screenful ahead in both directions, so scrolling shows
+            // thumbnails, not boxes filling in.
+            { root: this.scroller, rootMargin: "100% 0px" },
+        );
+        return this.watch;
+    }
+
+    private empty(box: Element): void {
+        if (!this.drawn.has(box)) return;
+        this.drawn.delete(box);
+        box.replaceChildren();
+    }
+
+    private draw(box: Element): void {
+        const markup = this.svgs.get(box);
+        if (markup == null || this.drawn.get(box) === markup) return;
+        this.drawn.set(box, markup);
+        box.innerHTML = markup;
+        const svg = box.querySelector("svg");
+        if (!svg) return;
+        const vb = parseViewBox(svg.getAttribute("viewBox"));
+        svg.setAttribute("width", "100%");
+        svg.setAttribute("height", "100%");
+        svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+        svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
+        // Thumbnails show the slide's final state, not its first build step.
+        svg.querySelectorAll(".anim-pending").forEach((el) => {
+            el.classList.remove("anim-pending");
+        });
+        svg.querySelectorAll("video").forEach((v) => {
+            v.removeAttribute("autoplay");
+        });
+        // Its text fitted once it is in the page.
+        scheduleFit(svg);
+        // Ids inside thumbnails would shadow the canvas's own for url(#…)
+        // lookups only if they came first in the document; the canvas does
+        // (see editor.html).
     }
 
     thumb(slide: SlideModel): HTMLElement {
@@ -123,40 +196,35 @@ export class Thumbs {
         }
         const data = ed.slides[slide.visibleIndex];
         if (!data) return box;
-        const cached = this.cache.get(data.svg);
-        if (cached && !this.used.has(data.svg)) {
-            this.used.set(data.svg, cached);
+        // By its markup: a slide whose notes or title changed looks the same.
+        const key = data.svg;
+        const cached = this.cache.get(key);
+        if (cached && !this.used.has(key)) {
+            this.used.set(key, cached);
             return cached;
         }
-        this.used.set(data.svg, box);
-        box.innerHTML = data.svg;
-        const svg = box.querySelector("svg");
-        if (svg) {
-            const vb = parseViewBox(svg.getAttribute("viewBox"));
-            svg.setAttribute("width", "100%");
-            svg.setAttribute("height", "100%");
-            svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-            svg.style.aspectRatio = `${vb.w} / ${vb.h}`;
-            // A slide of another shape than the deck's keeps its own.
-            box.style.aspectRatio = `${vb.w} / ${vb.h}`;
-            // Thumbnails show the slide's final state, not its first build step.
-            svg.querySelectorAll(".anim-pending").forEach((el) => {
-                el.classList.remove("anim-pending");
-            });
-            svg.querySelectorAll("video").forEach((v) => {
-                v.removeAttribute("autoplay");
-            });
-            // Its text fitted once it is in the page.
-            scheduleFit(svg);
-            // Ids inside thumbnails would shadow the canvas's own for url(#…)
-            // lookups only if they came first in the document; the canvas does
-            // (see editor.html).
-        }
+        this.used.set(key, box);
+        this.svgs.set(box, data.svg);
+        // A slide of another shape than the deck's keeps its own, known
+        // before it is drawn so the list does not move when it is.
+        const vb = parseViewBox(rootViewBox(data.svg));
+        box.style.aspectRatio = `${vb.w} / ${vb.h}`;
+        const watch = this.observer();
+        if (watch) watch.observe(box);
+        else this.draw(box);
         return box;
     }
 }
 
-const thumbs = new Thumbs();
+const ROOT_VIEWBOX = /^<svg\b[^>]*?\sviewBox="([^"]*)"/;
+
+/** A slide's viewBox attribute read off its markup, without parsing it. */
+function rootViewBox(svg: string): string | null {
+    const open = svg.slice(0, svg.indexOf(">") + 1);
+    return ROOT_VIEWBOX.exec(open)?.[1] ?? null;
+}
+
+const thumbs = new Thumbs(list);
 
 /** What is being dragged in the slide list or the grid view. */
 export type Drag =
@@ -327,19 +395,88 @@ function headerItem(k: number): HTMLElement {
     return head;
 }
 
-export function renderSorter(): void {
-    clear(list);
-    thumbs.begin();
-    const slides = ed.model?.slides ?? [];
-    for (const row of sorterRows(slides.length, sections(), isCollapsed)) {
-        list.append(
-            row.kind === "header"
-                ? headerItem(row.section)
-                : slideItem(slides[row.index], row.index),
-        );
+// What each row of the list shows, as last drawn. A render that would draw
+// the same rows only moves the marks (the current slide, the picked ones),
+// and one in which some slides look different draws those rows again:
+// drawing the whole list for every rebuild and every click cost a 300-slide
+// deck a third of a second each time.
+interface RowFacts {
+    text: string;
+    svg: string | undefined;
+}
+let drawn: RowFacts[] = [];
+let items: HTMLElement[] = [];
+
+function rowFacts(row: Row): RowFacts {
+    const editable = !!ed.model?.deckEditable;
+    if (row.kind === "header") {
+        const s = sections()[row.section];
+        const text = `h ${row.section} ${s?.count} ${isCollapsed(row.section)} ${editable} ${s?.name}`;
+        return { text, svg: undefined };
     }
-    thumbs.end();
-    list.querySelector(".active")?.scrollIntoView({ block: "nearest" });
+    const slide = ed.model?.slides[row.index];
+    const data =
+        slide?.visibleIndex != null ? ed.slides[slide.visibleIndex] : null;
+    return {
+        text: `s ${row.index} ${slide?.visible} ${editable} ${slide?.title ?? slide?.id ?? slide?.src}`,
+        svg: data?.svg,
+    };
+}
+
+function rowItem(row: Row): HTMLElement {
+    const slides = ed.model?.slides ?? [];
+    return row.kind === "header"
+        ? headerItem(row.section)
+        : slideItem(slides[row.index], row.index);
+}
+
+function markRows(): void {
+    for (const item of items) {
+        if (!item.classList.contains("sorter-item")) continue;
+        const i = Number(item.dataset.index);
+        item.classList.toggle("active", i === ed.current);
+        item.classList.toggle("picked", ed.slideSelection.has(i));
+    }
+}
+
+/** Draw the slide list. `anew` draws every row again whatever it showed
+ * (a section being renamed, a header's state the rows do not tell). */
+export function renderSorter(anew = false): void {
+    const slides = ed.model?.slides ?? [];
+    const rows = sorterRows(slides.length, sections(), isCollapsed);
+    const facts = rows.map(rowFacts);
+    const sameRows =
+        !anew &&
+        !headerPending() &&
+        facts.length === drawn.length &&
+        facts.every((f, i) => f.text === drawn[i].text);
+    const before = list.querySelector(".active");
+    if (sameRows) {
+        facts.forEach((f, i) => {
+            if (f.svg === drawn[i].svg) return;
+            const fresh = rowItem(rows[i]);
+            items[i].replaceWith(fresh);
+            items[i] = fresh;
+            thumbs.forget(drawn[i].svg);
+        });
+        drawn = facts;
+        markRows();
+    } else {
+        // The list keeps its place: only what it shows is drawn (Thumbs),
+        // and a list that jumped would draw another screenful.
+        const top = list.scrollTop;
+        drawn = facts;
+        clear(list);
+        thumbs.begin();
+        items = rows.map(rowItem);
+        list.append(...items);
+        thumbs.end();
+        list.scrollTop = top;
+    }
+    const active = list.querySelector(".active");
+    if (active !== before || !sameRows) {
+        active?.scrollIntoView({ block: "nearest" });
+    }
     emit("sorter");
 }
 
@@ -542,8 +679,8 @@ export function initSorter(): void {
         revealCurrent();
         renderSorter();
     });
-    on("slide-selection", renderSorter);
-    on("sections", renderSorter);
+    on("slide-selection", () => renderSorter());
+    on("sections", () => renderSorter(true));
     initListDrop();
     addBtn.addEventListener("click", () => {
         if (!ed.model?.deckEditable) {
