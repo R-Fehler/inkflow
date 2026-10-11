@@ -2286,15 +2286,69 @@ class EditorSession:
         except gitops.GitError as exc:
             raise EditError(str(exc)) from exc
 
+    def _discard_slides(
+        self, msg: dict[str, object], found: slidegit.Changes
+    ) -> dict[str, object]:
+        """Put the chosen slides back as they were in the last commit
+        (`slidegit.discard_plan`): one History step, so Undo brings the
+        changes back (unlike the Git menu's Discard changes…)."""
+        raw = msg.get("slides")
+        chosen = (
+            [i for i in cast("list[object]", raw) if isinstance(i, int)]
+            if isinstance(raw, list)
+            else []
+        )
+        plan = slidegit.discard_plan(found, chosen)
+        if msg.get("dryRun"):
+            return {"ok": True, "plan": plan.json(found)}
+        self._local_only(msg, "discard changes")
+        raw_shared = msg.get("shared")
+        shared = (
+            [str(p) for p in cast("list[object]", raw_shared)]
+            if isinstance(raw_shared, list)
+            else []
+        )
+        changes: list[_Change] = []
+        for path, after in slidegit.discard_writes(found, plan, shared).items():
+            before = path.read_bytes() if path.is_file() else None
+            if before == after:
+                continue
+            if after is None:
+                path.unlink()
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(after)
+            changes.append(_Change(path, before, after))
+        if not changes:
+            raise EditError("these slides have no changes to put back")
+        n = len(set(chosen))
+        label = (
+            f"Discard changes to slide {chosen[0] + 1}"
+            if n == 1
+            else f"Discard changes to {n} slides"
+        )
+        step = _Step(label, changes)
+        self._record(step)
+        return self._result(step)
+
     def _slide_git(
         self, msg: dict[str, object], deck: Deck | None
     ) -> dict[str, object]:
         """The git action's slide operations: ``slide-diff`` (one slide's
-        changes as diff text) and ``commit-slides`` (the chosen ones'
-        changes only; ``dryRun`` says what would go in)."""
+        changes as diff text), ``slide-log`` (the commits that changed it),
+        ``commit-slides`` (the chosen ones' changes only) and
+        ``discard-slides`` (theirs put back as committed, one undoable
+        step); ``dryRun`` says what would be written."""
         op = msg.get("op")
         found = self._slide_changes(deck)
         try:
+            if op == "slide-log":
+                index = msg.get("slide")
+                if not isinstance(index, int):
+                    raise EditError("which slide?")
+                return {"ok": True, "log": slidegit.slide_log(found, index)}
+            if op == "discard-slides":
+                return self._discard_slides(msg, found)
             if op == "slide-diff":
                 index = msg.get("slide")
                 if not isinstance(index, int):
@@ -2342,7 +2396,7 @@ class EditorSession:
 
     def _git(self, msg: dict[str, object], deck: Deck | None) -> dict[str, object]:
         op = str(msg.get("op") or "status")
-        if op in ("slide-diff", "commit-slides"):
+        if op in ("slide-diff", "slide-log", "commit-slides", "discard-slides"):
             return self._slide_git(msg, deck)
         if op == "init":
             self._local_only(msg, "create a repository")

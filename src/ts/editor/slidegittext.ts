@@ -107,6 +107,54 @@ export function changedAmong(
         .sort((a, b) => a - b);
 }
 
+/** The slides among `indices` with any mark (U, M or the dot), in deck
+ * order: what can be put back, and the grid's "Changed only". */
+export function markedAmong(
+    changes: SlideChanges | null,
+    indices: Iterable<number>,
+): number[] {
+    if (!changes) return [];
+    return [...indices]
+        .filter((i) => !!changes.slides[i]?.state)
+        .sort((a, b) => a - b);
+}
+
+/** The next slide with a mark after `from` (`dir` 1) or before it (-1),
+ * wrapping around; null when no other slide has one. */
+export function nextMarked(
+    changes: SlideChanges | null,
+    from: number,
+    dir: 1 | -1,
+): number | null {
+    const n = changes?.slides.length ?? 0;
+    for (let k = 1; k <= n; k++) {
+        const i = (((from + dir * k) % n) + n) % n;
+        if (i !== from && changes?.slides[i]?.state) return i;
+    }
+    return null;
+}
+
+export interface SlideCommit {
+    sha: string;
+    short: string;
+    author: string;
+    when: string;
+    subject: string;
+    files: string[];
+    entry: "added" | "changed" | "removed" | null;
+}
+
+/** What a commit of a slide's history changed of it, in words. */
+export function commitWhat(c: SlideCommit): string {
+    const parts: string[] = [];
+    if (c.entry === "added") parts.push("added the slide");
+    else if (c.entry === "changed") parts.push("its Slide(...)");
+    else if (c.entry === "removed") parts.push("removed the slide");
+    const names = c.files.map((f) => f.split("/").pop() ?? f);
+    if (names.length) parts.push(names.join(", "));
+    return parts.join(" · ");
+}
+
 export function countChanged(changes: SlideChanges | null): number {
     return (changes?.slides ?? []).filter(
         (s) => s.state === "new" || s.state === "modified",

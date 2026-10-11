@@ -1543,7 +1543,8 @@ body.compare-mode .panel-tab {
 .grid-item:hover .star-btn {
   opacity: 1;
 }
-#grid-starred.on {
+#grid-starred.on,
+#grid-changed.on {
   background: var(--sel-soft);
   border-color: var(--sel);
   color: var(--sel);

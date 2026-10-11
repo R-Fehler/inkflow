@@ -361,6 +361,9 @@ class Changes:
     (a clone lacks them)."""
     made_of: list[list[str]]
     """Per slide, every file it is made of (relative to the repository)."""
+    own: list[list[str]]
+    """Per slide, the files only it is made of (no layout, overlay or deck
+    input, no file another slide uses too)."""
 
     def removed_json(self) -> list[dict[str, object]]:
         head = self.diff.head or []
@@ -542,6 +545,14 @@ def changes(build: SideBuild, repo: gitops.Repo) -> Changes:
         titles,
         outside,
         [list(files) for files in per_slide],
+        [
+            [
+                rel
+                for rel, role in files.items()
+                if role not in _SHARED_ROLES and uses[rel] == 1
+            ]
+            for files in per_slide
+        ],
     )
 
 
@@ -701,3 +712,153 @@ def commit_slides(
     if not paths and not blobs:
         raise gitops.GitError("these slides have no changes to commit")
     return gitops.commit_with(found.repo, message, paths, blobs)
+
+
+# ── Discarding chosen slides' changes ──
+
+
+@dataclass
+class DiscardPlan:
+    paths: list[dict[str, object]]
+    """The chosen slides' own changed files, put back as committed (a new
+    one deleted)."""
+    shared: list[dict[str, object]]
+    """Changed files they share with other slides: put back only when
+    ticked (the other slides change too)."""
+    deck: str
+    """``none`` or ``partial``: deck.py with the chosen slides' entries as
+    committed (a new one left out), everything else as it is now."""
+    deck_text: str | None
+
+    def json(self, found: Changes) -> dict[str, object]:
+        return {
+            "paths": self.paths,
+            "shared": self.shared,
+            "deck": self.deck,
+            "deckPath": found.deck_rel,
+        }
+
+
+def discard_plan(found: Changes, selected: list[int]) -> DiscardPlan:
+    """What discarding the chosen slides' changes writes: the opposite of
+    `commit_plan`, the other slides' changes kept."""
+    chosen = {i for i in selected if 0 <= i < len(found.slides)}
+    if not chosen:
+        raise gitops.GitError("choose the slides to put back")
+    paths: dict[str, dict[str, object]] = {}
+    shared: dict[str, dict[str, object]] = {}
+    for i in sorted(chosen):
+        own = set(found.own[i])
+        for f in found.slides[i].files:
+            target = paths if f.path in own else shared
+            target.setdefault(f.path, {"path": f.path, "status": f.status})
+    deck = "none"
+    deck_text: str | None = None
+    if found.deck_rel in found.changed and any(
+        found.diff.entry_state(i) is not None for i in chosen
+    ):
+        others = set(range(len(found.slides))) - chosen
+        if not others and found.diff.head_code is None:
+            raise gitops.GitError("deck.py has no committed version to go back to")
+        text = partial_deck(found.diff, others, with_removed=True)
+        if text != found.diff.work_code:
+            deck, deck_text = "partial", text
+    if not paths and deck == "none" and not shared:
+        raise gitops.GitError("these slides have no changes to put back")
+    return DiscardPlan(list(paths.values()), list(shared.values()), deck, deck_text)
+
+
+def discard_writes(
+    found: Changes, plan: DiscardPlan, shared: list[str]
+) -> dict[Path, bytes | None]:
+    """The bytes each file gets (None: deleted), by absolute path: the own
+    files and the ticked shared ones as committed, deck.py as planned."""
+    allowed = {str(p["path"]) for p in plan.shared}
+    rels = [str(p["path"]) for p in plan.paths] + [r for r in shared if r in allowed]
+    root = found.repo.root
+    out: dict[Path, bytes | None] = {
+        root / rel: gitops.head_bytes(found.repo, rel) for rel in rels
+    }
+    if plan.deck_text is not None:
+        out[root / found.deck_rel] = plan.deck_text.encode("utf-8")
+    return out
+
+
+# ── One slide's history ──
+
+
+_LOG_MAX = 50
+
+
+def slide_log(
+    found: Changes, index: int, limit: int = _LOG_MAX
+) -> list[dict[str, object]]:
+    """The commits that changed slide ``index``: one of its own files, or its
+    ``Slide(...)`` entry (found in each version of deck.py by what names it,
+    `match_entries`), newest first."""
+    if not 0 <= index < len(found.slides):
+        raise gitops.GitError(f"there is no slide {index + 1}")
+    repo = found.repo
+    if not repo.has_head():
+        return []
+    own = set(found.own[index])
+    paths = [*sorted(own), found.deck_rel]
+    out = repo.git(
+        "-c",
+        "core.quotepath=off",
+        "log",
+        f"-n{limit * 4}",
+        "--format=%x01%H%x00%h%x00%an%x00%ar%x00%s",
+        "--name-only",
+        "--",
+        *paths,
+    )
+    work = found.diff.work[index] if found.diff.work is not None else None
+    parsed: dict[str, list[Entry] | None] = {}
+
+    def entry_at(rev: str) -> str | None:
+        blob = gitops.try_git(repo, "rev-parse", f"{rev}:{found.deck_rel}")
+        if blob is None or work is None:
+            return None
+        if blob not in parsed:
+            parsed[blob] = entries(gitops.try_git(repo, "cat-file", "blob", blob))
+        found_entries = parsed[blob]
+        if not found_entries:
+            return None
+        j = match_entries(found_entries, [work])[0]
+        return found_entries[j].norm if j is not None else None
+
+    items: list[dict[str, object]] = []
+    for chunk in out.split("\x01"):
+        if not chunk.strip():
+            continue
+        head, *names = chunk.strip("\n").split("\n")
+        sha, short, author, when, subject = head.split("\0")
+        touched = sorted(n for n in names if n in own)
+        entry: str | None = None
+        if found.deck_rel in names:
+            now, before = entry_at(sha), entry_at(f"{sha}^")
+            if now != before:
+                entry = (
+                    "added"
+                    if before is None
+                    else "removed"
+                    if now is None
+                    else "changed"
+                )
+        if not touched and entry is None:
+            continue
+        items.append(
+            {
+                "sha": sha,
+                "short": short,
+                "author": author,
+                "when": when,
+                "subject": subject,
+                "files": touched,
+                "entry": entry,
+            }
+        )
+        if len(items) >= limit:
+            break
+    return items

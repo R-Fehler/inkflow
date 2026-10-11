@@ -9264,6 +9264,27 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       return s2 === "new" || s2 === "modified";
     }).sort((a2, b2) => a2 - b2);
   }
+  function markedAmong(changes2, indices) {
+    if (!changes2) return [];
+    return [...indices].filter((i2) => !!changes2.slides[i2]?.state).sort((a2, b2) => a2 - b2);
+  }
+  function nextMarked(changes2, from, dir) {
+    const n3 = changes2?.slides.length ?? 0;
+    for (let k2 = 1; k2 <= n3; k2++) {
+      const i2 = ((from + dir * k2) % n3 + n3) % n3;
+      if (i2 !== from && changes2?.slides[i2]?.state) return i2;
+    }
+    return null;
+  }
+  function commitWhat(c2) {
+    const parts = [];
+    if (c2.entry === "added") parts.push("added the slide");
+    else if (c2.entry === "changed") parts.push("its Slide(...)");
+    else if (c2.entry === "removed") parts.push("removed the slide");
+    const names2 = c2.files.map((f2) => f2.split("/").pop() ?? f2);
+    if (names2.length) parts.push(names2.join(", "));
+    return parts.join(" \xB7 ");
+  }
   function defaultMessage(titles) {
     const named = titles.map((t2) => `"${t2.trim() || "untitled"}"`);
     if (named.length === 1) return `Update slide ${named[0]}`;
@@ -9358,16 +9379,233 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         item2("Show git diff", () => void diffDialog(i2), !any)
       );
     }
+    if (picked.length === 1) {
+      out.push(
+        item2(
+          "History of this slide\u2026",
+          () => void historyDialog2(i2),
+          !status3.hasCommits
+        )
+      );
+    }
     const n3 = changed2.length;
+    const marked = markedAmong(changes, picked);
     out.push(
       item2(
         picked.length === 1 ? "Commit this slide\u2026" : `Commit ${n3} changed slide${n3 === 1 ? "" : "s"}\u2026`,
         () => void commitSlides(changed2),
         n3 === 0
+      ),
+      item2(
+        picked.length === 1 ? "Discard changes to this slide\u2026" : `Discard changes to ${marked.length} slide${marked.length === 1 ? "" : "s"}\u2026`,
+        () => void discardSlides(marked),
+        marked.length === 0 || !status3.hasCommits
       )
     );
     return out;
   }
+  function isMarked(i2) {
+    return !!slideChange(i2)?.state;
+  }
+  function markedCount() {
+    return markedAmong(changes, ed.model?.slides.keys() ?? []).length;
+  }
+  function jumpToChange(dir) {
+    const next = nextMarked(changes, ed.current, dir);
+    if (next == null) {
+      toast(
+        changes && markedCount() ? "No other slide has changes" : "No slide has changes since the last commit"
+      );
+      return;
+    }
+    ed.slideSelection.clear();
+    gotoSlide(next);
+  }
+  async function discardSlides(slides) {
+    if (!slides.length) {
+      toast("These slides have no changes to put back");
+      return;
+    }
+    const res = await request({
+      action: "git",
+      op: "discard-slides",
+      slides,
+      dryRun: true
+    });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot put these slides back", "error");
+      return;
+    }
+    const plan2 = res.plan;
+    const shared = /* @__PURE__ */ new Set();
+    const fileRows = plan2.paths.map(
+      (f2) => fileLine(
+        f2.path,
+        f2.status,
+        f2.status === "new" ? "deleted (not in the last commit)" : ""
+      )
+    );
+    if (plan2.deck === "partial") {
+      fileRows.push(
+        h(
+          "div",
+          { class: "git-file" },
+          h("span", { class: "git-status s-modified" }, "part"),
+          h(
+            "span",
+            { class: "git-path" },
+            `${plan2.deckPath}: these slides' Slide(...) entries as committed (a new slide is removed)`
+          )
+        )
+      );
+    }
+    const sharedRows = plan2.shared.map((f2) => {
+      const box = h("input", {
+        type: "checkbox",
+        value: f2.path
+      });
+      box.addEventListener("change", () => {
+        if (box.checked) shared.add(f2.path);
+        else shared.delete(f2.path);
+      });
+      return h(
+        "label",
+        { class: "git-file" },
+        box,
+        h("span", { class: `git-status s-${f2.status}` }, f2.status),
+        h("code", { class: "git-path" }, f2.path),
+        h("span", { class: "hint" }, "other slides change too")
+      );
+    });
+    const n3 = slides.length;
+    openDialog(
+      n3 === 1 ? `Discard changes to slide ${slides[0] + 1}` : `Discard changes to ${n3} slides`,
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Put back"),
+          fileRows.length ? h("div", { class: "git-files" }, ...fileRows) : h("p", { class: "hint" }, "Nothing of their own.")
+        ),
+        plan2.shared.length ? h(
+          "div",
+          { class: "field" },
+          h(
+            "span",
+            { class: "field-label" },
+            "Also put back (shared with other slides)"
+          ),
+          h("div", { class: "git-files" }, ...sharedRows)
+        ) : null,
+        h(
+          "p",
+          { class: "hint" },
+          "The other slides keep their changes. Undo brings these back."
+        ),
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn danger",
+              onclick: async () => {
+                const done = await edit({
+                  action: "git",
+                  op: "discard-slides",
+                  slides,
+                  shared: [...shared]
+                });
+                if (!done.ok) return;
+                closeDialog();
+                toast(
+                  String(done.label ?? "Changes discarded"),
+                  "ok"
+                );
+              }
+            },
+            "Discard"
+          )
+        )
+      ),
+      { wide: true }
+    );
+  }
+  async function historyDialog2(i2) {
+    const res = await request({ action: "git", op: "slide-log", slide: i2 });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot read the slide's history", "error");
+      return;
+    }
+    const log = res.log ?? [];
+    const rows = log.map(
+      (c2) => h(
+        "div",
+        { class: "git-row" },
+        h(
+          "div",
+          { class: "git-commit" },
+          h(
+            "div",
+            {},
+            h("code", {}, c2.short),
+            " ",
+            h("strong", {}, c2.subject)
+          ),
+          h(
+            "div",
+            { class: "hint" },
+            `${c2.author}, ${c2.when} \xB7 ${commitWhat(c2)}`
+          )
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn",
+            title: "This slide then, beside it now",
+            onclick: () => {
+              closeDialog();
+              openCompare(
+                { kind: "commit", rev: c2.sha },
+                { kind: "live" },
+                { focus: i2 }
+              );
+            }
+          },
+          "Compare"
+        )
+      )
+    );
+    openDialog(
+      `History of slide ${i2 + 1}: ${slideName2(i2)}`,
+      h(
+        "div",
+        { class: "git-form" },
+        rows.length ? h("div", { class: "git-list" }, ...rows) : h(
+          "p",
+          { class: "hint" },
+          "No commit has changed this slide's own files or its Slide(...) yet."
+        ),
+        h(
+          "p",
+          { class: "hint" },
+          "Commits that changed its own files or its Slide(...) in deck.py; files it shares with other slides (its layout) are left out."
+        )
+      ),
+      { wide: true }
+    );
+  }
+  document.addEventListener("keydown", (e2) => {
+    if (!e2.altKey || e2.key !== "F5" || e2.ctrlKey || e2.metaKey) return;
+    const target = e2.target;
+    if (target?.closest("input, textarea, select, [contenteditable]")) return;
+    e2.preventDefault();
+    jumpToChange(e2.shiftKey ? -1 : 1);
+  });
   function compareSlide(i2) {
     openCompare(
       { kind: "commit", rev: "HEAD" },
@@ -17755,9 +17993,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   var list3 = document.getElementById("grid-list");
   var sizeInput = document.getElementById("grid-size");
   var starFilter = document.getElementById("grid-starred");
+  var changedFilter = document.getElementById("grid-changed");
   var thumbs4 = new Thumbs(list3);
   var STARRED_KEY = "inkflow-editor-grid-starred";
   var starredOnly = false;
+  var changedOnly = false;
   function toggleGrid(on2 = view2.hidden === true) {
     view2.hidden = !on2;
     document.body.classList.toggle("grid-mode", on2);
@@ -17785,7 +18025,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       {
         class: `grid-item${i2 === ed.current ? " active" : ""}${ed.slideSelection.has(i2) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
         // Among the starred only, a drop would have no place to mean.
-        draggable: ed.model?.deckEditable && !starredOnly ? "true" : null,
+        draggable: ed.model?.deckEditable && !starredOnly && !changedOnly ? "true" : null,
         "data-index": i2
       },
       thumbs4.thumb(slide),
@@ -17913,6 +18153,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     starFilter.textContent = `\u2605 ${filterLabel(starCount())}`;
     starFilter.classList.toggle("on", starredOnly);
     starFilter.setAttribute("aria-pressed", String(starredOnly));
+    const marked = markedCount();
+    changedFilter.hidden = !marked && !changedOnly;
+    changedFilter.textContent = `Changed only (${marked})`;
+    changedFilter.classList.toggle("on", changedOnly);
+    changedFilter.setAttribute("aria-pressed", String(changedOnly));
   }
   function setStarredOnly(on2) {
     starredOnly = on2;
@@ -17932,8 +18177,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const all = sections();
     for (const block of sectionBlocks(slides.length, all)) {
       const k2 = block.section;
-      const shownSlides = starredOnly ? onlyStarred(block.slides, isStarred) : block.slides;
-      if (starredOnly && !shownSlides.length) continue;
+      let shownSlides = starredOnly ? onlyStarred(block.slides, isStarred) : block.slides;
+      if (changedOnly) shownSlides = shownSlides.filter(isMarked);
+      if ((starredOnly || changedOnly) && !shownSlides.length) continue;
       const wrap2 = h("div", {
         class: `grid-section${k2 == null ? " unsectioned" : ""}`
       });
@@ -17955,7 +18201,15 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       list3.append(wrap2);
     }
     thumbs4.end();
-    if (starredOnly && !starCount()) {
+    if (changedOnly && !markedCount()) {
+      list3.append(
+        h(
+          "div",
+          { class: "grid-empty" },
+          "No slide has changes since the last commit"
+        )
+      );
+    } else if (starredOnly && !starCount()) {
       list3.append(
         h(
           "div",
@@ -18075,6 +18329,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     } catch {
     }
     starFilter.addEventListener("click", () => setStarredOnly(!starredOnly));
+    changedFilter.addEventListener("click", () => {
+      changedOnly = !changedOnly;
+      renderGrid();
+    });
     on("sections", renderGrid);
   }
 

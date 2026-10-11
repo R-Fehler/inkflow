@@ -3,13 +3,16 @@ import {
     type CommitPlan,
     changedAmong,
     changeTitle,
+    commitWhat,
     countChanged,
     deckWords,
     defaultMessage,
     diffLine,
     leftWords,
     letter,
+    markedAmong,
     missingWords,
+    nextMarked,
     removedName,
     type SlideChanges,
     touchedWords,
@@ -181,5 +184,47 @@ describe("diffLine", () => {
         expect(diffLine("+new")).toBe("add");
         expect(diffLine("-old")).toBe("del");
         expect(diffLine(" same")).toBe("");
+    });
+});
+
+describe("marked slides", () => {
+    it("are every slide with a mark, the dot included", () => {
+        expect(markedAmong(changes, [0, 1, 2, 3])).toEqual([1, 2, 3]);
+        expect(markedAmong(null, [1])).toEqual([]);
+    });
+
+    it("are reached in both directions, wrapping around", () => {
+        expect(nextMarked(changes, 0, 1)).toBe(1);
+        expect(nextMarked(changes, 3, 1)).toBe(1);
+        expect(nextMarked(changes, 1, -1)).toBe(3);
+        const one: SlideChanges = {
+            ...changes,
+            slides: [changes.slides[0], changes.slides[2]],
+        };
+        expect(nextMarked(one, 1, 1)).toBeNull();
+        expect(nextMarked(one, 0, 1)).toBe(1);
+        expect(nextMarked(null, 0, 1)).toBeNull();
+    });
+});
+
+describe("commitWhat", () => {
+    it("names the entry change and the files", () => {
+        const base = {
+            sha: "a",
+            short: "a",
+            author: "T",
+            when: "now",
+            subject: "s",
+        };
+        expect(
+            commitWhat({
+                ...base,
+                files: ["talk/slides/b.md"],
+                entry: "added",
+            }),
+        ).toBe("added the slide · b.md");
+        expect(commitWhat({ ...base, files: [], entry: "changed" })).toBe(
+            "its Slide(...)",
+        );
     });
 });

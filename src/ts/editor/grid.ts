@@ -22,7 +22,7 @@ import {
     sections,
     selectSection,
 } from "./sectionui";
-import { changeBadge } from "./slidegit";
+import { changeBadge, isMarked, markedCount } from "./slidegit";
 import {
     clearDropMarks,
     dragging,
@@ -44,11 +44,15 @@ const view = document.getElementById("grid-view")!;
 const list = document.getElementById("grid-list")!;
 const sizeInput = document.getElementById("grid-size") as HTMLInputElement;
 const starFilter = document.getElementById("grid-starred")!;
+const changedFilter = document.getElementById("grid-changed")!;
 const thumbs = new Thumbs(list);
 
 const STARRED_KEY = "inkflow-editor-grid-starred";
 // Show the starred slides only (the grid's filter).
 let starredOnly = false;
+// Only the slides with changes since the last commit (slidegit.ts); not
+// remembered: a commit empties it.
+let changedOnly = false;
 
 export function gridOpen(): boolean {
     return !view.hidden;
@@ -85,7 +89,10 @@ function gridItem(slide: SlideModel, i: number): HTMLElement {
         {
             class: `grid-item${i === ed.current ? " active" : ""}${ed.slideSelection.has(i) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
             // Among the starred only, a drop would have no place to mean.
-            draggable: ed.model?.deckEditable && !starredOnly ? "true" : null,
+            draggable:
+                ed.model?.deckEditable && !starredOnly && !changedOnly
+                    ? "true"
+                    : null,
             "data-index": i,
         },
         thumbs.thumb(slide),
@@ -217,6 +224,11 @@ function renderFilter(): void {
     starFilter.textContent = `★ ${filterLabel(starCount())}`;
     starFilter.classList.toggle("on", starredOnly);
     starFilter.setAttribute("aria-pressed", String(starredOnly));
+    const marked = markedCount();
+    changedFilter.hidden = !marked && !changedOnly;
+    changedFilter.textContent = `Changed only (${marked})`;
+    changedFilter.classList.toggle("on", changedOnly);
+    changedFilter.setAttribute("aria-pressed", String(changedOnly));
 }
 
 function setStarredOnly(on: boolean): void {
@@ -239,11 +251,12 @@ export function renderGrid(): void {
     const all = sections();
     for (const block of sectionBlocks(slides.length, all)) {
         const k = block.section;
-        const shownSlides = starredOnly
+        let shownSlides = starredOnly
             ? onlyStarred(block.slides, isStarred)
             : block.slides;
-        // Starred only: a section none of whose slides is starred is left out.
-        if (starredOnly && !shownSlides.length) continue;
+        if (changedOnly) shownSlides = shownSlides.filter(isMarked);
+        // Filtered: a section none of whose slides is shown is left out.
+        if ((starredOnly || changedOnly) && !shownSlides.length) continue;
         const wrap = h("div", {
             class: `grid-section${k == null ? " unsectioned" : ""}`,
         });
@@ -265,7 +278,15 @@ export function renderGrid(): void {
         list.append(wrap);
     }
     thumbs.end();
-    if (starredOnly && !starCount()) {
+    if (changedOnly && !markedCount()) {
+        list.append(
+            h(
+                "div",
+                { class: "grid-empty" },
+                "No slide has changes since the last commit",
+            ),
+        );
+    } else if (starredOnly && !starCount()) {
         list.append(
             h(
                 "div",
@@ -398,5 +419,9 @@ export function initGrid(): void {
         // every slide shown
     }
     starFilter.addEventListener("click", () => setStarredOnly(!starredOnly));
+    changedFilter.addEventListener("click", () => {
+        changedOnly = !changedOnly;
+        renderGrid();
+    });
     on("sections", renderGrid);
 }

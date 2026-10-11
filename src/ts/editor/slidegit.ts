@@ -12,23 +12,28 @@ import { openCompare } from "./compare";
 import { closeDialog, openDialog } from "./dialog";
 import { h, toast } from "./dom";
 import { gitStatus, runGit } from "./git";
-import { request } from "./net";
+import { edit, request } from "./net";
 import {
     type CommitPlan,
     changedAmong,
     changeTitle,
+    commitWhat,
     deckWords,
     defaultMessage,
     diffLine,
     leftWords,
     letter,
+    markedAmong,
     missingWords,
+    nextMarked,
     removedName,
     type SlideChange,
     type SlideChanges,
+    type SlideCommit,
     touchedWords,
     whyWords,
 } from "./slidegittext";
+import { gotoSlide } from "./sorter";
 import { ed, emit } from "./state";
 
 let changes: SlideChanges | null = null;
@@ -100,7 +105,17 @@ export function slideGitItems(
             item("Show git diff", () => void diffDialog(i), !any),
         );
     }
+    if (picked.length === 1) {
+        out.push(
+            item(
+                "History of this slide…",
+                () => void historyDialog(i),
+                !status.hasCommits,
+            ),
+        );
+    }
     const n = changed.length;
+    const marked = markedAmong(changes, picked);
     out.push(
         item(
             picked.length === 1
@@ -109,9 +124,248 @@ export function slideGitItems(
             () => void commitSlides(changed),
             n === 0,
         ),
+        item(
+            picked.length === 1
+                ? "Discard changes to this slide…"
+                : `Discard changes to ${marked.length} slide${marked.length === 1 ? "" : "s"}…`,
+            () => void discardSlides(marked),
+            marked.length === 0 || !status.hasCommits,
+        ),
     );
     return out;
 }
+
+/** Whether slide `i` has a mark (the grid's "Changed only"). */
+export function isMarked(i: number): boolean {
+    return !!slideChange(i)?.state;
+}
+
+export function markedCount(): number {
+    return markedAmong(changes, ed.model?.slides.keys() ?? []).length;
+}
+
+/** Go to the next (or previous) slide with changes (Alt+F5 / Shift+Alt+F5,
+ * as VS Code goes to the next change). */
+export function jumpToChange(dir: 1 | -1): void {
+    const next = nextMarked(changes, ed.current, dir);
+    if (next == null) {
+        toast(
+            changes && markedCount()
+                ? "No other slide has changes"
+                : "No slide has changes since the last commit",
+        );
+        return;
+    }
+    ed.slideSelection.clear();
+    gotoSlide(next);
+}
+
+// ── Discarding ──
+
+/** Put the slides `slides` back as they were in the last commit, as one
+ * step Undo takes back. */
+export async function discardSlides(slides: number[]): Promise<void> {
+    if (!slides.length) {
+        toast("These slides have no changes to put back");
+        return;
+    }
+    const res = await request({
+        action: "git",
+        op: "discard-slides",
+        slides,
+        dryRun: true,
+    });
+    if (!res.ok) {
+        toast(res.error ?? "Cannot put these slides back", "error");
+        return;
+    }
+    const plan = res.plan as {
+        paths: { path: string; status: string }[];
+        shared: { path: string; status: string }[];
+        deck: "none" | "partial";
+        deckPath: string;
+    };
+    const shared = new Set<string>();
+    const fileRows = plan.paths.map((f) =>
+        fileLine(
+            f.path,
+            f.status,
+            f.status === "new" ? "deleted (not in the last commit)" : "",
+        ),
+    );
+    if (plan.deck === "partial") {
+        fileRows.push(
+            h(
+                "div",
+                { class: "git-file" },
+                h("span", { class: "git-status s-modified" }, "part"),
+                h(
+                    "span",
+                    { class: "git-path" },
+                    `${plan.deckPath}: these slides' Slide(...) entries as committed (a new slide is removed)`,
+                ),
+            ),
+        );
+    }
+    const sharedRows = plan.shared.map((f) => {
+        const box = h("input", {
+            type: "checkbox",
+            value: f.path,
+        }) as HTMLInputElement;
+        box.addEventListener("change", () => {
+            if (box.checked) shared.add(f.path);
+            else shared.delete(f.path);
+        });
+        return h(
+            "label",
+            { class: "git-file" },
+            box,
+            h("span", { class: `git-status s-${f.status}` }, f.status),
+            h("code", { class: "git-path" }, f.path),
+            h("span", { class: "hint" }, "other slides change too"),
+        );
+    });
+    const n = slides.length;
+    openDialog(
+        n === 1
+            ? `Discard changes to slide ${slides[0] + 1}`
+            : `Discard changes to ${n} slides`,
+        h(
+            "div",
+            { class: "git-form" },
+            h(
+                "div",
+                { class: "field" },
+                h("span", { class: "field-label" }, "Put back"),
+                fileRows.length
+                    ? h("div", { class: "git-files" }, ...fileRows)
+                    : h("p", { class: "hint" }, "Nothing of their own."),
+            ),
+            plan.shared.length
+                ? h(
+                      "div",
+                      { class: "field" },
+                      h(
+                          "span",
+                          { class: "field-label" },
+                          "Also put back (shared with other slides)",
+                      ),
+                      h("div", { class: "git-files" }, ...sharedRows),
+                  )
+                : null,
+            h(
+                "p",
+                { class: "hint" },
+                "The other slides keep their changes. Undo brings these back.",
+            ),
+            h(
+                "div",
+                { class: "btn-row end" },
+                h(
+                    "button",
+                    {
+                        type: "button",
+                        class: "pbtn danger",
+                        onclick: async () => {
+                            const done = await edit({
+                                action: "git",
+                                op: "discard-slides",
+                                slides,
+                                shared: [...shared],
+                            });
+                            if (!done.ok) return;
+                            closeDialog();
+                            toast(
+                                String(done.label ?? "Changes discarded"),
+                                "ok",
+                            );
+                        },
+                    },
+                    "Discard",
+                ),
+            ),
+        ),
+        { wide: true },
+    );
+}
+
+// ── History ──
+
+async function historyDialog(i: number): Promise<void> {
+    const res = await request({ action: "git", op: "slide-log", slide: i });
+    if (!res.ok) {
+        toast(res.error ?? "Cannot read the slide's history", "error");
+        return;
+    }
+    const log = (res.log as SlideCommit[] | undefined) ?? [];
+    const rows = log.map((c) =>
+        h(
+            "div",
+            { class: "git-row" },
+            h(
+                "div",
+                { class: "git-commit" },
+                h(
+                    "div",
+                    {},
+                    h("code", {}, c.short),
+                    " ",
+                    h("strong", {}, c.subject),
+                ),
+                h(
+                    "div",
+                    { class: "hint" },
+                    `${c.author}, ${c.when} · ${commitWhat(c)}`,
+                ),
+            ),
+            h(
+                "button",
+                {
+                    type: "button",
+                    class: "pbtn",
+                    title: "This slide then, beside it now",
+                    onclick: () => {
+                        closeDialog();
+                        openCompare(
+                            { kind: "commit", rev: c.sha },
+                            { kind: "live" },
+                            { focus: i },
+                        );
+                    },
+                },
+                "Compare",
+            ),
+        ),
+    );
+    openDialog(
+        `History of slide ${i + 1}: ${slideName(i)}`,
+        h(
+            "div",
+            { class: "git-form" },
+            rows.length
+                ? h("div", { class: "git-list" }, ...rows)
+                : h(
+                      "p",
+                      { class: "hint" },
+                      "No commit has changed this slide's own files or its Slide(...) yet.",
+                  ),
+            h(
+                "p",
+                { class: "hint" },
+                "Commits that changed its own files or its Slide(...) in deck.py; files it shares with other slides (its layout) are left out.",
+            ),
+        ),
+        { wide: true },
+    );
+}
+
+document.addEventListener("keydown", (e) => {
+    if (!e.altKey || e.key !== "F5" || e.ctrlKey || e.metaKey) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("input, textarea, select, [contenteditable]")) return;
+    e.preventDefault();
+    jumpToChange(e.shiftKey ? -1 : 1);
+});
 
 /** Slide `i` beside its last committed version (compare.ts). */
 export function compareSlide(i: number): void {

@@ -77,6 +77,27 @@ def run(
     return result.stdout
 
 
+def run_bytes(cwd: Path, *args: str, timeout: float = _TIMEOUT) -> bytes:
+    """``git <args>`` in ``cwd``; its stdout as bytes (a picture, a video)."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "LC_ALL": "C"}
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(cwd), *args],
+            capture_output=True,
+            env=env,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,
+        )
+    except FileNotFoundError as exc:
+        raise GitError("git is not installed") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise GitError(f"git {args[0]} took too long and was stopped") from exc
+    if result.returncode != 0:
+        message = result.stderr.decode("utf-8", "replace").strip()
+        raise GitError(message or f"git {args[0]} failed")
+    return result.stdout
+
+
 def _try(cwd: Path, *args: str) -> str | None:
     try:
         return run(cwd, *args).strip()
@@ -382,6 +403,23 @@ def commit_with(
         index_path.unlink(missing_ok=True)
     repo.git("reset", "-q", "--", *paths, *blobs)
     return repo.git("rev-parse", "--short", "HEAD").strip()
+
+
+def try_git(repo: Repo, *args: str) -> str | None:
+    """``git <args>``'s output, or None when it fails."""
+    return _try(repo.root, *args)
+
+
+def head_bytes(repo: Repo, rel: str) -> bytes | None:
+    """The last commit's version of the file at ``rel``, with the
+    repository's filters applied (a Git LFS file as its content, not its
+    pointer), or None when the last commit does not have it."""
+    if not repo.has_head():
+        return None
+    try:
+        return run_bytes(repo.root, "cat-file", "--filters", f"HEAD:{rel}")
+    except GitError:
+        return None
 
 
 def diff_text(repo: Repo, paths: list[str], untracked: list[str]) -> str:

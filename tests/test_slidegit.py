@@ -528,3 +528,74 @@ def test_files_a_clone_would_lack_are_named(deck_py: Path) -> None:
     found = _changes(deck_py)
     plan = slidegit.commit_plan(found, [2], with_removed=False)
     assert plan.missing == [{"path": "talk/secret/pic.svg", "why": "ignored"}]
+
+
+# ── Discarding a slide's changes ──
+
+
+def test_discard_puts_one_slide_back_and_undo_restores_it(deck_py: Path) -> None:
+    _work(deck_py)
+    deck = deck_py.parent
+    (deck / "layouts" / "two.svg").write_text(
+        LAYOUT.replace('y="60"', 'y="70"'), "utf-8"
+    )
+    before = deck_py.read_text(encoding="utf-8")
+    session, built = _session(deck_py)
+    req: dict[str, object] = {"action": "git", "op": "discard-slides", "slides": [3]}
+    plan = cast(
+        "dict[str, object]", session.apply({**req, "dryRun": True}, built)["plan"]
+    )
+    assert plan["deck"] == "partial"
+    assert plan["paths"] == []
+    assert plan["shared"] == [{"path": "talk/layouts/two.svg", "status": "modified"}]
+    with pytest.raises(EditError, match="only an editor on this machine"):
+        session.apply(req, built)
+    res = session.apply({**req, "_local": True}, built)
+    assert res["label"] == "Discard changes to slide 4"
+    text = deck_py.read_text(encoding="utf-8")
+    # Slide c as committed; the new slide d stays, so does the layout.
+    assert 'title="C"' not in text
+    assert 'md="d.md"' in text
+    assert 'y="70"' in (deck / "layouts" / "two.svg").read_text("utf-8")
+    session.apply({"action": "undo"}, built)
+    assert deck_py.read_text(encoding="utf-8") == before
+
+
+def test_discard_a_new_slide_deletes_its_files(deck_py: Path) -> None:
+    _work(deck_py)
+    deck = deck_py.parent
+    (deck / "slides" / "b.md").write_text("# B\n\nMore\n", "utf-8")
+    session, built = _session(deck_py)
+    session.apply(
+        {"action": "git", "op": "discard-slides", "slides": [2, 4], "_local": True},
+        built,
+    )
+    assert not (deck / "slides" / "d.md").exists()
+    assert (deck / "slides" / "b.md").read_text("utf-8") == "# B\n"
+    text = deck_py.read_text(encoding="utf-8")
+    assert 'md="d.md"' not in text
+    assert 'title="C"' in text  # (slide c was not chosen)
+
+
+# ── One slide's history ──
+
+
+def test_slide_log_lists_the_commits_that_changed_it(deck_py: Path) -> None:
+    deck = deck_py.parent
+    (deck / "slides" / "b.md").write_text("# B\n\nMore\n", "utf-8")
+    _git(deck, "commit", "-qam", "B text")
+    _edit_deck(deck_py, 'md="c.md")', 'md="c.md", title="C")')
+    _git(deck, "commit", "-qam", "C title")
+    (deck / "slides" / "a.md").write_text("# A!\n", "utf-8")
+    _git(deck, "commit", "-qam", "A text")
+    found = _changes(deck_py)
+    b = slidegit.slide_log(found, 2)
+    assert [(c["subject"], c["files"], c["entry"]) for c in b] == [
+        ("B text", ["talk/slides/b.md"], None),
+        ("First", ["talk/slides/b.md"], "added"),
+    ]
+    c = slidegit.slide_log(found, 3)
+    assert [(c["subject"], c["entry"]) for c in c] == [
+        ("C title", "changed"),
+        ("First", "added"),
+    ]
