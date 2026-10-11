@@ -43,6 +43,7 @@ from urllib.parse import unquote
 
 from inkflow import ns
 from inkflow.assets import PDF_CACHE, AssetRoots
+from inkflow.deps import note
 from inkflow.editor.context import context_dir
 from inkflow.logging import logger
 from inkflow.svgio import SvgElement
@@ -400,6 +401,8 @@ class PdfPages:
     roots: AssetRoots
     tool: str | None = field(default_factory=converter)
     warned: bool = field(default=False, init=False)
+    unconverted: list[str] = field(default_factory=list, init=False)
+    """The PDFs no converter was there for, in the order they were met."""
 
     def page(self, ref: str) -> tuple[str | None, str]:
         """``(canonical ref of the converted page, why not)`` for a canonical
@@ -408,6 +411,11 @@ class PdfPages:
         name = Path(path).name
         page = page_of(ref)
         pdf = self.roots.locate(path)
+        if pdf is not None:
+            # The PDF, and the page committed beside it (there or not yet).
+            note(pdf)
+            if page is not None:
+                note(committed_path(pdf, page))
         if pdf is None or not pdf.is_file():
             logger.warning(f"PDF not found: {path}")
             return None, "PDF not found"
@@ -418,6 +426,7 @@ class PdfPages:
         if committed is not None:
             return self.roots.canonicalize(committed), ""
         if self.tool is None:
+            self.unconverted.append(name)
             if not self.warned:
                 self.warned = True
                 logger.warning(f"cannot show {name}: {install_hint()}")
@@ -427,6 +436,8 @@ class PdfPages:
         except (PdfError, OSError) as exc:
             logger.warning(f"{name}: {exc}")
             return None, f"page {page} could not be converted"
+        # The cache is a folder anyone may empty: the page gone is a change.
+        note(converted)
         return self.roots.canonicalize(converted), ""
 
     def apply(self, root: SvgElement) -> SvgElement:

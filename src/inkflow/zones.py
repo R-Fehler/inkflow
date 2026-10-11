@@ -19,6 +19,7 @@ from inkflow.charts import (
     expand_fences,
     resolve,
 )
+from inkflow.deps import note_class
 from inkflow.enums import Align, Trigger, VAlign
 from inkflow.logging import logger
 from inkflow.manifest import (
@@ -193,6 +194,7 @@ def _all_animation_subclasses() -> Iterator[type[Animation]]:
 def _resolve_animation_type(name: str) -> type[Animation]:
     for cls in _all_animation_subclasses():
         if cls.__name__ == name:
+            note_class(cls)
             return cls
     raise ValueError(f"unknown animation type {name!r}")
 

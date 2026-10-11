@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import hashlib
 import importlib.resources
 import re
@@ -18,6 +19,7 @@ from inkflow.clean import (
     is_preview_layer,
     strip_preview_layers,
 )
+from inkflow.deps import note, settled, stamp
 from inkflow.ns import (
     INKFLOW_COPY_OF,
     INKFLOW_DEFAULT_ZONE,
@@ -69,6 +71,7 @@ class AssetKind(StrEnum):
 # ── Built-in theme ───────────────────────────────────────────────────────────
 
 
+@functools.cache
 def builtin_theme_dir() -> Path:
     return Path(str(importlib.resources.files("inkflow").joinpath("theme")))
 
@@ -76,8 +79,27 @@ def builtin_theme_dir() -> Path:
 # ── Parent attribute ──────────────────────────────────────────────────────────
 
 
+_ROOT_CACHE: dict[str, tuple[object, dict[str, str]]] = {}
+
+
+def _root_attributes(path: Path) -> dict[str, str]:
+    """The attributes of an SVG file's root, remembered while the file is the
+    same: a chain is resolved for every slide of every build, and parsing a
+    slide to read one attribute off its root was a third of a warm build."""
+    note(path)
+    key = str(path)
+    now = stamp(key)
+    cached = _ROOT_CACHE.get(key)
+    if cached is not None and cached[0] == now:
+        return cached[1]
+    attributes = {str(k): str(v) for k, v in parse_svg_file(path).attrib.items()}
+    if settled(now):
+        _ROOT_CACHE[key] = (now, attributes)
+    return attributes
+
+
 def _read_parent_attr(svg_path: Path) -> str | None:
-    return parse_svg_file(svg_path).get(INKFLOW_PARENT)
+    return _root_attributes(svg_path).get(INKFLOW_PARENT)
 
 
 # ── Path resolution ───────────────────────────────────────────────────────────
@@ -135,6 +157,7 @@ def resolve_parent_path(
                 + "Use --deck to point to a project."
             )
         resolved = _with_svg(project_root / kind / name)
+        note(resolved)
         if not resolved.exists():
             raise ValueError(f"local:{name} not found at {resolved}")
         return resolved
@@ -144,6 +167,7 @@ def resolve_parent_path(
         if theme is None:
             raise ValueError(f"theme:{name} requires Deck(theme=...) to be set.")
         resolved = _with_svg(theme.asset_dir() / kind / name)
+        note(resolved)
         if not resolved.exists():
             raise ValueError(f"theme:{name} not found at {resolved}")
         return _ours(resolved)
@@ -151,6 +175,7 @@ def resolve_parent_path(
     if parent_str.startswith("builtin:"):
         name = parent_str[len("builtin:") :]
         resolved = _with_svg(builtin_theme_dir() / kind / name)
+        note(resolved)
         if not resolved.exists():
             raise ValueError(
                 f"builtin:{name} not found — no built-in {kind.singular} named '{name}'"
@@ -177,6 +202,9 @@ def resolve_parent_path(
     candidates.append(_with_svg(builtin_theme_dir() / kind / name))
 
     for candidate in candidates:
+        # Each one looked at is a dependency: a file that appears earlier in
+        # the search later (a project layout of the theme's name) wins then.
+        note(candidate)
         if candidate.exists():
             return _ours(candidate)
 
@@ -189,11 +217,19 @@ def resolve_parent_path(
 # ── The deck's own copies of theme files ─────────────────────────────────────
 
 
+@functools.lru_cache(maxsize=64)
+def _theme_folder(assets: Path, kind: AssetKind) -> Path:
+    """A theme's layouts (or overlays) folder, resolved once: every reference
+    of every slide asks whether it lands in one, and a theme's folder does
+    not move while inkflow runs."""
+    return (assets / kind).resolve()
+
+
 def _theme_dirs(theme: Theme | None, kind: AssetKind) -> list[tuple[str, Path]]:
     """The folders of theme files a project may copy, with their prefix."""
-    dirs = [("builtin", (builtin_theme_dir() / kind).resolve())]
+    dirs = [("builtin", _theme_folder(builtin_theme_dir(), kind))]
     if theme is not None:
-        dirs.append(("theme", (theme.asset_dir() / kind).resolve()))
+        dirs.append(("theme", _theme_folder(theme.asset_dir(), kind)))
     return dirs
 
 
@@ -209,26 +245,15 @@ def theme_ref(
     return None
 
 
-_COPY_OF_CACHE: dict[str, tuple[tuple[int, int], str | None]] = {}
-
-
 def copy_of(path: Path) -> str | None:
     """The `inkflow:copy-of` of a project file (cached by its stat)."""
-    try:
-        st = path.stat()
-    except OSError:
+    note(path)
+    if stamp(path) is None:
         return None
-    key = str(path)
-    stamp = (st.st_mtime_ns, st.st_size)
-    cached = _COPY_OF_CACHE.get(key)
-    if cached is not None and cached[0] == stamp:
-        return cached[1]
     try:
-        value = parse_svg_file(path).get(INKFLOW_COPY_OF)
+        return _root_attributes(path).get(INKFLOW_COPY_OF)
     except Exception:
-        value = None
-    _COPY_OF_CACHE[key] = (stamp, value)
-    return value
+        return None
 
 
 def label_of(path: Path) -> str | None:

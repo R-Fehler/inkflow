@@ -33,6 +33,7 @@ from lxml import etree
 from inkflow import ns
 from inkflow.assets import AssetSource, is_local_ref
 from inkflow.colors import SVG_TOKENS
+from inkflow.deps import note
 from inkflow.enums import ChartKind
 from inkflow.logging import logger
 from inkflow.manifest import Chart, ChartValue
@@ -290,6 +291,8 @@ def resolve(chart: Chart, source: AssetSource) -> ResolvedChart:
     if not is_local_ref(src):
         return _failed(chart, source, f"charts read local files only: {src}")
     path = source.roots.locate(source.ref(src))
+    if path is not None:
+        note(path)
     if path is None or not path.is_file():
         return _failed(chart, source, f"chart data not found: {src}")
     try:

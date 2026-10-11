@@ -8,7 +8,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from functools import cache
 from pathlib import Path
-from typing import NamedTuple, NotRequired, TypedDict, cast
+from typing import NamedTuple, NotRequired, Protocol, TypedDict, cast
 
 from inkflow import ns
 from inkflow.animations import Animation, Cue, PlayVideo
@@ -23,6 +23,7 @@ from inkflow.content import (
     substitute_zone_numbers,
     zone_box,
 )
+from inkflow.deps import note
 from inkflow.drawio_inline import inline_diagrams
 from inkflow.editor.provenance import INK, stamper
 from inkflow.enums import AnimationKind, ColorMode, Direction, Trigger
@@ -34,7 +35,13 @@ from inkflow.layout import (
     resolve_parent_path,
     zone_placeholder_css,
 )
-from inkflow.loaders import LoadedText, load_md, load_notes, load_style
+from inkflow.loaders import (
+    LoadedText,
+    load_md,
+    load_notes,
+    load_style,
+    notes_path,
+)
 from inkflow.logging import logger
 from inkflow.manifest import (
     Deck,
@@ -121,6 +128,9 @@ class SlideData(TypedDict):
     section: NotRequired[SlideSection]
     """The section the slide is in; absent before the first section."""
     edit: NotRequired[SlideEditInfo]
+    key: NotRequired[str]
+    """Served slides only: a digest of the slide as sent, by which a page
+    names the slides it already holds (`inkflow.incremental.set_keys`)."""
 
 
 # ── Path conventions ─────────────────────────────────────────────────────────
@@ -193,6 +203,7 @@ def resolve_slide_src(src: str, project_dir: Path, theme: Theme | None = None) -
     ):
         name = src if p.suffix else src + ".svg"
         slides_candidate = project_dir / "slides" / name
+        note(slides_candidate)
         if slides_candidate.exists():
             return slides_candidate
     return resolve_parent_path(src, project_dir, project_dir, theme)
@@ -605,6 +616,7 @@ class SlideSvg:
         self.root = picture_backgrounds(self.root)
 
     def compose_ink(self, path: Path, roots: AssetRoots, slide_id: str) -> None:
+        note(path)
         if not path.is_file():
             return
         try:
@@ -946,7 +958,7 @@ def _editable_files(
     ctx: DeckContext,
     svg_path: Path,
     md: LoadedText | None,
-    loaded_notes: LoadedText,
+    notes: Path | None,
     deck_path: Path,
 ) -> list[EditableFile]:
     """The slide's in-project ancestor layouts (root first, so the immediate
@@ -968,14 +980,8 @@ def _editable_files(
     files.append({"label": "Layout", "name": svg_path.name, "path": str(svg_path)})
     if md is not None and md.path is not None:
         files.append({"label": "Content", "name": md.path.name, "path": str(md.path)})
-    if loaded_notes.path is not None:
-        files.append(
-            {
-                "label": "Notes",
-                "name": loaded_notes.path.name,
-                "path": str(loaded_notes.path),
-            }
-        )
+    if notes is not None:
+        files.append({"label": "Notes", "name": notes.name, "path": str(notes)})
     files.append({"label": "Deck", "name": deck_path.name, "path": str(deck_path)})
     return files
 
@@ -1002,45 +1008,106 @@ def deck_context(
     )
 
 
+class BuiltSlide(NamedTuple):
+    """One slide as built from its own files: everything of its `SlideData`
+    but the notes file's text and its section, which are the deck's."""
+
+    svg: str
+    title: str
+    notes: str
+    """The slide's markdown-derived notes."""
+    editable_files: list[EditableFile]
+    edit: SlideEditInfo | None
+
+
+def build_slide(
+    slide: Slide, ctx: DeckContext, slide_number: int, slide_id: str, deck_path: Path
+) -> BuiltSlide:
+    """Read and process one slide. A served deck keeps the result until one of
+    the files read here changes (`inkflow.incremental`), so every file this
+    reads, or looks for, is noted (`inkflow.deps.note`)."""
+    md = load_md(slide.md, ctx.project_dir)
+    parsed = parse_markdown_zones(md.text) if md is not None else None
+    title = _infer_slide_title(slide, slide_id, parsed)
+    md_source = _source_for(ctx.assets, md.path if md is not None else None)
+    processed = process_slide(slide, ctx, slide_number, parsed, md_source, slide_id)
+    svg_path = resolve_slide_src(slide.src, ctx.project_dir, ctx.theme)
+    editable_files = _editable_files(
+        ctx, svg_path, md, notes_path(slide.notes, ctx.project_dir), deck_path
+    )
+    return BuiltSlide(
+        processed.svg, title, processed.notes, editable_files, processed.edit
+    )
+
+
+def slide_notes(slide: Slide, ctx: DeckContext) -> str:
+    """The slide's notes file (or inline notes) as HTML. Apart from
+    `build_slide`: a note typed in the editor changes no slide."""
+    loaded = load_notes(slide.notes, ctx.project_dir)
+    return _source_for(ctx.assets, loaded.path).html(loaded.text)
+
+
+class DeckBuild(Protocol):
+    """One build's slides, from a `SlideStore` where it still holds them."""
+
+    def slide(self, slide: Slide, number: int, slide_id: str) -> BuiltSlide: ...
+
+    def notes(self, slide: Slide, slide_id: str) -> str: ...
+
+    def finish(self) -> None: ...
+
+
+class SlideStore(Protocol):
+    """What keeps built slides between builds (`inkflow.incremental.SlideCache`)."""
+
+    def build(self, ctx: DeckContext, deck_path: Path) -> DeckBuild: ...
+
+
 def process_deck(
-    deck: Deck, project_dir: Path, deck_path: Path, *, editor: bool = False
+    deck: Deck,
+    project_dir: Path,
+    deck_path: Path,
+    *,
+    editor: bool = False,
+    cache: SlideStore | None = None,
 ) -> list[SlideData]:
+    """Every visible slide of ``deck``, built. With ``cache`` (a server
+    rebuilding on every change), a slide none of whose inputs changed since
+    the last build is taken from it instead of being built again."""
     visible_slides = [s for s in deck.slides if s.visible]
     ctx = deck_context(deck, project_dir, len(visible_slides), editor=editor)
-    assets = ctx.assets
     ids = slide_ids(visible_slides)
     sections = {
         id(deck.slides[i]): k
         for k, span in enumerate(deck.section_ranges())
         for i in span
     }
+    build = cache.build(ctx, deck_path) if cache is not None else None
     results: list[SlideData] = []
     for i, (slide, slide_id) in enumerate(zip(visible_slides, ids, strict=True)):
         logger.debug(f"processing slide {i + 1}/{len(visible_slides)}: {slide_id}")
-        md = load_md(slide.md, project_dir)
-        parsed = parse_markdown_zones(md.text) if md is not None else None
-        title = _infer_slide_title(slide, slide_id, parsed)
-        loaded_notes = load_notes(slide.notes, project_dir)
-        explicit_notes = _source_for(assets, loaded_notes.path).html(loaded_notes.text)
-        md_source = _source_for(assets, md.path if md is not None else None)
-        processed = process_slide(slide, ctx, i + 1, parsed, md_source, slide_id)
-        notes = "\n".join(filter(None, [explicit_notes, processed.notes]))
-
-        svg_path = resolve_slide_src(slide.src, ctx.project_dir, ctx.theme)
-        editable_files = _editable_files(ctx, svg_path, md, loaded_notes, deck_path)
+        if build is None:
+            explicit_notes = slide_notes(slide, ctx)
+            built = build_slide(slide, ctx, i + 1, slide_id, deck_path)
+        else:
+            explicit_notes = build.notes(slide, slide_id)
+            built = build.slide(slide, i + 1, slide_id)
+        notes = "\n".join(filter(None, [explicit_notes, built.notes]))
 
         data: SlideData = {
             "id": slide_id,
-            "svg": processed.svg,
-            "title": title,
+            "svg": built.svg,
+            "title": built.title,
             "notes": notes,
-            "editableFiles": editable_files,
+            "editableFiles": built.editable_files,
         }
         section = sections.get(id(slide))
         if section is not None:
             data["section"] = {"name": deck.sections[section].name, "index": section}
-        if processed.edit is not None:
-            data["edit"] = processed.edit
+        if built.edit is not None:
+            data["edit"] = built.edit
         results.append(data)
+    if build is not None:
+        build.finish()
     logger.info(f"processed {len(results)} slide(s)")
     return results

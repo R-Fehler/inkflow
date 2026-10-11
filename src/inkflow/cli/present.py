@@ -141,7 +141,7 @@ def serve(
     Keyboard shortcuts in the terminal:
 
     - `o`: open the presentation in a browser
-    - `r`: force a rebuild
+    - `r`: build every slide again (a change builds only the slides it touches)
     - `t`: toggle the error trace
     - `q`: quit (Ctrl-D and Ctrl-C also work)
     """

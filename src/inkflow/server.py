@@ -18,7 +18,13 @@ import time
 import traceback
 import webbrowser
 import zipfile
-from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Collection,
+    Sequence,
+)
 from dataclasses import dataclass
 from html import escape as escape_html
 from pathlib import Path
@@ -69,7 +75,7 @@ from inkflow.editor import projects
 from inkflow.editor.comparehub import CompareHub, side_build_from
 from inkflow.editor.comparesrc import CompareError
 from inkflow.editor.context import write_context
-from inkflow.editor.model import build_model
+from inkflow.editor.model import ModelCache, build_model
 from inkflow.editor.session import EditError, EditorSession, Exporters
 from inkflow.editor.svgops import file_hash
 from inkflow.enums import ColorMode
@@ -80,6 +86,7 @@ from inkflow.fonts import (
     shipped_font_url,
     ui_fonts_css,
 )
+from inkflow.incremental import SlideCache, as_patch, keys_of, set_keys
 from inkflow.loaders import load_deck_scripts, load_deck_styles
 from inkflow.logging import Levels, collect_logs, logger, report
 from inkflow.manifest import Deck
@@ -95,6 +102,16 @@ from inkflow.wsbridge import Bridge
 DEFAULT_PORT = 7777
 
 # ── Shared mutable state ──────────────────────────────────────────────────────
+
+
+@dataclass
+class Kept:
+    """One deck's builds, slide by slide: a rebuild processes the slides a
+    change touched and takes the others from here (`inkflow.incremental`)."""
+
+    deck_path: Path
+    slides: SlideCache
+    model: ModelCache
 
 
 class State(TypedDict):
@@ -147,6 +164,11 @@ class EditorState(TypedDict):
     so an agent waiting for its edit to build learns that it never will."""
     compare: CompareHub | None
     """The compare views of the open editor pages (editor/comparehub.py)."""
+    model_patch: dict[str, object] | None
+    """The model as sent to a page that holds the build before it: the
+    slides' entries that build already had are named by key."""
+    kept: Kept | None
+    """What is kept from one build of the served deck to the next."""
 
 
 _editor: EditorState = {
@@ -158,6 +180,8 @@ _editor: EditorState = {
     "shutdown": None,
     "failed_hash": None,
     "compare": None,
+    "model_patch": None,
+    "kept": None,
 }
 
 
@@ -263,7 +287,37 @@ def _load_deck(deck_path: Path, module: str = "_inkflow_deck") -> Deck:
 # ── Build pipeline ────────────────────────────────────────────────────────────
 
 
-async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
+def _kept_for(deck_path: Path, full: bool) -> Kept:
+    """The served deck's kept builds; none of them after ``full`` (or for
+    another deck than the last)."""
+    kept = _editor["kept"]
+    if kept is None or kept.deck_path != deck_path or full:
+        kept = Kept(deck_path, SlideCache(), ModelCache())
+        _editor["kept"] = kept
+    return kept
+
+
+def _update_message(
+    slides: Sequence[object], changed: dict[str, object] | None = None
+) -> str:
+    return json.dumps(
+        {
+            "type": "update",
+            "slides": slides,
+            "transitions": _state["transitions"],
+            "logs": _state["logs"],
+            **(changed or {}),
+        }
+    )
+
+
+async def rebuild(
+    deck_path: Path, ui: LiveUI, levels: Levels, *, full: bool = False
+) -> None:
+    """Build the deck and tell the pages. Slides whose files and settings
+    are as the last build read them are not processed again, and a page is
+    sent only the slides that changed; ``full`` forgets the last builds (the
+    terminal's ``r``)."""
     ui.set_building()
 
     async def _animate() -> None:
@@ -287,18 +341,26 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
             deck_hash = file_hash(deck_path.read_bytes())
             deck = await asyncio.to_thread(load_deck, deck_path)
             project_dir = deck_path.parent
+            kept = _kept_for(deck_path, full)
             # The editor build stamps source locators on every element; the
             # presenter ignores them, so one build serves both pages.
             edit_slides = await asyncio.to_thread(
-                functools.partial(process_deck, editor=True),
+                functools.partial(process_deck, editor=True, cache=kept.slides),
                 deck,
                 project_dir,
                 deck_path,
             )
-            model = await asyncio.to_thread(build_model, deck, deck_path, edit_slides)
+            model = await asyncio.to_thread(
+                functools.partial(build_model, cache=kept.model),
+                deck,
+                deck_path,
+                edit_slides,
+            )
             model["build"] = build_id
             roots = AssetRoots(project_dir, deck.theme.asset_dir())
             slides = [_versioned(_without_edit(s), roots) for s in edit_slides]
+            set_keys(slides)
+            set_keys(cast("list[dict[str, object]]", model["slides"]))
             transitions = resolve_transitions(deck)
             styles_css = await asyncio.to_thread(load_deck_styles, deck, project_dir)
             if deck.embed_fonts:
@@ -330,6 +392,12 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
             changed["styles"] = styles_css
         if deck.effective_mode != _state["mode"]:
             changed["mode"] = "" if deck.effective_mode == ColorMode.DARK else "light"
+        # What a page that saw the last build holds: named, not sent again.
+        held = keys_of(_state["slides"])
+        old_model = _editor["model"]
+        held_entries = keys_of(
+            cast("list[dict[str, object]]", old_model["slides"]) if old_model else []
+        )
         _state["slides"] = slides
         _state["transitions"] = transitions
         _state["styles_css"] = styles_css
@@ -339,6 +407,12 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         _state["theme_dir"] = deck.theme.asset_dir()
         _editor["deck"] = deck
         _editor["model"] = model
+        _editor["model_patch"] = {
+            **model,
+            "slides": as_patch(
+                cast("list[dict[str, object]]", model["slides"]), held_entries
+            ),
+        }
         if _editor["session"] is not None:
             _editor["session"].built_hash = deck_hash
         _editor["failed_hash"] = None
@@ -350,18 +424,23 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         else:
             _state["position"]["slideIndex"] = 0
         _state["position"]["step"] = 0
-        ui.set_ok(len(slides), time.monotonic() - t0, logs=tui_logs)
-        await broadcast(
-            json.dumps(
-                {
-                    "type": "update",
-                    "slides": slides,
-                    "transitions": transitions,
-                    "logs": browser_logs,
-                    **changed,
-                }
-            )
+        ui.set_ok(
+            len(slides),
+            time.monotonic() - t0,
+            logs=tui_logs,
+            processed=len(kept.slides.processed),
         )
+        patching = {
+            ws
+            for ws in _state["ws_clients"]
+            if (c := _share.people.get(ws)) is not None and c.patches
+        }
+        if patching:
+            patch = _update_message(as_patch(slides, held), changed)
+            await broadcast(patch, skip=_state["ws_clients"] - patching)
+        if _state["ws_clients"] - patching:
+            # A page of an older inkflow (a tab left open across an update).
+            await broadcast(_update_message(slides, changed), skip=patching)
         await _send_editors(_model_message)
         hub = _editor["compare"]
         if hub is not None:
@@ -394,10 +473,19 @@ def _history_state(client: Client | None) -> dict[str, object]:
     return session.history_state(client.author if client else "owner")
 
 
-def _model_message(client: Client | None = None) -> dict[str, object]:
+def _model_message(
+    client: Client | None = None, *, whole: bool = False
+) -> dict[str, object]:
+    """The editor's model for one person's page: as what changed since the
+    last build when the page takes patches, unless ``whole`` (a page just
+    connected, or one that asked again)."""
+    patch = _editor["model_patch"]
+    takes = client is not None and client.patches
     return {
         "type": "editor-model",
-        "model": _editor["model"],
+        "model": patch
+        if takes and patch is not None and not whole
+        else _editor["model"],
         "history": _history_state(client),
     }
 
@@ -437,10 +525,15 @@ async def _send_editors(
             _editor["clients"].discard(ws)
 
 
-async def broadcast(msg: str, sender: ServerConnection | None = None) -> None:
+async def broadcast(
+    msg: str,
+    sender: ServerConnection | None = None,
+    *,
+    skip: Collection[ServerConnection] = (),
+) -> None:
     dead: set[ServerConnection] = set()
     for ws in list(_state["ws_clients"]):
-        if ws is sender:
+        if ws is sender or ws in skip:
             continue
         try:
             await ws.send(msg)
@@ -951,10 +1044,32 @@ def make_ws_handler(
                 elif msg_type == "presence":
                     if _share.people.update(websocket, msg):
                         await _broadcast_presence()
-                elif msg_type == "hello" and msg.get("role") == "editor":
-                    _editor["clients"].add(websocket)
+                elif msg_type in ("hello", "resync"):
+                    # A page says which rebuilds it takes (``patch``: what
+                    # changed), and is told which slides the deck has now:
+                    # by key when it may hold them (the ones its HTML came
+                    # with), whole when it found it does not (``resync``).
+                    if msg_type == "hello":
+                        client.patches = bool(msg.get("patch"))
+                    editor = msg.get("role") == "editor"
+                    if msg_type == "hello" and editor:
+                        _editor["clients"].add(websocket)
+                    if client.patches and _state["error"] is None:
+                        whole = msg_type == "resync"
+                        slides = _state["slides"]
+                        await websocket.send(
+                            _update_message(
+                                slides if whole else as_patch(slides, keys_of(slides))
+                            )
+                        )
+                    if websocket not in _editor["clients"]:
+                        continue
                     if _editor["model"] is not None:
-                        await websocket.send(json.dumps(_model_message(client)))
+                        await websocket.send(
+                            json.dumps(_model_message(client, whole=True))
+                        )
+                    if msg_type == "resync":
+                        continue
                     await websocket.send(
                         json.dumps(
                             {"type": "presence", "people": _share.people.listing()}
@@ -1632,8 +1747,9 @@ async def _read_keys(
                 path = _share.access.owner_path("/edit")
                 _open_browser(f"{base}:{http_port}{path}")
             elif ch == "r" and deck_path is not None:
+                # Asked for by hand: every slide again, whatever is kept.
                 async with lock:
-                    await rebuild(deck_path, ui, levels)
+                    await rebuild(deck_path, ui, levels, full=True)
             elif ch == "t":
                 ui.toggle_trace()
 

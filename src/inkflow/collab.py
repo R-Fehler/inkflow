@@ -65,6 +65,9 @@ class Client:
     online: bool = False
     """Came through the relay (``online.host``), not to this server's port:
     sharing online and on the network start and stop separately."""
+    patches: bool = False
+    """The page takes a rebuild as what changed (``hello`` with ``patch``):
+    slides it holds are named by key instead of sent again."""
 
     @property
     def author(self) -> str:

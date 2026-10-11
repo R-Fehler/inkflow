@@ -20,6 +20,7 @@ from inkflow.charts import (
     read_table,
     read_text_rows,
 )
+from inkflow.deps import note
 from inkflow.editor.codegen import to_json
 from inkflow.enums import ChartKind
 from inkflow.manifest import Chart
@@ -141,6 +142,8 @@ def load(chart: Chart, project_dir: Path) -> Table:
     if chart.data is not None:
         return Table.from_columns(chart.data)
     path = data_path(chart, project_dir)
+    if path is not None:
+        note(path)
     if path is None or not path.is_file():
         raise ChartError(f"chart data not found: {chart.src}")
     return read_table(path)

@@ -13,6 +13,7 @@ import dataclasses
 import os
 import re
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -21,10 +22,12 @@ from inkflow import drawio
 from inkflow import transitions as transitions_module
 from inkflow.animations import Animation, Cue, PlayVideo
 from inkflow.colors import SVG_TOKENS
+from inkflow.deps import Stamp, Stamps, note, recording
 from inkflow.editor.chartedit import chart_json
 from inkflow.editor.codegen import field_schema, to_json
 from inkflow.editor.deckedit import DeckSource
 from inkflow.editor.svgops import file_hash
+from inkflow.incremental import frozen
 from inkflow.layout import discover_layouts, label_of, layouts_for
 from inkflow.loaders import load_md
 from inkflow.manifest import Chart, Deck, Image, Inline, Slide, TextBox, Video
@@ -49,6 +52,7 @@ class SourceInfo(TypedDict):
 
 
 def _is_writable(path: Path, project_dir: Path) -> bool:
+    note(path)
     resolved = path.resolve()
     if not resolved.is_relative_to(project_dir.resolve()):
         return False
@@ -170,6 +174,7 @@ def _notes_json(slide: Slide, project_dir: Path) -> dict[str, object]:
     path = Path(str(notes))
     if not path.is_absolute():
         path = project_dir / path
+    note(path)
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     return {
         "kind": "file",
@@ -195,31 +200,142 @@ def _md_json(slide: Slide, project_dir: Path) -> dict[str, object] | None:
     }
 
 
+@dataclass
+class _Kept:
+    key: object
+    deps: dict[str, Stamp]
+    facts: dict[str, object]
+    resolved: list[str]
+    """Each source's resolved path, the key of ``usedBy``."""
+
+
+@dataclass
+class ModelCache:
+    """A served deck's last model, slide by slide: what `build_model` read
+    from each slide's files (its Markdown, notes, source hashes, chart
+    columns) is kept until one of those files, or what deck.py says of the
+    slide, changes. See `inkflow.incremental` for the slides' own cache."""
+
+    slides: dict[object, _Kept] = field(default_factory=dict)
+    deck: tuple[str, list[int | None] | None] | None = None
+    """deck.py by hash: each slide's animation count (None: not editable)."""
+    read: list[int] = field(default_factory=list)
+    """Deck indices of the slides the last model read again."""
+
+    def clear(self) -> None:
+        self.slides.clear()
+        self.deck = None
+
+
+def _animation_counts(
+    deck_path: Path, expected: int, cache: ModelCache | None
+) -> list[int | None] | None:
+    """Each slide's ``animations=[...]`` length as written in deck.py, or None
+    when its slides are not a plain list of ``expected`` Slide(...) calls.
+    Read off the slide list once: asking the source slide by slide walks
+    deck.py once per slide, which on a 300-slide deck took most of a rebuild."""
+    try:
+        code = deck_path.read_bytes()
+    except OSError:
+        return None
+    digest = file_hash(code)
+    if cache is not None and cache.deck is not None and cache.deck[0] == digest:
+        counts = cache.deck[1]
+    else:
+        try:
+            counts = DeckSource(code.decode("utf-8")).animation_counts()
+        except Exception:
+            counts = None
+        if cache is not None:
+            cache.deck = (digest, counts)
+    return counts if counts is not None and len(counts) == expected else None
+
+
+def _slide_facts(
+    slide: Slide,
+    data: SlideData | None,
+    src_path: Path | None,
+    project_dir: Path,
+    deck_module: str,
+    hash_of: Callable[[Path], str],
+) -> tuple[dict[str, object], list[str]]:
+    """What the model says of one slide wherever it stands in the deck, and
+    each of its sources' resolved paths."""
+    facts: dict[str, object] = {
+        "visible": slide.visible,
+        "src": slide.src,
+        "title": slide.title,
+        "explicitId": slide.id,
+        "srcPath": str(src_path) if src_path else None,
+        "srcRel": _rel(src_path, project_dir) if src_path else None,
+        # Shared whatever else uses it: a layout, or a file not the deck's.
+        "srcShared": bool(
+            src_path is not None
+            and ("layouts" in src_path.parts or not _is_writable(src_path, project_dir))
+        ),
+        "md": _md_json(slide, project_dir),
+        "notes": _notes_json(slide, project_dir),
+        "zones": {k: _zone_json(v, project_dir) for k, v in slide.zones.items()},
+        "transition": (
+            _transition_json(slide.transition, deck_module)
+            if slide.transition is not None
+            else None
+        ),
+        "animations": [_cue_json(c, deck_module) for c in slide.animations],
+        "fontSize": slide.font_size,
+    }
+    resolved: list[str] = []
+    if data is not None:
+        facts["id"] = data["id"]
+        facts["title"] = data["title"]
+        edit = data.get("edit")
+        if edit is not None:
+            sources = source_infos(edit["sources"], project_dir, {}, hash_of)
+            resolved = [str(Path(p).resolve()) for p in edit["sources"]]
+            ink = Path(edit["ink"])
+            for info in sources:
+                if Path(info["path"]) == ink:
+                    info["role"] = "ink"
+            note(ink)
+            facts["ink"] = {
+                "path": str(ink),
+                "rel": _rel(ink, project_dir),
+                "exists": ink.is_file(),
+            }
+            facts["sources"] = sources
+            facts["emptyZones"] = edit["emptyZones"]
+            facts["zoneOrigins"] = edit["zoneOrigins"]
+            facts["zoneText"] = _zone_text(facts, slide, edit["zoneOrigins"])
+    return facts, resolved
+
+
 def build_model(
     deck: Deck,
     deck_path: Path,
     slides: list[SlideData],
     deck_module: str = "_inkflow_deck",
+    cache: ModelCache | None = None,
 ) -> dict[str, object]:
     """The editor model for one build. ``slides`` must come from an editor build;
-    ``deck_module`` is the module deck.py ran as (`server.load_deck`)."""
+    ``deck_module`` is the module deck.py ran as (`server.load_deck`). With
+    ``cache`` (a server rebuilding on every change) a slide is read again only
+    when its files or its ``Slide(...)`` changed."""
     project_dir = deck_path.parent
-    try:
-        source = DeckSource.read(deck_path)
-        calls = source.slide_calls(expected=len(deck.slides))
-    except Exception:
-        source, calls = None, None
-    deck_editable = calls is not None
-    # Read off the slide list once: asking the source slide by slide walks
-    # deck.py once per slide, which on a 300-slide deck took most of a rebuild.
-    counts = source.animation_counts() if source is not None and calls else None
+    counts = _animation_counts(deck_path, len(deck.slides), cache)
 
     # Which deck slides each file feeds, for "shared layout" warnings.
     used_by: dict[str, list[int]] = {}
     srcs: list[Path | None] = []
+    shown = iter(slides)
     for i, slide in enumerate(deck.slides):
+        edit = next(shown).get("edit") if slide.visible else None
         try:
-            path = resolve_slide_src(slide.src, project_dir, deck.theme).resolve()
+            # A built slide's first source is the file it was read from.
+            path = (
+                Path(edit["sources"][0])
+                if edit is not None and edit["sources"]
+                else resolve_slide_src(slide.src, project_dir, deck.theme)
+            ).resolve()
         except Exception:
             srcs.append(None)
             continue
@@ -237,70 +353,71 @@ def build_model(
                 hashes[key] = ""
         return hashes[key]
 
+    stamps = Stamps()
+    seen: set[object] = set()
+    if cache is not None:
+        cache.read = []
     out_slides: list[dict[str, object]] = []
     visible_index = 0
     for deck_index, slide in enumerate(deck.slides):
-        entry: dict[str, object] = {
-            "deckIndex": deck_index,
-            "visible": slide.visible,
-            "visibleIndex": visible_index if slide.visible else None,
-            "src": slide.src,
-            "title": slide.title,
-            "explicitId": slide.id,
-        }
+        data = slides[visible_index] if slide.visible else None
         src_path = srcs[deck_index]
-        entry["srcPath"] = str(src_path) if src_path else None
-        entry["srcRel"] = _rel(src_path, project_dir) if src_path else None
-        entry["srcShared"] = bool(
-            src_path is not None
-            and (
-                len(used_by.get(str(src_path), [])) > 1
-                or "layouts" in src_path.parts
-                or not _is_writable(src_path, project_dir)
+        if cache is None:
+            facts, resolved = _slide_facts(
+                slide, data, src_path, project_dir, deck_module, hash_of
             )
-        )
-        entry["md"] = _md_json(slide, project_dir)
-        entry["notes"] = _notes_json(slide, project_dir)
-        entry["zones"] = {k: _zone_json(v, project_dir) for k, v in slide.zones.items()}
-        entry["transition"] = (
-            _transition_json(slide.transition, deck_module)
-            if slide.transition is not None
-            else None
-        )
-        entry["animations"] = [_cue_json(c, deck_module) for c in slide.animations]
-        entry["animationsEditable"] = bool(
-            counts is not None
-            and deck_index < len(counts)
-            and counts[deck_index] == len(slide.animations)
-        )
-        entry["fontSize"] = slide.font_size
+        else:
+            # By id, so a slide keeps its entry wherever it moves; a hidden
+            # slide (never built, so without an id) by its place.
+            name: object = data["id"] if data is not None else deck_index
+            key = (
+                frozen(slide),
+                str(src_path),
+                (data["id"], data["title"], data.get("edit")) if data else None,
+                str(project_dir),
+                deck_module,
+            )
+            kept = cache.slides.get(name)
+            if kept is None or kept.key != key or not stamps.unchanged(kept.deps):
+                with recording() as deps:
+                    facts, resolved = _slide_facts(
+                        slide, data, src_path, project_dir, deck_module, hash_of
+                    )
+                kept = _Kept(key, deps, facts, resolved)
+                cache.slides[name] = kept
+                cache.read.append(deck_index)
+            seen.add(name)
+            facts, resolved = kept.facts, kept.resolved
+        entry: dict[str, object] = {
+            **facts,
+            "deckIndex": deck_index,
+            "visibleIndex": visible_index if slide.visible else None,
+            "srcShared": bool(
+                facts["srcShared"]
+                or (src_path is not None and len(used_by.get(str(src_path), [])) > 1)
+            ),
+            "animationsEditable": bool(
+                counts is not None and counts[deck_index] == len(slide.animations)
+            ),
+        }
+        if "sources" in facts:
+            entry["sources"] = [
+                {**info, "usedBy": used_by.get(path, [])}
+                for info, path in zip(
+                    cast("list[SourceInfo]", facts["sources"]), resolved, strict=True
+                )
+            ]
         if slide.visible:
-            data = slides[visible_index]
-            entry["id"] = data["id"]
-            entry["title"] = data["title"]
-            edit = data.get("edit")
-            if edit is not None:
-                sources = source_infos(edit["sources"], project_dir, used_by, hash_of)
-                ink = Path(edit["ink"])
-                for info in sources:
-                    if Path(info["path"]) == ink:
-                        info["role"] = "ink"
-                entry["ink"] = {
-                    "path": str(ink),
-                    "rel": _rel(ink, project_dir),
-                    "exists": ink.is_file(),
-                }
-                entry["sources"] = sources
-                entry["emptyZones"] = edit["emptyZones"]
-                entry["zoneOrigins"] = edit["zoneOrigins"]
-                entry["zoneText"] = _zone_text(entry, slide, edit["zoneOrigins"])
             visible_index += 1
         out_slides.append(entry)
+    if cache is not None:
+        for gone in [k for k in cache.slides if k not in seen]:
+            del cache.slides[gone]
 
     return {
         "deckPath": str(deck_path),
         "projectDir": str(project_dir),
-        "deckEditable": deck_editable,
+        "deckEditable": counts is not None,
         "slides": out_slides,
         "sections": [
             {"name": section.name, "start": span.start, "count": len(span)}
@@ -379,6 +496,7 @@ def source_infos(
     sources: list[SourceInfo] = []
     for k, p in enumerate(paths):
         path = Path(p)
+        note(path)
         sources.append(
             {
                 "path": str(path),
