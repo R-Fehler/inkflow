@@ -34,13 +34,20 @@ import {
     pickSlide,
     Thumbs,
 } from "./sorter";
+import { isStarred, starButton, starCount } from "./stars";
+import { filterLabel, onlyStarred } from "./starstext";
 import { ed, emit, on } from "./state";
 import type { SlideModel } from "./types";
 
 const view = document.getElementById("grid-view")!;
 const list = document.getElementById("grid-list")!;
 const sizeInput = document.getElementById("grid-size") as HTMLInputElement;
+const starFilter = document.getElementById("grid-starred")!;
 const thumbs = new Thumbs(list);
+
+const STARRED_KEY = "inkflow-editor-grid-starred";
+// Show the starred slides only (the grid's filter).
+let starredOnly = false;
 
 export function gridOpen(): boolean {
     return !view.hidden;
@@ -76,13 +83,15 @@ function gridItem(slide: SlideModel, i: number): HTMLElement {
         "div",
         {
             class: `grid-item${i === ed.current ? " active" : ""}${ed.slideSelection.has(i) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
-            draggable: ed.model?.deckEditable ? "true" : null,
+            // Among the starred only, a drop would have no place to mean.
+            draggable: ed.model?.deckEditable && !starredOnly ? "true" : null,
             "data-index": i,
         },
         thumbs.thumb(slide),
         h(
             "div",
             { class: "grid-caption" },
+            slide.visible ? starButton(i) : null,
             h("span", { class: "grid-num" }, String(i + 1)),
             h(
                 "span",
@@ -101,6 +110,7 @@ function gridItem(slide: SlideModel, i: number): HTMLElement {
                 : null,
         ),
     );
+    item.classList.toggle("starred", isStarred(i));
     item.addEventListener("click", (e) => {
         pickSlide(i, e);
         ed.focus = "sorter";
@@ -201,21 +211,44 @@ function gridHeader(k: number): HTMLElement {
     return head;
 }
 
+function renderFilter(): void {
+    starFilter.textContent = `★ ${filterLabel(starCount())}`;
+    starFilter.classList.toggle("on", starredOnly);
+    starFilter.setAttribute("aria-pressed", String(starredOnly));
+}
+
+function setStarredOnly(on: boolean): void {
+    starredOnly = on;
+    try {
+        localStorage.setItem(STARRED_KEY, on ? "1" : "");
+    } catch {
+        // not remembered
+    }
+    renderGrid();
+}
+
 export function renderGrid(): void {
     if (view.hidden) return;
+    renderFilter();
+    const top = list.scrollTop;
     clear(list);
     thumbs.begin();
     const slides = ed.model?.slides ?? [];
     const all = sections();
     for (const block of sectionBlocks(slides.length, all)) {
         const k = block.section;
+        const shownSlides = starredOnly
+            ? onlyStarred(block.slides, isStarred)
+            : block.slides;
+        // Starred only: a section none of whose slides is starred is left out.
+        if (starredOnly && !shownSlides.length) continue;
         const wrap = h("div", {
             class: `grid-section${k == null ? " unsectioned" : ""}`,
         });
         if (k != null) wrap.append(gridHeader(k));
         if (k == null || !isCollapsed(k)) {
             const grid = h("div", { class: "grid-section-list" });
-            for (const i of block.slides) grid.append(gridItem(slides[i], i));
+            for (const i of shownSlides) grid.append(gridItem(slides[i], i));
             if (k != null && !block.slides.length) {
                 grid.append(
                     h(
@@ -230,6 +263,16 @@ export function renderGrid(): void {
         list.append(wrap);
     }
     thumbs.end();
+    if (starredOnly && !starCount()) {
+        list.append(
+            h(
+                "div",
+                { class: "grid-empty" },
+                "No starred slides yet: S stars the slide you are on, or click the ☆ under a slide",
+            ),
+        );
+    }
+    list.scrollTop = top;
     list.querySelector(".grid-item.active")?.scrollIntoView({
         block: "nearest",
     });
@@ -345,5 +388,12 @@ export function initGrid(): void {
     on("model", renderGrid);
     on("slide", renderGrid);
     on("slide-selection", renderGrid);
+    on("stars", renderGrid);
+    try {
+        starredOnly = localStorage.getItem(STARRED_KEY) === "1";
+    } catch {
+        // every slide shown
+    }
+    starFilter.addEventListener("click", () => setStarredOnly(!starredOnly));
     on("sections", renderGrid);
 }

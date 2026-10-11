@@ -112,6 +112,8 @@ class SlideOutline:
     notes_text: str = ""
     section: int | None = None
     """Index into ``DeckOutline.sections``; ``None`` before the first section."""
+    starred: bool = False
+    """The author starred it in the editor (editor/stars.py)."""
 
 
 @dataclass
@@ -377,6 +379,7 @@ def build_outline(deck: Deck, deck_path: Path, slides: list[SlideData]) -> DeckO
     project_dir = deck_path.parent
     model = build_model(deck, deck_path, slides)
     entries = cast("list[dict[str, object]]", model["slides"])
+    starred = set(cast("list[str]", model["stars"]))
     out: list[SlideOutline] = []
     canvas: list[float] | None = None
     for slide, entry in zip(deck.slides, entries, strict=True):
@@ -409,6 +412,7 @@ def build_outline(deck: Deck, deck_path: Path, slides: list[SlideData]) -> DeckO
             ),
             notes_text=str(notes.get("text") or ""),
             section=deck.section_of(index),
+            starred=entry.get("id") in starred,
         )
         if visible is None:
             item.zones = _hidden_zones(entry)
@@ -505,6 +509,8 @@ def _slide_lines(s: SlideOutline, full: bool) -> list[str]:
     head += f"  slides[{s.index}]"
     if s.hidden:
         head += " HIDDEN"
+    if s.starred:
+        head += " STARRED"
     if s.transition:
         head += f"  {s.transition}"
     lines = [head]
@@ -546,8 +552,11 @@ def _slide_lines(s: SlideOutline, full: bool) -> list[str]:
     return lines
 
 
-def format_outline(outline: DeckOutline, number: int | None = None) -> str:
-    """Plain text: the whole deck, or slide ``number`` (1-based) in detail."""
+def format_outline(
+    outline: DeckOutline, number: int | None = None, starred: bool = False
+) -> str:
+    """Plain text: the whole deck, slide ``number`` (1-based) in detail, or
+    with ``starred`` only the slides the author starred."""
     if number is not None:
         for s in outline.slides:
             if s.number == number:
@@ -555,9 +564,12 @@ def format_outline(outline: DeckOutline, number: int | None = None) -> str:
         raise IndexError(number)
     shown = sum(1 for s in outline.slides if not s.hidden)
     hidden = len(outline.slides) - shown
+    marked = sum(1 for s in outline.slides if s.starred)
     head = f"{outline.deck}: {shown} slides"
     if hidden:
         head += f" (+{hidden} hidden)"
+    if marked:
+        head += f", {marked} starred"
     if outline.size is not None:
         head += f", size {outline.size}: {outline.page}, canvas"
     head += (
@@ -574,6 +586,20 @@ def format_outline(outline: DeckOutline, number: int | None = None) -> str:
     starts: dict[int, list[SectionOutline]] = {}
     for section in outline.sections:
         starts.setdefault(section.index, []).append(section)
+    if starred:
+        # Only the starred slides, each under its section's name.
+        named: set[int] = set()
+        for s in outline.slides:
+            if not s.starred:
+                continue
+            if s.section is not None and s.section not in named:
+                named.add(s.section)
+                lines.extend(["", _section_line(outline.sections[s.section])])
+            lines.append("")
+            lines.extend(_slide_lines(s, full=False))
+        if not marked:
+            lines.extend(["", "no starred slides (star one in the editor: S)"])
+        return "\n".join(lines)
     for s in outline.slides:
         for section in starts.pop(s.index, []):
             lines.extend(["", _section_line(section)])

@@ -320,6 +320,34 @@ slides with a click, collapses with its caret, moves the whole section when
 dragged and has the section menu on right-click. The arrow keys move around the
 grid, across sections; double-click or <kbd>Enter</kbd> opens a slide,
 <kbd>Esc</kbd> goes back. The size slider sets how large the thumbnails are.
+**Starred only** shows just the slides you [starred](#starred-slides); among
+those, slides are not dragged to a new place.
+
+## Starred slides
+
+A star is your own mark on a slide worth coming back to: the ones to rework,
+the ones to show someone, the ones to hand to an agent.
+
+- <kbd>S</kbd> stars the slide you are on (or the slides picked in the slide
+  list or the grid), and takes the stars off when all of them have one. The
+  ☆ on a slide's row in the slide list and under its tile in the grid does
+  the same with the mouse, as do **Starred** in the slide panel and the
+  slide's right-click menu.
+- A starred slide shows a ★ in the slide list and in the grid.
+- **Starred only (N)** at the top of the grid view shows the starred slides
+  alone, under their sections; N is how many there are.
+- `inkflow outline` marks each starred slide `STARRED`, and `inkflow outline
+  --starred` prints only those, so "work on the slides I starred" is something
+  you can ask [Claude Code](claude-code.md) for. `inkflow slide star SLIDE…`
+  and `inkflow slide unstar SLIDE…` set them from the command line.
+
+Stars are not part of the deck. They are kept by slide id in
+`.inkflow/stars.json`, a folder git ignores: they are this working copy's,
+they survive restarts, and they are not committed, exported or presented.
+Starring a slide changes no file of the deck and rebuilds nothing. Because a
+star is on a slide's id, it stays on the slide when slides are added, removed
+or reordered, and it follows the slide when its id changes (a renamed slide,
+renamed files, or two slides on the same Markdown file that swap places).
 
 ## The canvas
 
@@ -1080,6 +1108,7 @@ print shop that asks for them.
 | Right-click | The object's menu (edit, clipboard, arrange, group, align, crop, hide, lock, open its file), or on an empty spot paste and the slide's actions; <kbd>Shift</kbd>+right-click gives the browser's own menu |
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>H</kbd> | Find / replace |
 | <kbd>G</kbd> | Grid view of all slides |
+| <kbd>S</kbd> | Star / unstar the slide (or the slides picked in the list or the grid) |
 | <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> | Hide / show the slide list, the speaker notes, the properties |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> <kbd>I</kbd> <kbd>K</kbd> (in text) | Bold, italic, link |
 | <kbd>Tab</kbd> (in a table) | Next cell |

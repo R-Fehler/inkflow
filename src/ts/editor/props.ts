@@ -94,6 +94,7 @@ import { choosePage, pageUrl, sourceRef } from "./pdfpages";
 import { makePlaceholderSection, placeholderSection } from "./placeholders";
 import { renameButton, renameSlideFiles } from "./rename";
 import { distribute } from "./snap";
+import { isStarred, toggleStar } from "./stars";
 import { currentSlide, ed, emit, on, sourceOf } from "./state";
 import {
     type CueInfo,
@@ -677,6 +678,19 @@ function renderSlidePanel(): void {
                     { placeholder: "deck default" },
                 ),
             ),
+            slide.visible &&
+                row(
+                    "Starred",
+                    (() => {
+                        const cb = h("input", { type: "checkbox" });
+                        cb.checked = isStarred(di);
+                        cb.title = "Your own mark, kept outside the deck (S)";
+                        cb.addEventListener("change", () => {
+                            void toggleStar([di]);
+                        });
+                        return cb;
+                    })(),
+                ),
             row(
                 "Hidden",
                 (() => {
@@ -3034,6 +3048,7 @@ function typingIn(el: Element): boolean {
 
 export function initProps(): void {
     on("selection", renderProps);
+    on("stars", renderProps);
     on("render", renderProps);
     on("preview", renderProps);
     // Esc in a field of the panel keeps what was typed (leaving the field

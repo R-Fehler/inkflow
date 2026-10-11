@@ -52,6 +52,7 @@ from inkflow.editor import (
     placeholders,
     places,
     projects,
+    stars,
     worktrees,
 )
 from inkflow.editor.codegen import Code, coerce_fields
@@ -295,6 +296,9 @@ class _Step:
     """Whose step it is: only they undo it (see ``History``)."""
     name: str = ""
     """Their display name when they made it, for "Ana changed … after you"."""
+    ids: dict[str, str] = field(default_factory=dict)
+    """Slide ids the step changed, old -> new: the stars follow them, and
+    follow them back when the step is undone (editor/stars.py)."""
 
     def paths(self) -> set[Path]:
         """Every file the step wrote, moved or copied to."""
@@ -827,10 +831,16 @@ class EditorSession:
             seq = msg.get("step")
             step = self.history.undo(seq if isinstance(seq, int) else None, self.author)
             self._wrote(step, undo=True)
+            if step.ids:
+                stars.follow(
+                    self.project_dir, {new: old for old, new in step.ids.items()}
+                )
             return self._result(step, undo=True)
         if action == "redo":
             step = self.history.redo(self.author)
             self._wrote(step)
+            if step.ids:
+                stars.follow(self.project_dir, step.ids)
             return self._result(step)
         if action == "upload":
             return self._upload(msg)
@@ -914,6 +924,8 @@ class EditorSession:
             return self._shapes(msg, deck)
         if action == "files":
             return {"ok": True, **self._file_list(deck)}
+        if action == "star":
+            return self._star(msg, deck)
         txn = _Txn(self.project_dir)
         extra: dict[str, object] = {}
         handler = {
@@ -996,7 +1008,13 @@ class EditorSession:
         if _role(msg) != "owner":
             self._guest_writes(txn)
         refresh = extra.pop("_previews", None)
+        moved_ids = cast("dict[str, str]", extra.pop("_ids", None) or {})
+        new_ids = cast("list[str]", extra.pop("_created", None) or [])
         step = txn.commit(label)
+        if step.changes or step.moves:
+            # The stars stay on their slides through a change of ids.
+            step.ids = moved_ids
+            stars.follow(self.project_dir, moved_ids, new_ids)
         if isinstance(refresh, Deck):
             self._refresh_previews(step, refresh)
         coalesce = msg.get("coalesce")
@@ -3465,6 +3483,7 @@ class EditorSession:
                 deck,
             )
             args = [_py(name)]
+            md_name: str | None = None
             text = msg.get("md")
             if isinstance(text, str) and text.strip():
                 # Its text from the start, in slides/<name>.md like a slide
@@ -3473,10 +3492,13 @@ class EditorSession:
                     self.project_dir / "slides", Path(name).stem, ".md"
                 )
                 txn.write(md_path, text.encode("utf-8"))
-                args.append(f"md={_py(md_path.name)}")
+                md_name = md_path.name
+                args.append(f"md={_py(md_name)}")
             source.insert_slide(after + 1, f"Slide({', '.join(args)})")
             imports.add("Slide")
             extra["select"] = after + 1
+            # Its id is its file's name: no star a slide of that id left.
+            extra["_created"] = slide_ids([Slide(name, md=md_name)])
             label = "New slide"
         elif op == "detach":
             index, slide = self._deck_slide(deck, msg)
@@ -3519,6 +3541,9 @@ class EditorSession:
             extra["select"] = kept[0] if kept else min(follow, len(slides_after) - 1)
         if slides_after is not None:
             self._follow_ink(deck, slides_after, origins, txn)
+            extra["_ids"], extra["_created"] = self._id_changes(
+                deck, slides_after, origins
+            )
         if relink is not None:
             extra["links"] = self._relink(*relink, deck, txn)
         return label
@@ -3695,6 +3720,7 @@ class EditorSession:
         extra["links"] = plan.links
         if msg.get("dryRun"):
             return label
+        extra["_ids"] = dict(plan.ids)
         moved = {new for _, new in plan.moves}
         for old_path, new_path in plan.moves:
             txn.move(old_path, new_path, plan.writes.get(new_path))
@@ -3844,6 +3870,62 @@ class EditorSession:
                 txn.write(path, None)
             return "Clear ink"
         raise EditError(f"unknown ink operation {op!r}")
+
+    @staticmethod
+    def _id_changes(
+        deck: Deck, after: list[Slide], origins: dict[int, tuple[Slide, bool]]
+    ) -> tuple[dict[str, str], list[str]]:
+        """What a slide-list edit does to the shown slides' ids: old -> new
+        for each slide whose id changes, and the ids of the slides it makes
+        (a new slide, a copy)."""
+
+        def ids(slides: list[Slide]) -> dict[int, str]:
+            visible = [s for s in slides if s.visible]
+            return dict(zip(map(id, visible), slide_ids(visible), strict=True))
+
+        before, now = ids(deck.slides), ids(after)
+        existing = set(map(id, deck.slides))
+        moves: dict[str, str] = {}
+        created: list[str] = []
+        for slide in after:
+            new_id = now.get(id(slide))
+            if new_id is None:
+                continue
+            origin, copy = origins.get(id(slide), (slide, False))
+            old_id = None if copy else before.get(id(origin))
+            if old_id is None:
+                # Not shown before (new, a copy, or hidden until now).
+                if copy or id(origin) not in existing:
+                    created.append(new_id)
+            elif old_id != new_id:
+                moves[old_id] = new_id
+        return moves, created
+
+    def _star(self, msg: dict[str, object], deck: Deck) -> dict[str, object]:
+        """Star or unstar slides (``slides``: deck indices; ``on``: true,
+        false, or left out to star them unless all are starred already).
+        Not a History step: a star is no part of the deck."""
+        raw = msg.get("slides")
+        indices = (
+            [i for i in cast("list[object]", raw) if isinstance(i, int)]
+            if isinstance(raw, list)
+            else []
+        )
+        visible = [s for s in deck.slides if s.visible]
+        shown = dict(zip(map(id, visible), slide_ids(visible), strict=True))
+        ids = [
+            shown[id(deck.slides[i])]
+            for i in indices
+            if 0 <= i < len(deck.slides) and id(deck.slides[i]) in shown
+        ]
+        if not ids:
+            raise EditError("a hidden slide has no id to star: show it first")
+        starred = set(stars.read_stars(self.project_dir))
+        on = msg.get("on")
+        if not isinstance(on, bool):
+            on = not all(i in starred for i in ids)
+        kept = stars.set_starred(self.project_dir, ids, on, shown.values())
+        return {"ok": True, "stars": kept, "starred": on, "ids": ids}
 
     def _ink_files(self, slides: list[Slide]) -> dict[int, Path]:
         """Each shown slide's ink file by the id the slide gets from its place

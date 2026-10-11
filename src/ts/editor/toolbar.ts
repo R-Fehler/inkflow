@@ -37,6 +37,7 @@ import {
     gotoSlide,
     newSlideLike,
 } from "./sorter";
+import { starSelection } from "./stars";
 import { currentSlide, ed, emit, on, type Tool } from "./state";
 import { initStepButton, renderStepButton, setStep } from "./stepbutton";
 import { copyStyle, pasteStyle } from "./stylecopy";
@@ -382,6 +383,8 @@ function onKey(e: KeyboardEvent): void {
         setZoom(scale() / 1.25);
     } else if (!mod && key === "0") {
         setZoom(0);
+    } else if (!mod && !e.altKey && lower === "s") {
+        starSelection();
     } else if (!mod && !e.altKey && panelOfKey(key)) {
         togglePanel(panelOfKey(key) as Panel);
     } else if (!mod && !e.altKey && lower in TOOL_KEYS) {

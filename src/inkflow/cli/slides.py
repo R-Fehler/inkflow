@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import cast
 
 import click
 
@@ -398,6 +399,46 @@ def hide(ref: str, deck_path: Path) -> None:
 def show(ref: str, deck_path: Path) -> None:
     """Put a hidden slide back in the presentation."""
     _set_hidden(ref, deck_path, hidden=False)
+
+
+def _set_starred(refs: tuple[str, ...], deck_path: Path, on: bool) -> None:
+    slides = _Slides.load(deck_path)
+    indices = [slides.index(ref) for ref in refs]
+    try:
+        applied = apply_request(
+            slides.path,
+            slides.deck,
+            slides.hash,
+            {"action": "star", "slides": indices, "on": on},
+        )
+    except RemoteEditError as exc:
+        raise click.ClickException(str(exc)) from exc
+    names = ", ".join(slides.name(i) for i in indices)
+    report("Starred" if on else "Unstarred", names)
+    count = len(cast("list[str]", applied.result.get("stars") or []))
+    report("Stars", f"{count} slide{'' if count == 1 else 's'} starred", style="dim")
+
+
+@slide.command("star")
+@click.argument("refs", metavar="SLIDE...", nargs=-1, required=True)
+@deck_option
+def star(refs: tuple[str, ...], deck_path: Path) -> None:
+    """Star slides: the author's own marks on the slides to come back to.
+
+    The editor shows a star on them (slide list, grid view and its "starred
+    only" filter) and `inkflow outline --starred` lists them. Stars are kept
+    by slide id in `.inkflow/stars.json`, which is this working copy's and
+    not committed; they change no slide, no export and no presentation.
+    """
+    _set_starred(refs, deck_path, on=True)
+
+
+@slide.command("unstar")
+@click.argument("refs", metavar="SLIDE...", nargs=-1, required=True)
+@deck_option
+def unstar(refs: tuple[str, ...], deck_path: Path) -> None:
+    """Take the star off slides (see `inkflow slide star`)."""
+    _set_starred(refs, deck_path, on=False)
 
 
 @slide.command("rename")

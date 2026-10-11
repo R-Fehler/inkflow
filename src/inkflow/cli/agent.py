@@ -96,12 +96,20 @@ def _number(deck_path: Path, ref: str) -> int:
 )
 @click.option("--json", "as_json", is_flag=True, help="Print the full structure.")
 @click.option(
+    "--starred",
+    is_flag=True,
+    help="Only the slides starred in the editor (every slide's line says STARRED"
+    + " when it is; `inkflow slide star` sets one).",
+)
+@click.option(
     "--boxes",
     is_flag=True,
     help="With --slide: add every element's box as the browser draws it"
     + " (`inkflow render --boxes`; needs Chromium).",
 )
-def outline(deck_path: Path, slide: str | None, as_json: bool, boxes: bool) -> None:
+def outline(
+    deck_path: Path, slide: str | None, as_json: bool, starred: bool, boxes: bool
+) -> None:
     """Print what is on every slide, in a few lines each.
 
     For each slide: its number, id, title and position in deck.py's
@@ -109,6 +117,9 @@ def outline(deck_path: Path, slide: str | None, as_json: bool, boxes: bool) -> N
     its own transition, then each zone (where its content is written and the
     start of its text, or the media/chart file) and the animations with the
     clicks they take. Start here instead of reading deck.py and every file.
+
+    A slide the author starred in the editor says STARRED; `--starred` prints
+    only those ("the slides I starred").
     """
     from inkflow.editor.outline import build_outline, format_outline, outline_json
     from inkflow.pipeline import process_deck
@@ -137,11 +148,17 @@ def outline(deck_path: Path, slide: str | None, as_json: bool, boxes: bool) -> N
             data = picked[0]
             if boxes:
                 data["boxes"] = dataclasses.asdict(_boxes(resolved, number))
+        elif starred:
+            data["slides"] = [
+                s
+                for s in cast("list[dict[str, object]]", data["slides"])
+                if s["starred"]
+            ]
         indent = 1 if sys.stdout.isatty() else None
         click.echo(json.dumps(data, indent=indent, ensure_ascii=False))
         return
     try:
-        click.echo(format_outline(result, number))
+        click.echo(format_outline(result, number, starred))
     except IndexError as exc:
         raise click.ClickException(f"no slide {number}") from exc
     if boxes and number is not None:

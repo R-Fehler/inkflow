@@ -386,7 +386,7 @@ src/
                                animation counts read once per content), drawioedit.py (a drawn-in diagram's shapes edited
                                on the slide: geometry/label/style/delete in its source,
                                the picture patched until draw.io redraws it), context.py (.inkflow/context.json for agents),
-                               outline.py (`inkflow outline`: `## <section>` lines, per-slide files, layout chain,
+                               outline.py (`inkflow outline`: `## <section>` lines, `STARRED` and `--starred`, per-slide files, layout chain,
                                zones with their origin, text, size and fit, animations and clicks, read
                                off `build_model` + the editor build; `--slide N` adds zone
                                boxes, canvas size and the slide SVG's named ids; with
@@ -500,6 +500,15 @@ src/
                                looks, each with `preview` colours for its thumbnail,
                                folder browsing, recent decks), places.py (favourite
                                folders + the default deck location, user config dir),
+                               stars.py (starred slides, the author's marks:
+                               `.inkflow/stars.json` = `{"starred": [slide ids]}`,
+                               not committed, unwatched, no History step; the
+                               session's `star` action (`slides`: deck indices,
+                               `on`), `follow` carries them through a step's id
+                               changes (`_Step.ids`: `_id_changes` for the `slide`
+                               ops, `RenamePlan.ids`), back on undo; a new slide's id
+                               starts without one; the model lists them as `stars`,
+                               the server tells editors `{"type":"stars"}`),
                                nativedialog.py (the OS folder/file chooser shown by the
                                server: zenity/kdialog, osascript, PowerShell; `system-pick`,
                                local only), media.py (files of any
@@ -526,7 +535,8 @@ src/
                                `inkflow overlay` new/copy/revert: the session's
                                `master` action through editor/remote.py), slides.py
                                (the `slide` group: add, delete, duplicate, move, hide, show,
-                               rename, title, and `slide section` add/rename/move/remove;
+                               star, unstar, rename, title, and `slide section`
+                               add/rename/move/remove;
                                SLIDE = presentation number or id, SECTION = name or
                                1-based position; runs the
                                session's `slide` action via editor/remote.py, so with an
@@ -856,6 +866,10 @@ src/
                       `#workspace` to 0 (css/editor/panels.css), a `.panel-tab`
                       on each edge of the canvas and the keys 1 2 3, kept in
                       localStorage; pure part in panelstext.ts, tested),
+                      stars.ts (starred slides: `S`, the ☆ on a slide's row
+                      and grid tile, the slide panel's Starred, the grid's
+                      "Starred only (N)" filter; `ed.model.stars` + the `stars`
+                      message; pure part in starstext.ts, tested),
                       context.ts (agent context + goto/select), net.ts (edit-op requests),
                       animpreview.ts (▶ Play in the Animation order list and an
                       animation's panel: shared/step.ts runs played on the canvas

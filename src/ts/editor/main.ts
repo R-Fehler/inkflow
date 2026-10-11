@@ -34,6 +34,7 @@ import { initPanels } from "./panels";
 import { focusCellLabel, initProps } from "./props";
 import { initShare } from "./share";
 import { initSorter, renderSorter } from "./sorter";
+import { initStars } from "./stars";
 import { currentSlide, ed, emit, on } from "./state";
 import { editingHost, editSvgText, editZone, finishTextEdit } from "./textedit";
 import { initTheme } from "./theme";
@@ -154,6 +155,7 @@ function boot(): void {
     initObjects();
     initNotes();
     initPanels();
+    initStars();
     initToolbar();
     initContext();
     initGallery();

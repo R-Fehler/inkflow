@@ -156,6 +156,8 @@ export interface EditorModel {
     layouts: LayoutInfo[];
     colorTokens: string[];
     deckSize?: DeckSize;
+    // The ids of the starred slides (stars.ts), in deck order.
+    stars?: string[];
 }
 
 // The deck's size (`Deck(size=)`, inkflow/sizes.py): the canvas a new slide

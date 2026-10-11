@@ -75,7 +75,7 @@ from inkflow.editor import projects
 from inkflow.editor.comparehub import CompareHub, side_build_from
 from inkflow.editor.comparesrc import CompareError
 from inkflow.editor.context import write_context
-from inkflow.editor.model import ModelCache, build_model
+from inkflow.editor.model import ModelCache, build_model, starred_ids
 from inkflow.editor.session import EditError, EditorSession, Exporters
 from inkflow.editor.svgops import file_hash
 from inkflow.enums import ColorMode
@@ -490,6 +490,20 @@ def _model_message(
     }
 
 
+def _stars() -> list[str]:
+    """The starred slides as the editor's model lists them, read anew (a
+    star changes no build), and put into the model a page gets on hello."""
+    session, model = _editor["session"], _editor["model"]
+    if session is None or model is None:
+        return []
+    entries = cast("list[dict[str, object]]", model["slides"])
+    starred = starred_ids(session.project_dir, entries)
+    for held in (model, _editor["model_patch"]):
+        if held is not None:
+            held["stars"] = starred
+    return starred
+
+
 def _build_status() -> dict[str, object]:
     """Which deck.py the server last built (or failed to): an agent's command
     (``inkflow slide``) waits for the build of its own edit with this."""
@@ -874,6 +888,10 @@ async def _handle_edit_op(
     await websocket.send(
         json.dumps({"type": "edit-result", "id": request_id, **result})
     )
+    if result.get("ok") and msg.get("action") == "star":
+        # No file of the deck changed and nothing rebuilds: every editor
+        # page is told which slides are starred now.
+        await _send_editors({"type": "stars", "stars": _stars()})
     if result.get("ok") and (
         result.get("changes") or msg.get("action") in ("undo", "redo")
     ):

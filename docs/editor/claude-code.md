@@ -51,7 +51,7 @@ right away.
 
 | Command | What it does |
 |---|---|
-| `inkflow outline` | Prints what is on every slide in a few lines each: its files and layout chain, each zone with where its text is written and how it starts, the animations and clicks. `--slide N` shows one slide in full (zone texts and boxes, canvas size, element ids to animate, animations as `deck.py` writes them); `--json` for the whole structure. Claude starts here instead of reading every file. |
+| `inkflow outline` | Prints what is on every slide in a few lines each: its files and layout chain, each zone with where its text is written and how it starts, the animations and clicks. `--slide N` shows one slide in full (zone texts and boxes, canvas size, element ids to animate, animations as `deck.py` writes them); `--json` for the whole structure. A slide you [starred](index.md#starred-slides) in the editor says `STARRED`, and `--starred` prints only those. Claude starts here instead of reading every file. |
 | `inkflow context` | Prints what the editor has selected right now (`--json` for the raw data). |
 | `inkflow render` | Writes PNGs of slides at any build step to `.inkflow/render/`, the editor's current slide by default (`--slide N`, `--all`, `--step S`), and reports layout problems. Claude looks at them to check its own work. `--sheet` puts the slides on one contact sheet; `--check` only measures (see below). `--boxes` prints where the browser drew every element instead ([below](#placing-against-real-text)). |
 | `inkflow verify` | Checks the deck for authoring mistakes. |
@@ -148,6 +148,7 @@ does, so nothing is left behind or orphaned:
 | `inkflow slide section move S --to K` / `--before S2` | Moves a section, with its slides, among the sections. |
 | `inkflow slide section remove S [--with-slides]` | Removes it; its slides join the section before it, or with `--with-slides` are deleted like `slide delete`. |
 | `inkflow slide hide N` / `show ID` | Sets or clears `visible=False`. |
+| `inkflow slide star N [N…]` / `unstar N [N…]` | Sets or clears your [star](index.md#starred-slides) on the slides: a mark kept outside the deck (`.inkflow/stars.json`), which `inkflow outline --starred` lists. Not an edit of the deck: no undo step, nothing rebuilt. |
 | `inkflow slide rename N NEW_ID` | Sets `id=`; its ink file and every `slide:<old id>` link follow. |
 | `inkflow slide rename-files N NAME [--keep-id] [-n]` | Renames the slide's own drawing, Markdown, notes and ink file to `NAME` (each in its folder); its id becomes `NAME` (unless it has an `id=`, or `--keep-id` writes the old one), and every reference and `slide:` link follows. |
 | `inkflow slide title N TEXT` | Sets `title=` (`""` removes it). |

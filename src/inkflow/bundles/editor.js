@@ -6317,6 +6317,88 @@
     return head;
   }
 
+  // src/ts/editor/starstext.ts
+  function starTargets(focus, picked, current3) {
+    if (focus === "sorter" && picked.size) {
+      return [...picked].sort((a2, b2) => a2 - b2);
+    }
+    return [current3];
+  }
+  function starsOn(ids, starred2) {
+    return !ids.every((id) => id != null && starred2.has(id));
+  }
+  function starTitle(starred2) {
+    return starred2 ? "Starred: take the star off (S)" : "Star this slide (S)";
+  }
+  function filterLabel(count) {
+    return `Starred only (${count})`;
+  }
+  function onlyStarred(indices, isStarred2) {
+    return indices.filter(isStarred2);
+  }
+
+  // src/ts/editor/stars.ts
+  function starred() {
+    return new Set(ed.model?.stars ?? []);
+  }
+  function isStarred(deckIndex) {
+    const id = ed.model?.slides[deckIndex]?.id;
+    return id != null && (ed.model?.stars ?? []).includes(id);
+  }
+  function starCount() {
+    return ed.model?.stars?.length ?? 0;
+  }
+  function setStars(ids) {
+    if (!ed.model || !Array.isArray(ids)) return;
+    ed.model.stars = ids.filter((id) => typeof id === "string");
+    emit("stars");
+  }
+  async function toggleStar(indices) {
+    const slides = ed.model?.slides ?? [];
+    const on2 = starsOn(
+      indices.map((i2) => slides[i2]?.id),
+      starred()
+    );
+    const result = await edit({ action: "star", slides: indices, on: on2 });
+    if (result.ok) setStars(result.stars);
+  }
+  function starSelection() {
+    void toggleStar(starTargets(ed.focus, ed.slideSelection, ed.current));
+  }
+  function starButton(deckIndex) {
+    const on2 = isStarred(deckIndex);
+    const button9 = h(
+      "button",
+      {
+        type: "button",
+        class: `star-btn${on2 ? " on" : ""}`,
+        "aria-pressed": String(on2),
+        title: starTitle(on2),
+        draggable: "false"
+      },
+      on2 ? "\u2605" : "\u2606"
+    );
+    button9.addEventListener("click", (e2) => {
+      e2.stopPropagation();
+      void toggleStar([deckIndex]);
+    });
+    button9.addEventListener("dblclick", (e2) => e2.stopPropagation());
+    return button9;
+  }
+  function markStar(item2, deckIndex) {
+    const on2 = isStarred(deckIndex);
+    item2.classList.toggle("starred", on2);
+    const button9 = item2.querySelector(".star-btn");
+    if (!button9 || button9.classList.contains("on") === on2) return;
+    button9.classList.toggle("on", on2);
+    button9.setAttribute("aria-pressed", String(on2));
+    button9.setAttribute("title", starTitle(on2));
+    button9.textContent = on2 ? "\u2605" : "\u2606";
+  }
+  function initStars() {
+    onMessage("stars", (msg) => setStars(msg.stars));
+  }
+
   // src/ts/editor/sorter.ts
   var list = document.getElementById("sorter-list");
   var addBtn = document.getElementById("sorter-add");
@@ -6517,8 +6599,10 @@
         "data-index": i2
       },
       h("span", { class: "sorter-num" }, String(i2 + 1)),
-      thumbs2.thumb(slide)
+      thumbs2.thumb(slide),
+      slide.visible ? starButton(i2) : null
     );
+    item2.classList.toggle("starred", isStarred(i2));
     item2.addEventListener("click", (e2) => pickSlide(i2, e2));
     item2.addEventListener("contextmenu", (e2) => {
       e2.preventDefault();
@@ -6640,6 +6724,7 @@
       const i2 = Number(item2.dataset.index);
       item2.classList.toggle("active", i2 === ed.current);
       item2.classList.toggle("picked", ed.slideSelection.has(i2));
+      markStar(item2, i2);
     }
   }
   function renderSorter(anew = false) {
@@ -6795,6 +6880,12 @@
     if (many) {
       menu3.append(
         menuItem(
+          `Star ${ed.slideSelection.size} slides (or take their stars off)`,
+          () => void toggleStar([...ed.slideSelection])
+        )
+      );
+      menu3.append(
+        menuItem(
           `Delete ${ed.slideSelection.size} slides`,
           () => void deleteSlides(),
           !editable
@@ -6818,6 +6909,14 @@
         !editable
       )
     );
+    if (slide?.visible) {
+      menu3.append(
+        menuItem(
+          isStarred(i2) ? "Take the star off" : "Star",
+          () => void toggleStar([i2])
+        )
+      );
+    }
     menu3.append(
       menuItem("Rename files\u2026", () => renameSlideFiles(i2), !editable)
     );
@@ -6851,6 +6950,7 @@
       renderSorter();
     });
     on("slide-selection", () => renderSorter());
+    on("stars", () => renderSorter());
     on("sections", () => renderSorter(true));
     initListDrop();
     addBtn.addEventListener("click", () => {
@@ -11771,6 +11871,18 @@
             { placeholder: "deck default" }
           )
         ),
+        slide.visible && row4(
+          "Starred",
+          (() => {
+            const cb = h("input", { type: "checkbox" });
+            cb.checked = isStarred(di);
+            cb.title = "Your own mark, kept outside the deck (S)";
+            cb.addEventListener("change", () => {
+              void toggleStar([di]);
+            });
+            return cb;
+          })()
+        ),
         row4(
           "Hidden",
           (() => {
@@ -13812,6 +13924,7 @@
   }
   function initProps() {
     on("selection", renderProps);
+    on("stars", renderProps);
     on("render", renderProps);
     on("preview", renderProps);
     panel.addEventListener("keydown", (e2) => {
@@ -14261,7 +14374,10 @@
   var view = document.getElementById("grid-view");
   var list2 = document.getElementById("grid-list");
   var sizeInput = document.getElementById("grid-size");
+  var starFilter = document.getElementById("grid-starred");
   var thumbs3 = new Thumbs(list2);
+  var STARRED_KEY = "inkflow-editor-grid-starred";
+  var starredOnly = false;
   function toggleGrid(on2 = view.hidden === true) {
     view.hidden = !on2;
     document.body.classList.toggle("grid-mode", on2);
@@ -14288,13 +14404,15 @@
       "div",
       {
         class: `grid-item${i2 === ed.current ? " active" : ""}${ed.slideSelection.has(i2) ? " picked" : ""}${slide.visible ? "" : " hidden-slide"}`,
-        draggable: ed.model?.deckEditable ? "true" : null,
+        // Among the starred only, a drop would have no place to mean.
+        draggable: ed.model?.deckEditable && !starredOnly ? "true" : null,
         "data-index": i2
       },
       thumbs3.thumb(slide),
       h(
         "div",
         { class: "grid-caption" },
+        slide.visible ? starButton(i2) : null,
         h("span", { class: "grid-num" }, String(i2 + 1)),
         h(
           "span",
@@ -14311,6 +14429,7 @@
         ) : null
       )
     );
+    item2.classList.toggle("starred", isStarred(i2));
     item2.addEventListener("click", (e2) => {
       pickSlide(i2, e2);
       ed.focus = "sorter";
@@ -14409,21 +14528,38 @@
     });
     return head;
   }
+  function renderFilter() {
+    starFilter.textContent = `\u2605 ${filterLabel(starCount())}`;
+    starFilter.classList.toggle("on", starredOnly);
+    starFilter.setAttribute("aria-pressed", String(starredOnly));
+  }
+  function setStarredOnly(on2) {
+    starredOnly = on2;
+    try {
+      localStorage.setItem(STARRED_KEY, on2 ? "1" : "");
+    } catch {
+    }
+    renderGrid();
+  }
   function renderGrid() {
     if (view.hidden) return;
+    renderFilter();
+    const top = list2.scrollTop;
     clear(list2);
     thumbs3.begin();
     const slides = ed.model?.slides ?? [];
     const all = sections();
     for (const block of sectionBlocks(slides.length, all)) {
       const k2 = block.section;
+      const shownSlides = starredOnly ? onlyStarred(block.slides, isStarred) : block.slides;
+      if (starredOnly && !shownSlides.length) continue;
       const wrap2 = h("div", {
         class: `grid-section${k2 == null ? " unsectioned" : ""}`
       });
       if (k2 != null) wrap2.append(gridHeader(k2));
       if (k2 == null || !isCollapsed(k2)) {
         const grid = h("div", { class: "grid-section-list" });
-        for (const i2 of block.slides) grid.append(gridItem(slides[i2], i2));
+        for (const i2 of shownSlides) grid.append(gridItem(slides[i2], i2));
         if (k2 != null && !block.slides.length) {
           grid.append(
             h(
@@ -14438,6 +14574,16 @@
       list2.append(wrap2);
     }
     thumbs3.end();
+    if (starredOnly && !starCount()) {
+      list2.append(
+        h(
+          "div",
+          { class: "grid-empty" },
+          "No starred slides yet: S stars the slide you are on, or click the \u2606 under a slide"
+        )
+      );
+    }
+    list2.scrollTop = top;
     list2.querySelector(".grid-item.active")?.scrollIntoView({
       block: "nearest"
     });
@@ -14541,6 +14687,12 @@
     on("model", renderGrid);
     on("slide", renderGrid);
     on("slide-selection", renderGrid);
+    on("stars", renderGrid);
+    try {
+      starredOnly = localStorage.getItem(STARRED_KEY) === "1";
+    } catch {
+    }
+    starFilter.addEventListener("click", () => setStarredOnly(!starredOnly));
     on("sections", renderGrid);
   }
 
@@ -16350,6 +16502,8 @@ ${area2.value.slice(pos)}`;
       setZoom(scale() / 1.25);
     } else if (!mod && key === "0") {
       setZoom(0);
+    } else if (!mod && !e2.altKey && lower === "s") {
+      starSelection();
     } else if (!mod && !e2.altKey && panelOfKey(key)) {
       togglePanel(panelOfKey(key));
     } else if (!mod && !e2.altKey && lower in TOOL_KEYS) {
@@ -24755,6 +24909,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     initObjects();
     initNotes();
     initPanels();
+    initStars();
     initToolbar();
     initContext();
     initGallery();

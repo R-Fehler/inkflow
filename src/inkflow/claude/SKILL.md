@@ -18,6 +18,8 @@ have just changed it.
 position in deck.py (`slides[i]`), its SVG/layout chain, `.md` and notes
 files, then each zone with where its text lives (`md` = the slide's `.md`,
 `deck.py` = `zones={...}`, `empty`) and the animations and clicks.
+A slide the author starred in the editor says `STARRED`; when asked about
+"the slides I starred", run `inkflow outline --starred` (only those).
 `inkflow outline -s N` adds full zone texts, zone boxes and the canvas size
 (to place shapes), the element ids animations can target, and each animation
 as deck.py writes it. Read it instead of opening every file; open only the

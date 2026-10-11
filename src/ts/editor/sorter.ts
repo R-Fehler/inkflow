@@ -38,6 +38,7 @@ import {
     sections,
     selectSection,
 } from "./sectionui";
+import { isStarred, markStar, starButton, toggleStar } from "./stars";
 import { ed, emit, on } from "./state";
 import type { SlideModel } from "./types";
 
@@ -297,7 +298,9 @@ function slideItem(slide: SlideModel, i: number): HTMLElement {
         },
         h("span", { class: "sorter-num" }, String(i + 1)),
         thumbs.thumb(slide),
+        slide.visible ? starButton(i) : null,
     );
+    item.classList.toggle("starred", isStarred(i));
     item.addEventListener("click", (e) => pickSlide(i, e));
     item.addEventListener("contextmenu", (e) => {
         e.preventDefault();
@@ -436,6 +439,7 @@ function markRows(): void {
         const i = Number(item.dataset.index);
         item.classList.toggle("active", i === ed.current);
         item.classList.toggle("picked", ed.slideSelection.has(i));
+        markStar(item, i);
     }
 }
 
@@ -622,6 +626,12 @@ export function openSlideMenu(x: number, y: number, i: number): void {
     if (many) {
         menu.append(
             menuItem(
+                `Star ${ed.slideSelection.size} slides (or take their stars off)`,
+                () => void toggleStar([...ed.slideSelection]),
+            ),
+        );
+        menu.append(
+            menuItem(
                 `Delete ${ed.slideSelection.size} slides`,
                 () => void deleteSlides(),
                 !editable,
@@ -645,6 +655,14 @@ export function openSlideMenu(x: number, y: number, i: number): void {
             !editable,
         ),
     );
+    if (slide?.visible) {
+        menu.append(
+            menuItem(
+                isStarred(i) ? "Take the star off" : "Star",
+                () => void toggleStar([i]),
+            ),
+        );
+    }
     menu.append(
         menuItem("Rename files…", () => renameSlideFiles(i), !editable),
     );
@@ -680,6 +698,7 @@ export function initSorter(): void {
         renderSorter();
     });
     on("slide-selection", () => renderSorter());
+    on("stars", () => renderSorter());
     on("sections", () => renderSorter(true));
     initListDrop();
     addBtn.addEventListener("click", () => {

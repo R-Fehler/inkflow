@@ -26,6 +26,7 @@ from inkflow.deps import Stamp, Stamps, note, recording, stamp
 from inkflow.editor.chartedit import chart_json
 from inkflow.editor.codegen import field_schema, to_json
 from inkflow.editor.deckedit import DeckSource
+from inkflow.editor.stars import read_stars
 from inkflow.editor.svgops import file_hash
 from inkflow.incremental import frozen
 from inkflow.layout import discover_layouts, label_of, layouts_for
@@ -443,7 +444,15 @@ def build_model(
         "layouts": _layouts(project_dir, deck),
         "colorTokens": list(SVG_TOKENS),
         "deckSize": size_json(deck),
+        "stars": starred_ids(project_dir, out_slides),
     }
+
+
+def starred_ids(project_dir: Path, entries: list[dict[str, object]]) -> list[str]:
+    """The ids of the deck's starred slides (editor/stars.py), in deck order:
+    a star whose slide is gone, or hidden, is not shown."""
+    starred = set(read_stars(project_dir))
+    return [str(e["id"]) for e in entries if e.get("id") in starred]
 
 
 def size_json(deck: Deck) -> dict[str, object]:

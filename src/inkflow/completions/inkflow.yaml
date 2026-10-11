@@ -91,6 +91,7 @@ commands:
       -d, --deck=: Path to deck.py
       -s, --slide=: One slide (1-based) in detail
       --json: Print the full structure
+      --starred: Only the slides starred in the editor
       --boxes: With --slide, every element's box as rendered
     completion:
       flag:
@@ -208,6 +209,22 @@ commands:
 
       - name: show
         description: Put a hidden slide back in the presentation.
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: star
+        description: Star slides (the author's marks, kept outside the deck).
+        flags:
+          -d, --deck=: Path to deck.py
+        completion:
+          flag:
+            deck: ["$files([\".py\"])"]
+
+      - name: unstar
+        description: Take the star off slides.
         flags:
           -d, --deck=: Path to deck.py
         completion:
