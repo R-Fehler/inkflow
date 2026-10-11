@@ -148,13 +148,13 @@
     fo.removeAttribute("data-inkflow-overflow");
     const cs = getComputedStyle(wrapper);
     if (cs.display === "none" || wrapper.clientHeight === 0) return null;
-    const apply2 = (scale2) => {
+    const apply3 = (scale2) => {
       if (scale2 < 1)
         wrapper.style.setProperty("--inkflow-fit-scale", String(scale2));
       else wrapper.style.removeProperty("--inkflow-fit-scale");
     };
     const fits = (scale2) => {
-      apply2(scale2);
+      apply3(scale2);
       return !overflows(wrapper, content2);
     };
     const off2 = cs.getPropertyValue("--inkflow-fit").trim() === "none";
@@ -162,7 +162,7 @@
       fits,
       floorScale(px(cs.fontSize) * unitScale(fo), minText)
     );
-    apply2(result.scale);
+    apply3(result.scale);
     if (result.scale < 1)
       fo.setAttribute("data-inkflow-fit", result.scale.toFixed(3));
     if (result.overflow) fo.setAttribute("data-inkflow-overflow", "");
@@ -1989,12 +1989,12 @@
           })
         );
       }
-      const shown2 = startingWith(
+      const shown3 = startingWith(
         (f2.files ?? []).map((x2) => x2.name),
         filter
       );
       for (const file of f2.files ?? []) {
-        if (!shown2.includes(file.name)) continue;
+        if (!shown3.includes(file.name)) continue;
         list4.append(
           entry(
             `\u{1F39E} ${file.name}`,
@@ -2008,7 +2008,7 @@
           )
         );
       }
-      if (!dirs.length && !shown2.length) {
+      if (!dirs.length && !shown3.length) {
         list4.append(
           h(
             "p",
@@ -3333,14 +3333,14 @@
     const src = ownSource();
     if (!up || !src) return;
     let href = relativePath(refBase(src), up.path);
-    let shown2 = up.rel;
+    let shown3 = up.rel;
     if (isPdfRef(up.path)) {
       const choice = await choosePage(up.path);
       if (!choice) return;
       href = withPage(href, choice.page);
-      shown2 = choice.url;
+      shown3 = choice.url;
     }
-    const size4 = shown2 ? await naturalSize(shown2) : { w: 400, h: 300 };
+    const size4 = shown3 ? await naturalSize(shown3) : { w: 400, h: 300 };
     const svg = slideRoot();
     const vb = svg?.viewBox.baseVal;
     const maxW = (vb?.width || 1920) * 0.5;
@@ -3637,8 +3637,8 @@
     return `${n3} ${word}${n3 === 1 ? "" : "s"}`;
   }
   function names(paths, limit = 3) {
-    const shown2 = paths.slice(0, limit).join(", ");
-    return paths.length > limit ? `${shown2} and ${paths.length - limit} more` : shown2;
+    const shown3 = paths.slice(0, limit).join(", ");
+    return paths.length > limit ? `${shown3} and ${paths.length - limit} more` : shown3;
   }
   function gitBadge(state) {
     switch (state) {
@@ -5263,7 +5263,7 @@
       own: kind === "overlay" ? "Drawn on top of every slide that gets it, whatever the slide's layout." : "A layout of this deck's own."
     }[o2.kind];
     const reach = layout ? layout.reach : overlay3?.slides ?? [];
-    const shown2 = h(
+    const shown3 = h(
       "select",
       { title: "See the layout with a slide's own content" },
       h(
@@ -5273,9 +5273,9 @@
       ),
       ...reach.map((i2) => h("option", { value: String(i2) }, slideName(i2)))
     );
-    shown2.value = view3.onSlide != null ? String(view3.onSlide) : "";
-    shown2.addEventListener("change", () => {
-      const v2 = shown2.value;
+    shown3.value = view3.onSlide != null ? String(view3.onSlide) : "";
+    shown3.addEventListener("change", () => {
+      const v2 = shown3.value;
       if (item) void show(item, v2 === "" ? null : Number(v2));
     });
     const actions = [];
@@ -5343,7 +5343,7 @@
         "label",
         { class: "prop-row" },
         h("span", { class: "prop-label" }, "Show"),
-        shown2
+        shown3
       ),
       h(
         "div",
@@ -7355,8 +7355,8 @@
     return result;
   }
   function updateHashes(hashes) {
-    const shown2 = ed.master ? [ed.master.slide] : [];
-    for (const slide of [...ed.model?.slides ?? [], ...shown2]) {
+    const shown3 = ed.master ? [ed.master.slide] : [];
+    for (const slide of [...ed.model?.slides ?? [], ...shown3]) {
       for (const src of slide.sources ?? []) {
         if (!(src.path in hashes)) continue;
         src.hash = hashes[src.path];
@@ -9844,7 +9844,7 @@
       clear(fields);
       const numeric = numericColumns(grid);
       const x2 = xColumn(grid, settings2);
-      const shown2 = plotted(grid, settings2);
+      const shown3 = plotted(grid, settings2);
       const kind = settings2.kind;
       const title3 = h("input", {
         type: "text",
@@ -9879,7 +9879,7 @@
       const twoAxes = secondAxisAllowed(settings2);
       for (const c2 of choices) {
         const usable = numeric.includes(c2);
-        const box = check(c2, shown2.includes(c2), (on2) => {
+        const box = check(c2, shown3.includes(c2), (on2) => {
           settings2.y = toggleSeries(grid, settings2, c2, on2);
           if (!on2) settings2.y2 = toggleRight(settings2, c2, false);
         });
@@ -9887,7 +9887,7 @@
           box.classList.add("off");
           box.title = "Not all numbers";
         }
-        if (twoAxes && usable && shown2.includes(c2)) {
+        if (twoAxes && usable && shown3.includes(c2)) {
           const right = check(
             "right axis",
             (settings2.y2 ?? []).includes(c2),
@@ -11569,7 +11569,7 @@
     };
     const numeric = value.numeric ?? [];
     const x2 = xColumn(grid, s2);
-    const shown2 = s2.y ?? numeric.filter((c2) => c2 !== x2);
+    const shown3 = s2.y ?? numeric.filter((c2) => c2 !== x2);
     const check = (label4, on2, fn) => {
       const box = h("input", { type: "checkbox" });
       box.checked = on2;
@@ -11580,11 +11580,11 @@
     const twoAxes = secondAxisAllowed(s2);
     for (const c2 of grid.columns.filter((c3) => c3 !== x2)) {
       const box = h("input", { type: "checkbox" });
-      box.checked = shown2.includes(c2);
+      box.checked = shown3.includes(c2);
       box.disabled = !numeric.includes(c2);
       box.addEventListener("change", () => {
         const next = grid.columns.filter(
-          (n3) => n3 === c2 ? box.checked : shown2.includes(n3)
+          (n3) => n3 === c2 ? box.checked : shown3.includes(n3)
         );
         const auto = numeric.filter((n3) => n3 !== x2);
         const same = next.length === auto.length && next.every((n3, i2) => n3 === auto[i2]);
@@ -11594,7 +11594,7 @@
         });
       });
       const entry = h("label", { class: "chart-check" }, box, c2);
-      if (twoAxes && shown2.includes(c2) && numeric.includes(c2)) {
+      if (twoAxes && shown3.includes(c2) && numeric.includes(c2)) {
         const right = h("input", { type: "checkbox" });
         right.checked = (s2.y2 ?? []).includes(c2);
         right.addEventListener(
@@ -12215,9 +12215,9 @@
   }
   function paintRow(sel, prop) {
     const first = sel[0].el;
-    const shown2 = boxShown(first);
-    const token = shown2 ? tokenOf(first, prop) : null;
-    const computed = shown2 ? getComputedStyle(first)[prop] : "none";
+    const shown3 = boxShown(first);
+    const token = shown3 ? tokenOf(first, prop) : null;
+    const computed = shown3 ? getComputedStyle(first)[prop] : "none";
     const send = (paint) => {
       const plans = sel.map((s2) => ({
         sel: s2,
@@ -12801,9 +12801,9 @@
       ],
       label4
     );
-    const shown2 = el2.hasAttribute("inkflow:show-shape");
+    const shown3 = el2.hasAttribute("inkflow:show-shape");
     const box = h("input", { type: "checkbox" });
-    box.checked = shown2;
+    box.checked = shown3;
     box.addEventListener(
       "change",
       () => void sendSvgOps(
@@ -13159,8 +13159,8 @@
     return isPdfRef(ref) ? `${name2} \xB7 page ${pdfPage(ref)}` : name2;
   }
   function pdfPageRow(sel, image, file, page, imageOps) {
-    const show2 = async (n3, shown2) => {
-      const url = shown2 ?? await pageUrl(file, n3);
+    const show2 = async (n3, shown3) => {
+      const url = shown3 ?? await pageUrl(file, n3);
       const src = sourceOf(sel.key);
       const root2 = ed.model?.projectDir;
       if (!url || !src || !root2 || n3 === page) return;
@@ -14544,6 +14544,80 @@
     on("sections", renderGrid);
   }
 
+  // src/ts/editor/panelstext.ts
+  var PANELS = ["left", "bottom", "right"];
+  var ALL_SHOWN = { left: true, bottom: true, right: true };
+  var PANEL_KEYS = {
+    left: "1",
+    bottom: "2",
+    right: "3"
+  };
+  var PANEL_NAMES = {
+    left: "slide list",
+    bottom: "speaker notes",
+    right: "properties"
+  };
+  function parseShown(stored2) {
+    const shown3 = { ...ALL_SHOWN };
+    if (!stored2) return shown3;
+    try {
+      const hidden = JSON.parse(stored2);
+      if (!Array.isArray(hidden)) return shown3;
+      for (const panel4 of PANELS) {
+        if (hidden.includes(panel4)) shown3[panel4] = false;
+      }
+    } catch {
+    }
+    return shown3;
+  }
+  function storeShown(shown3) {
+    return JSON.stringify(PANELS.filter((panel4) => !shown3[panel4]));
+  }
+  function panelTitle(panel4, shown3) {
+    const name2 = PANEL_NAMES[panel4];
+    return `${shown3 ? "Hide" : "Show"} the ${name2} (${PANEL_KEYS[panel4]})`;
+  }
+  function panelOfKey(key) {
+    return PANELS.find((panel4) => PANEL_KEYS[panel4] === key) ?? null;
+  }
+
+  // src/ts/editor/panels.ts
+  var KEY = "inkflow-editor-panels";
+  var shown2 = parseShown(null);
+  function button4(panel4) {
+    return document.getElementById(`btn-panel-${panel4}`);
+  }
+  function apply2() {
+    for (const panel4 of PANELS) {
+      document.body.classList.toggle(`hide-${panel4}`, !shown2[panel4]);
+      const b2 = button4(panel4);
+      if (!b2) continue;
+      b2.classList.toggle("on", shown2[panel4]);
+      b2.setAttribute("aria-pressed", String(shown2[panel4]));
+      b2.title = panelTitle(panel4, shown2[panel4]);
+    }
+    layoutPaper();
+    emit("zoom");
+  }
+  function togglePanel(panel4) {
+    shown2 = { ...shown2, [panel4]: !shown2[panel4] };
+    try {
+      localStorage.setItem(KEY, storeShown(shown2));
+    } catch {
+    }
+    apply2();
+  }
+  function initPanels() {
+    try {
+      shown2 = parseShown(localStorage.getItem(KEY));
+    } catch {
+    }
+    for (const panel4 of PANELS) {
+      button4(panel4)?.addEventListener("click", () => togglePanel(panel4));
+    }
+    apply2();
+  }
+
   // src/ts/editor/conflict.ts
   function showConflict(why, mine, useMine) {
     const area2 = h("textarea", {
@@ -15095,7 +15169,7 @@ $$`;
       window.clearTimeout(timer6);
       timer6 = window.setTimeout(() => void send(), 450);
     });
-    const button8 = (name2, title3, fn) => h(
+    const button9 = (name2, title3, fn) => h(
       "button",
       {
         type: "button",
@@ -15112,14 +15186,14 @@ $$`;
       "div",
       { class: "zone-toolbar" },
       h("span", { class: "zone-label" }, `${zone} \xB7 Markdown`),
-      button8("B", "Bold (Ctrl+B)", () => wrapSelection(area2, "**")),
-      button8("I", "Italic (Ctrl+I)", () => wrapSelection(area2, "*")),
-      button8("H", "Heading", () => prefixLines(area2, "## ")),
-      button8("\u2022", "Bullet list", () => prefixLines(area2, "- ")),
-      button8("1.", "Numbered list", () => prefixLines(area2, "1. ")),
-      button8("`", "Code", () => wrapSelection(area2, "`")),
-      button8("\u2211", "Math", () => wrapSelection(area2, "$")),
-      button8("\u23F5", "Reveal on click: insert a ::step:: marker", () => {
+      button9("B", "Bold (Ctrl+B)", () => wrapSelection(area2, "**")),
+      button9("I", "Italic (Ctrl+I)", () => wrapSelection(area2, "*")),
+      button9("H", "Heading", () => prefixLines(area2, "## ")),
+      button9("\u2022", "Bullet list", () => prefixLines(area2, "- ")),
+      button9("1.", "Numbered list", () => prefixLines(area2, "1. ")),
+      button9("`", "Code", () => wrapSelection(area2, "`")),
+      button9("\u2211", "Math", () => wrapSelection(area2, "$")),
+      button9("\u23F5", "Reveal on click: insert a ::step:: marker", () => {
         const pos = area2.selectionStart;
         area2.value = `${area2.value.slice(0, pos)}
 ::step::
@@ -16276,6 +16350,8 @@ ${area2.value.slice(pos)}`;
       setZoom(scale() / 1.25);
     } else if (!mod && key === "0") {
       setZoom(0);
+    } else if (!mod && !e2.altKey && panelOfKey(key)) {
+      togglePanel(panelOfKey(key));
     } else if (!mod && !e2.altKey && lower in TOOL_KEYS) {
       setTool(TOOL_KEYS[lower]);
     } else if (!mod && !e2.altKey && lower === "g") {
@@ -17934,7 +18010,7 @@ ${UNDO_NOTICE}` : question)) {
 
   // src/ts/editor/decks.ts
   var menu5 = document.getElementById("context-menu");
-  var button4 = document.getElementById("btn-deck");
+  var button5 = document.getElementById("btn-deck");
   function lookThumb(look) {
     const c2 = look.preview;
     if (!c2) return null;
@@ -17967,8 +18043,8 @@ ${UNDO_NOTICE}` : question)) {
   }
   function renderButton() {
     const dir = ed.model?.projectDir;
-    button4.textContent = `${dir ? baseName2(dir) : "deck"} \u25BE`;
-    button4.title = dir ? `${dir}
+    button5.textContent = `${dir ? baseName2(dir) : "deck"} \u25BE`;
+    button5.title = dir ? `${dir}
 Decks: new, open, recent` : "Decks";
   }
   async function info2() {
@@ -18006,7 +18082,7 @@ Decks: new, open, recent` : "Decks";
       h("div", { class: "menu-sep" }),
       menuItem("Quit Inkflow", () => void quit())
     );
-    const r2 = button4.getBoundingClientRect();
+    const r2 = button5.getBoundingClientRect();
     showMenu(r2.left, r2.bottom + 4);
   }
   async function openDeck(path) {
@@ -18340,7 +18416,7 @@ Decks: new, open, recent` : "Decks";
     document.body.append(page);
   }
   function initDecks() {
-    button4.addEventListener("click", () => void openMenu2());
+    button5.addEventListener("click", () => void openMenu2());
     on("model", renderButton);
     renderButton();
   }
@@ -19035,29 +19111,29 @@ Decks: new, open, recent` : "Decks";
 
   // src/ts/editor/git.ts
   var menu6 = document.getElementById("context-menu");
-  var button5 = document.getElementById("btn-git");
-  var label2 = button5.querySelector(".git-label");
-  var badge3 = button5.querySelector(".git-badge");
+  var button6 = document.getElementById("btn-git");
+  var label2 = button6.querySelector(".git-label");
+  var badge3 = button6.querySelector(".git-badge");
   var status = { repo: false, git: false };
   function render3() {
-    button5.hidden = !status.git;
+    button6.hidden = !status.git;
     if (!status.repo) {
       label2.textContent = "Git";
       badge3.hidden = true;
-      button5.title = "Not versioned: create a git repository for this deck";
+      button6.title = "Not versioned: create a git repository for this deck";
       return;
     }
     label2.textContent = status.branch ?? `@${status.detached ?? "?"}`;
     const n3 = status.changes?.length ?? 0;
     const lfsIssues = lfsFiles().length;
-    button5.classList.toggle("warn", lfsIssues > 0);
+    button6.classList.toggle("warn", lfsIssues > 0);
     badge3.hidden = n3 === 0 && lfsIssues === 0;
     badge3.textContent = n3 ? String(n3) : "!";
     const sync = [
       status.ahead ? `${status.ahead} to push` : "",
       status.behind ? `${status.behind} to pull` : ""
     ].filter(Boolean).join(", ");
-    button5.title = [
+    button6.title = [
       status.branch ? `Branch ${status.branch}` : `Viewing ${status.detached}`,
       n3 ? `${n3} changed file${n3 === 1 ? "" : "s"}` : "No changes",
       sync,
@@ -19089,9 +19165,9 @@ Decks: new, open, recent` : "Decks";
 Continue?`)) return null;
       if (notice) undoNoticeShown();
     }
-    button5.classList.add("busy");
+    button6.classList.add("busy");
     const res = await request({ action: "git", op, ...args });
-    button5.classList.remove("busy");
+    button6.classList.remove("busy");
     if (res.git) {
       status = res.git;
       render3();
@@ -19222,7 +19298,7 @@ Continue?`)) return null;
       );
       if (status.hasCommits) menu6.append(...await worktreeSection());
     }
-    const r2 = button5.getBoundingClientRect();
+    const r2 = button6.getBoundingClientRect();
     showMenu(Math.max(8, r2.right - 260), r2.bottom + 4);
   }
   function publishItems() {
@@ -19762,9 +19838,9 @@ Continue?`)) return null;
       if (!confirm(text)) return null;
       if (notice) undoNoticeShown();
     }
-    button5.classList.add("busy");
+    button6.classList.add("busy");
     const res = await request({ action: "worktree", op, ...args });
-    button5.classList.remove("busy");
+    button6.classList.remove("busy");
     if (res.git) {
       status = res.git;
       render3();
@@ -20025,7 +20101,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   var timer4 = 0;
   function initGit() {
-    button5.addEventListener("click", () => void openMenu3());
+    button6.addEventListener("click", () => void openMenu3());
     on("model", () => {
       window.clearTimeout(timer4);
       timer4 = window.setTimeout(() => void refreshGit(), 600);
@@ -20774,7 +20850,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   function icon2(name2) {
     return `<svg aria-hidden="true" viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${ICONS[name2]}</svg>`;
   }
-  function button6(title3, content2, data) {
+  function button7(title3, content2, data) {
     const b2 = document.createElement("button");
     b2.type = "button";
     b2.className = "ink-btn";
@@ -20809,12 +20885,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       this.el = el2;
       const tools = group(
         ...["pen", "highlighter", "eraser"].map(
-          (t2) => button6(TOOL_TITLES[t2], icon2(t2), { inkTool: t2 })
+          (t2) => button7(TOOL_TITLES[t2], icon2(t2), { inkTool: t2 })
         )
       );
       const swatches = group(
         ...SWATCHES.map((s2, i2) => {
-          const b2 = button6(
+          const b2 = button7(
             s2.label,
             `<span class="ink-swatch" style="background:${s2.token ? `var(--inkflow-${s2.token}, ${s2.hex})` : s2.hex}"></span>`,
             { inkSwatch: String(i2) }
@@ -20835,11 +20911,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       this.sizes = group();
       this.sizes.classList.add("ink-sizes");
       const actions = group(
-        button6(opts2.undoTitle, icon2("undo"), { inkAction: "undo" }),
-        button6(opts2.clearTitle, icon2("clear"), { inkAction: "clear" })
+        button7(opts2.undoTitle, icon2("undo"), { inkAction: "undo" }),
+        button7(opts2.clearTitle, icon2("clear"), { inkAction: "clear" })
       );
       const toggles = group(
-        button6(
+        button7(
           "Draw with a mouse or a finger too (off: only a pen draws, so clicks and swipes still navigate)",
           icon2("fingers"),
           { inkToggle: "fingers" }
@@ -20847,7 +20923,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       );
       if (opts2.keep) {
         toggles.append(
-          button6(
+          button7(
             "Keep: save new strokes with the slide (off: they last for this talk only)",
             icon2("keep"),
             { inkToggle: "keep" }
@@ -20856,7 +20932,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       }
       if (opts2.close) {
         toggles.append(
-          button6("Leave ink mode (i)", icon2("close"), {
+          button7("Leave ink mode (i)", icon2("close"), {
             inkAction: "close"
           })
         );
@@ -20954,7 +21030,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       this.sizes.replaceChildren(
         ...sizes.map((size4, i2) => {
           const px2 = Math.max(3, Math.round(size4 / largest * 16));
-          const b2 = button6(
+          const b2 = button7(
             ["Thin", "Medium", "Thick"][i2] ?? `Size ${i2 + 1}`,
             `<span class="ink-dot ${tool}" style="width:${px2}px;height:${tool === "highlighter" ? Math.max(3, Math.round(px2 / 2.5)) : px2}px"></span>`,
             { inkSize: String(i2) }
@@ -23470,7 +23546,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   var status2 = null;
   var body2 = null;
   var ssh = null;
-  var button7 = document.getElementById("btn-share");
+  var button8 = document.getElementById("btn-share");
   function qrSvg(text) {
     const qr = qrcode_default(0, "M");
     qr.addData(text);
@@ -23873,8 +23949,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function setStatus(msg) {
     status2 = msg;
-    if (button7) {
-      button7.classList.toggle(
+    if (button8) {
+      button8.classList.toggle(
         "on",
         status2.sharing || Boolean(status2.online?.sharing)
       );
@@ -23897,7 +23973,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function initShare() {
     onMessage("share-status", setStatus);
-    button7?.addEventListener("click", openShare);
+    button8?.addEventListener("click", openShare);
   }
 
   // src/ts/editor/theme.ts
@@ -24678,6 +24754,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     initProps();
     initObjects();
     initNotes();
+    initPanels();
     initToolbar();
     initContext();
     initGallery();

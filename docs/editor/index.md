@@ -918,6 +918,24 @@ tooltip.
 
 Renaming an object keeps the slide's animations pointing at it.
 
+## Hiding the panels
+
+The slide list on the left, the speaker notes below and the properties on the
+right can each be hidden, and the slide takes the room: for a small screen,
+or to see a slide large while you work on it.
+
+| Panel | Key | With the mouse |
+|---|---|---|
+| Slide list (in the slide master: its list of layouts) | <kbd>1</kbd> | the tab on the canvas's left edge |
+| Speaker notes | <kbd>2</kbd> | the tab above the notes, on the right |
+| Properties | <kbd>3</kbd> | the tab on the canvas's right edge |
+
+A hidden panel's tab stays on the window's edge and brings it back as it was:
+the notes at the height you dragged them to, the list where it was scrolled.
+Which panels are hidden is kept from slide to slide and when the page is
+reloaded. With the notes hidden, a zone's Markdown editor still opens in
+their place.
+
 ## Speaker notes
 
 The panel under the slide holds the slide's speaker notes, written in
@@ -1062,6 +1080,7 @@ print shop that asks for them.
 | Right-click | The object's menu (edit, clipboard, arrange, group, align, crop, hide, lock, open its file), or on an empty spot paste and the slide's actions; <kbd>Shift</kbd>+right-click gives the browser's own menu |
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>H</kbd> | Find / replace |
 | <kbd>G</kbd> | Grid view of all slides |
+| <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> | Hide / show the slide list, the speaker notes, the properties |
 | <kbd>Ctrl</kbd>+<kbd>B</kbd> <kbd>I</kbd> <kbd>K</kbd> (in text) | Bold, italic, link |
 | <kbd>Tab</kbd> (in a table) | Next cell |
 | <kbd>PageUp</kbd> <kbd>PageDown</kbd> | Previous / next slide |

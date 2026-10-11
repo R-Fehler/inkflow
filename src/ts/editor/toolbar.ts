@@ -27,6 +27,8 @@ import { openGallery } from "./gallery";
 import { toggleGrid } from "./grid";
 import { insertImage, insertVideo, setTool, typeInto } from "./insert";
 import { edit } from "./net";
+import { togglePanel } from "./panels";
+import { type Panel, panelOfKey } from "./panelstext";
 import { alignSelection } from "./props";
 import {
     deleteSlide,
@@ -380,6 +382,8 @@ function onKey(e: KeyboardEvent): void {
         setZoom(scale() / 1.25);
     } else if (!mod && key === "0") {
         setZoom(0);
+    } else if (!mod && !e.altKey && panelOfKey(key)) {
+        togglePanel(panelOfKey(key) as Panel);
     } else if (!mod && !e.altKey && lower in TOOL_KEYS) {
         setTool(TOOL_KEYS[lower]);
     } else if (!mod && !e.altKey && lower === "g") {

@@ -1081,7 +1081,8 @@ body.master-mode #notes {
   display: none;
 }
 body.master-mode #workspace {
-  grid-template-columns: 250px 1fr 300px;
+  --sorter-w: 250px;
+  --props-w: 300px;
   grid-template-areas: "sorter canvas props" "sorter canvas props";
 }
 #btn-layout {
@@ -1434,6 +1435,83 @@ body.notes-resizing {
   margin-bottom: 0;
 }
 
+/* src/css/editor/panels.css */
+body.hide-left #workspace {
+  --sorter-w: 0px;
+}
+body.hide-left #sorter,
+body.hide-left #master {
+  display: none;
+}
+body.hide-right #workspace {
+  --props-w: 0px;
+}
+body.hide-right #props {
+  display: none;
+}
+body.hide-bottom:not(.editing-zone) #workspace {
+  --notes-row: 0px;
+}
+body.hide-bottom:not(.editing-zone) #notes {
+  display: none;
+}
+.panel-tab {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--ui-line);
+  background: var(--ui-panel);
+  color: var(--subtext);
+  cursor: pointer;
+  opacity: 0.6;
+}
+.panel-tab:hover,
+.panel-tab:focus-visible {
+  opacity: 1;
+  color: var(--sel);
+  outline: none;
+}
+#btn-panel-left {
+  left: var(--sorter-w);
+  top: calc(50% - 22px);
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+}
+#btn-panel-right {
+  right: var(--props-w);
+  top: calc(50% - 22px);
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+}
+#btn-panel-bottom {
+  right: calc(var(--props-w) + 24px);
+  bottom: var(--notes-row);
+  width: 44px;
+  height: 14px;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+}
+#btn-panel-left:not(.on) svg,
+#btn-panel-right.on svg {
+  transform: rotate(180deg);
+}
+#btn-panel-bottom.on svg {
+  transform: rotate(-90deg);
+}
+#btn-panel-bottom:not(.on) svg {
+  transform: rotate(90deg);
+}
+body.master-mode #btn-panel-bottom,
+body.editing-zone #btn-panel-bottom,
+body.compare-mode .panel-tab {
+  display: none;
+}
+
 /* src/css/editor/index.css */
 :root {
   --ui-bg: var(--bg);
@@ -1601,8 +1679,12 @@ body.offline #conn {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 200px 1fr 300px;
-  grid-template-rows: minmax(0, 1fr) min(var(--notes-h, 150px), calc(100vh - 200px));
+  --sorter-w: 200px;
+  --props-w: 300px;
+  grid-template-columns: var(--sorter-w) 1fr var(--props-w);
+  --notes-row: min(var(--notes-h, 150px), calc(100vh - 200px));
+  grid-template-rows: minmax(0, 1fr) var(--notes-row);
+  position: relative;
   grid-template-areas: "sorter canvas props" "sorter notes props";
 }
 #sorter {
@@ -2526,7 +2608,7 @@ body.anim-playing #overlay {
   z-index: 2;
 }
 body.editing-zone #workspace {
-  grid-template-rows: minmax(0, 1fr) max(220px, 40vh, var(--notes-h, 0px));
+  --notes-row: max(220px, 40vh, var(--notes-h, 0px));
 }
 .zone-edit-wrap {
   display: flex;
@@ -2906,7 +2988,8 @@ body.offline #offline-banner {
 }
 @media (max-width: 1000px) {
   #workspace {
-    grid-template-columns: 150px 1fr 240px;
+    --sorter-w: 150px;
+    --props-w: 240px;
   }
 }
 #dialog {

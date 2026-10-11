@@ -64,6 +64,10 @@
         <svg id="overlay" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"></svg>
       </div>
     </main>
+    <!-- Each panel's tab on its edge of the canvas: hides it, and brings it back (panels.ts). -->
+    <button type="button" class="panel-tab on" id="btn-panel-left" aria-pressed="true" title="Hide the slide list (1)"><svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 5 8l5 5"/></svg></button>
+    <button type="button" class="panel-tab on" id="btn-panel-bottom" aria-pressed="true" title="Hide the speaker notes (2)"><svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 5 8l5 5"/></svg></button>
+    <button type="button" class="panel-tab on" id="btn-panel-right" aria-pressed="true" title="Hide the properties (3)"><svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3 5 8l5 5"/></svg></button>
     <section id="notes">
       <hr id="notes-resize" tabindex="0" aria-orientation="horizontal" aria-label="Height of the speaker notes" aria-valuenow="150" title="Drag to make the notes taller or shorter (double-click: the usual height)">
       <div class="notes-head">

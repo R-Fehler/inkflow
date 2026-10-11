@@ -30,6 +30,7 @@ import { initMaster } from "./master";
 import { connect } from "./net";
 import { initNotes } from "./notes";
 import { initObjects } from "./objects";
+import { initPanels } from "./panels";
 import { focusCellLabel, initProps } from "./props";
 import { initShare } from "./share";
 import { initSorter, renderSorter } from "./sorter";
@@ -152,6 +153,7 @@ function boot(): void {
     initProps();
     initObjects();
     initNotes();
+    initPanels();
     initToolbar();
     initContext();
     initGallery();
