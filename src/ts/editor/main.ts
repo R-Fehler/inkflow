@@ -31,6 +31,7 @@ import { connect } from "./net";
 import { initNotes } from "./notes";
 import { initObjects } from "./objects";
 import { initPanels } from "./panels";
+import { initProblems } from "./problems";
 import { focusCellLabel, initProps } from "./props";
 import { initShare } from "./share";
 import { initSorter, renderSorter } from "./sorter";
@@ -166,6 +167,7 @@ function boot(): void {
     initTheme();
     initDecks();
     initGit();
+    initProblems();
     initCanvasMenu();
     initCompare();
     initMaster();

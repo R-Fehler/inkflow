@@ -222,7 +222,7 @@ describe("commitWhat", () => {
                 files: ["talk/slides/b.md"],
                 entry: "added",
             }),
-        ).toBe("added the slide · b.md");
+        ).toBe("added the slide · slides/b.md");
         expect(commitWhat({ ...base, files: [], entry: "changed" })).toBe(
             "its Slide(...)",
         );

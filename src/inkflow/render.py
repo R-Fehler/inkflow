@@ -679,6 +679,52 @@ def render_slides(
     return result
 
 
+def check_built(
+    deck: Deck,
+    project_dir: Path,
+    slides: list[SlideData],
+    indices: list[int],
+    *,
+    contrast: bool = False,
+    chromium: str | None = None,
+    no_sandbox: bool = False,
+) -> dict[int, list[Finding]]:
+    """The layout findings of the already built ``slides`` at ``indices``
+    (0-based), as `render_slides` measures them, without writing a picture:
+    what the editor's problem marks show (editor/problems.py). Contrast
+    only with ``contrast``."""
+    exe = chromium or find_chromium()
+    if exe is None:
+        raise RuntimeError("Chromium not found: install chromium or google-chrome")
+    found: dict[int, list[Finding]] = {i: [] for i in indices}
+    if not indices:
+        return found
+    template = _page_template(
+        deck, project_dir, slides, load_deck_styles(deck, project_dir), None
+    )
+    checks = print_checks(deck, slides)
+    with (
+        tempfile.TemporaryDirectory() as tmp,
+        served(Path(tmp)) as url,
+        Browser.launch(exe, no_sandbox=no_sandbox) as browser,
+    ):
+        copy_assets(slides, asset_roots(deck, project_dir), Path(tmp))
+        page = browser.new_page()
+        for i in indices:
+            svg = slides[i]["svg"]
+            w, h = slide_dimensions(svg)
+            (Path(tmp) / f"slide-{i}.html").write_text(
+                _slide_page(template, svg, checks[i]), encoding="utf-8"
+            )
+            page.viewport(w, h, 1.0)
+            page.navigate(f"{url}/slide-{i}.html")
+            raw = page.evaluate("window.inkflowRendered")
+            found[i] += parse_findings(i + 1, slides[i]["id"], raw)
+            if contrast:
+                found[i] += _contrast(page, i + 1, slides[i]["id"], w, h, None)
+    return found
+
+
 def _contrast(
     page: Page, n: int, slide_id: str, w: int, h: int, shown: bytes | None
 ) -> list[Finding]:

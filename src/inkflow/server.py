@@ -76,6 +76,7 @@ from inkflow.editor.comparehub import CompareHub, side_build_from
 from inkflow.editor.comparesrc import CompareError
 from inkflow.editor.context import write_context
 from inkflow.editor.model import ModelCache, build_model, starred_ids
+from inkflow.editor.problems import Problems
 from inkflow.editor.session import EditError, EditorSession, Exporters
 from inkflow.editor.svgops import file_hash
 from inkflow.enums import ColorMode
@@ -169,6 +170,11 @@ class EditorState(TypedDict):
     slides' entries that build already had are named by key."""
     kept: Kept | None
     """What is kept from one build of the served deck to the next."""
+    problems: Problems | None
+    """Each slide's problems for the editor's marks (editor/problems.py)."""
+    edit_slides: list[SlideData] | None
+    """The last editor build's slides (what the layout check measures)."""
+    deck_hash: str | None
 
 
 _editor: EditorState = {
@@ -182,6 +188,9 @@ _editor: EditorState = {
     "compare": None,
     "model_patch": None,
     "kept": None,
+    "problems": None,
+    "edit_slides": None,
+    "deck_hash": None,
 }
 
 
@@ -443,6 +452,9 @@ async def rebuild(
             # A page of an older inkflow (a tab left open across an update).
             await broadcast(_update_message(slides, changed), skip=patching)
         await _send_editors(_model_message)
+        _editor["edit_slides"] = edit_slides
+        _editor["deck_hash"] = deck_hash
+        _check_problems()
         hub = _editor["compare"]
         if hub is not None:
             await hub.live_built(
@@ -525,6 +537,69 @@ def _without_edit(slide: SlideData) -> SlideData:
 
 
 # ── WebSocket broadcast ───────────────────────────────────────────────────────
+
+
+_problems_lock = asyncio.Lock()
+_background: set[asyncio.Task[None]] = set()
+
+
+def _check_problems() -> None:
+    """Check the slides' problems again in the background (after a build,
+    or when an editor asks for the layout check)."""
+    task = asyncio.get_running_loop().create_task(_refresh_problems())
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+
+
+def _problems_message() -> dict[str, object] | None:
+    problems, model = _editor["problems"], _editor["model"]
+    slides = _editor["edit_slides"]
+    if problems is None or model is None or slides is None:
+        return None
+    return problems.json(model, slides)
+
+
+async def _refresh_problems() -> None:
+    """verify's checks for the slides whose entry changed, then (when on)
+    the layout check for the slides whose SVG changed; editors are told
+    after each. One at a time, each on the latest build."""
+    async with _problems_lock:
+        problems, deck, model = _editor["problems"], _editor["deck"], _editor["model"]
+        slides, session = _editor["edit_slides"], _editor["session"]
+        if None in (problems, deck, model, slides, session):
+            return
+        assert problems is not None and deck is not None and model is not None
+        assert slides is not None and session is not None
+        try:
+            await asyncio.to_thread(
+                problems.verify,
+                deck,
+                session.project_dir,
+                model,
+                _editor["deck_hash"] or "",
+            )
+        except Exception:
+            logger.exception("checking the slides failed")
+            return
+        if (msg := _problems_message()) is not None:
+            await _send_editors(msg)
+        if not problems.layout_on:
+            return
+        problems.running = True
+        if (msg := _problems_message()) is not None:
+            await _send_editors(msg)
+        check = session.exporters.layout if session.exporters else None
+        try:
+            if check is None:
+                problems.error = "the layout check is not available here"
+            else:
+                await asyncio.to_thread(
+                    problems.measure, deck, session.project_dir, slides, check
+                )
+        finally:
+            problems.running = False
+        if (msg := _problems_message()) is not None:
+            await _send_editors(msg)
 
 
 async def _send_editors(
@@ -948,7 +1023,9 @@ async def _handle_compare(websocket: ServerConnection, msg: dict[str, object]) -
 _OWNER_ONLY = frozenset({"edit", "editor-context", "editor-command", "share"})
 """Messages only the owner's pages and programs send: opening a program on
 this machine, the agents' context file and commands, and sharing itself."""
-_EDITORS = frozenset({"edit-op", "compare-open", "compare-close", "compare-sources"})
+_EDITORS = frozenset(
+    {"edit-op", "compare-open", "compare-close", "compare-sources", "problems-check"}
+)
 
 
 def allowed(role: Role, msg: dict[str, object]) -> bool:
@@ -1089,6 +1166,8 @@ def make_ws_handler(
                         )
                     if msg_type == "resync":
                         continue
+                    if (problems_msg := _problems_message()) is not None:
+                        await websocket.send(json.dumps(problems_msg))
                     await websocket.send(
                         json.dumps(
                             {"type": "presence", "people": _share.people.listing()}
@@ -1096,6 +1175,14 @@ def make_ws_handler(
                     )
                 elif msg_type == "edit-op" and session is not None:
                     await _handle_edit_op(websocket, msg, session)
+                elif msg_type == "problems-check":
+                    # The Problems list's layout check (and its contrast
+                    # setting), for everyone editing this deck.
+                    problems = _editor["problems"]
+                    if problems is not None:
+                        problems.layout_on = msg.get("on") is not False
+                        problems.contrast = msg.get("contrast") is True
+                        _check_problems()
                 elif msg_type == "build-status":
                     await websocket.send(json.dumps(_build_status()))
                 elif msg_type in ("compare-open", "compare-close", "compare-sources"):
@@ -2218,6 +2305,8 @@ async def _serve_deck(
         }
         _editor["session"] = session
         _editor["compare"] = CompareHub(deck_path, load_deck) if deck_path else None
+        _editor["problems"] = Problems() if deck_path else None
+        _editor["edit_slides"] = None
         project_dir = deck_path.parent if deck_path else None
         if deck_path is not None:
             projects.remember(deck_path)

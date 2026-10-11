@@ -150,7 +150,9 @@ export function commitWhat(c: SlideCommit): string {
     if (c.entry === "added") parts.push("added the slide");
     else if (c.entry === "changed") parts.push("its Slide(...)");
     else if (c.entry === "removed") parts.push("removed the slide");
-    const names = c.files.map((f) => f.split("/").pop() ?? f);
+    // Its folder and name: a slide's Markdown and its notes are often
+    // both <id>.md.
+    const names = c.files.map((f) => f.split("/").slice(-2).join("/"));
     if (names.length) parts.push(names.join(", "));
     return parts.join(" · ");
 }

@@ -15,12 +15,13 @@ from inkflow.cli._common import deck_option, main, resolve_deck_path
 from inkflow.editor.session import Exporters
 from inkflow.export import build_pdf, build_static_html
 from inkflow.logging import Levels, report
+from inkflow.render import check_built
 from inkflow.server import DEFAULT_PORT, Sharing, open_browser, pick_port
 from inkflow.server import serve as _serve
 from inkflow.sizes import PageSize
 
 # The editor's Export dialog runs the same builds as the commands below.
-EXPORTERS = Exporters(html=build_static_html, pdf=build_pdf)
+EXPORTERS = Exporters(html=build_static_html, pdf=build_pdf, layout=check_built)
 
 _host_option = click.option(
     "--host",

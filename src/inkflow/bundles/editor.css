@@ -1647,6 +1647,81 @@ body.compare-mode .panel-tab {
 .git-file .hint {
   margin-left: auto;
 }
+.problem-mark {
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.problem-mark:empty {
+  display: none;
+}
+.problem-mark.p-error {
+  color: var(--red);
+}
+.problem-mark.p-warn {
+  color: var(--yellow);
+}
+.sorter-item .problem-mark {
+  position: absolute;
+  left: 0;
+  top: 56px;
+  width: 18px;
+  text-align: right;
+}
+.problems-btn {
+  color: var(--yellow);
+}
+.problems-btn.busy {
+  opacity: 0.7;
+}
+.problem-count {
+  margin-left: 3px;
+  font-size: 11px;
+}
+.problem-body {
+  max-height: 55vh;
+  overflow-y: auto;
+}
+.problem-slide {
+  display: block;
+  margin-top: 10px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+}
+.problem-slide:hover {
+  color: var(--sel);
+}
+.problem-list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.problem-list li {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+}
+.problem-level {
+  min-width: 12px;
+}
+.problem-list .p-error .problem-level {
+  color: var(--red);
+}
+.problem-list .p-warn .problem-level {
+  color: var(--yellow);
+}
+.problem-list .p-hint {
+  color: var(--subtext);
+}
+.problem-opt {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
 
 /* src/css/editor/index.css */
 :root {

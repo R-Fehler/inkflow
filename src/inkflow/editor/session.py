@@ -22,7 +22,7 @@ import sys
 import tempfile
 import threading
 import urllib.parse
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Protocol, cast
@@ -729,14 +729,40 @@ class PdfBuilder(Protocol):
     ) -> None: ...
 
 
+class LayoutChecker(Protocol):
+    def __call__(
+        self,
+        deck: Deck,
+        project_dir: Path,
+        slides: list[SlideData],
+        indices: list[int],
+        *,
+        contrast: bool = False,
+        chromium: str | None = None,
+        no_sandbox: bool = False,
+    ) -> Mapping[int, Sequence[LayoutFinding]]: ...
+
+
+class LayoutFinding(Protocol):
+    """A ``render.Finding``, as the problem marks read it."""
+
+    @property
+    def kind(self) -> str: ...
+    @property
+    def is_problem(self) -> bool: ...
+    def message(self) -> str: ...
+
+
 @dataclass(frozen=True)
 class Exporters:
-    """``export.build_static_html`` and ``export.build_pdf``, handed in by the
-    caller: the export module builds on the server module, which owns this
-    session, so importing it here would be a cycle."""
+    """``export.build_static_html`` and ``export.build_pdf`` (and
+    ``render.check_built``, the problem marks' layout check), handed in by
+    the caller: those modules build on the server module, which owns this
+    session, so importing them here would be a cycle."""
 
     html: HtmlBuilder
     pdf: PdfBuilder
+    layout: LayoutChecker | None = None
 
 
 class EditorSession:

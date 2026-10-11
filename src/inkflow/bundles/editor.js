@@ -1948,7 +1948,7 @@
       system.hidden = !folder.systemPicker;
       path.value = withSep(folder.path);
       filter = "";
-      renderList3();
+      renderList4();
       renderPlaces();
       where.textContent = folder.repo ? `In the git repository at ${folder.repo}` : "Not in a git repository";
       onChange(folder);
@@ -1970,7 +1970,7 @@
       );
       return b2;
     }
-    function renderList3() {
+    function renderList4() {
       clear(list4);
       const f2 = folder;
       if (!f2) return;
@@ -2090,7 +2090,7 @@
       const { dir, prefix } = splitTyped(path.value);
       if (folder && samePath(dir, folder.path)) {
         filter = prefix;
-        renderList3();
+        renderList4();
       } else if (dir && !prefix) {
         typing = window.setTimeout(
           () => void go(dir, { quiet: true }),
@@ -2113,7 +2113,7 @@
       const common = commonPrefix(matches);
       filter = common.length > prefix.length ? common : prefix;
       path.value = withSep(f2.path) + filter;
-      renderList3();
+      renderList4();
     }
     path.addEventListener("keydown", (e2) => {
       if (e2.key === "Tab" && !e2.shiftKey && !e2.ctrlKey && !e2.altKey) {
@@ -2142,7 +2142,7 @@
         e2.preventDefault();
         path.value = withSep(folder.path);
         filter = "";
-        renderList3();
+        renderList4();
       }
     });
     list4.addEventListener("keydown", (e2) => {
@@ -5250,19 +5250,19 @@
     if (!ed.master || !item || !tree) return null;
     const view3 = ed.master;
     const kind = item.kind;
-    const layout = kind === "layout" ? layoutOf(item.name) : null;
+    const layout2 = kind === "layout" ? layoutOf(item.name) : null;
     const overlay3 = kind === "overlay" ? tree.overlays.find((o3) => o3.name === item?.name) ?? null : null;
-    const entry = layout ?? overlay3;
+    const entry = layout2 ?? overlay3;
     if (!entry) return null;
     const o2 = origin(entry);
-    const isBackground = layout?.name === tree.background;
-    const heading = isBackground ? "Background (every slide)" : layout ? `Layout: ${title(layout)}` : `On top: ${item.name}`;
+    const isBackground = layout2?.name === tree.background;
+    const heading = isBackground ? "Background (every slide)" : layout2 ? `Layout: ${title(layout2)}` : `On top: ${item.name}`;
     const explain = {
       theme: kind === "layout" ? `From the theme. Your first edit gives this deck its own copy (layouts/${item.name}.svg), which ${isBackground ? "every slide" : "every slide on it"} then follows.` : `From the theme. Your first edit gives this deck its own copy (overlays/${item.name}.svg).`,
       copy: `This deck's own copy of ${entry.copyOf}: ${isBackground ? "every slide" : "the slides on it"} follow your copy, not the theme's.`,
       own: kind === "overlay" ? "Drawn on top of every slide that gets it, whatever the slide's layout." : "A layout of this deck's own."
     }[o2.kind];
-    const reach = layout ? layout.reach : overlay3?.slides ?? [];
+    const reach = layout2 ? layout2.reach : overlay3?.slides ?? [];
     const shown3 = h(
       "select",
       { title: "See the layout with a slide's own content" },
@@ -5305,14 +5305,14 @@
         )
       );
     }
-    if (layout && o2.kind === "own") {
+    if (layout2 && o2.kind === "own") {
       actions.push(
         h(
           "button",
           {
             type: "button",
             class: "pbtn",
-            onclick: () => renameLayout(layout)
+            onclick: () => renameLayout(layout2)
           },
           "Rename\u2026"
         ),
@@ -5321,7 +5321,7 @@
           {
             type: "button",
             class: "pbtn",
-            onclick: () => deleteLayout(layout)
+            onclick: () => deleteLayout(layout2)
           },
           "Delete\u2026"
         )
@@ -5337,7 +5337,7 @@
       h(
         "p",
         { class: "hint" },
-        kind === "layout" ? usage(layout, isBackground, total()) : `${plural2(reach.length, "slide")} get${reach.length === 1 ? "s" : ""} it`
+        kind === "layout" ? usage(layout2, isBackground, total()) : `${plural2(reach.length, "slide")} get${reach.length === 1 ? "s" : ""} it`
       ),
       h(
         "label",
@@ -5462,6 +5462,249 @@
     document.addEventListener("keydown", (e2) => {
       if (e2.key === "Escape" && menu2.classList.contains("open")) closeMenu();
     });
+  }
+
+  // src/ts/editor/problemstext.ts
+  function worst(problems2) {
+    if (!problems2?.length) return null;
+    if (problems2.some((p2) => p2.level === "error")) return "error";
+    if (problems2.some((p2) => p2.level === "warn")) return "warn";
+    return "hint";
+  }
+  function marked(problems2) {
+    return (problems2 ?? []).filter((p2) => p2.level !== "hint");
+  }
+  function countMarked(all) {
+    return all.reduce((n3, p2) => n3 + marked(p2).length, 0);
+  }
+  function problemTitle(problems2) {
+    const shown3 = marked(problems2);
+    if (!shown3.length) return "";
+    return shown3.map((p2) => `${p2.level === "error" ? "\u25CF" : "\u26A0"} ${p2.message}`).join("\n");
+  }
+  function slidesWithProblems(all, hints) {
+    const out = [];
+    all.forEach((p2, i2) => {
+      if ((hints ? p2 : marked(p2)).length) out.push(i2);
+    });
+    return out;
+  }
+  function layoutWords(state) {
+    if (state.running) return "Checking the layout\u2026";
+    if (state.error) return `The layout check failed: ${state.error}`;
+    if (!state.on)
+      return "The layout check (text that does not fit, objects outside the slide, text too small, coarse pictures) needs a browser run: turn it on to keep it up to date.";
+    return state.contrast ? "Layout and contrast are checked after every change." : "The layout is checked after every change (contrast is not).";
+  }
+
+  // src/ts/editor/problems.ts
+  var button2 = document.getElementById("btn-problems");
+  var CONTRAST_KEY = "inkflow-editor-check-contrast";
+  var HINTS_KEY = "inkflow-editor-problem-hints";
+  var problems = [];
+  var layout = {
+    on: false,
+    contrast: false,
+    running: false,
+    error: null
+  };
+  var listBody = null;
+  var onlySlide = null;
+  function pref(key) {
+    try {
+      return localStorage.getItem(key) === "1";
+    } catch {
+      return false;
+    }
+  }
+  function setPref(key, on2) {
+    try {
+      localStorage.setItem(key, on2 ? "1" : "");
+    } catch {
+    }
+  }
+  function slideProblems(i2) {
+    return problems.length === (ed.model?.slides.length ?? -1) ? problems[i2] ?? [] : [];
+  }
+  function paint(badge4, list4) {
+    const shown3 = marked(list4);
+    const level = worst(shown3);
+    badge4.textContent = shown3.length ? "\u26A0" : "";
+    badge4.className = `problem-mark${level ? ` p-${level}` : ""}`;
+    if (shown3.length) badge4.setAttribute("title", problemTitle(list4));
+    else badge4.removeAttribute("title");
+  }
+  function problemBadge(i2) {
+    const badge4 = h("span", { class: "problem-mark" });
+    paint(badge4, slideProblems(i2));
+    badge4.addEventListener("click", (e2) => {
+      if (!badge4.textContent) return;
+      e2.stopPropagation();
+      openProblems(i2);
+    });
+    return badge4;
+  }
+  function markProblems(item2, i2) {
+    const badge4 = item2.querySelector(".problem-mark");
+    if (badge4) paint(badge4, slideProblems(i2));
+  }
+  function renderButton() {
+    const n3 = countMarked(problems);
+    button2.hidden = !n3 && !layout.running;
+    button2.classList.toggle("busy", layout.running);
+    button2.querySelector(".problem-count").textContent = n3 ? String(n3) : "";
+    button2.title = layout.running ? "Checking the layout\u2026" : `${n3} problem${n3 === 1 ? "" : "s"} on the slides`;
+  }
+  function slideName2(i2) {
+    const slide = ed.model?.slides[i2];
+    return slide?.title ?? slide?.id ?? `slide ${i2 + 1}`;
+  }
+  function renderList2() {
+    if (!listBody) return;
+    const hints = pref(HINTS_KEY);
+    const indices = onlySlide != null ? [onlySlide] : slidesWithProblems(problems, hints);
+    clear(listBody);
+    if (!indices.length || !slideProblems(indices[0]).length) {
+      listBody.append(
+        h("p", { class: "hint" }, "No problems found on the slides.")
+      );
+      return;
+    }
+    for (const i2 of indices) {
+      const list4 = hints ? slideProblems(i2) : marked(slideProblems(i2));
+      if (!list4.length) continue;
+      listBody.append(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "problem-slide",
+            title: "Go to this slide",
+            onclick: () => {
+              closeDialog();
+              ed.slideSelection.clear();
+              gotoSlide(i2);
+            }
+          },
+          `${i2 + 1} \xB7 ${slideName2(i2)}`
+        ),
+        h(
+          "ul",
+          { class: "problem-list" },
+          ...list4.map(
+            (p2) => h(
+              "li",
+              { class: `p-${p2.level}` },
+              h(
+                "span",
+                { class: "problem-level" },
+                p2.level === "error" ? "\u2716" : p2.level === "warn" ? "\u26A0" : "\xB7"
+              ),
+              h("span", {}, p2.message)
+            )
+          )
+        )
+      );
+    }
+  }
+  function openProblems(only = null) {
+    onlySlide = only;
+    const contrast = h("input", { type: "checkbox" });
+    contrast.checked = pref(CONTRAST_KEY);
+    const hints = h("input", { type: "checkbox" });
+    hints.checked = pref(HINTS_KEY);
+    const status3 = h("p", { class: "hint" });
+    const toggle3 = h("button", { type: "button", class: "pbtn" });
+    const drawState = () => {
+      status3.textContent = layoutWords(layout);
+      status3.classList.toggle("warn", !!layout.error);
+      toggle3.textContent = layout.on ? "Stop checking the layout" : "Check the layout";
+      toggle3.classList.toggle("primary", !layout.on);
+    };
+    toggle3.addEventListener("click", () => {
+      sendRaw({
+        type: "problems-check",
+        on: !layout.on,
+        contrast: contrast.checked
+      });
+    });
+    contrast.addEventListener("change", () => {
+      setPref(CONTRAST_KEY, contrast.checked);
+      if (layout.on)
+        sendRaw({
+          type: "problems-check",
+          on: true,
+          contrast: contrast.checked
+        });
+    });
+    hints.addEventListener("change", () => {
+      setPref(HINTS_KEY, hints.checked);
+      renderList2();
+    });
+    listBody = h("div", { class: "problem-body" });
+    const box = openDialog(
+      only != null ? `Problems on slide ${only + 1}` : "Problems",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "div",
+          { class: "btn-row" },
+          toggle3,
+          h(
+            "label",
+            { class: "problem-opt" },
+            contrast,
+            h("span", {}, "Also check text contrast")
+          ),
+          h(
+            "label",
+            { class: "problem-opt" },
+            hints,
+            h("span", {}, "Show hints")
+          ),
+          only != null ? h(
+            "button",
+            {
+              type: "button",
+              class: "link-btn",
+              onclick: () => {
+                onlySlide = null;
+                renderList2();
+              }
+            },
+            "All slides"
+          ) : null
+        ),
+        status3,
+        listBody
+      ),
+      {
+        wide: true,
+        onClose: () => {
+          listBody = null;
+        }
+      }
+    );
+    box.classList.add("problems-dialog");
+    drawState();
+    renderList2();
+    redraw = drawState;
+  }
+  var redraw = null;
+  function initProblems() {
+    button2.addEventListener("click", () => openProblems());
+    onMessage("problems", (msg) => {
+      problems = msg.slides ?? [];
+      layout = msg.layout ?? layout;
+      renderButton();
+      if (listBody && dialogOpen()) {
+        renderList2();
+        redraw?.();
+      }
+      emit("problems");
+    });
+    on("model", renderButton);
   }
 
   // src/ts/editor/rename.ts
@@ -6776,7 +7019,7 @@ ${rules}`;
     only.addEventListener("change", () => {
       onlyChanges = only.checked;
       writePref("inkflow-compare-only", onlyChanges ? "1" : "0");
-      renderList2();
+      renderList3();
     });
     const head = h(
       "div",
@@ -6843,7 +7086,7 @@ ${rules}`;
     listEl = h("div", { class: "cmp-list", role: "listbox" });
     mainEl = h("div", { class: "cmp-main" });
     view.append(head, h("div", { class: "cmp-body" }, listEl, mainEl));
-    renderList2();
+    renderList3();
     renderMain();
   }
   function sideChip(side, which) {
@@ -6870,7 +7113,7 @@ ${rules}`;
       notes.length ? h("span", { class: "cmp-warn" }, " \u26A0") : null
     );
   }
-  function renderList2() {
+  function renderList3() {
     if (!model || !listEl) return;
     const m2 = model;
     clear(listEl);
@@ -8209,30 +8452,30 @@ ${UNDO_NOTICE}` : question)) {
 
   // src/ts/editor/git.ts
   var menu3 = document.getElementById("context-menu");
-  var button2 = document.getElementById("btn-git");
-  var label = button2.querySelector(".git-label");
-  var badge3 = button2.querySelector(".git-badge");
+  var button3 = document.getElementById("btn-git");
+  var label = button3.querySelector(".git-label");
+  var badge3 = button3.querySelector(".git-badge");
   var status = { repo: false, git: false };
   function render3() {
-    button2.hidden = !status.git;
+    button3.hidden = !status.git;
     if (!status.repo) {
       label.textContent = "Git";
       badge3.hidden = true;
-      button2.title = "Not versioned: create a git repository for this deck";
+      button3.title = "Not versioned: create a git repository for this deck";
       return;
     }
     label.textContent = status.branch ?? `@${status.detached ?? "?"}`;
     const n3 = status.changes?.length ?? 0;
     const lfsIssues = lfsFiles().length;
     const slidesChanged = changedSlideCount();
-    button2.classList.toggle("warn", lfsIssues > 0);
+    button3.classList.toggle("warn", lfsIssues > 0);
     badge3.hidden = n3 === 0 && lfsIssues === 0;
     badge3.textContent = n3 ? String(n3) : "!";
     const sync = [
       status.ahead ? `${status.ahead} to push` : "",
       status.behind ? `${status.behind} to pull` : ""
     ].filter(Boolean).join(", ");
-    button2.title = [
+    button3.title = [
       status.branch ? `Branch ${status.branch}` : `Viewing ${status.detached}`,
       n3 ? `${n3} changed file${n3 === 1 ? "" : "s"}` : "No changes",
       slidesChanged ? `${slidesChanged} slide${slidesChanged === 1 ? "" : "s"} changed` : "",
@@ -8269,9 +8512,9 @@ ${UNDO_NOTICE}` : question)) {
 Continue?`)) return null;
       if (notice) undoNoticeShown();
     }
-    button2.classList.add("busy");
+    button3.classList.add("busy");
     const res = await request({ action: "git", op, ...args });
-    button2.classList.remove("busy");
+    button3.classList.remove("busy");
     if (res.git) {
       status = res.git;
       render3();
@@ -8409,7 +8652,7 @@ Continue?`)) return null;
       );
       if (status.hasCommits) menu3.append(...await worktreeSection());
     }
-    const r2 = button2.getBoundingClientRect();
+    const r2 = button3.getBoundingClientRect();
     showMenu(Math.max(8, r2.right - 260), r2.bottom + 4);
   }
   function publishItems() {
@@ -8949,9 +9192,9 @@ Continue?`)) return null;
       if (!confirm(text)) return null;
       if (notice) undoNoticeShown();
     }
-    button2.classList.add("busy");
+    button3.classList.add("busy");
     const res = await request({ action: "worktree", op, ...args });
-    button2.classList.remove("busy");
+    button3.classList.remove("busy");
     if (res.git) {
       status = res.git;
       render3();
@@ -9212,7 +9455,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   var timer = 0;
   function initGit() {
-    button2.addEventListener("click", () => void openMenu2());
+    button3.addEventListener("click", () => void openMenu2());
     on("model", () => {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => void refreshGit(), 600);
@@ -9281,7 +9524,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     if (c2.entry === "added") parts.push("added the slide");
     else if (c2.entry === "changed") parts.push("its Slide(...)");
     else if (c2.entry === "removed") parts.push("removed the slide");
-    const names2 = c2.files.map((f2) => f2.split("/").pop() ?? f2);
+    const names2 = c2.files.map((f2) => f2.split("/").slice(-2).join("/"));
     if (names2.length) parts.push(names2.join(", "));
     return parts.join(" \xB7 ");
   }
@@ -9347,10 +9590,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function changeBadge(i2) {
     const badge4 = h("span", { class: "git-mark" });
-    paint(badge4, slideChange(i2));
+    paint2(badge4, slideChange(i2));
     return badge4;
   }
-  function paint(badge4, c2) {
+  function paint2(badge4, c2) {
     const state = c2?.state ?? "";
     badge4.textContent = letter(c2?.state ?? null);
     badge4.className = `git-mark${state ? ` m-${state}` : ""}`;
@@ -9359,7 +9602,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function markChange(item2, i2) {
     const badge4 = item2.querySelector(".git-mark");
-    if (badge4) paint(badge4, slideChange(i2));
+    if (badge4) paint2(badge4, slideChange(i2));
   }
   function slideGitItems(i2, item2) {
     const status3 = gitStatus();
@@ -9389,7 +9632,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       );
     }
     const n3 = changed2.length;
-    const marked = markedAmong(changes, picked);
+    const marked2 = markedAmong(changes, picked);
     out.push(
       item2(
         picked.length === 1 ? "Commit this slide\u2026" : `Commit ${n3} changed slide${n3 === 1 ? "" : "s"}\u2026`,
@@ -9397,9 +9640,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         n3 === 0
       ),
       item2(
-        picked.length === 1 ? "Discard changes to this slide\u2026" : `Discard changes to ${marked.length} slide${marked.length === 1 ? "" : "s"}\u2026`,
-        () => void discardSlides(marked),
-        marked.length === 0 || !status3.hasCommits
+        picked.length === 1 ? "Discard changes to this slide\u2026" : `Discard changes to ${marked2.length} slide${marked2.length === 1 ? "" : "s"}\u2026`,
+        () => void discardSlides(marked2),
+        marked2.length === 0 || !status3.hasCommits
       )
     );
     return out;
@@ -9581,7 +9824,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       )
     );
     openDialog(
-      `History of slide ${i2 + 1}: ${slideName2(i2)}`,
+      `History of slide ${i2 + 1}: ${slideName3(i2)}`,
       h(
         "div",
         { class: "git-form" },
@@ -9613,7 +9856,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       { focus: i2 }
     );
   }
-  function slideName2(i2) {
+  function slideName3(i2) {
     const slide = ed.model?.slides[i2];
     return slide?.title ?? slide?.id ?? `slide ${i2 + 1}`;
   }
@@ -9630,7 +9873,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       pre.append(h("span", { class: kind ? `d-${kind}` : null }, line), "\n");
     }
     openDialog(
-      `Changes to slide ${i2 + 1}: ${slideName2(i2)}`,
+      `Changes to slide ${i2 + 1}: ${slideName3(i2)}`,
       h(
         "div",
         { class: "git-form" },
@@ -9716,7 +9959,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       class: "git-message",
       rows: "3"
     });
-    message.value = defaultMessage(slides.map(slideName2));
+    message.value = defaultMessage(slides.map(slideName3));
     const files2 = h("div", { class: "git-files" });
     const offers = h("div", { class: "git-files" });
     const notes = h("div", {});
@@ -9850,7 +10093,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           { class: "git-file" },
           changeBadge(i2),
           h("span", { class: "git-slide-num" }, String(i2 + 1)),
-          h("span", {}, slideName2(i2))
+          h("span", {}, slideName3(i2))
         )
       )
     );
@@ -9980,7 +10223,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   }
   function starButton(deckIndex) {
     const on2 = isStarred(deckIndex);
-    const button9 = h(
+    const button10 = h(
       "button",
       {
         type: "button",
@@ -9991,22 +10234,22 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       },
       on2 ? "\u2605" : "\u2606"
     );
-    button9.addEventListener("click", (e2) => {
+    button10.addEventListener("click", (e2) => {
       e2.stopPropagation();
       void toggleStar([deckIndex]);
     });
-    button9.addEventListener("dblclick", (e2) => e2.stopPropagation());
-    return button9;
+    button10.addEventListener("dblclick", (e2) => e2.stopPropagation());
+    return button10;
   }
   function markStar(item2, deckIndex) {
     const on2 = isStarred(deckIndex);
     item2.classList.toggle("starred", on2);
-    const button9 = item2.querySelector(".star-btn");
-    if (!button9 || button9.classList.contains("on") === on2) return;
-    button9.classList.toggle("on", on2);
-    button9.setAttribute("aria-pressed", String(on2));
-    button9.setAttribute("title", starTitle(on2));
-    button9.textContent = on2 ? "\u2605" : "\u2606";
+    const button10 = item2.querySelector(".star-btn");
+    if (!button10 || button10.classList.contains("on") === on2) return;
+    button10.classList.toggle("on", on2);
+    button10.setAttribute("aria-pressed", String(on2));
+    button10.setAttribute("title", starTitle(on2));
+    button10.textContent = on2 ? "\u2605" : "\u2606";
   }
   function initStars() {
     onMessage("stars", (msg) => setStars(msg.stars));
@@ -10043,7 +10286,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       return;
     }
     const req = { action: "slide", op: "delete", slides: indices };
-    const names2 = indices.map((i2) => slideName3(i2));
+    const names2 = indices.map((i2) => slideName4(i2));
     const answer = await askSlideDelete(
       slideQuestion(names2),
       indices.length,
@@ -10214,7 +10457,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       h("span", { class: "sorter-num" }, String(i2 + 1)),
       thumbs3.thumb(slide),
       slide.visible ? starButton(i2) : null,
-      changeBadge(i2)
+      changeBadge(i2),
+      problemBadge(i2)
     );
     item2.classList.toggle("starred", isStarred(i2));
     item2.addEventListener("click", (e2) => pickSlide(i2, e2));
@@ -10340,6 +10584,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       item2.classList.toggle("picked", ed.slideSelection.has(i2));
       markStar(item2, i2);
       markChange(item2, i2);
+      markProblems(item2, i2);
     }
   }
   function renderSorter(anew = false) {
@@ -10397,12 +10642,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   function followSelect(i2) {
     pendingSelect = i2;
   }
-  async function newSlide(layout, after = ed.current) {
+  async function newSlide(layout2, after = ed.current) {
     const result = await edit({
       action: "slide",
       op: "new",
       after,
-      layout,
+      layout: layout2,
       name: "slide"
     });
     if (result.ok && result.select != null) pendingSelect = result.select;
@@ -10425,7 +10670,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const slide = ed.model?.slides[i2];
     if (!slide) return;
     const req = { action: "slide", op: "delete", slide: i2 };
-    const answer = await askSlideDelete(slideQuestion([slideName3(i2)]), 1, req);
+    const answer = await askSlideDelete(slideQuestion([slideName4(i2)]), 1, req);
     if (!answer) return;
     const result = await edit({ ...req, files: answer.files });
     if (result.ok) {
@@ -10433,7 +10678,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       emit("slide");
     }
   }
-  function slideName3(i2) {
+  function slideName4(i2) {
     const slide = ed.model?.slides[i2];
     return slide?.title ?? slide?.id ?? `slide ${i2 + 1}`;
   }
@@ -10569,6 +10814,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     on("slide-selection", () => renderSorter());
     on("stars", () => renderSorter());
     on("slide-git", () => renderSorter());
+    on("problems", () => renderSorter());
     on("sections", () => renderSorter(true));
     initListDrop();
     addBtn.addEventListener("click", () => {
@@ -14135,7 +14381,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     redraws.set(id, n3);
     timers.set(
       id,
-      window.setTimeout(() => void redraw(id, step2, n3), 600)
+      window.setTimeout(() => void redraw2(id, step2, n3), 600)
     );
   }
   var timers = /* @__PURE__ */ new Map();
@@ -14155,7 +14401,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       on("render", done);
     });
   }
-  async function redraw(id, step2, n3) {
+  async function redraw2(id, step2, n3) {
     const latest = () => redraws.get(id) === n3;
     await rendered(1500);
     const diagram = drawnById(id);
@@ -14783,7 +15029,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
 
   // src/ts/editor/stepbutton.ts
   var flash = 0;
-  function button3() {
+  function button4() {
     return document.getElementById("btn-step");
   }
   function slideMax() {
@@ -14791,7 +15037,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return svg ? maxStep(svg) : 0;
   }
   function showStepLabel(step2) {
-    const b2 = button3();
+    const b2 = button4();
     if (!b2 || flash) return;
     const max = slideMax();
     b2.textContent = stepLabel(step2, max);
@@ -14811,7 +15057,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     if (wrapped(from, step2)) cameRound();
   }
   function cameRound() {
-    const b2 = button3();
+    const b2 = button4();
     if (!b2) return;
     window.clearTimeout(flash);
     b2.classList.remove("came-round");
@@ -14825,7 +15071,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     }, 900);
   }
   function initStepButton() {
-    const b2 = button3();
+    const b2 = button4();
     if (!b2) return;
     b2.addEventListener("click", (e2) => {
       setStep(nextStep(ed.step, slideMax(), e2.shiftKey));
@@ -15058,7 +15304,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     sel.addEventListener("change", () => commit(sel.value));
     return sel;
   }
-  function button4(label4, title3, fn, cls = "") {
+  function button5(label4, title3, fn, cls = "") {
     return h(
       "button",
       { type: "button", class: `pbtn ${cls}`, title: title3, onclick: fn },
@@ -15163,7 +15409,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
               { class: "media-poster" },
               poster ? String(poster).split("/").pop() : "None"
             ),
-            button4(
+            button5(
               poster ? "Change\u2026" : "Pick\u2026",
               poster ? `Poster: ${poster}` : "Still image shown before playback",
               async () => {
@@ -15172,7 +15418,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
                 if (up) commit("poster", up.path);
               }
             ),
-            poster ? button4(
+            poster ? button5(
               "\u2715",
               "Remove the poster",
               () => commit("poster", null)
@@ -15267,7 +15513,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       { class: "prop-row" },
       h("span", { class: "prop-label" }, "Page"),
       numberInput(page, (n3) => show2(Math.max(1, Math.round(n3))), { min: 1 }),
-      button4("Pages\u2026", "See the PDF's pages and pick one", async () => {
+      button5("Pages\u2026", "See the PDF's pages and pick one", async () => {
         const choice = file ? await choosePage(file, page) : null;
         if (choice) show2(choice.page);
       })
@@ -15452,7 +15698,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         ),
         row5(
           "Layout",
-          button4(
+          button5(
             `${currentLayout ? layoutLabel(currentLayout) : "None"} \u25BE`,
             "Pick a layout from previews",
             () => void openGallery({
@@ -15465,12 +15711,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         editable && h(
           "div",
           { class: "prop-buttons" },
-          button4(
+          button5(
             "Save as layout\u2026",
             "Make a new layout (a template) from this slide: new slides can start from it",
             () => saveAsLayout(di)
           ),
-          currentLayout ? button4(
+          currentLayout ? button5(
             "Edit its layout",
             "Open the slide master at the layout this slide is built on: edits change every slide on it",
             () => void openMaster()
@@ -15548,7 +15794,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     if (deckPath) addFile("Deck", fileName2(deckPath), deckPath);
     if (editable)
       files2.append(
-        button4(
+        button5(
           "Rename files\u2026",
           "Give this slide's drawing, Markdown, notes and ink one new name (its id follows)",
           () => renameSlideFiles(di)
@@ -15557,7 +15803,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const textInDeck = slide.md?.kind !== "file" && (slide.md?.kind === "inline" || Object.values(slide.zones).some((z) => z.kind === "text"));
     if (textInDeck && editable)
       files2.append(
-        button4(
+        button5(
           "Move text to Markdown",
           "Move this slide's text out of deck.py into its own .md file",
           () => void edit({ action: "to-markdown", slide: di })
@@ -15580,7 +15826,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             { class: "hint warn" },
             `${stale} ${stale === 1 ? "arrow no longer meets its shape" : "arrows no longer meet their shapes"} (moved in draw.io or another editor).`
           ) : null,
-          button4(
+          button5(
             "Re-route all",
             "Re-attach every arrow to its shapes",
             () => reroute(arrows)
@@ -15705,13 +15951,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             },
             `#${cue.element}`
           ),
-          step2 != null && button4(
+          step2 != null && button5(
             icon("play", 12),
             "Preview from this animation",
             () => void playAnimations(step2),
             "anim-preview-ctl"
           ),
-          editable && button4(icon("up", 12), "Earlier", () => {
+          editable && button5(icon("up", 12), "Earlier", () => {
             if (i2 > 0)
               void edit({
                 action: "anim",
@@ -15721,7 +15967,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
                 to: i2 - 1
               });
           }),
-          editable && button4(icon("down", 12), "Later", () => {
+          editable && button5(icon("down", 12), "Later", () => {
             if (i2 < cues.length - 1) {
               void edit({
                 action: "anim",
@@ -15732,7 +15978,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
               });
             }
           }),
-          editable && button4(icon("trash", 12), "Remove", () => {
+          editable && button5(icon("trash", 12), "Remove", () => {
             void edit({
               action: "anim",
               slide: di,
@@ -15769,12 +16015,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const controls = h(
       "div",
       { class: "btn-row anim-preview" },
-      playing ? button4(
+      playing ? button5(
         "\u25A0 Stop",
         "Stop the preview (Esc)",
         () => stopPreview(),
         "anim-preview-ctl"
-      ) : button4(
+      ) : button5(
         "\u25B6 Play",
         "Play this slide's animations here, click by click",
         () => void playAnimations(1),
@@ -15828,13 +16074,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             trigger: cue.fields.trigger ?? "on-click"
           })
         ) : h("span", {}, cue.type),
-        steps[index] != null && button4(
+        steps[index] != null && button5(
           icon("play", 12),
           `Preview (click ${steps[index]})`,
           () => void playAnimations(steps[index] ?? 1),
           "anim-preview-ctl"
         ),
-        editable && button4(icon("trash", 12), "Remove", () => {
+        editable && button5(icon("trash", 12), "Remove", () => {
           void edit({
             action: "anim",
             slide: di,
@@ -15948,12 +16194,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const shown3 = boxShown(first);
     const token = shown3 ? tokenOf(first, prop) : null;
     const computed = shown3 ? getComputedStyle(first)[prop] : "none";
-    const send = (paint2) => {
+    const send = (paint3) => {
       const plans = sel.map((s2) => ({
         sel: s2,
         ops: [
           ...boxOps(s2),
-          { kind: "paint", loc: s2.loc, prop, ...paint2 }
+          { kind: "paint", loc: s2.loc, prop, ...paint3 }
         ]
       }));
       void sendSvgOps(plans, prop === "fill" ? "Fill" : "Stroke");
@@ -15978,7 +16224,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     custom.addEventListener("change", () => send({ color: custom.value }));
     swatches.append(custom);
     swatches.append(
-      button4("\u2205", "None", () => send({ color: "none" }), "none-btn")
+      button5("\u2205", "None", () => send({ color: "none" }), "none-btn")
     );
     return row5(prop === "fill" ? "Fill" : "Stroke", swatches);
   }
@@ -16082,7 +16328,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         h(
           "div",
           { class: "btn-row" },
-          button4("Leave the diagram", "Esc", () => enterGroup(null))
+          button5("Leave the diagram", "Esc", () => enterGroup(null))
         )
       )
     );
@@ -16173,7 +16419,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             media.path ? openButton(media.path) : null,
             media.inline ? null : renameButton(media.path)
           ),
-          button4(
+          button5(
             "Edit data\u2026",
             "Edit the chart's table (double-click)",
             () => void editChart(name2)
@@ -16189,12 +16435,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             renameButton(projectFile(media.src))
           ),
           ...media.kind === "image" && isPdfRef(media.src ?? "") ? [zonePageRow(slide, name2, media.src ?? "")] : [],
-          button4(
+          button5(
             "Replace media\u2026",
             "Pick another image or video",
             () => void zoneMedia(name2)
           ),
-          button4("Clear", "Empty this zone", () => {
+          button5("Clear", "Empty this zone", () => {
             void edit({
               action: "zone-media",
               slide: slide.deckIndex,
@@ -16204,11 +16450,11 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           })
         );
         const video = media.kind === "video" ? videoOf(el2) : null;
-        if (video) body3.push(previewButton(video, button4));
+        if (video) body3.push(previewButton(video, button5));
         if (media.kind === "video" && media.src) {
           const src2 = media.src;
           body3.push(
-            button4(
+            button5(
               "Check & convert\u2026",
               "Can every browser play it? Convert it to MP4 or WebM, smaller or at another resolution",
               () => void openVideoCheck({
@@ -16221,7 +16467,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         }
       } else {
         body3.push(
-          button4(
+          button5(
             "Edit text",
             "Edit this zone's Markdown (double-click)",
             () => {
@@ -16240,7 +16486,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     }
     const innerVideo = zone ? null : videoOf(el2);
     if (innerVideo) {
-      panel.append(section2("Video", previewButton(innerVideo, button4)));
+      panel.append(section2("Video", previewButton(innerVideo, button5)));
     }
     const textZone = zone && el2.localName === "foreignObject" && !!el2.querySelector(".inkflow-content");
     if (textZone) {
@@ -16450,12 +16696,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       h(
         "div",
         { class: "btn-row" },
-        button4(
+        button5(
           "Re-route",
           "Re-attach to the shapes where they are now",
           () => reroute([sel])
         ),
-        el2.hasAttribute("inkflow:bend") && button4(
+        el2.hasAttribute("inkflow:bend") && button5(
           "Reset bend",
           "Put the elbow's middle segment back where it goes by default",
           () => {
@@ -16466,7 +16712,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             );
           }
         ),
-        button4(
+        button5(
           "Detach",
           "Free both ends",
           () => send(
@@ -16662,7 +16908,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         on2 ? "Shrink text to fit" : "Keep text size"
       );
     };
-    const value = button4(
+    const value = button5(
       formatTextSize(current3),
       "Type a size (25\u2013300 %)",
       () => {
@@ -16701,13 +16947,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     );
     const smaller = nextTextSize(current3, -1);
     const larger = nextTextSize(current3, 1);
-    const down = button4(
+    const down = button5(
       "A\u2212",
       "Smaller text",
       () => setSize2(smaller),
       "text-size-step"
     );
-    const up = button4(
+    const up = button5(
       "A+",
       "Larger text",
       () => setSize2(larger),
@@ -16742,7 +16988,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       const actions = h("div", { class: "prop-buttons" });
       if (taller != null && have > 0 && taller > have + 1) {
         actions.append(
-          button4(
+          button5(
             "Make box taller",
             "Grow the box so the text fits at its size",
             () => void sendSvgOps(
@@ -16769,7 +17015,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       }
       if (smaller !== current3) {
         actions.append(
-          button4(
+          button5(
             "Smaller text",
             "One step smaller",
             () => setSize2(smaller)
@@ -16813,7 +17059,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       isDiagramHref(href) ? h(
         "div",
         { class: "btn-row" },
-        button4(
+        button5(
           "Edit diagram",
           "Open it in draw.io (or double-click it)",
           () => editDiagram(sel),
@@ -16824,7 +17070,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       h(
         "div",
         { class: "btn-row" },
-        button4(
+        button5(
           "Replace\u2026",
           "Pick another picture; it keeps this size and place",
           async () => {
@@ -16849,17 +17095,17 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             );
           }
         ),
-        ed.cropMode ? button4(
+        ed.cropMode ? button5(
           "Done cropping",
           "Enter",
           () => setCropMode(false),
           "on"
-        ) : button4(
+        ) : button5(
           "Crop",
           "Crop (double-click the picture)",
           () => void startCrop(sel)
         ),
-        cropped ? button4(
+        cropped ? button5(
           "Reset crop",
           "Show the whole picture again",
           () => void resetCrop(sel)
@@ -16912,7 +17158,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       numberInput(page, (n3) => void show2(Math.max(1, Math.round(n3))), {
         min: 1
       }),
-      button4("Pages\u2026", "See the PDF's pages and pick one", async () => {
+      button5("Pages\u2026", "See the PDF's pages and pick one", async () => {
         const choice = await choosePage(file, page);
         if (choice) void show2(choice.page, choice.url);
       })
@@ -16968,7 +17214,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       h(
         "div",
         { class: "btn-row" },
-        button4(
+        button5(
           "Edit diagram",
           "Open it in draw.io (or double-click it)",
           () => editDiagram(sel),
@@ -17267,13 +17513,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       h(
         "div",
         { class: "btn-row" },
-        button4(
+        button5(
           h("b", {}, "B"),
           "Bold",
           () => setAll({ "font-weight": bold ? null : "bold" }, "Bold"),
           bold ? "on" : ""
         ),
-        button4(
+        button5(
           h("i", {}, "I"),
           "Italic",
           () => setAll(
@@ -17282,25 +17528,25 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           ),
           italic ? "on" : ""
         ),
-        button4(
+        button5(
           "\u27F8",
           "Align start",
           () => setAll({ "text-anchor": null }, "Align"),
           anchor2 === "start" ? "on" : ""
         ),
-        button4(
+        button5(
           "\u21D4",
           "Align middle",
           () => setAll({ "text-anchor": "middle" }, "Align"),
           anchor2 === "middle" ? "on" : ""
         ),
-        button4(
+        button5(
           "\u27F9",
           "Align end",
           () => setAll({ "text-anchor": "end" }, "Align"),
           anchor2 === "end" ? "on" : ""
         ),
-        button4("Edit", "Edit text (double-click)", () => emit("edit-text"))
+        button5("Edit", "Edit text (double-click)", () => emit("edit-text"))
       )
     );
   }
@@ -17407,26 +17653,26 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       h(
         "div",
         { class: "btn-row" },
-        button4("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
-        button4("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
-        button4("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
-        button4("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
-        button4(
+        button5("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
+        button5("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
+        button5("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
+        button5("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
+        button5(
           icon("copy", 14),
           "Duplicate (Ctrl+D)",
           () => emit("duplicate")
         ),
-        sels.length > 1 && button4(
+        sels.length > 1 && button5(
           icon("group", 14),
           "Group (Ctrl+G)",
           () => emit("group")
         ),
-        isGroup && button4(
+        isGroup && button5(
           "Ungroup",
           "Ungroup (Ctrl+Shift+G)",
           () => emit("ungroup")
         ),
-        button4(
+        button5(
           icon("trash", 14),
           "Delete (Del)",
           () => emit("delete"),
@@ -17479,7 +17725,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const movable = sels.every((s2) => canTransform(s2.el));
     panel.append(section2(`${sels.length} objects`));
     if (movable) {
-      const a2 = (label4, title3, how) => button4(label4, title3, () => alignSelection(how));
+      const a2 = (label4, title3, how) => button5(label4, title3, () => alignSelection(how));
       panel.append(
         section2(
           "Align",
@@ -18047,7 +18293,8 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           },
           "\u2726"
         ) : null,
-        changeBadge(i2)
+        changeBadge(i2),
+        problemBadge(i2)
       )
     );
     item2.classList.toggle("starred", isStarred(i2));
@@ -18153,9 +18400,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     starFilter.textContent = `\u2605 ${filterLabel(starCount())}`;
     starFilter.classList.toggle("on", starredOnly);
     starFilter.setAttribute("aria-pressed", String(starredOnly));
-    const marked = markedCount();
-    changedFilter.hidden = !marked && !changedOnly;
-    changedFilter.textContent = `Changed only (${marked})`;
+    const marked2 = markedCount();
+    changedFilter.hidden = !marked2 && !changedOnly;
+    changedFilter.textContent = `Changed only (${marked2})`;
     changedFilter.classList.toggle("on", changedOnly);
     changedFilter.setAttribute("aria-pressed", String(changedOnly));
   }
@@ -18324,6 +18571,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     on("slide-selection", renderGrid);
     on("stars", renderGrid);
     on("slide-git", renderGrid);
+    on("problems", renderGrid);
     try {
       starredOnly = localStorage.getItem(STARRED_KEY) === "1";
     } catch {
@@ -18376,13 +18624,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   // src/ts/editor/panels.ts
   var KEY = "inkflow-editor-panels";
   var shown2 = parseShown(null);
-  function button5(panel4) {
+  function button6(panel4) {
     return document.getElementById(`btn-panel-${panel4}`);
   }
   function apply2() {
     for (const panel4 of PANELS) {
       document.body.classList.toggle(`hide-${panel4}`, !shown2[panel4]);
-      const b2 = button5(panel4);
+      const b2 = button6(panel4);
       if (!b2) continue;
       b2.classList.toggle("on", shown2[panel4]);
       b2.setAttribute("aria-pressed", String(shown2[panel4]));
@@ -18405,7 +18653,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     } catch {
     }
     for (const panel4 of PANELS) {
-      button5(panel4)?.addEventListener("click", () => togglePanel(panel4));
+      button6(panel4)?.addEventListener("click", () => togglePanel(panel4));
     }
     apply2();
   }
@@ -18961,7 +19209,7 @@ $$`;
       window.clearTimeout(timer6);
       timer6 = window.setTimeout(() => void send(), 450);
     });
-    const button9 = (name2, title3, fn) => h(
+    const button10 = (name2, title3, fn) => h(
       "button",
       {
         type: "button",
@@ -18978,14 +19226,14 @@ $$`;
       "div",
       { class: "zone-toolbar" },
       h("span", { class: "zone-label" }, `${zone} \xB7 Markdown`),
-      button9("B", "Bold (Ctrl+B)", () => wrapSelection(area2, "**")),
-      button9("I", "Italic (Ctrl+I)", () => wrapSelection(area2, "*")),
-      button9("H", "Heading", () => prefixLines(area2, "## ")),
-      button9("\u2022", "Bullet list", () => prefixLines(area2, "- ")),
-      button9("1.", "Numbered list", () => prefixLines(area2, "1. ")),
-      button9("`", "Code", () => wrapSelection(area2, "`")),
-      button9("\u2211", "Math", () => wrapSelection(area2, "$")),
-      button9("\u23F5", "Reveal on click: insert a ::step:: marker", () => {
+      button10("B", "Bold (Ctrl+B)", () => wrapSelection(area2, "**")),
+      button10("I", "Italic (Ctrl+I)", () => wrapSelection(area2, "*")),
+      button10("H", "Heading", () => prefixLines(area2, "## ")),
+      button10("\u2022", "Bullet list", () => prefixLines(area2, "- ")),
+      button10("1.", "Numbered list", () => prefixLines(area2, "1. ")),
+      button10("`", "Code", () => wrapSelection(area2, "`")),
+      button10("\u2211", "Math", () => wrapSelection(area2, "$")),
+      button10("\u23F5", "Reveal on click: insert a ::step:: marker", () => {
         const pos = area2.selectionStart;
         area2.value = `${area2.value.slice(0, pos)}
 ::step::
@@ -20503,7 +20751,7 @@ ${area2.value.slice(pos)}`;
 
   // src/ts/editor/decks.ts
   var menu6 = document.getElementById("context-menu");
-  var button6 = document.getElementById("btn-deck");
+  var button7 = document.getElementById("btn-deck");
   function lookThumb(look) {
     const c2 = look.preview;
     if (!c2) return null;
@@ -20534,10 +20782,10 @@ ${area2.value.slice(pos)}`;
   function slug(text) {
     return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "my-deck";
   }
-  function renderButton() {
+  function renderButton2() {
     const dir = ed.model?.projectDir;
-    button6.textContent = `${dir ? baseName2(dir) : "deck"} \u25BE`;
-    button6.title = dir ? `${dir}
+    button7.textContent = `${dir ? baseName2(dir) : "deck"} \u25BE`;
+    button7.title = dir ? `${dir}
 Decks: new, open, recent` : "Decks";
   }
   async function info2() {
@@ -20605,7 +20853,7 @@ Ctrl+click: open in a new tab`;
       h("div", { class: "menu-sep" }),
       menuItem("Quit Inkflow", () => void quit())
     );
-    const r2 = button6.getBoundingClientRect();
+    const r2 = button7.getBoundingClientRect();
     showMenu(r2.left, r2.bottom + 4);
   }
   async function openDeckInTab(path) {
@@ -20977,9 +21225,9 @@ Ctrl+click: open in a new tab`;
     document.body.append(page);
   }
   function initDecks() {
-    button6.addEventListener("click", () => void openMenu3());
-    on("model", renderButton);
-    renderButton();
+    button7.addEventListener("click", () => void openMenu3());
+    on("model", renderButton2);
+    renderButton2();
   }
 
   // src/ts/editor/exportdlg.ts
@@ -21351,7 +21599,7 @@ Ctrl+click: open in a new tab`;
       const [first, last] = stack.pop();
       const [ax, ay] = outline[first];
       const [bx, by] = outline[last];
-      let worst = -1;
+      let worst2 = -1;
       let index = -1;
       for (let i2 = first + 1; i2 < last; i2++) {
         const d2 = pointSegment2(
@@ -21362,12 +21610,12 @@ Ctrl+click: open in a new tab`;
           bx,
           by
         );
-        if (d2 > worst) {
-          worst = d2;
+        if (d2 > worst2) {
+          worst2 = d2;
           index = i2;
         }
       }
-      if (worst > t2) {
+      if (worst2 > t2) {
         keep[index] = 1;
         stack.push([first, index], [index, last]);
       }
@@ -21835,7 +22083,7 @@ Ctrl+click: open in a new tab`;
   function icon2(name2) {
     return `<svg aria-hidden="true" viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${ICONS[name2]}</svg>`;
   }
-  function button7(title3, content2, data) {
+  function button8(title3, content2, data) {
     const b2 = document.createElement("button");
     b2.type = "button";
     b2.className = "ink-btn";
@@ -21870,12 +22118,12 @@ Ctrl+click: open in a new tab`;
       this.el = el2;
       const tools = group(
         ...["pen", "highlighter", "eraser"].map(
-          (t2) => button7(TOOL_TITLES[t2], icon2(t2), { inkTool: t2 })
+          (t2) => button8(TOOL_TITLES[t2], icon2(t2), { inkTool: t2 })
         )
       );
       const swatches = group(
         ...SWATCHES.map((s2, i2) => {
-          const b2 = button7(
+          const b2 = button8(
             s2.label,
             `<span class="ink-swatch" style="background:${s2.token ? `var(--inkflow-${s2.token}, ${s2.hex})` : s2.hex}"></span>`,
             { inkSwatch: String(i2) }
@@ -21896,11 +22144,11 @@ Ctrl+click: open in a new tab`;
       this.sizes = group();
       this.sizes.classList.add("ink-sizes");
       const actions = group(
-        button7(opts2.undoTitle, icon2("undo"), { inkAction: "undo" }),
-        button7(opts2.clearTitle, icon2("clear"), { inkAction: "clear" })
+        button8(opts2.undoTitle, icon2("undo"), { inkAction: "undo" }),
+        button8(opts2.clearTitle, icon2("clear"), { inkAction: "clear" })
       );
       const toggles = group(
-        button7(
+        button8(
           "Draw with a mouse or a finger too (off: only a pen draws, so clicks and swipes still navigate)",
           icon2("fingers"),
           { inkToggle: "fingers" }
@@ -21908,7 +22156,7 @@ Ctrl+click: open in a new tab`;
       );
       if (opts2.keep) {
         toggles.append(
-          button7(
+          button8(
             "Keep: save new strokes with the slide (off: they last for this talk only)",
             icon2("keep"),
             { inkToggle: "keep" }
@@ -21917,7 +22165,7 @@ Ctrl+click: open in a new tab`;
       }
       if (opts2.close) {
         toggles.append(
-          button7("Leave ink mode (i)", icon2("close"), {
+          button8("Leave ink mode (i)", icon2("close"), {
             inkAction: "close"
           })
         );
@@ -22015,7 +22263,7 @@ Ctrl+click: open in a new tab`;
       this.sizes.replaceChildren(
         ...sizes.map((size4, i2) => {
           const px2 = Math.max(3, Math.round(size4 / largest * 16));
-          const b2 = button7(
+          const b2 = button8(
             ["Thin", "Medium", "Thick"][i2] ?? `Size ${i2 + 1}`,
             `<span class="ink-dot ${tool}" style="width:${px2}px;height:${tool === "highlighter" ? Math.max(3, Math.round(px2 / 2.5)) : px2}px"></span>`,
             { inkSize: String(i2) }
@@ -24531,7 +24779,7 @@ Ctrl+click: open in a new tab`;
   var status2 = null;
   var body2 = null;
   var ssh = null;
-  var button8 = document.getElementById("btn-share");
+  var button9 = document.getElementById("btn-share");
   function qrSvg(text) {
     const qr = qrcode_default(0, "M");
     qr.addData(text);
@@ -24934,8 +25182,8 @@ Ctrl+click: open in a new tab`;
   }
   function setStatus(msg) {
     status2 = msg;
-    if (button8) {
-      button8.classList.toggle(
+    if (button9) {
+      button9.classList.toggle(
         "on",
         status2.sharing || Boolean(status2.online?.sharing)
       );
@@ -24958,7 +25206,7 @@ Ctrl+click: open in a new tab`;
   }
   function initShare() {
     onMessage("share-status", setStatus);
-    button8?.addEventListener("click", openShare);
+    button9?.addEventListener("click", openShare);
   }
 
   // src/ts/editor/theme.ts
@@ -25751,6 +25999,7 @@ Ctrl+click: open in a new tab`;
     initTheme();
     initDecks();
     initGit();
+    initProblems();
     initCanvasMenu();
     initCompare();
     initMaster();

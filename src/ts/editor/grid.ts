@@ -8,6 +8,7 @@
 
 import { verticalNeighbor } from "../shared/sections";
 import { clear, h } from "./dom";
+import { problemBadge } from "./problems";
 import {
     dropOnHeader,
     dropOnSlide,
@@ -117,6 +118,7 @@ function gridItem(slide: SlideModel, i: number): HTMLElement {
                   )
                 : null,
             changeBadge(i),
+            problemBadge(i),
         ),
     );
     item.classList.toggle("starred", isStarred(i));
@@ -413,6 +415,7 @@ export function initGrid(): void {
     on("slide-selection", renderGrid);
     on("stars", renderGrid);
     on("slide-git", renderGrid);
+    on("problems", renderGrid);
     try {
         starredOnly = localStorage.getItem(STARRED_KEY) === "1";
     } catch {

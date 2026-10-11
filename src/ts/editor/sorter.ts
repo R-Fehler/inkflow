@@ -19,6 +19,7 @@ import { clear, h, icon, toast } from "./dom";
 import { openGallery } from "./gallery";
 import { saveAsLayout } from "./master";
 import { edit } from "./net";
+import { markProblems, problemBadge } from "./problems";
 import { renameSlideFiles } from "./rename";
 import {
     dropOnHeader,
@@ -301,6 +302,7 @@ function slideItem(slide: SlideModel, i: number): HTMLElement {
         thumbs.thumb(slide),
         slide.visible ? starButton(i) : null,
         changeBadge(i),
+        problemBadge(i),
     );
     item.classList.toggle("starred", isStarred(i));
     item.addEventListener("click", (e) => pickSlide(i, e));
@@ -443,6 +445,7 @@ function markRows(): void {
         item.classList.toggle("picked", ed.slideSelection.has(i));
         markStar(item, i);
         markChange(item, i);
+        markProblems(item, i);
     }
 }
 
@@ -705,6 +708,7 @@ export function initSorter(): void {
     on("slide-selection", () => renderSorter());
     on("stars", () => renderSorter());
     on("slide-git", () => renderSorter());
+    on("problems", () => renderSorter());
     on("sections", () => renderSorter(true));
     initListDrop();
     addBtn.addEventListener("click", () => {
