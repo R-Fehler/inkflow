@@ -24,9 +24,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
+import tempfile
+import time
 from collections.abc import Callable
 from importlib.resources import files
 from pathlib import Path
@@ -34,7 +38,7 @@ from typing import cast
 
 import platformdirs
 
-from inkflow import init, pack, sync
+from inkflow import init, instances, pack, sync
 from inkflow import lfs as lfs_rules
 from inkflow.assets import REFERENCE_PATTERNS, is_local_ref
 from inkflow.builtin_themes import Paper, Stage
@@ -482,3 +486,52 @@ def deck_file(path: str) -> Path:
     if candidate.name != "deck.py" or not candidate.is_file():
         raise ProjectError(f"no deck.py at {path}")
     return candidate.resolve()
+
+
+def serve_elsewhere(deck_py: Path, wait: float = 30.0) -> instances.Instance:
+    """A server of its own for ``deck_py`` (the editor's "Open in a new
+    tab"): the one serving it already, else a new one started hidden like
+    the desktop launcher's (``inkflow edit --no-open``, on the next free
+    port), which stops by itself once no page has been open for a minute.
+    Waits until it answers."""
+    from inkflow.launcher import IDLE_SECONDS, hidden_python
+
+    found = instances.serving(deck_py, exclude_pid=os.getpid())
+    if found is not None:
+        return found
+    args = [
+        hidden_python(),
+        "-m",
+        "inkflow",
+        "edit",
+        "--deck",
+        str(deck_py),
+        "--no-open",
+        f"--quit-when-idle={IDLE_SECONDS}",
+    ]
+    windows = sys.platform == "win32"
+    with tempfile.TemporaryFile() as errors:
+        process = subprocess.Popen(
+            args,
+            cwd=deck_py.parent,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=errors,
+            # Not a child of this server: it outlives a quit or a deck switch.
+            start_new_session=not windows,
+            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0) if windows else 0,
+        )
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            found = instances.serving(deck_py, exclude_pid=os.getpid())
+            if found is not None:
+                return found
+            if process.poll() is not None:
+                errors.seek(0)
+                said = errors.read().decode("utf-8", "replace").strip()
+                last = said.splitlines()[-1] if said else ""
+                raise ProjectError(
+                    f"the deck's server stopped{': ' + last if last else ''}"
+                )
+            time.sleep(0.2)
+    raise ProjectError("the deck's server did not start in time")

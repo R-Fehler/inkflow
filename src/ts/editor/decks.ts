@@ -8,7 +8,7 @@ import { clear, h, toast } from "./dom";
 import { folderPicker, type Places } from "./folderpicker";
 import { request, stopReconnecting, whenConnected } from "./net";
 import { openFiles } from "./rename";
-import { menuItem, showMenu } from "./sorter";
+import { closeMenu, menuItem, showMenu } from "./sorter";
 import { ed, on } from "./state";
 
 const menu = document.getElementById("context-menu")!;
@@ -118,8 +118,38 @@ async function openMenu(): Promise<void> {
         for (const path of data.recent) {
             const dir = path.replace(/[\\/]deck\.py$/, "");
             const item = menuItem(baseName(dir), () => void openDeck(path));
-            item.title = dir;
-            menu.append(item);
+            item.title = `${dir}\nCtrl+click: open in a new tab`;
+            // Ctrl/⌘+click or a middle click: in a tab of its own.
+            item.addEventListener(
+                "click",
+                (e) => {
+                    if (!(e.ctrlKey || e.metaKey)) return;
+                    e.stopImmediatePropagation();
+                    closeMenu();
+                    void openDeckInTab(path);
+                },
+                { capture: true },
+            );
+            item.addEventListener("auxclick", (e) => {
+                if (e.button !== 1) return;
+                e.preventDefault();
+                closeMenu();
+                void openDeckInTab(path);
+            });
+            const tab = h(
+                "button",
+                {
+                    type: "button",
+                    class: "menu-side",
+                    title: "Open in a new tab (with a server of its own; this deck stays open here)",
+                    onclick: () => {
+                        closeMenu();
+                        void openDeckInTab(path);
+                    },
+                },
+                "⧉",
+            );
+            menu.append(h("div", { class: "menu-row" }, item, tab));
         }
     }
     if (ed.model) {
@@ -134,6 +164,35 @@ async function openMenu(): Promise<void> {
     );
     const r = button.getBoundingClientRect();
     showMenu(r.left, r.bottom + 4);
+}
+
+/** Open the deck at `path` in a new tab, served by a server of its own
+ * (started if none has it open), while this tab keeps its deck. The tab is
+ * opened at once, while the click still counts as the user's (a tab
+ * opened after waiting would be blocked as a popup), and sent on when the
+ * server answers. */
+export async function openDeckInTab(path: string): Promise<boolean> {
+    const tab = window.open("", "_blank");
+    if (tab) {
+        tab.document.title = "Opening deck…";
+        tab.document.body.textContent = `Starting inkflow for ${baseName(path.replace(/[\\/]deck\.py$/, ""))}…`;
+    }
+    toast("Opening the deck in a new tab…");
+    const res = await request({ action: "open-deck-tab", path });
+    if (!res.ok || typeof res.url !== "string") {
+        tab?.close();
+        toast(res.error ?? "Cannot open that deck", "error");
+        return false;
+    }
+    closeDialog();
+    const url = new URL(res.url, location.href).href;
+    if (tab && !tab.closed) {
+        tab.opener = null;
+        tab.location.href = url;
+    } else if (!window.open(url, "_blank", "noopener")) {
+        toast(`Open it at ${url}`, "error");
+    }
+    return true;
 }
 
 async function openDeck(path: string): Promise<boolean> {
@@ -366,10 +425,21 @@ function openDeckDialog(data: DeckInfo): void {
         { type: "button", class: "pbtn primary", disabled: true },
         "Open this deck",
     ) as HTMLButtonElement;
+    const inTab = h(
+        "button",
+        {
+            type: "button",
+            class: "pbtn",
+            disabled: true,
+            title: "With a server of its own; this deck stays open here",
+        },
+        "Open in a new tab",
+    ) as HTMLButtonElement;
     const picker = folderPicker(
         data.places?.default ?? data.current.replace(/[\\/][^\\/]*$/, ""),
         (f) => {
             open.disabled = !f.isDeck;
+            inTab.disabled = !f.isDeck || !ed.model;
             open.textContent = f.isDeck
                 ? `Open ${baseName(f.path)}`
                 : "No deck.py in this folder";
@@ -379,6 +449,10 @@ function openDeckDialog(data: DeckInfo): void {
         const f = picker.current();
         if (f?.isDeck) void openDeck(join(f.path, "deck.py"));
     });
+    inTab.addEventListener("click", () => {
+        const f = picker.current();
+        if (f?.isDeck) void openDeckInTab(join(f.path, "deck.py"));
+    });
     openDialog(
         "Open deck",
         h(
@@ -386,7 +460,7 @@ function openDeckDialog(data: DeckInfo): void {
             { class: "deck-form" },
             h("p", { class: "hint" }, "Go to a folder with a deck.py in it."),
             picker.el,
-            h("div", { class: "btn-row end" }, open),
+            h("div", { class: "btn-row end" }, inTab, open),
         ),
         { large: true },
     );

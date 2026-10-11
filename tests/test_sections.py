@@ -14,6 +14,7 @@ from inkflow.editor.deckedit import (
     DeckEditError,
     DeckSource,
     Group,
+    SlideRef,
     add_section,
     move_in_groups,
     move_section,
@@ -87,7 +88,7 @@ def _groups() -> list[Group]:
     ]
 
 
-def _slides(groups: list[Group]) -> list[list[int | str]]:
+def _slides(groups: list[Group]) -> list[list[SlideRef]]:
     return [g.slides for g in groups]
 
 

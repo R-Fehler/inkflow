@@ -210,19 +210,35 @@ class Infer:
 INFER = Infer()
 
 
+@dataclass(frozen=True)
+class Foreign:
+    """A slide of another version of deck.py, with the comments written
+    above and beside it (`DeckSource.slide_items`): slidegit.py puts a slide
+    back as it was committed."""
+
+    item: _Item
+    column: int | None
+
+
+SlideRef = int | str | Foreign
+"""A slide of a `Group`: a deck index, the code of a new slide, or a
+slide of another version of deck.py."""
+
+
 @dataclass
 class Group:
     """One run of the slide list: the slides before the first section
     (``name`` None) or one ``Section``."""
 
     name: str | None
-    slides: list[int | str] = field(default_factory=list)
-    """Deck indices of existing slides, or the code of a new ``Slide(...)``."""
+    slides: list[SlideRef] = field(default_factory=list)
+    """Deck indices of existing slides, or the code of a new ``Slide(...)``
+    (or a `Foreign` one)."""
     origin: int | None = None
     """The existing section (its index) whose ``Section(...)`` call this keeps;
     ``None`` writes a new one."""
 
-    def with_slides(self, slides: list[int | str]) -> Group:
+    def with_slides(self, slides: list[SlideRef]) -> Group:
         return Group(self.name, slides, self.origin)
 
 
@@ -230,7 +246,7 @@ def _count(groups: Sequence[Group]) -> int:
     return sum(len(g.slides) for g in groups)
 
 
-def flatten(groups: Sequence[Group]) -> list[int | str]:
+def flatten(groups: Sequence[Group]) -> list[SlideRef]:
     """The slides of ``groups`` in deck order."""
     return [s for g in groups for s in g.slides]
 
@@ -469,7 +485,7 @@ class _Layout:
                 return None
         return _SectionNode(item, call, name, seq)
 
-    def _slide_items(self) -> list[tuple[_Item, int | None]]:
+    def slide_items(self) -> list[tuple[_Item, int | None]]:
         """Every slide's item with the column of the list holding it."""
         out = [(item, _column(self.outer)) for item in self.prefix]
         for section in self.sections:
@@ -481,7 +497,7 @@ class _Layout:
     def calls(self) -> list[cst.Call]:
         return [
             cast("cst.Call", cast("cst.Element", item.node).value)
-            for item, _ in self._slide_items()
+            for item, _ in self.slide_items()
         ]
 
     def groups(self) -> list[Group]:
@@ -506,7 +522,7 @@ class _Layout:
     def build(self, groups: Sequence[Group]) -> cst.List:
         if not groups or groups[0].name is not None or groups[0].origin is not None:
             raise DeckEditError("the slide list starts with its unsectioned slides")
-        slides = self._slide_items()
+        slides = self.slide_items()
         current = self.groups()
         seen: set[int] = set()
         for g in groups:
@@ -517,13 +533,15 @@ class _Layout:
                         raise DeckEditError(f"slide {s} placed twice")
                     seen.add(s)
 
-        def items(refs: list[int | str], col: int | None) -> list[_Item]:
+        def items(refs: list[SlideRef], col: int | None) -> list[_Item]:
             out: list[_Item] = []
             for ref in refs:
                 if isinstance(ref, str):
                     out.append(_Item(cst.Element(cst.parse_expression(ref)), (), None))
                     continue
-                item, src = slides[ref]
+                item, src = (
+                    (ref.item, ref.column) if isinstance(ref, Foreign) else slides[ref]
+                )
                 delta = col - src if col is not None and src is not None else 0
                 out.append(_reindent(item, delta))
             return out
@@ -595,8 +613,8 @@ def _new_section(name: str, col: int | None, unit: int) -> cst.Call:
 
 def _fill_section(
     call: cst.Call,
-    refs: list[int | str],
-    items: Callable[[list[int | str], int | None], list[_Item]],
+    refs: list[SlideRef],
+    items: Callable[[list[SlideRef], int | None], list[_Item]],
     outer_col: int | None,
     unit: int,
 ) -> cst.Call:
@@ -753,6 +771,14 @@ class DeckSource:
         if expected is not None and len(calls) != expected:
             return None
         return calls
+
+    def slide_items(self) -> list[Foreign] | None:
+        """Every slide with its comments, to put into another version of
+        deck.py (`Foreign`); None when the list is not editable."""
+        layout = self._layout()
+        if layout is None:
+            return None
+        return [Foreign(item, col) for item, col in layout.slide_items()]
 
     def groups(self) -> list[Group] | None:
         """The slide list as sections: ``[0]`` the slides before the first

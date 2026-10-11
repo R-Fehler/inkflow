@@ -34,14 +34,19 @@ IDLE_SECONDS = 60
 """A hidden server stops once no page has been open this long."""
 
 
+def hidden_python() -> str:
+    """This Python, without a console window of its own (pythonw on Windows)."""
+    python = sys.executable
+    if sys.platform == "win32":
+        windowless = Path(python).with_name("pythonw.exe")
+        python = str(windowless) if windowless.exists() else python
+    return python
+
+
 def command(terminal: bool = False) -> list[str]:
     """What the launcher runs: in a terminal, or hidden (then it stops by
     itself once no page is open)."""
-    python = sys.executable
-    if not terminal and sys.platform == "win32":
-        # pythonw: no console window.
-        windowless = Path(python).with_name("pythonw.exe")
-        python = str(windowless) if windowless.exists() else python
+    python = sys.executable if terminal else hidden_python()
     args = [python, "-m", "inkflow", "edit", "--start"]
     return args if terminal else [*args, f"--quit-when-idle={IDLE_SECONDS}"]
 

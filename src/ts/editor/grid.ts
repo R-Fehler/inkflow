@@ -22,6 +22,7 @@ import {
     sections,
     selectSection,
 } from "./sectionui";
+import { changeBadge } from "./slidegit";
 import {
     clearDropMarks,
     dragging,
@@ -108,6 +109,7 @@ function gridItem(slide: SlideModel, i: number): HTMLElement {
                       "✦",
                   )
                 : null,
+            changeBadge(i),
         ),
     );
     item.classList.toggle("starred", isStarred(i));
@@ -389,6 +391,7 @@ export function initGrid(): void {
     on("slide", renderGrid);
     on("slide-selection", renderGrid);
     on("stars", renderGrid);
+    on("slide-git", renderGrid);
     try {
         starredOnly = localStorage.getItem(STARRED_KEY) === "1";
     } catch {

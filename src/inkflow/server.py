@@ -415,6 +415,7 @@ async def rebuild(
         }
         if _editor["session"] is not None:
             _editor["session"].built_hash = deck_hash
+            _editor["session"].live = (edit_slides, model)
         _editor["failed_hash"] = None
         _state["error"] = None
         _state["logs"] = browser_logs

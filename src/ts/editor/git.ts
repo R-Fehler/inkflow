@@ -23,6 +23,7 @@ import {
 } from "./pack";
 import { commitPaths } from "./packtext";
 import { openPublishDialog } from "./publish";
+import { changedSlideCount, commitPicked, setSlideChanges } from "./slidegit";
 import { closeMenu, menuItem, showMenu } from "./sorter";
 import { ed, emit, on } from "./state";
 import type { EditResult } from "./types";
@@ -109,6 +110,7 @@ function render(): void {
     label.textContent = status.branch ?? `@${status.detached ?? "?"}`;
     const n = status.changes?.length ?? 0;
     const lfsIssues = lfsFiles().length;
+    const slidesChanged = changedSlideCount();
     button.classList.toggle("warn", lfsIssues > 0);
     badge.hidden = n === 0 && lfsIssues === 0;
     badge.textContent = n ? String(n) : "!";
@@ -123,6 +125,9 @@ function render(): void {
             ? `Branch ${status.branch}`
             : `Viewing ${status.detached}`,
         n ? `${n} changed file${n === 1 ? "" : "s"}` : "No changes",
+        slidesChanged
+            ? `${slidesChanged} slide${slidesChanged === 1 ? "" : "s"} changed`
+            : "",
         sync,
         lfsIssues
             ? `${lfsIssues} media file${lfsIssues === 1 ? "" : "s"} not in Git LFS`
@@ -135,9 +140,16 @@ function render(): void {
 export async function refreshGit(): Promise<Status> {
     // Asked again once connected: the server sends a model then.
     if (!connected()) return status;
-    const res = await request({ action: "git", op: "status" });
+    // With each slide's changes since the last commit (slidegit.ts).
+    const res = await request({ action: "git", op: "status", slides: true });
     if (res.ok && res.git) status = res.git as Status;
+    if (res.ok) setSlideChanges(status.repo ? res.slides : null);
     render();
+    return status;
+}
+
+/** The last git status read. */
+export function gitStatus(): Status {
     return status;
 }
 
@@ -185,8 +197,14 @@ async function git(
         ed.canRedo = false;
         emit("history");
     }
+    // A commit changes no file (no rebuild follows): the slides' marks are
+    // asked for again here.
+    void refreshGit();
     return res;
 }
+
+/** One git operation, as the Git menu runs it (for slidegit.ts). */
+export const runGit = git;
 
 // ── Menu ──
 
@@ -256,6 +274,13 @@ async function openMenu(): Promise<void> {
                 "Commit…",
                 () => commitDialog(),
                 n === 0 || !status.branch,
+            ),
+            menuItem(
+                ed.slideSelection.size > 1
+                    ? `Commit the ${ed.slideSelection.size} picked slides…`
+                    : `Commit slide ${ed.current + 1} only…`,
+                () => commitPicked(),
+                changedSlideCount() === 0 || !status.branch,
             ),
             menuItem(
                 status.ahead ? `Push (${status.ahead})` : "Push",

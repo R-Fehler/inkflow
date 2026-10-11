@@ -119,7 +119,12 @@ Both use the same folder picker:
   starts. Unless the open deck's git repository says otherwise, a new deck then
   goes next to it in that repository. Both are saved for your user, so every
   editor offers them.
-- **Recent decks** reopens one of the last ten.
+- **Recent decks** reopens one of the last ten. The **⧉** beside one (or
+  <kbd>Ctrl</kbd>+click, or a middle click) opens it in a new tab instead,
+  with a server of its own, and this tab keeps its deck; **Open in a new
+  tab** in Open deck… does the same. A server started this way runs in the
+  background and stops a minute after its last tab closes, like the desktop
+  launcher's; a deck some server already has open is opened there.
 
 Opening a deck switches the running server to it, on the same address: the
 editor page reloads with the new deck, and the presenter at `/` shows it too.
@@ -232,6 +237,38 @@ branch and how many files changed. Its menu covers what a deck needs day to day:
   up, the menu shows **Published at …** (a link) and **Publish… (update)**
   writes the files again. It also names fonts only your computer has, which
   the online deck would miss. See [Publishing online](../presenting/publish.md).
+
+### What changed on each slide
+
+Each slide's row in the slide list (and its tile in the grid view) carries a
+mark for its changes since the last commit, as VS Code marks files:
+
+- **U** (green): a new slide, whose `Slide(...)` is not in the last commit.
+- **M** (amber): a changed slide: its `Slide(...)` in `deck.py` or one of its
+  own files changed (its SVG, Markdown, notes, ink, chart data, a picture).
+- **•** (blue): only a file it shares with other slides changed: its layout,
+  an overlay, a picture or a Markdown file other slides use too.
+
+Hover a mark for the files behind it. A slide's right-click menu then has:
+
+- **Compare with the last commit** opens the [compare view](compare.md) on
+  that slide: the last commit beside the working copy, changed elements
+  outlined.
+- **Show git diff** shows the slide's changes as git's diff text: its
+  `Slide(...)` entry, then its files (SVGs through inkflow's SVG diff driver
+  once `inkflow setup-git` set it up, so only visual changes show).
+- **Commit this slide…** (or **Commit N changed slides…** with several
+  picked) commits those slides and nothing else: their own files, and
+  `deck.py` with only their `Slide(...)` entries changed, every other slide's
+  entry as it was in the last commit (a new one left out, a removed one kept).
+  `deck.py` itself is not touched: the other slides' changes stay as
+  uncommitted changes. What `deck.py` says besides its slides (imports,
+  `Deck(...)` settings, sections, the slide order) goes in as it is now. The
+  dialog lists what goes in, offers the files the slides share with others
+  (a new layout made for them is ticked), and, when slides were removed since
+  the last commit, whether their removal goes in too. The Git menu's
+  **Commit slide N only…** does the same for the slide being edited or the
+  picked ones.
 
 Discard, pull, switching or creating a branch, merging a worktree, and View, Restore or Revert change
 the deck's files on disk, so the editor's undo and redo history starts over after

@@ -611,22 +611,23 @@ def _slide_settings(slide: Slide, entry: dict[str, object]) -> dict[str, object]
     }
 
 
-def _slide_files(
+def slide_paths(
     build: SideBuild,
     slide: Slide,
     entry: dict[str, object],
     data: SlideData | None,
     slide_id: str,
-    hashes: dict[Path, str],
-) -> dict[str, tuple[str, str]]:
+) -> dict[Path, str]:
+    """The files one slide is made of, each with its role: its sources
+    (``slide``, ``layout``, ``overlay``, ``diagram``), ``md``, ``notes``,
+    ``ink``, chart ``data`` and the pictures it shows (``asset``). Only
+    files that exist; the first role a file is found in wins."""
     project_dir = build.project_dir
-    files: dict[str, tuple[str, str]] = {}
+    files: dict[Path, str] = {}
 
     def add(path: Path, role: str) -> None:
         if path.is_file():
-            files.setdefault(
-                _rel(path, project_dir), (role, _content_hash(path, hashes))
-            )
+            files.setdefault(Path(os.path.abspath(path)), role)
 
     for src in cast("list[dict[str, object]]", entry.get("sources") or []):
         add(Path(str(src["path"])), str(src["role"]))
@@ -666,6 +667,20 @@ def _slide_files(
             if located is not None and not ref.startswith(THEME_PREFIX):
                 add(located, "asset")
     return files
+
+
+def _slide_files(
+    build: SideBuild,
+    slide: Slide,
+    entry: dict[str, object],
+    data: SlideData | None,
+    slide_id: str,
+    hashes: dict[Path, str],
+) -> dict[str, tuple[str, str]]:
+    return {
+        _rel(path, build.project_dir): (role, _content_hash(path, hashes))
+        for path, role in slide_paths(build, slide, entry, data, slide_id).items()
+    }
 
 
 def deck_facts(build: SideBuild) -> DeckFacts:

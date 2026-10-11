@@ -6,6 +6,7 @@ import {
     counts,
     countText,
     firstRow,
+    focusRow,
     followRow,
     mergeBranch,
     mergeTarget,
@@ -161,6 +162,13 @@ describe("rows", () => {
         after.pairs[2] = pair(1, 2, "changed");
         expect(followRow(M, 1, after)).toBe(2);
         expect(followRow(null, 3, after)).toBe(0);
+    });
+
+    it("finds the row of a right-hand slide by its deck index", () => {
+        // Right slide 4 ("m") is on row 4; slide 2 ("new") on row 3.
+        expect(focusRow(M, 4)).toBe(4);
+        expect(focusRow(M, 2)).toBe(3);
+        expect(focusRow(M, 9)).toBe(-1);
     });
 });
 

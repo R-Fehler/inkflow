@@ -313,7 +313,9 @@ src/
                                the slide list is read as `Group`s (unsectioned + one per
                                Section) and every list edit is `restructure(groups)`: pure
                                `move_in_groups`/`add_section`/`remove_section`/
-                               `move_section`, slides reindented to their new list),
+                               `move_section`, slides reindented to their new list; a
+                               group may also carry a `Foreign` slide: one of another
+                               version of deck.py with its comments, `slide_items`),
                                codegen.py (DSL object -> shortest constructor source; field
                                schemas for the property panels), session.py (one request ->
                                one undoable whole-file step; EditorSession/History; the
@@ -403,7 +405,8 @@ src/
                                CLI's text/JSON), comparesrc.py (compare sides: `Source`,
                                commits materialized into `.inkflow/cache/compare/<sha>/`,
                                worktrees, `build_side` with an injected loader,
-                               `deck_facts`, `shadow_css`, `display_svg`), comparehub.py
+                               `deck_facts`, `slide_paths` (the files a slide is made of,
+                               by role), `shadow_css`, `display_svg`), comparehub.py
                                (the server's compare views: shared sides, live rebuilds,
                                folder watchers, `/_cmp/<token>/` assets, `take_request`,
                                `compare-sources`; see "The compare view" below),
@@ -486,7 +489,25 @@ src/
                                no LFS rule covers or committed as full copies, `lfs_track`
                                / `lfs_off`; `file_states` = per file committed/modified/
                                untracked/ignored/no-repo (one `status --ignored`);
-                               shells out to git with GIT_TERMINAL_PROMPT=0),
+                               `commit_with` (paths + blobs given as text, from an index
+                               of its own), `diff_text`; shells out to git with
+                               GIT_TERMINAL_PROMPT=0),
+                               slidegit.py (each slide's changes since the last commit:
+                               `changes` = per slide `new`/`modified`/`shared` from the
+                               git status of its files (`slide_paths`; layouts, overlays
+                               and files several slides use are shared) and its
+                               `Slide(...)` entry against HEAD's deck.py (`entries`,
+                               `match_entries`: same code, then the same id / md / src
+                               with no other name disagreeing); `slide_diff` (entry diff
+                               + git diff of its files); `commit_plan`/`commit_slides`:
+                               the chosen slides' own files + `partial_deck` = the
+                               working deck.py with every other slide's entry as
+                               committed (`Foreign`, comments kept), new ones left out,
+                               removed ones put back unless `with_removed`; the
+                               session's git ops `status` + `slides`, `slide-diff`,
+                               `commit-slides` (`dryRun` = the plan; commit local
+                               only), read off `EditorSession.live` = the server's
+                               last editor build),
                                worktrees.py (the session's `worktree` action and
                                `inkflow worktree`: `list_worktrees` = every worktree with
                                the deck.py at the same relative path, ahead/behind the
@@ -499,7 +520,11 @@ src/
                                forced, deletes only merged (or forced) `deck/` branches),
                                projects.py (new deck in one of seven
                                looks, each with `preview` colours for its thumbnail,
-                               folder browsing, recent decks), places.py (favourite
+                               folder browsing, recent decks, `serve_elsewhere`: the
+                               session's `open-deck-tab` (local only, unlocked) = the
+                               deck's own server, started hidden like the launcher's
+                               (`launcher.hidden_python`, `--no-open --quit-when-idle`)
+                               when none has it, its `owner_url`), places.py (favourite
                                folders + the default deck location, user config dir),
                                stars.py (starred slides, the author's marks:
                                `.inkflow/stars.json` = `{"starred": [slide ids]}`,
@@ -888,7 +913,10 @@ src/
                       Bundle fonts into the deck with the licence warnings in a
                       confirm; font fields send `fonts` op `set`),
                       find.ts, exportdlg.ts, openwith.ts ("Open ▾" in other programs),
-                      decks.ts ("deck ▾": new/open/recent decks, start page),
+                      decks.ts ("deck ▾": new/open/recent decks, start page;
+                      `openDeckInTab`: ⧉ / Ctrl+click on a recent deck, "Open in a
+                      new tab" in Open deck…, the tab opened at the click and sent
+                      to the `open-deck-tab` result's URL),
                       folderpicker.ts (the folder picker those and the video picker
                       share: Tab completion, type-to-filter, keyboard list, places,
                       Browse… = system dialog; its pure path maths in pathtext.ts),
@@ -961,8 +989,16 @@ src/
                       pinch / Ctrl+wheel -> canvas.zoomAbout, one finger
                       deferred), compare.ts (the compare view: paired list,
                       side by side / slider / difference, outlines, notes diff,
-                      picker, Take this slide, Merge branch) over comparelib.ts
-                      (pure: rows, jumps, badges, word diff, take/merge rules;
+                      picker, Take this slide, Merge branch; `openCompare(…,
+                      {focus})` starts on a right-hand slide, `focusRow`) over
+                      comparelib.ts (pure: rows, jumps, badges, word diff,
+                      take/merge rules; tested), slidegit.ts (each slide's
+                      U/M/• mark on its list row and grid tile, from the
+                      `slides` git.ts asks for with every git status and after
+                      every git op (`setSlideChanges`, event `slide-git`); the
+                      slide menu's Compare with the last commit, Show git diff
+                      and Commit this slide / N changed slides…; the
+                      commit-slides dialog) over slidegittext.ts (pure words;
                       tested)
     fit/              main.ts: the PDF export page's script (bundles/fit.js, inlined
                       into pdf.html by export.py): `fitSlide` on every slide, again

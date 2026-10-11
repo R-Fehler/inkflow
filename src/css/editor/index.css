@@ -7,6 +7,7 @@
 @import "./notes.css";
 @import "./panels.css";
 @import "./stars.css";
+@import "./slidegit.css";
 
 /* inkflow visual editor. Chrome colours come from theme-vars (the presenter's
    palette); the slide itself is styled by the deck's own CSS (__STYLES__). */

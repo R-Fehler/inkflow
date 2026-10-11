@@ -52,10 +52,12 @@ from inkflow.editor import (
     placeholders,
     places,
     projects,
+    slidegit,
     stars,
     worktrees,
 )
 from inkflow.editor.codegen import Code, coerce_fields
+from inkflow.editor.comparesrc import SideBuild
 from inkflow.editor.deckedit import (
     INFER,
     DeckEditError,
@@ -188,6 +190,7 @@ from inkflow.manifest import (
 from inkflow.ns import INKFLOW_COPY_OF, INKFLOW_LABEL, INKFLOW_SHOW_SHAPE
 from inkflow.overlay import Overlay
 from inkflow.pipeline import (
+    SlideData,
     deck_context,
     process_slide,
     resolve_slide_src,
@@ -213,6 +216,7 @@ _PROJECT_ACTIONS = (
     "browse",
     "new-deck",
     "open-deck",
+    "open-deck-tab",
     "quit",
     "places-set",
     "system-pick",
@@ -512,6 +516,7 @@ _UNLOCKED = frozenset(
         "master-placeholders",
         "find",
         "browse",
+        "open-deck-tab",
     }
 )
 """Requests that write nothing the History holds and may take a while (a
@@ -768,6 +773,9 @@ class EditorSession:
     """Each recent build's view of the project: file -> (mtime, size)."""
     last_writer: dict[Path, tuple[str, str, str]]
     """Who last wrote each file through the History: (author, name, hash)."""
+    live: tuple[list[SlideData], dict[str, object]] | None
+    """The server's last editor build (slides, model): which files each
+    slide is made of, for the git action's slide changes (slidegit.py)."""
 
     def __init__(
         self, deck_path: Path | None, exporters: Exporters | None = None
@@ -786,6 +794,7 @@ class EditorSession:
         self.build_id = 0
         self.snapshots = {}
         self.last_writer = {}
+        self.live = None
         self._lock: threading.RLock = threading.RLock()
         self._who: threading.local = threading.local()
         self.shape_deck_hash = None
@@ -866,7 +875,7 @@ class EditorSession:
         if action in _MEDIA_ACTIONS:
             return self._media(msg)
         if action == "git":
-            return self._git(msg)
+            return self._git(msg, deck)
         if action == "publish":
             return self._publish(msg, deck)
         if action == "worktree":
@@ -2253,8 +2262,88 @@ class EditorSession:
         {"discard", "pull", "switch", "view", "revert", "restore", "create-branch"}
     )
 
-    def _git(self, msg: dict[str, object]) -> dict[str, object]:
+    def _slide_changes(self, deck: Deck | None) -> slidegit.Changes:
+        """Every slide's changes since the last commit, read off the
+        server's last build (slidegit.py)."""
+        if deck is None or self.live is None:
+            raise EditError("the deck has not built yet")
+        repo = gitops.open_repo(self.project_dir)
+        if repo is None:
+            raise EditError("this deck is not in a git repository")
+        slides, model = self.live
+        if len(cast("list[object]", model["slides"])) != len(deck.slides):
+            raise EditError("the deck is rebuilding; try again")
+        build = SideBuild(
+            deck=deck,
+            deck_path=self.deck_path,
+            slides=slides,
+            model=model,
+            styles="",
+            scripts="",
+        )
+        try:
+            return slidegit.changes(build, repo)
+        except gitops.GitError as exc:
+            raise EditError(str(exc)) from exc
+
+    def _slide_git(
+        self, msg: dict[str, object], deck: Deck | None
+    ) -> dict[str, object]:
+        """The git action's slide operations: ``slide-diff`` (one slide's
+        changes as diff text) and ``commit-slides`` (the chosen ones'
+        changes only; ``dryRun`` says what would go in)."""
+        op = msg.get("op")
+        found = self._slide_changes(deck)
+        try:
+            if op == "slide-diff":
+                index = msg.get("slide")
+                if not isinstance(index, int):
+                    raise EditError("which slide?")
+                return {
+                    "ok": True,
+                    "diff": slidegit.slide_diff(found, index),
+                    "slide": found.slides[index].json()
+                    if 0 <= index < len(found.slides)
+                    else None,
+                }
+            raw = msg.get("slides")
+            chosen = (
+                [i for i in cast("list[object]", raw) if isinstance(i, int)]
+                if isinstance(raw, list)
+                else []
+            )
+            with_removed = msg.get("removed") is True
+            if msg.get("dryRun"):
+                plan = slidegit.commit_plan(found, chosen, with_removed)
+                return {"ok": True, "plan": plan.json(found)}
+            self._local_only(msg, "use git (commit)")
+            if msg.get("name") or msg.get("email"):
+                gitops.set_identity(
+                    found.repo, str(msg.get("name") or ""), str(msg.get("email") or "")
+                )
+            extra = msg.get("paths")
+            sha = slidegit.commit_slides(
+                found,
+                chosen,
+                str(msg.get("message") or ""),
+                with_removed,
+                [str(p) for p in cast("list[object]", extra)]
+                if isinstance(extra, list)
+                else [],
+            )
+        except (gitops.GitError, slidegit.PartialError) as exc:
+            raise EditError(str(exc)) from exc
+        n = len(chosen)
+        return {
+            "ok": True,
+            "message": f"Committed {sha} ({n} slide{'' if n == 1 else 's'})",
+            "git": gitops.status(self.project_dir),
+        }
+
+    def _git(self, msg: dict[str, object], deck: Deck | None) -> dict[str, object]:
         op = str(msg.get("op") or "status")
+        if op in ("slide-diff", "commit-slides"):
+            return self._slide_git(msg, deck)
         if op == "init":
             self._local_only(msg, "create a repository")
             try:
@@ -2263,7 +2352,21 @@ class EditorSession:
                 raise EditError(str(exc)) from exc
             return {"ok": True, "git": gitops.status(self.project_dir)}
         if op == "status":
-            return {"ok": True, "git": gitops.status(self.project_dir)}
+            result: dict[str, object] = {
+                "ok": True,
+                "git": gitops.status(self.project_dir),
+            }
+            if msg.get("slides") and cast("dict[str, object]", result["git"])["repo"]:
+                # Each slide's changes since the last commit, for the slide
+                # list's marks; none while the deck has not built, and never
+                # at the cost of the status itself.
+                try:
+                    result["slides"] = self._slide_changes(deck).json()
+                except EditError:
+                    pass
+                except Exception as exc:
+                    logger.warning(f"could not read the slides' git changes: {exc}")
+            return result
         if op not in ("log", "branches"):
             # Commits run the repository's hooks; the rest rewrites the
             # owner's working copy.
@@ -2561,6 +2664,19 @@ class EditorSession:
                     suffixes=suffixes,
                 )
                 return {"ok": True, "path": chosen}
+            if action == "open-deck-tab":
+                # Another deck in a server of its own, for a new tab: this
+                # one keeps its deck.
+                deck_py = projects.deck_file(str(msg.get("path") or ""))
+                projects.remember(deck_py)
+                if self.has_deck and deck_py == self.deck_path:
+                    return {"ok": True, "deck": str(deck_py), "url": "/edit"}
+                instance = projects.serve_elsewhere(deck_py)
+                return {
+                    "ok": True,
+                    "deck": str(deck_py),
+                    "url": instance.owner_url("/edit"),
+                }
             if action == "new-deck":
                 deck_py = projects.create_deck(
                     Path(str(msg.get("path") or "")),

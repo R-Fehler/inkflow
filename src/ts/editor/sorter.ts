@@ -38,6 +38,7 @@ import {
     sections,
     selectSection,
 } from "./sectionui";
+import { changeBadge, markChange, slideGitItems } from "./slidegit";
 import { isStarred, markStar, starButton, toggleStar } from "./stars";
 import { ed, emit, on } from "./state";
 import type { SlideModel } from "./types";
@@ -299,6 +300,7 @@ function slideItem(slide: SlideModel, i: number): HTMLElement {
         h("span", { class: "sorter-num" }, String(i + 1)),
         thumbs.thumb(slide),
         slide.visible ? starButton(i) : null,
+        changeBadge(i),
     );
     item.classList.toggle("starred", isStarred(i));
     item.addEventListener("click", (e) => pickSlide(i, e));
@@ -440,6 +442,7 @@ function markRows(): void {
         item.classList.toggle("active", i === ed.current);
         item.classList.toggle("picked", ed.slideSelection.has(i));
         markStar(item, i);
+        markChange(item, i);
     }
 }
 
@@ -637,6 +640,7 @@ export function openSlideMenu(x: number, y: number, i: number): void {
                 !editable,
             ),
         );
+        menu.append(...slideGitItems(i, menuItem));
         showMenu(x, y);
         return;
     }
@@ -671,6 +675,7 @@ export function openSlideMenu(x: number, y: number, i: number): void {
     menu.append(
         menuItem("Add section here…", () => void addSectionAt(i), !editable),
     );
+    menu.append(...slideGitItems(i, menuItem));
     showMenu(x, y);
 }
 
@@ -699,6 +704,7 @@ export function initSorter(): void {
     });
     on("slide-selection", () => renderSorter());
     on("stars", () => renderSorter());
+    on("slide-git", () => renderSorter());
     on("sections", () => renderSorter(true));
     initListDrop();
     addBtn.addEventListener("click", () => {

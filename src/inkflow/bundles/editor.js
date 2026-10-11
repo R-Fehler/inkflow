@@ -1159,9 +1159,9 @@
   function usesBoxAttrs(g2) {
     return BOX_TAGS.has(g2.sourceTag) && g2.sourceTag !== "use" && g2.attrs.width != null && g2.attrs.height != null && isTranslateOnly(g2.own);
   }
-  function transformPlan(g2, slideChange) {
+  function transformPlan(g2, slideChange2) {
     const p2 = g2.parentToSlide;
-    const inParent = multiply(invert(p2), multiply(slideChange, p2));
+    const inParent = multiply(invert(p2), multiply(slideChange2, p2));
     return { transform: formatTransform(multiply(inParent, g2.own)) };
   }
   function shiftList(value, delta) {
@@ -1204,12 +1204,12 @@
         const xs = shiftList(g2.attrs.x ?? "0", delta.x);
         const ys = shiftList(g2.attrs.y ?? "0", delta.y);
         const kids = textChildren2.map((c2) => {
-          const plan = {};
+          const plan2 = {};
           const cx = shiftList(c2.attrs.x, delta.x);
           const cy = shiftList(c2.attrs.y, delta.y);
-          if (cx != null) plan.x = cx;
-          if (cy != null) plan.y = cy;
-          return plan;
+          if (cx != null) plan2.x = cx;
+          if (cy != null) plan2.y = cy;
+          return plan2;
         });
         if (xs != null && ys != null) {
           return { attrs: { x: xs, y: ys }, children: kids };
@@ -3768,8 +3768,8 @@
       })
     );
   }
-  function warnings(plan) {
-    const lines = deleteWarnings(plan.files, plan.repo);
+  function warnings(plan2) {
+    const lines = deleteWarnings(plan2.files, plan2.repo);
     if (!lines.length) return null;
     return h(
       "div",
@@ -3813,7 +3813,7 @@
           type: "checkbox",
           "data-delete": "files"
         });
-        let plan = null;
+        let plan2 = null;
         const box = check;
         box.addEventListener("change", async () => {
           if (!box.checked) {
@@ -3827,8 +3827,8 @@
               "Looking for its files\u2026"
             )
           );
-          plan ??= option2.load();
-          const found = await plan;
+          plan2 ??= option2.load();
+          const found = await plan2;
           if (!box.checked) return;
           if (!found) {
             details.replaceChildren(
@@ -4262,10 +4262,10 @@
     const list4 = filled.map(number).join(", ");
     return filled.length === 1 ? `Filled on slide ${list4}` : `Filled on ${filled.length} slides: ${list4}`;
   }
-  function renameSummary(plan) {
-    const n3 = plan.slides.length;
+  function renameSummary(plan2) {
+    const n3 = plan2.slides.length;
     if (!n3) return "No slide fills it: only the layout changes";
-    return `Renames the zone on ${n3} slide${n3 === 1 ? "" : "s"} (${plan.slideNames.join(", ")})`;
+    return `Renames the zone on ${n3} slide${n3 === 1 ? "" : "s"} (${plan2.slideNames.join(", ")})`;
   }
 
   // src/ts/editor/placeholders.ts
@@ -4549,9 +4549,9 @@
           say(result.error ?? "cannot rename", true);
           return;
         }
-        const plan = result.placeholder;
-        const warn = plan.warnings.length ? ` \xB7 ${plan.warnings[0]}` : "";
-        say(`zone-${to} \xB7 ${renameSummary(plan)}${warn}`);
+        const plan2 = result.placeholder;
+        const warn = plan2.warnings.length ? ` \xB7 ${plan2.warnings[0]}` : "";
+        say(`zone-${to} \xB7 ${renameSummary(plan2)}${warn}`);
       }, 250);
     });
     nameInput.addEventListener("change", () => {
@@ -5796,17 +5796,17 @@
   }
   async function deletePicked(paths) {
     const dry = await request({ action: "delete-files", paths, dryRun: true });
-    const plan = planOf(dry);
-    if (!plan) {
+    const plan2 = planOf(dry);
+    if (!plan2) {
       toast(dry.error ?? "Cannot delete those files", "error");
       void openFiles(new Set(paths));
       return;
     }
     const answer = await askDelete({
       title: "Delete files",
-      question: `Delete ${plural(plan.files.length, "file")} from disk?`,
+      question: `Delete ${plural(plan2.files.length, "file")} from disk?`,
       confirm: "Delete",
-      plan
+      plan: plan2
     });
     if (!answer) {
       void openFiles(new Set(paths));
@@ -6317,9 +6317,3356 @@
     return head;
   }
 
+  // src/ts/editor/comparelib.ts
+  function isChange(p2) {
+    return p2.status !== "same" || p2.moved;
+  }
+  function visibleRows(pairs, onlyChanges2) {
+    const rows = [];
+    pairs.forEach((p2, i2) => {
+      if (!onlyChanges2 || isChange(p2)) rows.push(i2);
+    });
+    return rows;
+  }
+  function nextChange(pairs, from, dir) {
+    for (let i2 = from + dir; i2 >= 0 && i2 < pairs.length; i2 += dir) {
+      if (isChange(pairs[i2])) return i2;
+    }
+    return null;
+  }
+  function firstRow(pairs) {
+    const i2 = pairs.findIndex(isChange);
+    return i2 >= 0 ? i2 : 0;
+  }
+  function focusRow(m2, index) {
+    return m2.pairs.findIndex(
+      (p2) => p2.right != null && m2.right.slides[p2.right]?.index === index
+    );
+  }
+  function followRow(before, row6, after) {
+    const old = before?.pairs[row6];
+    if (!before || !old) return firstRow(after.pairs);
+    const lid = old.left != null ? before.left.slides[old.left]?.id : null;
+    const rid = old.right != null ? before.right.slides[old.right]?.id : null;
+    const same = after.pairs.findIndex(
+      (p2) => lid != null && p2.left != null && after.left.slides[p2.left]?.id === lid || rid != null && p2.right != null && after.right.slides[p2.right]?.id === rid
+    );
+    if (same >= 0) return same;
+    return Math.min(row6, Math.max(0, after.pairs.length - 1));
+  }
+  function badge2(p2) {
+    if (p2.status === "added")
+      return { symbol: "+", cls: "added", title: "Only on the right" };
+    if (p2.status === "removed")
+      return { symbol: "\u2212", cls: "removed", title: "Only on the left" };
+    if (p2.status === "changed")
+      return {
+        symbol: p2.moved ? "\u2195" : "~",
+        cls: p2.moved ? "changed moved" : "changed",
+        title: p2.moved ? "Changed and moved" : "Changed"
+      };
+    if (p2.moved) return { symbol: "\u2195", cls: "moved", title: "Moved" };
+    return { symbol: "", cls: "same", title: "The same" };
+  }
+  function rowSlide(m2, p2) {
+    if (p2.right != null) return m2.right.slides[p2.right] ?? null;
+    if (p2.left != null) return m2.left.slides[p2.left] ?? null;
+    return null;
+  }
+  function num2(s2) {
+    return s2?.number != null ? String(s2.number) : "\xB7";
+  }
+  function rowNumber(m2, p2) {
+    const l2 = p2.left != null ? m2.left.slides[p2.left] : null;
+    const r2 = p2.right != null ? m2.right.slides[p2.right] : null;
+    if (p2.moved && l2 && r2) return `${num2(l2)} \u2192 ${num2(r2)}`;
+    return num2(r2 ?? l2);
+  }
+  function whatChanged(p2) {
+    const parts = p2.files.filter((f2) => f2.role !== "notes").map((f2) => f2.path);
+    if (p2.notes || p2.files.some((f2) => f2.role === "notes")) parts.push("notes");
+    parts.push(...p2.settings.map((s2) => s2.replace(/_/g, " ")));
+    if (!parts.length && p2.visual) parts.push("look");
+    return parts;
+  }
+  function counts(pairs) {
+    const c2 = { changed: 0, added: 0, removed: 0, moved: 0, same: 0 };
+    for (const p2 of pairs) {
+      if (p2.status === "changed") c2.changed++;
+      else if (p2.status === "added") c2.added++;
+      else if (p2.status === "removed") c2.removed++;
+      else if (!p2.moved) c2.same++;
+      if (p2.moved) c2.moved++;
+    }
+    return c2;
+  }
+  function countText(c2) {
+    const parts = [
+      c2.changed && `${c2.changed} changed`,
+      c2.added && `${c2.added} added`,
+      c2.removed && `${c2.removed} removed`,
+      c2.moved && `${c2.moved} moved`
+    ].filter(Boolean);
+    return parts.length ? parts.join(" \xB7 ") : "No differences";
+  }
+  var MAX_CELLS = 4e6;
+  function tokens(text) {
+    return text.split(/(\s+)/).filter((t2) => t2 !== "");
+  }
+  function merge(parts) {
+    const out = [];
+    for (const p2 of parts) {
+      const last = out[out.length - 1];
+      if (last && last.kind === p2.kind) last.text += p2.text;
+      else out.push({ ...p2 });
+    }
+    return out;
+  }
+  function wordDiff(a2, b2) {
+    if (a2 === b2) return a2 ? [{ kind: "same", text: a2 }] : [];
+    const x2 = tokens(a2);
+    const y2 = tokens(b2);
+    let start = 0;
+    while (start < x2.length && start < y2.length && x2[start] === y2[start])
+      start++;
+    let endX = x2.length;
+    let endY = y2.length;
+    while (endX > start && endY > start && x2[endX - 1] === y2[endY - 1]) {
+      endX--;
+      endY--;
+    }
+    const head = start ? [{ kind: "same", text: x2.slice(0, start).join("") }] : [];
+    const tail = endX < x2.length ? [{ kind: "same", text: x2.slice(endX).join("") }] : [];
+    const xs = x2.slice(start, endX);
+    const ys = y2.slice(start, endY);
+    if (xs.length * ys.length > MAX_CELLS) {
+      return merge([
+        ...head,
+        { kind: "del", text: xs.join("") },
+        { kind: "ins", text: ys.join("") },
+        ...tail
+      ]).filter((p2) => p2.text);
+    }
+    const n3 = xs.length;
+    const m2 = ys.length;
+    const table = [];
+    for (let i3 = 0; i3 <= n3; i3++) table.push(new Uint32Array(m2 + 1));
+    for (let i3 = n3 - 1; i3 >= 0; i3--) {
+      for (let j3 = m2 - 1; j3 >= 0; j3--) {
+        table[i3][j3] = xs[i3] === ys[j3] ? table[i3 + 1][j3 + 1] + 1 : Math.max(table[i3 + 1][j3], table[i3][j3 + 1]);
+      }
+    }
+    const mid = [];
+    let i2 = 0;
+    let j2 = 0;
+    while (i2 < n3 && j2 < m2) {
+      if (xs[i2] === ys[j2]) {
+        mid.push({ kind: "same", text: xs[i2] });
+        i2++;
+        j2++;
+      } else if (table[i2 + 1][j2] >= table[i2][j2 + 1]) {
+        mid.push({ kind: "del", text: xs[i2++] });
+      } else {
+        mid.push({ kind: "ins", text: ys[j2++] });
+      }
+    }
+    while (i2 < n3) mid.push({ kind: "del", text: xs[i2++] });
+    while (j2 < m2) mid.push({ kind: "ins", text: ys[j2++] });
+    return merge([...head, ...mid, ...tail]);
+  }
+  function takeState(m2, row6) {
+    const p2 = m2.pairs[row6];
+    const liveLeft = m2.left.live && !m2.right.live;
+    const liveRight = m2.right.live && !m2.left.live;
+    if (!p2 || !(liveLeft || liveRight)) {
+      return {
+        enabled: false,
+        title: "One side must be the working copy to take a slide into it",
+        replace: false
+      };
+    }
+    const other = liveLeft ? m2.right : m2.left;
+    const theirs = liveLeft ? p2.right : p2.left;
+    const mine = liveLeft ? p2.left : p2.right;
+    if (theirs == null) {
+      return {
+        enabled: false,
+        title: `This slide is not in ${other.label}`,
+        replace: false
+      };
+    }
+    if (p2.status === "same") {
+      return {
+        enabled: false,
+        title: "Both versions are the same",
+        replace: true
+      };
+    }
+    return {
+      enabled: true,
+      title: mine == null ? `Insert ${other.label}'s slide into the working copy` : `Replace the working copy's slide with ${other.label}'s version (Ctrl+Z undoes it)`,
+      replace: mine != null
+    };
+  }
+  function mergeTarget(m2) {
+    if (m2.left.live && !m2.right.live) return m2.right.branch;
+    if (m2.right.live && !m2.left.live) return m2.left.branch;
+    return null;
+  }
+  async function mergeBranch(branch, send) {
+    const res = await send({ action: "worktree", op: "merge", branch });
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: String(res.error ?? `could not merge ${branch}`)
+      };
+    }
+    return {
+      ok: true,
+      historyCleared: res.historyCleared === true,
+      message: typeof res.message === "string" ? res.message : `Merged ${branch} into the working copy`
+    };
+  }
+  function swapSources(m2) {
+    return [m2.right.source, m2.left.source];
+  }
+  function newFontRules(fonts, present2) {
+    const rules = fonts.match(/@font-face\s*\{[^{}]*\}/g) ?? [];
+    return rules.filter((r2) => !present2.includes(r2)).join("\n");
+  }
+  function toSlideBox(r2, slide, vb) {
+    if (!slide.width || !slide.height || !r2.width && !r2.height) return null;
+    const sx = vb.w / slide.width;
+    const sy = vb.h / slide.height;
+    return [
+      vb.x + (r2.left - slide.left) * sx,
+      vb.y + (r2.top - slide.top) * sy,
+      r2.width * sx,
+      r2.height * sy
+    ];
+  }
+
+  // src/ts/editor/gitnotice.ts
+  var NOTICE_KEY = "inkflow-git-undo-notice";
+  var noticeShown = false;
+  function undoNoticeDue() {
+    try {
+      return sessionStorage.getItem(NOTICE_KEY) !== "1" && !noticeShown;
+    } catch {
+      return !noticeShown;
+    }
+  }
+  function undoNoticeShown() {
+    noticeShown = true;
+    try {
+      sessionStorage.setItem(NOTICE_KEY, "1");
+    } catch {
+    }
+  }
+  var UNDO_NOTICE = "Note: git changes the deck's files on disk, so the editor's undo and redo history is cleared afterwards (Ctrl+Z cannot go back past this point). You are told this once per session.";
+
+  // src/ts/editor/compare.ts
+  var view = document.getElementById("compare-view");
+  var model = null;
+  var viewId = 0;
+  var open2 = null;
+  var row3 = 0;
+  var focus = null;
+  var onlyChanges = readPref("inkflow-compare-only", "0") === "1";
+  var mode = readPref("inkflow-compare-mode", "side") || "side";
+  var outlines = readPref("inkflow-compare-outlines", "1") === "1";
+  var wipe = 50;
+  var error = null;
+  function readPref(key, fallback) {
+    try {
+      return localStorage.getItem(key) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  function writePref(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+    }
+  }
+  function openCompare(left, right, opts2 = {}) {
+    viewId += 1;
+    open2 = [left, right];
+    focus = opts2.focus ?? null;
+    error = null;
+    if (!model) {
+      view.hidden = false;
+      document.body.classList.add("compare-mode");
+      renderLoading("Building both versions\u2026");
+    } else {
+      view.classList.add("busy");
+    }
+    view.focus();
+    void whenConnected().then(
+      () => sendRaw({ type: "compare-open", view: viewId, left, right })
+    );
+  }
+  function closeCompare() {
+    if (view.hidden) return;
+    sendRaw({ type: "compare-close" });
+    model = null;
+    open2 = null;
+    view.hidden = true;
+    view.classList.remove("busy");
+    clear(view);
+    document.body.classList.remove("compare-mode");
+    document.getElementById("cmp-fonts")?.remove();
+    emit("slide");
+  }
+  function renderLoading(text) {
+    clear(view);
+    view.append(
+      h(
+        "div",
+        { class: "cmp-head" },
+        h("strong", { class: "cmp-title" }, "Compare"),
+        h("span", { class: "cmp-spacer" }),
+        closeButton()
+      ),
+      h("div", { class: "cmp-loading" }, text)
+    );
+  }
+  function closeButton() {
+    return h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn",
+        title: "Back to editing (Esc)",
+        onclick: () => closeCompare()
+      },
+      "Close"
+    );
+  }
+  var BASE_CSS = `
+:host { display: block; position: relative; }
+.cmp-root {
+    all: initial;
+    display: block;
+    width: 100%;
+    height: 100%;
+    /* A slide's text that names no font: the deck's body font, as on a slide. */
+    font-family: var(--inkflow-body-font);
+}
+.cmp-root > svg { display: block; width: 100%; height: 100%; }
+`;
+  var baseSheet = null;
+  var sideSheets = /* @__PURE__ */ new Map();
+  function sheets(side) {
+    if (!baseSheet) {
+      baseSheet = new CSSStyleSheet();
+      baseSheet.replaceSync(BASE_CSS);
+    }
+    let entry = sideSheets.get(side.token);
+    if (!entry || entry.css !== side.css) {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(side.css);
+      entry = { css: side.css, sheet };
+      sideSheets.set(side.token, entry);
+    }
+    return [baseSheet, entry.sheet];
+  }
+  function addFonts(side) {
+    if (!side.fonts) return;
+    let style = document.getElementById("cmp-fonts");
+    if (!style) {
+      style = h("style", { id: "cmp-fonts" });
+      document.head.append(style);
+    }
+    const present2 = (document.getElementById("deck-styles")?.textContent ?? "") + style.textContent;
+    const rules = newFontRules(side.fonts, present2);
+    if (rules) style.textContent += `
+${rules}`;
+  }
+  function slideView(side, slide, cls) {
+    const host5 = h("div", {
+      class: `cmp-slide ${cls}`
+    });
+    if (!slide?.svg) {
+      host5.classList.add("empty");
+      host5.textContent = slide ? "hidden slide" : `not in ${side.label || "this version"}`;
+      return host5;
+    }
+    const root2 = host5.attachShadow({ mode: "open" });
+    root2.adoptedStyleSheets = sheets(side);
+    const wrap2 = document.createElement("div");
+    wrap2.className = "cmp-root";
+    if (document.documentElement.dataset.theme === "light") {
+      wrap2.dataset.theme = "light";
+    }
+    wrap2.innerHTML = slide.svg;
+    const svg = wrap2.querySelector("svg");
+    if (svg) {
+      const vb = parseViewBox(svg.getAttribute("viewBox"));
+      svg.setAttribute("width", "100%");
+      svg.setAttribute("height", "100%");
+      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+      host5.style.aspectRatio = `${vb.w} / ${vb.h}`;
+      svg.querySelectorAll(".anim-pending").forEach((el2) => {
+        el2.classList.remove("anim-pending");
+      });
+      svg.querySelectorAll("video").forEach((v2) => {
+        v2.removeAttribute("autoplay");
+        v2.removeAttribute("controls");
+      });
+      scheduleFit(svg);
+      host5.svg = svg;
+    }
+    root2.append(wrap2);
+    return host5;
+  }
+  var thumbs2 = /* @__PURE__ */ new Map();
+  function thumb2(side, index) {
+    const slide = index != null ? side.slides[index] ?? null : null;
+    if (!slide) return h("div", { class: "cmp-thumb none" });
+    const key = `${side.token}\0${slide.svg ?? `hidden:${slide.id}`}`;
+    const cached = thumbs2.get(key);
+    if (cached && !cached.isConnected) return cached;
+    const el2 = slideView(side, slide, "cmp-thumb");
+    thumbs2.set(key, el2);
+    return el2;
+  }
+  function onModel(msg) {
+    if (msg.view !== viewId || view.hidden) return;
+    const next = msg;
+    const before = model;
+    row3 = before ? followRow(before, row3, next) : firstRow(next.pairs);
+    if (focus != null) {
+      const at3 = focusRow(next, focus);
+      if (at3 >= 0) row3 = at3;
+      focus = null;
+    }
+    model = next;
+    view.classList.remove("busy");
+    const tokens2 = /* @__PURE__ */ new Set([next.left.token, next.right.token]);
+    for (const key of [...thumbs2.keys()]) {
+      if (!tokens2.has(key.split("\0")[0])) thumbs2.delete(key);
+    }
+    addFonts(next.left);
+    addFonts(next.right);
+    render2();
+  }
+  function onError(msg) {
+    if (msg.for !== "compare-open" || msg.view !== viewId) return;
+    error = String(msg.message ?? "could not compare");
+    view.classList.remove("busy");
+    if (!model) {
+      renderLoading(`Cannot compare: ${error}`);
+      view.querySelector(".cmp-loading")?.classList.add("error");
+    } else {
+      toast(`Cannot compare: ${error}`, "error");
+    }
+  }
+  var listEl = null;
+  var mainEl = null;
+  function render2() {
+    if (!model) return;
+    const m2 = model;
+    clear(view);
+    const c2 = counts(m2.pairs);
+    const merge2 = mergeTarget(m2);
+    const only = h("input", { type: "checkbox" });
+    only.checked = onlyChanges;
+    only.addEventListener("change", () => {
+      onlyChanges = only.checked;
+      writePref("inkflow-compare-only", onlyChanges ? "1" : "0");
+      renderList2();
+    });
+    const head = h(
+      "div",
+      { class: "cmp-head" },
+      h("strong", { class: "cmp-title" }, "Compare"),
+      sideChip(m2.left, "left"),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "tb-btn cmp-swap",
+          title: "Swap the two sides",
+          onclick: () => {
+            const [l2, r2] = swapSources(m2);
+            openCompare(l2, r2);
+          }
+        },
+        "\u21C4"
+      ),
+      sideChip(m2.right, "right"),
+      h("span", { class: "cmp-counts" }, countText(c2)),
+      m2.deck.length ? h(
+        "span",
+        {
+          class: "cmp-deckdiff",
+          title: "Deck-wide settings that differ"
+        },
+        `Deck: ${m2.deck.map((s2) => s2.replace(/_/g, " ")).join(", ")}`
+      ) : null,
+      h("span", { class: "cmp-spacer" }),
+      h("label", { class: "cmp-only" }, only, "Only changes"),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "tb-btn",
+          title: "Previous change (P)",
+          onclick: () => jump(-1)
+        },
+        "\u2191"
+      ),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "tb-btn",
+          title: "Next change (N)",
+          onclick: () => jump(1)
+        },
+        "\u2193"
+      ),
+      merge2 ? h(
+        "button",
+        {
+          type: "button",
+          class: "pbtn",
+          title: `Merge ${merge2} into the working copy's branch`,
+          onclick: () => void merging(merge2)
+        },
+        "Merge branch"
+      ) : null,
+      closeButton()
+    );
+    listEl = h("div", { class: "cmp-list", role: "listbox" });
+    mainEl = h("div", { class: "cmp-main" });
+    view.append(head, h("div", { class: "cmp-body" }, listEl, mainEl));
+    renderList2();
+    renderMain();
+  }
+  function sideChip(side, which) {
+    const kind = side.kind === "live" ? "working copy" : side.kind === "commit" ? "commit" : "folder";
+    const notes = [
+      side.error ? `does not build: ${side.error}` : "",
+      side.missing.length ? `${side.missing.length} Git LFS file(s) missing` : ""
+    ].filter(Boolean);
+    return h(
+      "button",
+      {
+        type: "button",
+        class: `cmp-chip ${which}${side.error ? " error" : ""}`,
+        title: [
+          side.deckPath,
+          ...notes,
+          "Click to show something else on this side"
+        ].join("\n"),
+        onclick: () => void openComparePicker(which)
+      },
+      h("span", { class: "cmp-chip-kind" }, which === "left" ? "L" : "R"),
+      side.label,
+      side.kind !== "live" && side.kind !== "commit" ? h("span", { class: "hint" }, ` (${kind})`) : null,
+      notes.length ? h("span", { class: "cmp-warn" }, " \u26A0") : null
+    );
+  }
+  function renderList2() {
+    if (!model || !listEl) return;
+    const m2 = model;
+    clear(listEl);
+    const rows = visibleRows(m2.pairs, onlyChanges);
+    const broken = [m2.left, m2.right].filter((s2) => s2.error);
+    for (const s2 of broken) {
+      listEl.append(
+        h(
+          "div",
+          { class: "cmp-empty error" },
+          `${s2.label} does not build: ${s2.error}`
+        )
+      );
+    }
+    if (!rows.length && !broken.length) {
+      listEl.append(h("div", { class: "cmp-empty" }, "No differences"));
+    }
+    for (const i2 of rows) {
+      const p2 = m2.pairs[i2];
+      const b2 = badge2(p2);
+      const slide = rowSlide(m2, p2);
+      listEl.append(
+        h(
+          "div",
+          {
+            class: `cmp-row s-${b2.cls.replace(/ /g, " s-")}${i2 === row3 ? " active" : ""}`,
+            role: "option",
+            "data-row": i2,
+            title: `${b2.title}${p2.status === "changed" ? `: ${whatChanged(p2).join(", ")}` : ""}`,
+            onclick: () => selectRow(i2)
+          },
+          h(
+            "div",
+            { class: "cmp-row-head" },
+            h("span", { class: "cmp-num" }, rowNumber(m2, p2)),
+            h("span", { class: "cmp-id" }, slide?.id ?? ""),
+            b2.symbol ? h("span", { class: `cmp-badge ${b2.cls}` }, b2.symbol) : null
+          ),
+          h(
+            "div",
+            { class: "cmp-row-thumbs" },
+            thumb2(m2.left, p2.left),
+            thumb2(m2.right, p2.right)
+          )
+        )
+      );
+    }
+    revealRow();
+  }
+  function revealRow() {
+    const el2 = listEl?.querySelector(".cmp-row.active");
+    if (!listEl || !el2) return;
+    const top = el2.offsetTop;
+    if (top < listEl.scrollTop) listEl.scrollTop = top - 8;
+    else if (top + el2.offsetHeight > listEl.scrollTop + listEl.clientHeight) {
+      listEl.scrollTop = top + el2.offsetHeight - listEl.clientHeight + 8;
+    }
+  }
+  function selectRow(i2) {
+    if (!model || i2 < 0 || i2 >= model.pairs.length) return;
+    row3 = i2;
+    listEl?.querySelectorAll(".cmp-row").forEach((el2) => {
+      el2.classList.toggle(
+        "active",
+        Number(el2.getAttribute("data-row")) === i2
+      );
+    });
+    revealRow();
+    renderMain();
+  }
+  function jump(dir) {
+    if (!model) return;
+    const next = nextChange(model.pairs, row3, dir);
+    if (next == null) {
+      toast(dir > 0 ? "No more changes below" : "No more changes above");
+      return;
+    }
+    if (onlyChanges || isChange(model.pairs[next])) selectRow(next);
+  }
+  function step(dir) {
+    if (!model) return;
+    const rows = visibleRows(model.pairs, onlyChanges);
+    const at3 = rows.indexOf(row3);
+    const next = rows[at3 < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, at3 + dir))];
+    if (next != null) selectRow(next);
+  }
+  function renderMain() {
+    if (!model || !mainEl) return;
+    const m2 = model;
+    clear(mainEl);
+    const p2 = m2.pairs[row3];
+    if (!p2) {
+      mainEl.append(h("div", { class: "cmp-empty" }, "Nothing to compare"));
+      return;
+    }
+    const left = p2.left != null ? m2.left.slides[p2.left] ?? null : null;
+    const right = p2.right != null ? m2.right.slides[p2.right] ?? null : null;
+    const modes = h(
+      "div",
+      { class: "cmp-modes", role: "tablist" },
+      ...[
+        ["side", "Side by side", "1"],
+        ["slider", "Slider", "2"],
+        ["diff", "Difference", "3"]
+      ].map(
+        ([id, label4, key]) => h(
+          "button",
+          {
+            type: "button",
+            class: `seg${mode === id ? " on" : ""}`,
+            title: `${label4} (${key})`,
+            onclick: () => setMode(id)
+          },
+          label4
+        )
+      )
+    );
+    const outlineBox = h("input", { type: "checkbox" });
+    outlineBox.checked = outlines;
+    outlineBox.addEventListener("change", () => {
+      outlines = outlineBox.checked;
+      writePref("inkflow-compare-outlines", outlines ? "1" : "0");
+      renderMain();
+    });
+    const bar = h(
+      "div",
+      { class: "cmp-stagebar" },
+      modes,
+      h(
+        "label",
+        { class: "cmp-only", title: "Outline what changed (O)" },
+        outlineBox,
+        "Outline changes"
+      ),
+      h("span", { class: "cmp-spacer" }),
+      h(
+        "span",
+        { class: "cmp-legend" },
+        h("i", { class: "lg changed" }),
+        "changed ",
+        h("i", { class: "lg added" }),
+        "added ",
+        h("i", { class: "lg removed" }),
+        "removed"
+      )
+    );
+    const stage = h("div", { class: `cmp-stage mode-${mode}` });
+    const both = left?.svg && right?.svg;
+    if (mode === "side" || !both) {
+      stage.classList.add("mode-side");
+      stage.append(
+        pane(m2.left, left, p2, "left", rowNumberOf(left)),
+        pane(m2.right, right, p2, "right", rowNumberOf(right))
+      );
+    } else {
+      stage.append(stacked(m2, left, right, p2));
+    }
+    mainEl.append(bar, stage, info(m2, p2, left, right));
+  }
+  function rowNumberOf(s2) {
+    if (!s2) return "";
+    return `${s2.number != null ? `${s2.number} \xB7 ` : "hidden \xB7 "}${s2.id}`;
+  }
+  function setMode(next) {
+    mode = next;
+    writePref("inkflow-compare-mode", mode);
+    renderMain();
+  }
+  function pane(side, slide, p2, which, caption) {
+    const frame = h("div", { class: "cmp-frame" });
+    const sv = slideView(side, slide, "cmp-big");
+    frame.append(sv);
+    if (outlines && sv.svg) {
+      const marks = p2.elements.filter(
+        (e2) => which === "left" ? e2.left : e2.right
+      );
+      afterLayout(() => drawOutlines(frame, sv.svg, marks, which));
+    }
+    return h(
+      "div",
+      { class: `cmp-pane ${which}` },
+      h(
+        "div",
+        { class: "cmp-pane-label" },
+        h("span", { class: "cmp-chip-kind" }, which === "left" ? "L" : "R"),
+        side.label,
+        caption ? h("span", { class: "hint" }, `  ${caption}`) : null
+      ),
+      frame
+    );
+  }
+  function stacked(m2, left, right, p2) {
+    const frame = h("div", { class: "cmp-frame stacked" });
+    const a2 = slideView(m2.left, left, "cmp-big under");
+    const b2 = slideView(m2.right, right, "cmp-big over");
+    frame.append(a2, b2);
+    if (mode === "slider") {
+      const handle2 = h("div", { class: "cmp-handle" });
+      const place = () => {
+        b2.style.clipPath = `inset(0 0 0 ${wipe}%)`;
+        handle2.style.left = `${wipe}%`;
+      };
+      place();
+      frame.append(handle2);
+      const move = (e2) => {
+        const r2 = frame.getBoundingClientRect();
+        wipe = Math.max(
+          0,
+          Math.min(100, (e2.clientX - r2.left) / r2.width * 100)
+        );
+        place();
+      };
+      frame.addEventListener("pointerdown", (e2) => {
+        frame.setPointerCapture(e2.pointerId);
+        move(e2);
+        frame.addEventListener("pointermove", move);
+      });
+      frame.addEventListener(
+        "pointerup",
+        () => frame.removeEventListener("pointermove", move)
+      );
+    }
+    if (outlines && b2.svg) {
+      const marks = p2.elements;
+      afterLayout(() => {
+        if (b2.svg) drawOutlines(frame, b2.svg, marks, "right", a2.svg);
+      });
+    }
+    const caption = mode === "slider" ? h(
+      "div",
+      { class: "cmp-pane-label" },
+      h("span", { class: "cmp-chip-kind" }, "L"),
+      `${m2.left.label}  \u25C0 drag \u25B6  `,
+      h("span", { class: "cmp-chip-kind" }, "R"),
+      m2.right.label
+    ) : h(
+      "div",
+      { class: "cmp-pane-label" },
+      "Difference: what is the same turns black, what differs lights up"
+    );
+    return h("div", { class: "cmp-pane wide" }, caption, frame);
+  }
+  function afterLayout(fn) {
+    requestAnimationFrame(() => requestAnimationFrame(fn));
+  }
+  function locate(svg, loc) {
+    let el2 = svg;
+    for (const i2 of loc.path) {
+      el2 = el2?.children[i2] ?? null;
+      if (!el2) break;
+    }
+    if (el2 && el2 !== svg && el2.localName.toLowerCase() === loc.tag.toLowerCase()) {
+      const box = toSlideBox(
+        el2.getBoundingClientRect(),
+        svg.getBoundingClientRect(),
+        parseViewBox(svg.getAttribute("viewBox"))
+      );
+      if (box && box[2] > 0 && box[3] > 0) return box;
+    }
+    return loc.box;
+  }
+  var SVG_NS2 = "http://www.w3.org/2000/svg";
+  function drawOutlines(frame, svg, marks, which, leftSvg) {
+    if (!frame.isConnected || !marks.length) return;
+    const vb = parseViewBox(svg.getAttribute("viewBox"));
+    const layer2 = document.createElementNS(SVG_NS2, "svg");
+    layer2.setAttribute("class", "cmp-outlines");
+    layer2.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+    layer2.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    const pad2 = Math.max(vb.w, vb.h) / 240;
+    const draw = (target, loc, cls, label4) => {
+      const box = loc ? locate(target, loc) : null;
+      if (!box) return;
+      const rect = document.createElementNS(SVG_NS2, "rect");
+      rect.setAttribute("x", String(box[0] - pad2));
+      rect.setAttribute("y", String(box[1] - pad2));
+      rect.setAttribute("width", String(box[2] + 2 * pad2));
+      rect.setAttribute("height", String(box[3] + 2 * pad2));
+      rect.setAttribute("rx", String(pad2));
+      rect.setAttribute("class", `mark ${cls}`);
+      const title3 = document.createElementNS(SVG_NS2, "title");
+      title3.textContent = label4;
+      rect.append(title3);
+      layer2.append(rect);
+    };
+    for (const mark of marks) {
+      const label4 = `${mark.change}${mark.id ? ` #${mark.id}` : ""}${mark.text ? `: ${mark.text}` : ""}`;
+      if (leftSvg) {
+        if (mark.left && mark.change !== "added") {
+          draw(
+            leftSvg,
+            mark.left,
+            `${mark.change} before`,
+            `${label4} (left)`
+          );
+        }
+        if (mark.right) draw(svg, mark.right, mark.change, label4);
+        continue;
+      }
+      draw(
+        svg,
+        which === "left" ? mark.left : mark.right,
+        mark.change,
+        label4
+      );
+    }
+    frame.append(layer2);
+  }
+  function info(m2, p2, left, right) {
+    const b2 = badge2(p2);
+    const take2 = takeState(m2, row3);
+    const what = p2.status === "changed" ? whatChanged(p2) : [];
+    const summary2 = p2.status === "added" ? `Only in ${m2.right.label}` : p2.status === "removed" ? `Only in ${m2.left.label}` : p2.status === "same" ? p2.moved ? "The same slide, moved" : "No differences" : `${p2.moved ? "Moved, and changed: " : "Changed: "}${what.join(", ")}`;
+    const box = h(
+      "div",
+      { class: "cmp-info" },
+      h(
+        "div",
+        { class: "cmp-info-head" },
+        b2.symbol ? h("span", { class: `cmp-badge ${b2.cls}` }, b2.symbol) : null,
+        h("strong", {}, summary2),
+        h("span", { class: "cmp-spacer" }),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "pbtn primary",
+            disabled: !take2.enabled,
+            title: take2.title,
+            onclick: () => void taking()
+          },
+          "Take this slide"
+        )
+      )
+    );
+    if (p2.files.length) {
+      box.append(
+        h("h4", {}, "Files"),
+        h(
+          "div",
+          { class: "cmp-files" },
+          ...p2.files.map(
+            (f2) => h(
+              "div",
+              { class: "cmp-file" },
+              h("span", { class: `cmp-fstat ${f2.change}` }, f2.change),
+              h("code", {}, f2.path),
+              h("span", { class: "hint" }, f2.role)
+            )
+          )
+        )
+      );
+    }
+    if (p2.settings.length) {
+      box.append(
+        h("h4", {}, "In deck.py"),
+        h(
+          "div",
+          { class: "cmp-settings" },
+          p2.settings.map((s2) => s2.replace(/_/g, " ")).join(", ")
+        )
+      );
+    }
+    if (p2.elements.length) {
+      const n3 = (k2) => p2.elements.filter((e2) => e2.change === k2).length;
+      box.append(
+        h(
+          "div",
+          { class: "hint cmp-elcount" },
+          `Elements: ${n3("changed")} changed, ${n3("added")} added, ${n3("removed")} removed`
+        )
+      );
+    }
+    if (left || right) {
+      const a2 = left?.notes ?? "";
+      const bText = right?.notes ?? "";
+      const parts = wordDiff(a2, bText);
+      box.append(
+        h("h4", {}, p2.notes ? "Speaker notes (changed)" : "Speaker notes"),
+        parts.length ? h(
+          "div",
+          { class: "cmp-notes" },
+          ...parts.map(
+            (part) => part.kind === "same" ? document.createTextNode(part.text) : h(part.kind, {}, part.text)
+          )
+        ) : h("div", { class: "hint" }, "No notes")
+      );
+    }
+    return box;
+  }
+  async function taking() {
+    if (!model) return;
+    const m2 = model;
+    const p2 = m2.pairs[row3];
+    const state = takeState(m2, row3);
+    if (!p2 || !state.enabled) return;
+    const other = m2.left.live ? m2.right : m2.left;
+    const files2 = p2.files.map((f2) => `  ${f2.path}`).join("\n");
+    const question = state.replace ? `Replace this slide in the working copy with ${other.label}'s version?${files2 ? `
+
+Files written:
+${files2}` : ""}
+
+Ctrl+Z takes it back.` : `Insert ${other.label}'s slide into the working copy?`;
+    if (!confirm(question)) return;
+    const res = await edit({
+      action: "compare-take",
+      pair: row3,
+      left: p2.left,
+      right: p2.right
+    });
+    if (res.ok) {
+      const stepNo = res.step;
+      toast(String(res.label ?? "Took the slide"), "ok", {
+        label: "Undo",
+        run: () => void edit({
+          action: "undo",
+          ...typeof stepNo === "number" ? { step: stepNo } : {}
+        })
+      });
+    }
+  }
+  async function merging(branch) {
+    const notice = undoNoticeDue();
+    const question = `Merge ${branch} into the working copy's branch? Commit or discard your own changes first; git refuses a merge that would overwrite them.`;
+    if (!confirm(notice ? `${question}
+
+${UNDO_NOTICE}` : question)) {
+      return;
+    }
+    if (notice) undoNoticeShown();
+    view.classList.add("busy");
+    const res = await mergeBranch(branch, request);
+    view.classList.remove("busy");
+    if (!res.ok) {
+      toast(res.error ?? `Could not merge ${branch}`, "error");
+      return;
+    }
+    if (res.historyCleared) {
+      ed.canUndo = false;
+      ed.canRedo = false;
+      emit("history");
+    }
+    toast(res.message ?? `Merged ${branch}`, "ok");
+  }
+  var sourcesWaiting = null;
+  function fetchSources() {
+    return new Promise((resolve) => {
+      sourcesWaiting = resolve;
+      sendRaw({ type: "compare-sources" });
+    });
+  }
+  var LIVE = { kind: "live" };
+  async function openComparePicker(side = null) {
+    await whenConnected();
+    const data = await fetchSources();
+    const current3 = model;
+    const pick2 = (chosen) => {
+      closeDialog();
+      if (side && current3) {
+        const [l2, r2] = [current3.left.source, current3.right.source];
+        openCompare(
+          side === "left" ? chosen : l2,
+          side === "right" ? chosen : r2
+        );
+      } else {
+        openCompare(LIVE, chosen);
+      }
+    };
+    const sections2 = [];
+    if (side) {
+      sections2.push(
+        h(
+          "div",
+          { class: "btn-row" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => pick2(LIVE)
+            },
+            "The working copy"
+          )
+        )
+      );
+    }
+    if (data.repo) {
+      const rev = h("input", {
+        type: "text",
+        placeholder: "HEAD~2, a tag, a sha\u2026",
+        spellcheck: "false"
+      });
+      const go = () => {
+        if (rev.value.trim())
+          pick2({ kind: "commit", rev: rev.value.trim() });
+      };
+      rev.addEventListener("keydown", (e2) => {
+        if (e2.key === "Enter") {
+          e2.preventDefault();
+          go();
+        }
+      });
+      const others2 = (data.worktrees ?? []).filter(
+        (w2) => !w2.current && w2.deck
+      );
+      const inTree = new Set(others2.map((w2) => w2.branch));
+      const branches = (data.branches ?? []).filter(
+        (b2) => b2 !== data.branch && !inTree.has(b2)
+      );
+      if (others2.length || branches.length) {
+        sections2.push(
+          h("h3", {}, "A branch or worktree"),
+          h(
+            "div",
+            { class: "git-list" },
+            ...others2.map(
+              (w2) => h(
+                "div",
+                { class: "git-row" },
+                h(
+                  "div",
+                  { class: "git-commit" },
+                  h("strong", {}, w2.branch ?? "(detached)"),
+                  h(
+                    "span",
+                    { class: "hint" },
+                    `worktree \xB7 ${w2.path}`
+                  )
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    onclick: () => pick2({
+                      kind: "path",
+                      deck: w2.deck,
+                      ...w2.branch ? { label: w2.branch } : {}
+                    })
+                  },
+                  "Compare"
+                )
+              )
+            ),
+            ...branches.map(
+              (b2) => h(
+                "div",
+                { class: "git-row" },
+                h(
+                  "div",
+                  { class: "git-commit" },
+                  h("strong", {}, b2),
+                  h("span", { class: "hint" }, "branch")
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    onclick: () => pick2({ kind: "branch", name: b2 })
+                  },
+                  "Compare"
+                )
+              )
+            )
+          )
+        );
+      }
+      sections2.push(
+        h("h3", {}, "A commit"),
+        h(
+          "div",
+          { class: "git-list history cmp-commits" },
+          ...(data.commits ?? []).map(
+            (c2) => h(
+              "div",
+              { class: `git-row${c2.head ? " current" : ""}` },
+              h(
+                "div",
+                { class: "git-commit" },
+                h("strong", {}, c2.subject),
+                h(
+                  "span",
+                  { class: "hint" },
+                  `${c2.short} \xB7 ${c2.author} \xB7 ${c2.when}${c2.refs.length ? ` \xB7 ${c2.refs.join(", ")}` : ""}`
+                )
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  class: "pbtn",
+                  onclick: () => pick2({ kind: "commit", rev: c2.sha })
+                },
+                "Compare"
+              )
+            )
+          )
+        ),
+        h(
+          "div",
+          { class: "btn-row" },
+          rev,
+          h(
+            "button",
+            { type: "button", class: "pbtn", onclick: go },
+            "Compare"
+          )
+        )
+      );
+    }
+    const folderBtn = h(
+      "button",
+      { type: "button", class: "pbtn primary", disabled: true },
+      "Compare with this deck"
+    );
+    const start = (ed.model?.projectDir ?? "").replace(/[\\/][^\\/]*$/, "");
+    const picker = folderPicker(start, (f2) => {
+      folderBtn.disabled = !f2.isDeck;
+      folderBtn.textContent = f2.isDeck ? "Compare with this deck" : "No deck.py in this folder";
+    });
+    folderBtn.addEventListener("click", () => {
+      const f2 = picker.current();
+      if (f2?.isDeck)
+        pick2({ kind: "path", deck: joinPath(f2.path, "deck.py") });
+    });
+    sections2.push(
+      h("h3", {}, "Another deck folder"),
+      picker.el,
+      h("div", { class: "btn-row end" }, folderBtn)
+    );
+    openDialog(
+      side ? `Show on the ${side}\u2026` : "Compare the working copy with\u2026",
+      h("div", { class: "git-form cmp-picker" }, ...sections2),
+      { large: true }
+    );
+  }
+  function onKey(e2) {
+    if (view.hidden) return;
+    const target = e2.target;
+    const typing = target.closest(
+      "input:not([type=checkbox]):not([type=radio]), textarea, select, #dialog"
+    );
+    if (dialogOpen() || typing) {
+      return;
+    }
+    const mod = e2.ctrlKey || e2.metaKey;
+    if (mod && ["z", "y"].includes(e2.key.toLowerCase())) return;
+    const handled = () => {
+      e2.preventDefault();
+      e2.stopPropagation();
+    };
+    switch (e2.key) {
+      case "Escape":
+        handled();
+        closeCompare();
+        return;
+      case "ArrowDown":
+        handled();
+        step(1);
+        return;
+      case "ArrowUp":
+        handled();
+        step(-1);
+        return;
+      case "n":
+      case "N":
+        handled();
+        jump(1);
+        return;
+      case "p":
+      case "P":
+        handled();
+        jump(-1);
+        return;
+      case "1":
+        handled();
+        setMode("side");
+        return;
+      case "2":
+        handled();
+        setMode("slider");
+        return;
+      case "3":
+        handled();
+        setMode("diff");
+        return;
+      case "o":
+      case "O":
+        handled();
+        outlines = !outlines;
+        writePref("inkflow-compare-outlines", outlines ? "1" : "0");
+        renderMain();
+        return;
+    }
+    e2.stopPropagation();
+  }
+  function initCompare() {
+    onMessage("compare-model", onModel);
+    onMessage("compare-error", (msg) => {
+      if (msg.for === "compare-sources") {
+        toast(String(msg.message ?? "cannot list versions"), "error");
+        sourcesWaiting?.({ repo: false });
+        sourcesWaiting = null;
+        return;
+      }
+      onError(msg);
+    });
+    onMessage("compare-sources", (msg) => {
+      sourcesWaiting?.(msg);
+      sourcesWaiting = null;
+    });
+    onConnect(() => {
+      if (open2 && !view.hidden) {
+        viewId += 1;
+        sendRaw({
+          type: "compare-open",
+          view: viewId,
+          left: open2[0],
+          right: open2[1]
+        });
+      }
+    });
+    document.addEventListener("keydown", onKey, true);
+    new MutationObserver(() => {
+      if (!model || view.hidden) return;
+      thumbs2.clear();
+      render2();
+    }).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"]
+    });
+    document.addEventListener("inkflow:compare", (e2) => {
+      const detail = e2.detail;
+      if (!detail?.deck) return;
+      openCompare(LIVE, {
+        kind: detail.kind ?? "path",
+        deck: detail.deck,
+        ...detail.label ? { label: detail.label } : {}
+      });
+    });
+    const params = new URLSearchParams(location.search);
+    const spec = params.get("compare");
+    if (spec) {
+      params.delete("compare");
+      const query2 = params.toString();
+      try {
+        history.replaceState(
+          null,
+          "",
+          `${location.pathname}${query2 ? `?${query2}` : ""}${location.hash}`
+        );
+      } catch {
+      }
+      openCompare(LIVE, { kind: "spec", spec });
+    }
+  }
+
+  // src/ts/editor/packtext.ts
+  function missingLines(summary2) {
+    return summary2.items.filter((i2) => i2.fixable).map((i2) => i2.message);
+  }
+  function consequences(summary2) {
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    for (const item2 of summary2.items.filter((i2) => i2.fixable)) {
+      const line = sentence(item2.consequence);
+      if (!seen.has(line)) {
+        seen.add(line);
+        out.push(line);
+      }
+    }
+    return out;
+  }
+  function remainingLines(items2) {
+    return items2.filter((i2) => !i2.fixable).map((i2) => sentence(i2.message));
+  }
+  function withoutPackingTitle(summary2) {
+    const all = consequences(summary2);
+    if (!all.length) return "Commit as it is";
+    const more = all.length > 1 ? ` (and ${all.length - 1} more)` : "";
+    return `Not recommended: ${all[0]}${more}`;
+  }
+  function sentence(text) {
+    const t2 = text.trim();
+    if (!t2) return t2;
+    const first = t2[0].toUpperCase() + t2.slice(1);
+    return /[.!?]$/.test(first) ? first : `${first}.`;
+  }
+  function commitPaths(ticked, packed) {
+    return [.../* @__PURE__ */ new Set([...ticked, ...packed])];
+  }
+
+  // src/ts/editor/pack.ts
+  var PACK_HELP = "Make the deck self-contained: fonts, outside files, lock file, git rules \u2014 so it looks the same on every machine";
+  async function packCheck() {
+    const res = await request({ action: "pack", op: "check" });
+    return res.ok ? res.pack : null;
+  }
+  async function applyPack() {
+    const res = await edit({ action: "pack", op: "apply" });
+    if (!res.ok) return null;
+    const lock = res.lock;
+    if (typeof lock === "string" && !lock.startsWith("uv.lock written")) {
+      toast(lock, "info");
+    }
+    const changes2 = res.changes ?? [];
+    return {
+      gitPaths: res.gitPaths ?? [],
+      changed: changes2.map((c2) => `${c2.change}: ${c2.path}`),
+      remaining: res.remaining ?? []
+    };
+  }
+  function list(lines, cls = "pack-list") {
+    return h("ul", { class: cls }, ...lines.map((l2) => h("li", {}, l2)));
+  }
+  function commitGate(summary2, packAndCommit, commitAnyway) {
+    const remaining = remainingLines(summary2.items);
+    const busy = (b2) => {
+      for (const btn of box.querySelectorAll("button"))
+        btn.disabled = b2;
+    };
+    const primary = h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn primary",
+        "data-pack": "pack-and-commit",
+        onclick: async () => {
+          busy(true);
+          await packAndCommit();
+          busy(false);
+        }
+      },
+      "Pack and commit"
+    );
+    const box = openDialog(
+      "Commit: pack the deck first?",
+      h(
+        "div",
+        { class: "git-form pack-gate" },
+        h(
+          "p",
+          {},
+          "This deck depends on this computer, so it will not look the same elsewhere:"
+        ),
+        list(missingLines(summary2)),
+        h(
+          "p",
+          { class: "hint" },
+          "Packing copies what is missing into the deck and adds the files it writes to this commit."
+        ),
+        h(
+          "div",
+          { class: "pack-without" },
+          h(
+            "p",
+            { class: "hint warn" },
+            "Without packing, on other machines:"
+          ),
+          list(consequences(summary2), "pack-list warn")
+        ),
+        remaining.length ? h(
+          "details",
+          { class: "pack-remaining" },
+          h("summary", {}, "Packing cannot change"),
+          list(remaining)
+        ) : null,
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              "data-pack": "commit-anyway",
+              title: withoutPackingTitle(summary2),
+              onclick: async () => {
+                busy(true);
+                await commitAnyway();
+                busy(false);
+              }
+            },
+            "Commit without packing (not recommended)"
+          ),
+          primary
+        )
+      ),
+      { wide: true }
+    );
+    primary.focus();
+  }
+  async function openPackDialog() {
+    const body3 = h(
+      "div",
+      { class: "git-form pack-dialog" },
+      h("p", { class: "hint" }, "Checking the deck\u2026")
+    );
+    openDialog("Pack deck", body3, { wide: true, hint: PACK_HELP });
+    const res = await request({ action: "pack", op: "plan" });
+    if (!body3.isConnected) return;
+    body3.replaceChildren();
+    if (!res.ok) {
+      body3.append(h("p", { class: "hint warn" }, res.error ?? "cannot pack"));
+      return;
+    }
+    const summary2 = res.pack;
+    const remaining = remainingLines(summary2.items);
+    const copies = summary2.assets?.copies ?? [];
+    const warnings2 = summary2.fonts?.warnings ?? [];
+    if (!summary2.steps.length) {
+      body3.append(
+        h(
+          "p",
+          {},
+          "Nothing to pack: everything this deck needs is in its folder."
+        )
+      );
+    } else {
+      body3.append(h("p", {}, "Packing will:"), list(summary2.steps));
+      if (copies.length) {
+        body3.append(
+          h(
+            "details",
+            {},
+            h("summary", {}, `Files copied in (${copies.length})`),
+            list(copies.map((c2) => `${c2.from} \u2192 ${c2.to}`))
+          )
+        );
+      }
+    }
+    if (warnings2.length) {
+      body3.append(
+        h("p", { class: "hint warn" }, "Font licences:"),
+        list(warnings2, "pack-list warn")
+      );
+    }
+    if (remaining.length) {
+      body3.append(
+        h(
+          "p",
+          { class: "hint" },
+          "Still depends on the machine afterwards:"
+        ),
+        list(remaining)
+      );
+    }
+    const pack = h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn primary",
+        "data-pack": "pack",
+        onclick: async () => {
+          pack.disabled = true;
+          const done = await applyPack();
+          if (!done) {
+            pack.disabled = false;
+            return;
+          }
+          showResult(done);
+        }
+      },
+      "Pack"
+    );
+    pack.disabled = !summary2.steps.length;
+    body3.append(
+      h(
+        "div",
+        { class: "btn-row end" },
+        h(
+          "button",
+          { type: "button", class: "pbtn", onclick: () => closeDialog() },
+          summary2.steps.length ? "Cancel" : "Close"
+        ),
+        pack
+      )
+    );
+    if (summary2.steps.length) pack.focus();
+  }
+  function showResult(done) {
+    const remaining = remainingLines(done.remaining);
+    openDialog(
+      "Deck packed",
+      h(
+        "div",
+        { class: "git-form pack-dialog" },
+        done.changed.length ? h(
+          "div",
+          {},
+          h(
+            "p",
+            {},
+            "Packed (one step: Ctrl+Z takes it back). Commit these files to share them:"
+          ),
+          list(done.changed)
+        ) : h("p", {}, "Packed: nothing needed changing."),
+        remaining.length ? h(
+          "div",
+          {},
+          h(
+            "p",
+            { class: "hint" },
+            "Still depends on the machine:"
+          ),
+          list(remaining)
+        ) : h(
+          "p",
+          { class: "hint" },
+          "Nothing else depends on this machine."
+        ),
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              onclick: () => closeDialog()
+            },
+            "Done"
+          )
+        )
+      ),
+      { wide: true }
+    );
+  }
+
+  // src/ts/editor/publishtext.ts
+  function defaultHost(info4) {
+    return info4.configured?.host ?? info4.suggested ?? "github";
+  }
+  function filesFor(info4, host5, release) {
+    return info4.hosts[host5].files.filter((f2) => release || !f2.release);
+  }
+  function fileAction(file) {
+    if (file.exists === "inkflow") return "update";
+    if (file.exists === "other") return "replace";
+    return "new";
+  }
+  function linkParts(text) {
+    const parts = [];
+    const re2 = /https?:\/\/[^\s)]+[^\s).,;]/g;
+    let last = 0;
+    for (const m2 of text.matchAll(re2)) {
+      const at3 = m2.index ?? 0;
+      if (at3 > last) parts.push({ text: text.slice(last, at3) });
+      parts.push({ url: m2[0] });
+      last = at3 + m2[0].length;
+    }
+    if (last < text.length) parts.push({ text: text.slice(last) });
+    return parts;
+  }
+
+  // src/ts/editor/publish.ts
+  var HOST_NAMES = {
+    github: "GitHub Pages",
+    gitlab: "GitLab Pages"
+  };
+  function linked(text) {
+    return h(
+      "span",
+      {},
+      ...linkParts(text).map(
+        (p2) => "url" in p2 ? h(
+          "a",
+          { href: p2.url, target: "_blank", rel: "noopener" },
+          p2.url
+        ) : p2.text
+      )
+    );
+  }
+  function fileRow(action, path) {
+    const tone = action === "new" ? "new" : action === "replace" ? "deleted" : "modified";
+    return h(
+      "div",
+      { class: "git-file" },
+      h("span", { class: `git-status s-${tone}` }, action),
+      h("code", { class: "git-path" }, path)
+    );
+  }
+  function address(url, note) {
+    return h(
+      "div",
+      { class: "publish-url" },
+      url ? h("a", { href: url, target: "_blank", rel: "noopener" }, url) : h("span", { class: "hint" }, "not known yet"),
+      note ? h("p", { class: "hint publish-note" }, `(${note})`) : null
+    );
+  }
+  async function openPublishDialog(commit, canPush) {
+    const res = await request({ action: "publish", op: "status" });
+    if (!res.ok) {
+      toast(res.error ?? "could not read the publishing setup", "error");
+      return;
+    }
+    const info4 = res.publish;
+    let host5 = defaultHost(info4);
+    const release = h("input", { type: "checkbox" });
+    release.checked = info4.configured?.release ?? false;
+    const readme = h("input", { type: "checkbox" });
+    readme.checked = info4.readme === "missing";
+    const hostButtons = ["github", "gitlab"].map((value) => {
+      const radio = h("input", {
+        type: "radio",
+        name: "publish-host",
+        value
+      });
+      radio.checked = value === host5;
+      radio.addEventListener("change", () => {
+        host5 = value;
+        update();
+      });
+      return h(
+        "label",
+        { class: "look" },
+        radio,
+        h(
+          "span",
+          { class: "look-text" },
+          h("strong", {}, HOST_NAMES[value]),
+          h(
+            "span",
+            { class: "hint" },
+            value === "github" ? "A workflow in .github/workflows/" : "A pages job in .gitlab-ci.yml"
+          )
+        )
+      );
+    });
+    const files2 = h("div", { class: "git-files" });
+    const where = h("div", {});
+    const notes = h("div", { class: "publish-notes" });
+    const write2 = h(
+      "button",
+      { type: "button", class: "pbtn primary", onclick: () => void run() },
+      "Write files"
+    );
+    release.addEventListener("change", () => update());
+    readme.addEventListener("change", () => update());
+    function update() {
+      const hostInfo = info4.hosts[host5];
+      const list4 = filesFor(info4, host5, release.checked);
+      const rows = list4.map((f2) => fileRow(fileAction(f2), f2.path));
+      if (readme.checked && info4.readme !== "linked") {
+        const missing = info4.readme === "missing";
+        rows.push(fileRow(missing ? "new" : "link", "README.md"));
+      }
+      files2.replaceChildren(...rows);
+      where.replaceChildren(address(hostInfo.url, hostInfo.note));
+      notes.replaceChildren(
+        ...[...hostInfo.warnings, ...info4.fonts].map(
+          (w2) => h("p", { class: "hint warn publish-note" }, w2)
+        )
+      );
+      write2.textContent = list4.some((f2) => f2.exists !== "none") ? "Update files" : "Write files";
+    }
+    async function run() {
+      const list4 = filesFor(info4, host5, release.checked);
+      const theirs = list4.filter((f2) => f2.exists === "other");
+      if (theirs.length && !confirm(
+        `${theirs.map((f2) => f2.path).join(", ")} exists already and was not written by inkflow. Replace it?`
+      ))
+        return;
+      write2.disabled = true;
+      const out = await edit({
+        action: "publish",
+        op: "setup",
+        host: host5,
+        release: release.checked,
+        readme: readme.checked,
+        force: list4.some((f2) => f2.exists !== "none")
+      });
+      write2.disabled = false;
+      if (!out.ok) return;
+      done(out);
+    }
+    function done(out) {
+      const written = out.written ?? [];
+      const steps = out.steps ?? [];
+      const url = out.url ?? null;
+      const note = out.note ?? null;
+      const message = `Publish the slides on ${HOST_NAMES[host5]}`;
+      const commitBtn = (push) => h(
+        "button",
+        {
+          type: "button",
+          class: push ? "pbtn" : "pbtn primary",
+          onclick: async () => {
+            if (await commit(written, message, push)) closeDialog();
+          }
+        },
+        push ? "Commit and push" : "Commit"
+      );
+      openDialog(
+        `Publishing on ${HOST_NAMES[host5]}`,
+        h(
+          "div",
+          { class: "git-form publish-form" },
+          h(
+            "div",
+            { class: "field" },
+            h("span", { class: "field-label" }, "Written"),
+            h(
+              "div",
+              { class: "git-files" },
+              ...written.map(
+                (p2) => h("code", { class: "git-path" }, p2)
+              )
+            )
+          ),
+          h(
+            "div",
+            { class: "field" },
+            h("span", { class: "field-label" }, "Address"),
+            address(url, note)
+          ),
+          h(
+            "div",
+            { class: "field" },
+            h("span", { class: "field-label" }, "Next"),
+            h(
+              "ol",
+              { class: "publish-steps" },
+              ...steps.map((s2) => h("li", {}, linked(s2)))
+            )
+          ),
+          h(
+            "div",
+            { class: "btn-row end" },
+            h(
+              "button",
+              {
+                type: "button",
+                class: "pbtn",
+                onclick: () => closeDialog()
+              },
+              "Later"
+            ),
+            written.length > 0 && canPush && commitBtn(true),
+            written.length > 0 && commitBtn(false)
+          )
+        ),
+        { wide: true }
+      );
+    }
+    update();
+    openDialog(
+      "Publish the slides",
+      h(
+        "div",
+        { class: "git-form publish-form" },
+        h(
+          "p",
+          { class: "hint" },
+          `Every push to ${info4.branch} builds the deck with inkflow build and puts it online. The files below go in the repository${info4.scope ? ` (at its root, ${info4.root})` : ""}: commit and push them.`
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Host"),
+          h("div", { class: "look-list" }, ...hostButtons)
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Also"),
+          h(
+            "div",
+            {},
+            h(
+              "label",
+              { class: "check-row" },
+              release,
+              "Publish a release at every tag v\u2026 (the slides as one HTML file and a PDF)"
+            ),
+            info4.readme !== "linked" && h(
+              "label",
+              { class: "check-row" },
+              readme,
+              info4.readme === "missing" ? "Write a README.md that links to the slides" : "Add a link to the slides to README.md"
+            )
+          )
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Files"),
+          files2
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Address"),
+          where
+        ),
+        notes,
+        h("div", { class: "btn-row end" }, write2)
+      ),
+      { wide: true, hint: info4.remote ?? "no remote yet" }
+    );
+  }
+
+  // src/ts/editor/worktreetext.ts
+  function branchName(wt) {
+    return wt.branch ?? `@${wt.head}`;
+  }
+  function summary(wt) {
+    const parts = [
+      wt.ahead ? `${wt.ahead} ahead` : "",
+      wt.behind ? `${wt.behind} behind` : "",
+      wt.dirty ? "uncommitted changes" : "",
+      wt.deck ? "" : "no deck"
+    ].filter(Boolean);
+    return parts.length ? parts.join(" \xB7 ") : "up to date";
+  }
+  function deckDir(deck) {
+    const cut2 = Math.max(deck.lastIndexOf("/"), deck.lastIndexOf("\\"));
+    return cut2 > 0 ? deck.slice(0, cut2) : deck;
+  }
+  function shellQuote(path) {
+    return /^[\w@%+=:,./\\-]+$/.test(path) ? path : `'${path.replace(/'/g, "'\\''")}'`;
+  }
+  function agentPrompt(wt) {
+    const deck = wt.deck ?? `${wt.path}/deck.py`;
+    return [
+      `Work on this deck in the git worktree ${wt.path} (branch ${branchName(wt)}), not in the deck I have open.`,
+      `Pass --deck ${shellQuote(deck)} to every inkflow command, change only files under that folder, and commit there when you are done.`,
+      "Do not merge it: I will compare and merge it myself."
+    ].join(" ");
+  }
+  function agentCommand(wt) {
+    return `cd ${shellQuote(wt.deck ? deckDir(wt.deck) : wt.path)} && claude`;
+  }
+
+  // src/ts/editor/git.ts
+  var menu3 = document.getElementById("context-menu");
+  var button2 = document.getElementById("btn-git");
+  var label = button2.querySelector(".git-label");
+  var badge3 = button2.querySelector(".git-badge");
+  var status = { repo: false, git: false };
+  function render3() {
+    button2.hidden = !status.git;
+    if (!status.repo) {
+      label.textContent = "Git";
+      badge3.hidden = true;
+      button2.title = "Not versioned: create a git repository for this deck";
+      return;
+    }
+    label.textContent = status.branch ?? `@${status.detached ?? "?"}`;
+    const n3 = status.changes?.length ?? 0;
+    const lfsIssues = lfsFiles().length;
+    const slidesChanged = changedSlideCount();
+    button2.classList.toggle("warn", lfsIssues > 0);
+    badge3.hidden = n3 === 0 && lfsIssues === 0;
+    badge3.textContent = n3 ? String(n3) : "!";
+    const sync = [
+      status.ahead ? `${status.ahead} to push` : "",
+      status.behind ? `${status.behind} to pull` : ""
+    ].filter(Boolean).join(", ");
+    button2.title = [
+      status.branch ? `Branch ${status.branch}` : `Viewing ${status.detached}`,
+      n3 ? `${n3} changed file${n3 === 1 ? "" : "s"}` : "No changes",
+      slidesChanged ? `${slidesChanged} slide${slidesChanged === 1 ? "" : "s"} changed` : "",
+      sync,
+      lfsIssues ? `${lfsIssues} media file${lfsIssues === 1 ? "" : "s"} not in Git LFS` : ""
+    ].filter(Boolean).join(" \xB7 ");
+  }
+  async function refreshGit() {
+    if (!connected()) return status;
+    const res = await request({ action: "git", op: "status", slides: true });
+    if (res.ok && res.git) status = res.git;
+    if (res.ok) setSlideChanges(status.repo ? res.slides : null);
+    render3();
+    return status;
+  }
+  function gitStatus() {
+    return status;
+  }
+  var REWRITES = /* @__PURE__ */ new Set([
+    "discard",
+    "pull",
+    "switch",
+    "view",
+    "revert",
+    "restore",
+    "create-branch"
+  ]);
+  async function git(op, args = {}, question = "") {
+    const notice = REWRITES.has(op) && undoNoticeDue();
+    if (question || notice) {
+      const text = [question, notice ? UNDO_NOTICE : ""].filter(Boolean).join("\n\n");
+      if (!confirm(question ? text : `${text}
+
+Continue?`)) return null;
+      if (notice) undoNoticeShown();
+    }
+    button2.classList.add("busy");
+    const res = await request({ action: "git", op, ...args });
+    button2.classList.remove("busy");
+    if (res.git) {
+      status = res.git;
+      render3();
+    }
+    if (!res.ok) {
+      toast(res.error ?? `git ${op} failed`, "error");
+      return null;
+    }
+    if (typeof res.message === "string") toast(res.message, "ok");
+    if (res.historyCleared) {
+      ed.canUndo = false;
+      ed.canRedo = false;
+      emit("history");
+    }
+    void refreshGit();
+    return res;
+  }
+  var runGit = git;
+  async function openMenu2() {
+    await refreshGit();
+    clear(menu3);
+    if (!status.repo) {
+      menu3.append(
+        h("div", { class: "menu-title" }, "Not versioned"),
+        menuItem("Create a git repository", async () => {
+          if (await git("init"))
+            toast("This deck is now versioned with git", "ok");
+        }),
+        menuItem("Create a git repository (git only, no LFS)", async () => {
+          if (await git("init", { lfs: false }))
+            toast("This deck is now versioned with git", "ok");
+        }),
+        h("div", { class: "menu-sep" }),
+        menuItem(
+          "Compare with another deck\u2026",
+          () => void openComparePicker()
+        ),
+        menuItem("Pack deck\u2026", () => void openPackDialog()),
+        h("div", { class: "menu-note" }, PACK_HELP)
+      );
+    } else {
+      const n3 = status.changes?.length ?? 0;
+      const deckChanges = (status.changes ?? []).filter((c2) => c2.inDeck);
+      const where = status.branch ? `On ${status.branch}` : `Viewing ${status.detached} (no branch)`;
+      menu3.append(
+        h(
+          "div",
+          { class: "menu-title" },
+          `${where} \xB7 ${n3 ? `${n3} change${n3 === 1 ? "" : "s"}` : "no changes"}`
+        )
+      );
+      if (status.last) {
+        menu3.append(
+          h(
+            "div",
+            { class: "menu-note" },
+            `Last: ${status.last.subject} (${status.last.when})`
+          )
+        );
+      }
+      const lfsCount = lfsFiles().length;
+      if (lfsCount) {
+        const item2 = menuItem(
+          `\u26A0 ${lfsCount} media file${lfsCount === 1 ? "" : "s"} not in Git LFS\u2026`,
+          () => lfsDialog()
+        );
+        item2.classList.add("warn");
+        menu3.append(item2);
+      } else if (status.lfs?.mode === "on" && !status.lfs.installed) {
+        menu3.append(
+          h(
+            "div",
+            { class: "menu-note warn" },
+            "git-lfs is not installed: this deck's media needs it"
+          )
+        );
+      }
+      menu3.append(
+        menuItem(
+          "Commit\u2026",
+          () => commitDialog(),
+          n3 === 0 || !status.branch
+        ),
+        menuItem(
+          ed.slideSelection.size > 1 ? `Commit the ${ed.slideSelection.size} picked slides\u2026` : `Commit slide ${ed.current + 1} only\u2026`,
+          () => commitPicked(),
+          changedSlideCount() === 0 || !status.branch
+        ),
+        menuItem(
+          status.ahead ? `Push (${status.ahead})` : "Push",
+          () => void git("push"),
+          !status.remotes?.length || !status.branch
+        ),
+        menuItem(
+          status.behind ? `Pull (${status.behind})` : "Pull",
+          () => void git("pull"),
+          !status.upstream
+        ),
+        menuItem(
+          "Discard changes\u2026",
+          () => discardDialog(),
+          deckChanges.length === 0
+        ),
+        menuItem("Pack deck\u2026", () => void openPackDialog()),
+        h("div", { class: "menu-note" }, PACK_HELP),
+        menuItem(
+          "Undo last commit",
+          async () => {
+            if (await git(
+              "undo-commit",
+              {},
+              `Take back "${status.last?.subject}"? Its changes stay, uncommitted.`
+            ))
+              toast(
+                "Last commit taken back; its changes are kept",
+                "ok"
+              );
+          },
+          !status.canUndoCommit
+        ),
+        h("div", { class: "menu-sep" }),
+        menuItem(
+          status.branch ? "Branches\u2026" : "Back to a branch\u2026",
+          () => void branchesDialog(),
+          !status.hasCommits
+        ),
+        menuItem(
+          "History\u2026",
+          () => void historyDialog(),
+          !status.hasCommits
+        ),
+        menuItem("Compare\u2026", () => void openComparePicker()),
+        h("div", { class: "menu-sep" }),
+        ...publishItems()
+      );
+      if (status.hasCommits) menu3.append(...await worktreeSection());
+    }
+    const r2 = button2.getBoundingClientRect();
+    showMenu(Math.max(8, r2.right - 260), r2.bottom + 4);
+  }
+  function publishItems() {
+    const pages = status.pages;
+    const items2 = [];
+    if (pages?.url) {
+      items2.push(
+        h(
+          "a",
+          {
+            class: "menu-item publish-link",
+            href: pages.url,
+            target: "_blank",
+            rel: "noopener",
+            title: "Open the published slides",
+            onclick: () => closeMenu()
+          },
+          `Published at ${pages.url.replace(/^https:\/\//, "")}`
+        )
+      );
+    }
+    items2.push(
+      menuItem(pages ? "Publish\u2026 (update)" : "Publish\u2026", () => {
+        void openPublishDialog(commitFiles, !!status.remotes?.length);
+      })
+    );
+    return items2;
+  }
+  async function commitFiles(paths, message, push) {
+    await refreshGit();
+    if (!status.identity) {
+      commitDialog(paths, message);
+      return true;
+    }
+    if (!await git("commit", { message, paths })) return false;
+    if (push) await git("push");
+    return true;
+  }
+  function lfsFiles() {
+    const l2 = status.lfs;
+    return l2 ? [...l2.uncovered, ...l2.unconverted] : [];
+  }
+  function size2(bytes) {
+    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${bytes} B`;
+  }
+  function lfsList(files2) {
+    return h(
+      "div",
+      { class: "git-files" },
+      ...files2.map(
+        (f2) => h(
+          "div",
+          { class: "git-file" },
+          h("span", { class: "git-status" }, f2.kind),
+          h("code", { class: "git-path" }, f2.path),
+          h("span", { class: "hint git-size" }, size2(f2.size))
+        )
+      )
+    );
+  }
+  function lfsDialog() {
+    const l2 = status.lfs;
+    if (!l2) return;
+    const paths = lfsFiles().map((f2) => f2.path);
+    openDialog(
+      "Large files and Git LFS",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "p",
+          { class: "hint" },
+          "Git keeps a full copy of a video or image in every version, so the repository grows with each change. Git LFS stores them outside the history; a small repository can do without it."
+        ),
+        l2.uncovered.length > 0 && h("h3", {}, "No Git LFS rule covers these"),
+        l2.uncovered.length > 0 && lfsList(l2.uncovered),
+        l2.unconverted.length > 0 && h("h3", {}, "Committed before Git LFS was set up"),
+        l2.unconverted.length > 0 && lfsList(l2.unconverted),
+        !l2.installed && h(
+          "p",
+          { class: "hint warn" },
+          "git-lfs is not installed on this computer: install it (git-lfs.com) to track files with it."
+        ),
+        h(
+          "p",
+          { class: "hint" },
+          "Tracking adds rules to the deck's .gitattributes and stages the files again as LFS files; commit to keep it. Earlier commits keep their full copies (git lfs migrate rewrites history, for everyone with a clone)."
+        ),
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              title: "Record in .gitattributes that this deck stores media in git itself; no more warnings",
+              onclick: async () => {
+                if (await git("lfs-off")) closeDialog();
+              }
+            },
+            "Use git without LFS"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              disabled: !l2.installed,
+              onclick: async () => {
+                if (await git("lfs-track", { paths }))
+                  closeDialog();
+              }
+            },
+            "Track with Git LFS"
+          )
+        )
+      ),
+      { wide: true }
+    );
+  }
+  function fileRow2(change, checked) {
+    const box = h("input", {
+      type: "checkbox",
+      value: change.path
+    });
+    box.checked = checked;
+    return h(
+      "label",
+      { class: `git-file${change.inDeck ? "" : " outside"}` },
+      box,
+      h("span", { class: `git-status s-${change.status}` }, change.status),
+      h("code", { class: "git-path" }, change.path)
+    );
+  }
+  function checkedPaths(list4) {
+    return [...list4.querySelectorAll("input:checked")].map(
+      (b2) => b2.value
+    );
+  }
+  function commitDialog(ticked, text) {
+    const changes2 = status.changes ?? [];
+    const message = h("textarea", {
+      class: "git-message",
+      rows: "3"
+    });
+    message.value = text ?? status.suggestedMessage ?? "Update slides";
+    const files2 = h(
+      "div",
+      { class: "git-files" },
+      ...changes2.map(
+        (c2) => fileRow2(c2, ticked ? ticked.includes(c2.path) : c2.inDeck)
+      )
+    );
+    const outside = changes2.some((c2) => !c2.inDeck);
+    const name2 = h("input", {
+      type: "text",
+      placeholder: "Your name"
+    });
+    const email = h("input", {
+      type: "email",
+      placeholder: "you@example.com"
+    });
+    const identity = status.identity ? null : h(
+      "div",
+      { class: "git-identity" },
+      h(
+        "p",
+        { class: "hint" },
+        "git needs to know who commits (kept in this repository only):"
+      ),
+      h("div", { class: "btn-row" }, name2, email)
+    );
+    const commit = async (paths, push) => {
+      const res = await git("commit", {
+        message: message.value,
+        paths,
+        ...identity ? { name: name2.value, email: email.value } : {}
+      });
+      if (!res) return;
+      closeDialog();
+      if (push) await git("push");
+    };
+    const run = async (push) => {
+      const paths = checkedPaths(files2);
+      const summary2 = paths.length ? await packCheck() : null;
+      if (!summary2?.needed) {
+        await commit(paths, push);
+        return;
+      }
+      commitGate(
+        summary2,
+        async () => {
+          const packed = await applyPack();
+          if (!packed) return;
+          await refreshGit();
+          await commit(commitPaths(paths, packed.gitPaths), push);
+        },
+        () => commit(paths, push)
+      );
+    };
+    const canPush = !!status.remotes?.length;
+    const changed2 = new Set(changes2.map((c2) => c2.path));
+    const heavy = lfsFiles().filter((f2) => changed2.has(f2.path));
+    const lfsNote = heavy.length > 0 && h(
+      "p",
+      { class: "hint warn" },
+      `${heavy.length} of these ${heavy.length === 1 ? "is a media file" : "are media files"} git would store whole, not in Git LFS. `,
+      h(
+        "button",
+        {
+          type: "button",
+          class: "link-btn",
+          onclick: () => lfsDialog()
+        },
+        "Review\u2026"
+      )
+    );
+    message.addEventListener("keydown", (e2) => {
+      if (e2.key === "Enter" && (e2.ctrlKey || e2.metaKey)) {
+        e2.preventDefault();
+        void run(false);
+      }
+    });
+    openDialog(
+      "Commit",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "label",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Message"),
+          message
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Files"),
+          h(
+            "div",
+            {},
+            files2,
+            outside && h(
+              "p",
+              { class: "hint" },
+              "Files outside this deck are left out unless you tick them."
+            )
+          )
+        ),
+        lfsNote,
+        identity,
+        h(
+          "div",
+          { class: "btn-row end" },
+          canPush && h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => void run(true)
+            },
+            "Commit and push"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              title: "Ctrl+Enter",
+              onclick: () => void run(false)
+            },
+            "Commit"
+          )
+        )
+      ),
+      { wide: true, hint: status.branch ? `on ${status.branch}` : void 0 }
+    );
+    message.focus();
+    message.select();
+  }
+  function discardDialog() {
+    const changes2 = (status.changes ?? []).filter((c2) => c2.inDeck);
+    const files2 = h(
+      "div",
+      { class: "git-files" },
+      ...changes2.map((c2) => fileRow2(c2, true))
+    );
+    openDialog(
+      "Discard changes",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "p",
+          { class: "hint warn" },
+          "The ticked files go back to how they were in the last commit; new files are deleted. This cannot be undone."
+        ),
+        files2,
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn danger",
+              onclick: async () => {
+                const paths = checkedPaths(files2);
+                if (!paths.length) return;
+                if (await git("discard", { paths })) {
+                  closeDialog();
+                  toast(
+                    `Discarded changes to ${paths.length} file${paths.length === 1 ? "" : "s"}`,
+                    "ok"
+                  );
+                }
+              }
+            },
+            "Discard"
+          )
+        )
+      ),
+      { wide: true }
+    );
+  }
+  async function branchesDialog() {
+    const res = await git("branches");
+    if (!res) return;
+    const branches = res.branches;
+    const name2 = h("input", {
+      type: "text",
+      placeholder: "new-branch-name"
+    });
+    const create = async () => {
+      if (!name2.value.trim()) return;
+      if (await git("create-branch", { name: name2.value.trim() })) {
+        closeDialog();
+        toast(`Created and switched to ${name2.value.trim()}`, "ok");
+      }
+    };
+    name2.addEventListener("keydown", (e2) => {
+      if (e2.key === "Enter") {
+        e2.preventDefault();
+        void create();
+      }
+    });
+    openDialog(
+      "Branches",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "div",
+          { class: "git-list" },
+          ...branches.map(
+            (b2) => h(
+              "div",
+              { class: `git-row${b2.current ? " current" : ""}` },
+              h("strong", {}, b2.name),
+              h(
+                "span",
+                { class: "hint" },
+                b2.current ? "current" : b2.when
+              ),
+              !b2.current && h(
+                "button",
+                {
+                  type: "button",
+                  class: "pbtn",
+                  onclick: async () => {
+                    if (await git("switch", {
+                      name: b2.name
+                    })) {
+                      closeDialog();
+                      toast(
+                        `Switched to ${b2.name}`,
+                        "ok"
+                      );
+                    }
+                  }
+                },
+                "Switch"
+              )
+            )
+          )
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "New branch"),
+          h(
+            "div",
+            { class: "btn-row" },
+            name2,
+            h(
+              "button",
+              {
+                type: "button",
+                class: "pbtn primary",
+                onclick: create
+              },
+              "Create and switch"
+            )
+          )
+        ),
+        h(
+          "p",
+          { class: "hint" },
+          "Uncommitted changes come along to the branch you switch to; git refuses a switch that would overwrite them."
+        )
+      ),
+      { wide: true }
+    );
+  }
+  async function historyDialog() {
+    const res = await git("log");
+    if (!res) return;
+    const log = res.log;
+    const act = async (op, c2, question, done) => {
+      if (await git(op, { sha: c2.sha }, question)) {
+        closeDialog();
+        toast(done, "ok");
+      }
+    };
+    openDialog(
+      "History",
+      h(
+        "div",
+        { class: "git-form" },
+        log.length ? h(
+          "div",
+          { class: "git-list history" },
+          ...log.map(
+            (c2) => h(
+              "div",
+              { class: `git-row${c2.head ? " current" : ""}` },
+              h(
+                "div",
+                { class: "git-commit" },
+                h("strong", {}, c2.subject),
+                h(
+                  "span",
+                  { class: "hint" },
+                  `${c2.short} \xB7 ${c2.author} \xB7 ${c2.when}${c2.refs.length ? ` \xB7 ${c2.refs.join(", ")}` : ""}`
+                )
+              ),
+              h(
+                "div",
+                { class: "btn-row" },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    title: "Compare with the working copy, slide by slide",
+                    onclick: () => {
+                      closeDialog();
+                      openCompare(
+                        { kind: "live" },
+                        {
+                          kind: "commit",
+                          rev: c2.sha
+                        }
+                      );
+                    }
+                  },
+                  "Compare"
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    title: "Show the deck as it was then (switch back with Branches)",
+                    onclick: () => void act(
+                      "view",
+                      c2,
+                      `Show the deck as it was at "${c2.subject}"? Edits there are not on any branch until you create one.`,
+                      `Viewing ${c2.short}; switch back to a branch from the git menu`
+                    )
+                  },
+                  "View"
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    title: "Make the deck's files what they were then, as uncommitted changes",
+                    onclick: () => void act(
+                      "restore",
+                      c2,
+                      `Restore the deck's files to "${c2.subject}"? Your current files are replaced (commit first to keep them).`,
+                      `Restored the deck to ${c2.short}; commit to keep it`
+                    )
+                  },
+                  "Restore"
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "pbtn",
+                    title: "A new commit that undoes this one",
+                    onclick: () => void act(
+                      "revert",
+                      c2,
+                      `Undo "${c2.subject}" with a new commit?`,
+                      `Reverted ${c2.short}`
+                    )
+                  },
+                  "Revert"
+                )
+              )
+            )
+          )
+        ) : h("p", { class: "hint" }, "No commits touch this deck yet."),
+        h(
+          "p",
+          { class: "hint" },
+          "View: look at an old version (no branch). Restore: bring the deck back to it as changes you can commit. Revert: undo one commit with a new one."
+        )
+      ),
+      {
+        wide: true,
+        hint: status.scope ? `changes to ${status.scope}/` : void 0
+      }
+    );
+  }
+  async function worktreeOp(op, args = {}, question = "", rewrites = false, quiet = false) {
+    const notice = rewrites && undoNoticeDue();
+    if (question || notice) {
+      const text = [question, notice ? UNDO_NOTICE : ""].filter(Boolean).join("\n\n");
+      if (!confirm(text)) return null;
+      if (notice) undoNoticeShown();
+    }
+    button2.classList.add("busy");
+    const res = await request({ action: "worktree", op, ...args });
+    button2.classList.remove("busy");
+    if (res.git) {
+      status = res.git;
+      render3();
+    }
+    if (!res.ok) {
+      if (!quiet) toast(res.error ?? `worktree ${op} failed`, "error");
+      return res;
+    }
+    if (typeof res.message === "string") toast(res.message, "ok");
+    if (typeof res.note === "string") toast(res.note, "info");
+    if (res.historyCleared) {
+      ed.canUndo = false;
+      ed.canRedo = false;
+      emit("history");
+    }
+    return res;
+  }
+  async function worktreeList() {
+    const res = await request({ action: "worktree", op: "list" });
+    return res.ok ? res.worktrees : [];
+  }
+  async function worktreeSection() {
+    const others2 = (await worktreeList()).filter((w2) => !w2.main);
+    return [
+      h("div", { class: "menu-sep" }),
+      h("div", { class: "menu-title" }, "Worktrees"),
+      ...others2.map(
+        (wt) => h(
+          "div",
+          { class: "menu-wt" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "menu-item",
+              title: `${wt.path}
+Merge, remove, or what to tell the agent`,
+              onclick: () => {
+                closeMenu();
+                worktreeDialog(wt);
+              }
+            },
+            h("span", { class: "wt-branch" }, branchName(wt)),
+            h("span", { class: "wt-state" }, summary(wt))
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "menu-mini",
+              disabled: !wt.deck,
+              title: "Compare its slides with this deck",
+              onclick: () => {
+                closeMenu();
+                compareWith(wt);
+              }
+            },
+            "Compare"
+          )
+        )
+      ),
+      menuItem("New worktree for an agent\u2026", () => newWorktreeDialog())
+    ];
+  }
+  function compareWith(wt) {
+    if (!wt.deck) return;
+    document.dispatchEvent(
+      new CustomEvent("inkflow:compare", {
+        detail: { kind: "path", deck: wt.deck, label: branchName(wt) }
+      })
+    );
+  }
+  function copyBlock(text) {
+    return h(
+      "div",
+      { class: "wt-copy" },
+      h("pre", { class: "wt-command" }, text),
+      h(
+        "button",
+        {
+          type: "button",
+          class: "pbtn",
+          onclick: () => void navigator.clipboard.writeText(text).then(
+            () => toast("Copied", "ok"),
+            () => toast("Could not copy: select the text", "error")
+          )
+        },
+        "Copy"
+      )
+    );
+  }
+  function newWorktreeDialog() {
+    const name2 = h("input", {
+      type: "text",
+      placeholder: "e.g. bolder-colours",
+      spellcheck: "false"
+    });
+    const create = async () => {
+      const value = name2.value.trim().replace(/\s+/g, "-");
+      if (!value) return;
+      const res = await worktreeOp("add", { name: value });
+      if (res?.ok) worktreeDialog(res.worktree, true);
+    };
+    name2.addEventListener("keydown", (e2) => {
+      if (e2.key === "Enter") {
+        e2.preventDefault();
+        void create();
+      }
+    });
+    openDialog(
+      "New worktree for an agent",
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "p",
+          { class: "hint" },
+          `A copy of the deck on a branch of its own, deck/<name>, from the last commit of ${status.branch ?? "this version"}. A coding agent works and commits there while your deck stays as it is; then compare and merge it, or remove it.`
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Name"),
+          h(
+            "div",
+            { class: "btn-row" },
+            name2,
+            h(
+              "button",
+              {
+                type: "button",
+                class: "pbtn primary",
+                onclick: () => void create()
+              },
+              "Create"
+            )
+          )
+        ),
+        (status.changes ?? []).some((c2) => c2.inDeck) && h(
+          "p",
+          { class: "hint warn" },
+          "Your uncommitted changes to the deck are not in it: commit first to include them."
+        )
+      ),
+      { wide: true }
+    );
+    name2.focus();
+  }
+  function worktreeDialog(wt, created = false) {
+    const into = status.branch;
+    const merge2 = async () => {
+      const n3 = wt.ahead;
+      const question = [
+        `Merge ${branchName(wt)} (${n3} commit${n3 === 1 ? "" : "s"}) into ${into}? Its changes land in your deck's files now.`,
+        wt.dirty ? "Its uncommitted changes are not merged (commit them there first)." : ""
+      ].filter(Boolean).join("\n\n");
+      const res = await worktreeOp(
+        "merge",
+        { branch: wt.branch },
+        question,
+        true
+      );
+      if (res?.ok) closeDialog();
+    };
+    const remove = async () => {
+      const lost = [
+        wt.dirty ? "uncommitted changes" : "",
+        wt.ahead ? `${wt.ahead} unmerged commit${wt.ahead === 1 ? "" : "s"}` : ""
+      ].filter(Boolean);
+      if (!confirm(
+        `Remove the worktree ${wt.name} (${wt.path})?${lost.length ? `
+
+It has ${lost.join(" and ")}.` : ""}`
+      ))
+        return;
+      let res = await worktreeOp(
+        "remove",
+        { name: wt.path },
+        "",
+        false,
+        true
+      );
+      if (res && !res.ok) {
+        if (!confirm(
+          `${res.error}
+
+Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
+        ))
+          return;
+        res = await worktreeOp("remove", { name: wt.path, force: true });
+      }
+      if (res?.ok) closeDialog();
+    };
+    openDialog(
+      `Worktree ${branchName(wt)}`,
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "p",
+          { class: "hint" },
+          created ? `Created from the last commit${into ? ` of ${into}` : ""} \xB7 ` : `${summary(wt)} \xB7 `,
+          h("code", { class: "git-path" }, wt.path)
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Tell the agent"),
+          copyBlock(agentPrompt(wt))
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Or start one there"),
+          copyBlock(agentCommand(wt))
+        ),
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn danger",
+              onclick: () => void remove()
+            },
+            "Remove\u2026"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              disabled: !wt.deck,
+              title: "Its slides side by side with this deck's",
+              onclick: () => {
+                closeDialog();
+                compareWith(wt);
+              }
+            },
+            "Compare"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              disabled: !wt.branch || !into || wt.ahead === 0,
+              title: into ? `Bring its commits into ${into}` : "Switch the deck to a branch first",
+              onclick: () => void merge2()
+            },
+            into ? `Merge into ${into}\u2026` : "Merge\u2026"
+          )
+        )
+      ),
+      { wide: true }
+    );
+  }
+  var timer = 0;
+  function initGit() {
+    button2.addEventListener("click", () => void openMenu2());
+    on("model", () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void refreshGit(), 600);
+    });
+  }
+
+  // src/ts/editor/slidegittext.ts
+  function letter(state) {
+    if (state === "new") return "U";
+    if (state === "modified") return "M";
+    if (state === "shared") return "\u2022";
+    return "";
+  }
+  var STATE_WORDS = {
+    new: "New since the last commit",
+    modified: "Changed since the last commit",
+    shared: "Only files it shares with other slides changed"
+  };
+  var ROLE_WORDS = {
+    layout: "its layout",
+    overlay: "an overlay",
+    md: "its Markdown",
+    notes: "its notes",
+    ink: "its ink",
+    data: "chart data",
+    asset: "a picture",
+    diagram: "a diagram",
+    slide: "its SVG"
+  };
+  function changeTitle(c2) {
+    if (!c2?.state) return "";
+    const lines = [STATE_WORDS[c2.state] ?? ""];
+    if (c2.entry === "new") lines.push("  its Slide(...) in deck.py is new");
+    else if (c2.entry === "modified")
+      lines.push("  its Slide(...) in deck.py changed");
+    for (const f2 of c2.files) {
+      const what = ROLE_WORDS[f2.role] ?? f2.role;
+      const shared = f2.shared ? ", shared with other slides" : "";
+      lines.push(`  ${f2.path} (${what}, ${f2.status}${shared})`);
+    }
+    return lines.join("\n");
+  }
+  function changedAmong(changes2, indices) {
+    if (!changes2) return [];
+    return [...indices].filter((i2) => {
+      const s2 = changes2.slides[i2]?.state;
+      return s2 === "new" || s2 === "modified";
+    }).sort((a2, b2) => a2 - b2);
+  }
+  function defaultMessage(titles) {
+    const named = titles.map((t2) => `"${t2.trim() || "untitled"}"`);
+    if (named.length === 1) return `Update slide ${named[0]}`;
+    if (named.length <= 3) {
+      const last = named.pop();
+      return `Update slides ${named.join(", ")} and ${last}`;
+    }
+    return `Update ${named.length} slides`;
+  }
+  function removedName(r2) {
+    if (!r2.key) return `slide ${r2.index + 1}`;
+    return r2.key.replace(/^(id|md|src):/, "");
+  }
+  function deckWords(plan2) {
+    if (plan2.deck === "none") return "";
+    const whole = plan2.deck === "whole";
+    const base2 = whole ? `${plan2.deckPath}: all its changes` : `${plan2.deckPath}: these slides' Slide(...) entries only`;
+    return plan2.other ? `${base2}, with its imports, settings, sections and order as they are now` : base2;
+  }
+  function leftWords(plan2) {
+    if (!plan2.left) return "";
+    return `${plan2.left} other changed slide${plan2.left === 1 ? "" : "s"} stay${plan2.left === 1 ? "s" : ""} uncommitted.`;
+  }
+  function tickedOffer(offer, withRemoved) {
+    if (offer.why === "deleted") return withRemoved;
+    return offer.status === "new";
+  }
+  function diffLine(line) {
+    if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("+++ ") || line.startsWith("--- ") || line.startsWith("new file") || line.startsWith("deleted file") || line.startsWith("Binary files"))
+      return "meta";
+    if (line.startsWith("@@")) return "hunk";
+    if (line.startsWith("+")) return "add";
+    if (line.startsWith("-")) return "del";
+    return "";
+  }
+
+  // src/ts/editor/slidegit.ts
+  var changes = null;
+  function setSlideChanges(next) {
+    const value = next && typeof next === "object" && Array.isArray(next.slides) ? next : null;
+    if (JSON.stringify(value) === JSON.stringify(changes)) return;
+    changes = value;
+    emit("slide-git");
+  }
+  function slideChange(i2) {
+    if (!changes || changes.slides.length !== (ed.model?.slides.length ?? 0))
+      return void 0;
+    return changes.slides[i2];
+  }
+  function changeBadge(i2) {
+    const badge4 = h("span", { class: "git-mark" });
+    paint(badge4, slideChange(i2));
+    return badge4;
+  }
+  function paint(badge4, c2) {
+    const state = c2?.state ?? "";
+    badge4.textContent = letter(c2?.state ?? null);
+    badge4.className = `git-mark${state ? ` m-${state}` : ""}`;
+    if (state) badge4.setAttribute("title", changeTitle(c2));
+    else badge4.removeAttribute("title");
+  }
+  function markChange(item2, i2) {
+    const badge4 = item2.querySelector(".git-mark");
+    if (badge4) paint(badge4, slideChange(i2));
+  }
+  function slideGitItems(i2, item2) {
+    const status3 = gitStatus();
+    if (!status3.repo || !changes) return [];
+    const picked = ed.slideSelection.size > 1 ? [...ed.slideSelection] : [i2];
+    const changed2 = changedAmong(changes, picked);
+    const out = [h("div", { class: "menu-sep" })];
+    if (picked.length === 1) {
+      const c2 = slideChange(i2);
+      const any = !!c2?.state;
+      out.push(
+        item2(
+          "Compare with the last commit",
+          () => compareSlide(i2),
+          !status3.hasCommits
+        ),
+        item2("Show git diff", () => void diffDialog(i2), !any)
+      );
+    }
+    const n3 = changed2.length;
+    out.push(
+      item2(
+        picked.length === 1 ? "Commit this slide\u2026" : `Commit ${n3} changed slide${n3 === 1 ? "" : "s"}\u2026`,
+        () => void commitSlides(changed2),
+        n3 === 0
+      )
+    );
+    return out;
+  }
+  function compareSlide(i2) {
+    openCompare(
+      { kind: "commit", rev: "HEAD" },
+      { kind: "live" },
+      { focus: i2 }
+    );
+  }
+  function slideName2(i2) {
+    const slide = ed.model?.slides[i2];
+    return slide?.title ?? slide?.id ?? `slide ${i2 + 1}`;
+  }
+  async function diffDialog(i2) {
+    const res = await request({ action: "git", op: "slide-diff", slide: i2 });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot read the slide's changes", "error");
+      return;
+    }
+    const text = String(res.diff ?? "");
+    const pre = h("pre", { class: "git-diff" });
+    for (const line of text.split("\n")) {
+      const kind = diffLine(line);
+      pre.append(h("span", { class: kind ? `d-${kind}` : null }, line), "\n");
+    }
+    openDialog(
+      `Changes to slide ${i2 + 1}: ${slideName2(i2)}`,
+      h(
+        "div",
+        { class: "git-form" },
+        text.trim() ? pre : h(
+          "p",
+          { class: "hint" },
+          "No changes since the last commit."
+        ),
+        h(
+          "div",
+          { class: "btn-row end" },
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => {
+                closeDialog();
+                compareSlide(i2);
+              }
+            },
+            "Compare with the last commit"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: async () => {
+                await navigator.clipboard?.writeText(text);
+                toast("Diff copied", "ok");
+              }
+            },
+            "Copy"
+          ),
+          changedAmong(changes, [i2]).length ? h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              onclick: () => void commitSlides([i2])
+            },
+            "Commit this slide\u2026"
+          ) : null
+        )
+      ),
+      { large: true }
+    );
+  }
+  async function plan(slides, removed) {
+    const res = await request({
+      action: "git",
+      op: "commit-slides",
+      slides,
+      removed,
+      dryRun: true
+    });
+    if (!res.ok) {
+      toast(res.error ?? "Cannot commit these slides", "error");
+      return null;
+    }
+    return res.plan;
+  }
+  function fileLine(path, status3) {
+    return h(
+      "div",
+      { class: "git-file" },
+      h("span", { class: `git-status s-${status3}` }, status3),
+      h("code", { class: "git-path" }, path)
+    );
+  }
+  async function commitSlides(slides) {
+    if (!slides.length) {
+      toast("These slides have no changes to commit");
+      return;
+    }
+    let withRemoved = false;
+    let current3 = await plan(slides, withRemoved);
+    if (!current3) return;
+    const status3 = gitStatus();
+    const message = h("textarea", {
+      class: "git-message",
+      rows: "3"
+    });
+    message.value = defaultMessage(slides.map(slideName2));
+    const files2 = h("div", { class: "git-files" });
+    const offers = h("div", { class: "git-files" });
+    const notes = h("div", {});
+    const ticked = /* @__PURE__ */ new Set();
+    const draw = (p2) => {
+      files2.replaceChildren(
+        ...p2.paths.map((f2) => fileLine(f2.path, f2.status)),
+        ...p2.deck !== "none" ? [
+          h(
+            "div",
+            { class: "git-file" },
+            h(
+              "span",
+              { class: "git-status s-modified" },
+              p2.deck === "whole" ? "modified" : "part"
+            ),
+            h("span", { class: "git-path" }, deckWords(p2))
+          )
+        ] : []
+      );
+      offers.replaceChildren(
+        ...p2.offered.map((o2) => {
+          const box = h("input", {
+            type: "checkbox",
+            value: o2.path
+          });
+          box.checked = ticked.has(o2.path) || tickedOffer(o2, withRemoved);
+          if (box.checked) ticked.add(o2.path);
+          box.addEventListener("change", () => {
+            if (box.checked) ticked.add(o2.path);
+            else ticked.delete(o2.path);
+          });
+          const why = o2.why === "deleted" ? "deleted, no slide uses it" : o2.why === "layout" || o2.why === "overlay" ? `${o2.why}: other slides use it too` : "other slides use it too";
+          return h(
+            "label",
+            { class: "git-file" },
+            box,
+            h("span", { class: `git-status s-${o2.status}` }, o2.status),
+            h("code", { class: "git-path" }, o2.path),
+            h("span", { class: "hint" }, why)
+          );
+        })
+      );
+      offers.hidden = !p2.offered.length;
+      offersLabel.hidden = !p2.offered.length;
+      notes.replaceChildren(
+        ...[leftWords(p2)].filter(Boolean).map((t2) => h("p", { class: "hint" }, t2))
+      );
+    };
+    const offersLabel = h(
+      "span",
+      { class: "field-label" },
+      "Also commit (shared with other slides, or left over)"
+    );
+    const removed = changes?.removed ?? [];
+    const removedBox = h("input", { type: "checkbox" });
+    removedBox.addEventListener("change", async () => {
+      withRemoved = removedBox.checked;
+      const next = await plan(slides, withRemoved);
+      if (!next) {
+        removedBox.checked = !removedBox.checked;
+        withRemoved = removedBox.checked;
+        return;
+      }
+      for (const o2 of next.offered) {
+        if (o2.why === "deleted") {
+          if (withRemoved) ticked.add(o2.path);
+          else ticked.delete(o2.path);
+        }
+      }
+      current3 = next;
+      draw(next);
+    });
+    const name2 = h("input", {
+      type: "text",
+      placeholder: "Your name"
+    });
+    const email = h("input", {
+      type: "email",
+      placeholder: "you@example.com"
+    });
+    const identity = status3.identity ? null : h(
+      "div",
+      { class: "git-identity" },
+      h(
+        "p",
+        { class: "hint" },
+        "git needs to know who commits (kept in this repository only):"
+      ),
+      h("div", { class: "btn-row" }, name2, email)
+    );
+    const run = async (push) => {
+      if (!current3) return;
+      const res = await runGit("commit-slides", {
+        slides,
+        message: message.value,
+        removed: withRemoved,
+        paths: current3.offered.map((o2) => o2.path).filter((p2) => ticked.has(p2)),
+        ...identity ? { name: name2.value, email: email.value } : {}
+      });
+      if (!res) return;
+      closeDialog();
+      if (push) await runGit("push");
+    };
+    message.addEventListener("keydown", (e2) => {
+      if (e2.key === "Enter" && (e2.ctrlKey || e2.metaKey)) {
+        e2.preventDefault();
+        void run(false);
+      }
+    });
+    const list4 = h(
+      "div",
+      { class: "git-slides" },
+      ...slides.map(
+        (i2) => h(
+          "div",
+          { class: "git-file" },
+          changeBadge(i2),
+          h("span", { class: "git-slide-num" }, String(i2 + 1)),
+          h("span", {}, slideName2(i2))
+        )
+      )
+    );
+    openDialog(
+      slides.length === 1 ? "Commit this slide" : `Commit ${slides.length} slides`,
+      h(
+        "div",
+        { class: "git-form" },
+        h(
+          "label",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Message"),
+          message
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Slides"),
+          list4
+        ),
+        h(
+          "div",
+          { class: "field" },
+          h("span", { class: "field-label" }, "Goes in"),
+          h("div", {}, files2, notes)
+        ),
+        h("div", { class: "field" }, offersLabel, offers),
+        removed.length ? h(
+          "label",
+          { class: "field inline" },
+          removedBox,
+          h(
+            "span",
+            {},
+            `Also commit the removal of ${removed.length} slide${removed.length === 1 ? "" : "s"} (${removed.map(removedName).join(", ")})`
+          )
+        ) : null,
+        identity,
+        h(
+          "div",
+          { class: "btn-row end" },
+          status3.remotes?.length ? h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn",
+              onclick: () => void run(true)
+            },
+            "Commit and push"
+          ) : null,
+          h(
+            "button",
+            {
+              type: "button",
+              class: "pbtn primary",
+              title: "Ctrl+Enter",
+              onclick: () => void run(false)
+            },
+            "Commit"
+          )
+        )
+      ),
+      {
+        wide: true,
+        hint: status3.branch ? `on ${status3.branch}` : void 0
+      }
+    );
+    draw(current3);
+    message.focus();
+    message.select();
+  }
+  function commitPicked() {
+    const picked = ed.slideSelection.size ? [...ed.slideSelection] : [ed.current];
+    void commitSlides(changedAmong(changes, picked));
+  }
+  function changedSlideCount() {
+    return changedAmong(changes, ed.model?.slides.keys() ?? []).length;
+  }
+
   // src/ts/editor/starstext.ts
-  function starTargets(focus, picked, current3) {
-    if (focus === "sorter" && picked.size) {
+  function starTargets(focus2, picked, current3) {
+    if (focus2 === "sorter" && picked.size) {
       return [...picked].sort((a2, b2) => a2 - b2);
     }
     return [current3];
@@ -6400,9 +9747,9 @@
   }
 
   // src/ts/editor/sorter.ts
-  var list = document.getElementById("sorter-list");
+  var list2 = document.getElementById("sorter-list");
   var addBtn = document.getElementById("sorter-add");
-  var menu3 = document.getElementById("context-menu");
+  var menu4 = document.getElementById("context-menu");
   function pickSlide(i2, e2) {
     ed.focus = "sorter";
     if (e2.shiftKey) {
@@ -6430,7 +9777,7 @@
       return;
     }
     const req = { action: "slide", op: "delete", slides: indices };
-    const names2 = indices.map((i2) => slideName2(i2));
+    const names2 = indices.map((i2) => slideName3(i2));
     const answer = await askSlideDelete(
       slideQuestion(names2),
       indices.length,
@@ -6552,7 +9899,7 @@
     const open5 = svg.slice(0, svg.indexOf(">") + 1);
     return ROOT_VIEWBOX.exec(open5)?.[1] ?? null;
   }
-  var thumbs2 = new Thumbs(list);
+  var thumbs3 = new Thumbs(list2);
   var dragging = { now: null };
   function dragSlides(i2) {
     if (ed.slideSelection.size > 1 && ed.slideSelection.has(i2)) {
@@ -6599,8 +9946,9 @@
         "data-index": i2
       },
       h("span", { class: "sorter-num" }, String(i2 + 1)),
-      thumbs2.thumb(slide),
-      slide.visible ? starButton(i2) : null
+      thumbs3.thumb(slide),
+      slide.visible ? starButton(i2) : null,
+      changeBadge(i2)
     );
     item2.classList.toggle("starred", isStarred(i2));
     item2.addEventListener("click", (e2) => pickSlide(i2, e2));
@@ -6621,7 +9969,7 @@
     item2.addEventListener("dragend", () => {
       dragging.now = null;
       item2.classList.remove("dragging");
-      clearDropMarks(list);
+      clearDropMarks(list2);
     });
     item2.addEventListener("dragover", (e2) => {
       const drag = dragging.now;
@@ -6630,11 +9978,11 @@
       e2.stopPropagation();
       if (drag.kind === "section") {
         const gap = sectionGapAtSlide(sections(), i2);
-        markGap(list, gap, list.lastElementChild);
+        markGap(list2, gap, list2.lastElementChild);
         return;
       }
       const r2 = item2.getBoundingClientRect();
-      clearDropMarks(list);
+      clearDropMarks(list2);
       item2.classList.add(
         e2.clientY > r2.top + r2.height / 2 ? "drop-after" : "drop-before"
       );
@@ -6643,7 +9991,7 @@
       e2.preventDefault();
       e2.stopPropagation();
       const drag = dragging.now;
-      clearDropMarks(list);
+      clearDropMarks(list2);
       if (!drag) return;
       if (drag.kind === "section") {
         const gap = sectionGapAtSlide(sections(), i2);
@@ -6669,7 +10017,7 @@
     head.addEventListener("dragend", () => {
       dragging.now = null;
       head.classList.remove("dragging");
-      clearDropMarks(list);
+      clearDropMarks(list2);
     });
     head.addEventListener("dragover", (e2) => {
       const drag = dragging.now;
@@ -6677,17 +10025,17 @@
       e2.preventDefault();
       e2.stopPropagation();
       if (drag.kind === "section") {
-        markGap(list, headerGap(head, k2, e2), list.lastElementChild);
+        markGap(list2, headerGap(head, k2, e2), list2.lastElementChild);
         return;
       }
-      clearDropMarks(list);
+      clearDropMarks(list2);
       head.classList.add("drop-into");
     });
     head.addEventListener("drop", (e2) => {
       e2.preventDefault();
       e2.stopPropagation();
       const drag = dragging.now;
-      clearDropMarks(list);
+      clearDropMarks(list2);
       if (!drag) return;
       if (drag.kind === "section") {
         void moveSectionToGap(drag.section, headerGap(head, k2, e2));
@@ -6725,6 +10073,7 @@
       item2.classList.toggle("active", i2 === ed.current);
       item2.classList.toggle("picked", ed.slideSelection.has(i2));
       markStar(item2, i2);
+      markChange(item2, i2);
     }
   }
   function renderSorter(anew = false) {
@@ -6732,50 +10081,50 @@
     const rows = sorterRows(slides.length, sections(), isCollapsed);
     const facts = rows.map(rowFacts);
     const sameRows = !anew && !headerPending() && facts.length === drawn.length && facts.every((f2, i2) => f2.text === drawn[i2].text);
-    const before = list.querySelector(".active");
+    const before = list2.querySelector(".active");
     if (sameRows) {
       facts.forEach((f2, i2) => {
         if (f2.svg === drawn[i2].svg) return;
         const fresh = rowItem(rows[i2]);
         items[i2].replaceWith(fresh);
         items[i2] = fresh;
-        thumbs2.forget(drawn[i2].svg);
+        thumbs3.forget(drawn[i2].svg);
       });
       drawn = facts;
       markRows();
     } else {
-      const top = list.scrollTop;
+      const top = list2.scrollTop;
       drawn = facts;
-      clear(list);
-      thumbs2.begin();
+      clear(list2);
+      thumbs3.begin();
       items = rows.map(rowItem);
-      list.append(...items);
-      thumbs2.end();
-      list.scrollTop = top;
+      list2.append(...items);
+      thumbs3.end();
+      list2.scrollTop = top;
     }
-    const active3 = list.querySelector(".active");
+    const active3 = list2.querySelector(".active");
     if (active3 !== before || !sameRows) {
       active3?.scrollIntoView({ block: "nearest" });
     }
     emit("sorter");
   }
   function initListDrop() {
-    list.addEventListener("dragover", (e2) => {
+    list2.addEventListener("dragover", (e2) => {
       const drag = dragging.now;
-      if (!drag || e2.target !== list) return;
+      if (!drag || e2.target !== list2) return;
       e2.preventDefault();
       if (drag.kind === "section") {
-        markGap(list, sections().length, list.lastElementChild);
+        markGap(list2, sections().length, list2.lastElementChild);
       } else {
-        clearDropMarks(list);
-        list.lastElementChild?.classList.add("drop-after");
+        clearDropMarks(list2);
+        list2.lastElementChild?.classList.add("drop-after");
       }
     });
-    list.addEventListener("drop", (e2) => {
+    list2.addEventListener("drop", (e2) => {
       const drag = dragging.now;
-      if (!drag || e2.target !== list) return;
+      if (!drag || e2.target !== list2) return;
       e2.preventDefault();
-      clearDropMarks(list);
+      clearDropMarks(list2);
       dropAtEnd(drag);
     });
   }
@@ -6810,7 +10159,7 @@
     const slide = ed.model?.slides[i2];
     if (!slide) return;
     const req = { action: "slide", op: "delete", slide: i2 };
-    const answer = await askSlideDelete(slideQuestion([slideName2(i2)]), 1, req);
+    const answer = await askSlideDelete(slideQuestion([slideName3(i2)]), 1, req);
     if (!answer) return;
     const result = await edit({ ...req, files: answer.files });
     if (result.ok) {
@@ -6818,7 +10167,7 @@
       emit("slide");
     }
   }
-  function slideName2(i2) {
+  function slideName3(i2) {
     const slide = ed.model?.slides[i2];
     return slide?.title ?? slide?.id ?? `slide ${i2 + 1}`;
   }
@@ -6834,8 +10183,8 @@
   }
   var pendingSelect = null;
   function closeMenu() {
-    menu3.classList.remove("open");
-    clear(menu3);
+    menu4.classList.remove("open");
+    clear(menu4);
   }
   function menuItem(label4, fn, disabled = false) {
     return h(
@@ -6856,21 +10205,21 @@
     const slide = ed.model?.slides[i2];
     const editable = !!ed.model?.deckEditable;
     const many = ed.slideSelection.size > 1;
-    clear(menu3);
-    menu3.append(
+    clear(menu4);
+    menu4.append(
       menuItem(
         many ? `Copy ${ed.slideSelection.size} slides` : "Copy",
         () => void copySlides()
       )
     );
-    menu3.append(
+    menu4.append(
       menuItem(
         many ? "Cut slides" : "Cut",
         () => void cutSlides(),
         !editable
       )
     );
-    menu3.append(
+    menu4.append(
       menuItem(
         "Paste after this slide",
         () => void pasteFromClipboard(),
@@ -6878,31 +10227,32 @@
       )
     );
     if (many) {
-      menu3.append(
+      menu4.append(
         menuItem(
           `Star ${ed.slideSelection.size} slides (or take their stars off)`,
           () => void toggleStar([...ed.slideSelection])
         )
       );
-      menu3.append(
+      menu4.append(
         menuItem(
           `Delete ${ed.slideSelection.size} slides`,
           () => void deleteSlides(),
           !editable
         )
       );
+      menu4.append(...slideGitItems(i2, menuItem));
       showMenu(x2, y2);
       return;
     }
-    menu3.append(
+    menu4.append(
       menuItem(
         "New slide after\u2026",
         () => void openGallery({ mode: "insert", after: i2 }),
         !editable
       )
     );
-    menu3.append(menuItem("Duplicate", () => void duplicateSlide(i2), !editable));
-    menu3.append(
+    menu4.append(menuItem("Duplicate", () => void duplicateSlide(i2), !editable));
+    menu4.append(
       menuItem(
         slide?.visible ? "Hide (skip in presentation)" : "Show",
         () => void toggleHidden(i2),
@@ -6910,28 +10260,29 @@
       )
     );
     if (slide?.visible) {
-      menu3.append(
+      menu4.append(
         menuItem(
           isStarred(i2) ? "Take the star off" : "Star",
           () => void toggleStar([i2])
         )
       );
     }
-    menu3.append(
+    menu4.append(
       menuItem("Rename files\u2026", () => renameSlideFiles(i2), !editable)
     );
-    menu3.append(menuItem("Save as layout\u2026", () => saveAsLayout(i2), !editable));
-    menu3.append(menuItem("Delete", () => void deleteSlide(i2), !editable));
-    menu3.append(
+    menu4.append(menuItem("Save as layout\u2026", () => saveAsLayout(i2), !editable));
+    menu4.append(menuItem("Delete", () => void deleteSlide(i2), !editable));
+    menu4.append(
       menuItem("Add section here\u2026", () => void addSectionAt(i2), !editable)
     );
+    menu4.append(...slideGitItems(i2, menuItem));
     showMenu(x2, y2);
   }
   function showMenu(x2, y2) {
-    menu3.classList.add("open");
-    const r2 = menu3.getBoundingClientRect();
-    menu3.style.left = `${Math.min(x2, window.innerWidth - r2.width - 8)}px`;
-    menu3.style.top = `${Math.min(y2, window.innerHeight - r2.height - 8)}px`;
+    menu4.classList.add("open");
+    const r2 = menu4.getBoundingClientRect();
+    menu4.style.left = `${Math.min(x2, window.innerWidth - r2.width - 8)}px`;
+    menu4.style.top = `${Math.min(y2, window.innerHeight - r2.height - 8)}px`;
   }
   function initSorter() {
     on("model", () => {
@@ -6951,6 +10302,7 @@
     });
     on("slide-selection", () => renderSorter());
     on("stars", () => renderSorter());
+    on("slide-git", () => renderSorter());
     on("sections", () => renderSorter(true));
     initListDrop();
     addBtn.addEventListener("click", () => {
@@ -6964,7 +10316,7 @@
       void openGallery({ mode: "insert", after: ed.current });
     });
     document.addEventListener("pointerdown", (e2) => {
-      if (!menu3.contains(e2.target)) closeMenu();
+      if (!menu4.contains(e2.target)) closeMenu();
     });
     document.addEventListener("keydown", (e2) => {
       if (e2.key === "Escape") closeMenu();
@@ -6991,10 +10343,10 @@
   function myName() {
     return storedName() ?? collab.me?.name ?? "";
   }
-  var timer = 0;
+  var timer2 = 0;
   var lastSent = "";
   function sendPresence(now = false) {
-    window.clearTimeout(timer);
+    window.clearTimeout(timer2);
     const go = () => {
       const msg = {
         type: "presence",
@@ -7011,7 +10363,7 @@
       sendRaw(msg);
     };
     if (now) go();
-    else timer = window.setTimeout(go, 120);
+    else timer2 = window.setTimeout(go, 120);
   }
   function presenceConnected() {
     lastSent = "";
@@ -8753,8 +12105,8 @@
     }
     return ok;
   }
-  function applyPlanToDom(el2, plan) {
-    for (const [k2, v2] of Object.entries(plan)) {
+  function applyPlanToDom(el2, plan2) {
+    for (const [k2, v2] of Object.entries(plan2)) {
       if (v2 == null) el2.removeAttribute(k2);
       else el2.setAttribute(k2, v2);
     }
@@ -8769,7 +12121,7 @@
       return connectorMoveOps(sel, dx, dy);
     }
     const kids = textChildren(sel.el);
-    const plan = planMove(
+    const plan2 = planMove(
       elementGeom(sel.el),
       dx,
       dy,
@@ -8777,9 +12129,9 @@
         attrs: { x: k2.getAttribute("x"), y: k2.getAttribute("y") }
       }))
     );
-    const ops = [{ kind: "attrs", loc: sel.loc, set: plan.attrs }];
-    applyPlanToDom(sel.el, plan.attrs);
-    plan.children?.forEach((p2, i2) => {
+    const ops = [{ kind: "attrs", loc: sel.loc, set: plan2.attrs }];
+    applyPlanToDom(sel.el, plan2.attrs);
+    plan2.children?.forEach((p2, i2) => {
       const loc = kids[i2].getAttribute("data-ink");
       if (loc && Object.keys(p2).length) {
         ops.push({ kind: "attrs", loc, set: p2 });
@@ -9012,11 +12364,11 @@
       restore(drag.snaps);
       lastPlans = drag.snaps.map((s2) => {
         const target = mapBox(s2.box, drag.start, to);
-        const plan = cropping && planCrop(s2.geom, s2.box, target) || planResize(s2.geom, s2.box, target);
-        applyPlanToDom(s2.sel.el, plan);
+        const plan2 = cropping && planCrop(s2.geom, s2.box, target) || planResize(s2.geom, s2.box, target);
+        applyPlanToDom(s2.sel.el, plan2);
         return {
           sel: s2.sel,
-          ops: [{ kind: "attrs", loc: s2.sel.loc, set: plan }]
+          ops: [{ kind: "attrs", loc: s2.sel.loc, set: plan2 }]
         };
       });
     } else if (drag.kind === "rotate") {
@@ -9027,11 +12379,11 @@
       if (e2.shiftKey) deg = Math.round(deg / 15) * 15;
       restore(drag.snaps);
       lastPlans = drag.snaps.map((s2) => {
-        const plan = planRotate(s2.geom, deg, c2);
-        applyPlanToDom(s2.sel.el, plan);
+        const plan2 = planRotate(s2.geom, deg, c2);
+        applyPlanToDom(s2.sel.el, plan2);
         return {
           sel: s2.sel,
-          ops: [{ kind: "attrs", loc: s2.sel.loc, set: plan }]
+          ops: [{ kind: "attrs", loc: s2.sel.loc, set: plan2 }]
         };
       });
     } else if (drag.kind === "endpoint") {
@@ -9313,18 +12665,18 @@
     const diagrams = /* @__PURE__ */ new Set();
     const out = [];
     let refused = false;
-    for (const plan of plans) {
-      if (sourceOf(plan.sel.key)?.role !== "diagram") {
-        out.push(plan);
+    for (const plan2 of plans) {
+      if (sourceOf(plan2.sel.key)?.role !== "diagram") {
+        out.push(plan2);
         continue;
       }
-      const el2 = plan.sel.el;
+      const el2 = plan2.sel.el;
       const diagram = el2.closest("svg[data-drawio]");
       const cell = el2.getAttribute("data-cell-id");
       if (!diagram || !cell) continue;
       const ops = [];
       let moved = false;
-      for (const op of plan.ops) {
+      for (const op of plan2.ops) {
         if (op.kind === "delete") ops.push({ kind: "cell-delete", cell });
         else if (String(op.kind).startsWith("cell-")) ops.push(op);
         else if (geometryChanged([op])) moved = true;
@@ -9343,7 +12695,7 @@
         }
       }
       if (ops.length) {
-        out.push({ sel: plan.sel, ops });
+        out.push({ sel: plan2.sel, ops });
         diagrams.add(diagram);
       }
     }
@@ -10306,7 +13658,7 @@
     const mode2 = drawnDiagram(el2)?.getAttribute("data-drawio-mode");
     return mode2 === "inline" || mode2 === "themed" ? mode2 : "picture";
   }
-  var open2 = null;
+  var open3 = null;
   function editDiagram(sel) {
     const image = diagramOf(sel.el);
     const src = sourceOf(sel.key);
@@ -10333,7 +13685,7 @@
     void openDrawio({ path: null });
   }
   async function openDrawio(target) {
-    if (open2) return;
+    if (open3) return;
     const res = await request({ action: "drawio-load", path: target.path });
     if (!res.ok) {
       toast(res.error ?? "Cannot open that diagram", "error");
@@ -10410,7 +13762,7 @@
     );
     const wrap2 = h("div", { id: "drawio", class: "drawio" }, frame, note);
     document.body.append(wrap2);
-    open2 = wrap2;
+    open3 = wrap2;
     const slow = window.setTimeout(() => {
       if (loaded) return;
       status3.textContent = `draw.io did not load from ${origin2}. Is this computer offline? Draw the diagram in draw.io desktop instead.`;
@@ -10421,7 +13773,7 @@
       window.clearTimeout(slow);
       window.removeEventListener("message", onMessage2);
       wrap2.remove();
-      open2 = null;
+      open3 = null;
     };
     const save4 = async (svg) => {
       const first = path === null;
@@ -10887,7 +14239,7 @@
     a: "Link"
   };
   var collapsed = /* @__PURE__ */ new Set();
-  function label(el2) {
+  function label2(el2) {
     if (isZone(el2)) return `Zone \xB7 ${zoneName(el2)}`;
     const id = el2.getAttribute("id");
     const kind = el2.hasAttribute("data-ink-layer") ? "Layer" : NAMES[el2.localName] ?? el2.localName;
@@ -11011,7 +14363,7 @@
     }
     select([el2]);
   }
-  function row3(el2, depth) {
+  function row4(el2, depth) {
     const loc = el2.getAttribute("data-ink") ?? "";
     const src = sourceOf(keyOf(el2));
     const writable = !!src?.writable && (canTransform(el2) || ed.layoutMode || isOwnObject(el2));
@@ -11021,13 +14373,13 @@
     const selected = ed.selection.some((s2) => s2.el === el2);
     const locked = el2.hasAttribute("data-ink-locked");
     const hidden = isHidden(el2);
-    const name2 = h("span", { class: "obj-name" }, label(el2));
+    const name2 = h("span", { class: "obj-name" }, label2(el2));
     const out = [];
     const item2 = h(
       "div",
       {
         class: `obj-row${selected ? " on" : ""}${writable ? "" : " foreign"}${hidden ? " hidden-obj" : ""}`,
-        title: src ? `${label(el2)} \xB7 ${src.rel}` : label(el2),
+        title: src ? `${label2(el2)} \xB7 ${src.rel}` : label2(el2),
         style: `padding-left:${8 + depth * 14}px`
       },
       h(
@@ -11079,7 +14431,7 @@
     item2.addEventListener("mouseleave", () => setHover(null));
     out.push(item2);
     if (open5) {
-      for (const k2 of [...kids].reverse()) out.push(...row3(k2, depth + 1));
+      for (const k2 of [...kids].reverse()) out.push(...row4(k2, depth + 1));
     }
     return out;
   }
@@ -11109,7 +14461,7 @@
         "Top of the stack first. Middle-click (or Alt+click) on the slide steps through overlapping objects."
       )
     );
-    for (const el2 of top) host4.append(...row3(el2, 0));
+    for (const el2 of top) host4.append(...row4(el2, 0));
   }
   function showTab(tab) {
     for (const b2 of tabs.querySelectorAll("[data-tab]")) {
@@ -11165,7 +14517,7 @@
 
   // src/ts/editor/stepbutton.ts
   var flash = 0;
-  function button2() {
+  function button3() {
     return document.getElementById("btn-step");
   }
   function slideMax() {
@@ -11173,7 +14525,7 @@
     return svg ? maxStep(svg) : 0;
   }
   function showStepLabel(step2) {
-    const b2 = button2();
+    const b2 = button3();
     if (!b2 || flash) return;
     const max = slideMax();
     b2.textContent = stepLabel(step2, max);
@@ -11193,7 +14545,7 @@
     if (wrapped(from, step2)) cameRound();
   }
   function cameRound() {
-    const b2 = button2();
+    const b2 = button3();
     if (!b2) return;
     window.clearTimeout(flash);
     b2.classList.remove("came-round");
@@ -11207,7 +14559,7 @@
     }, 900);
   }
   function initStepButton() {
-    const b2 = button2();
+    const b2 = button3();
     if (!b2) return;
     b2.addEventListener("click", (e2) => {
       setStep(nextStep(ed.step, slideMax(), e2.shiftKey));
@@ -11392,7 +14744,7 @@
       ...body3.filter((b2) => !!b2)
     );
   }
-  function row4(label4, ...controls) {
+  function row5(label4, ...controls) {
     return h(
       "label",
       { class: "prop-row" },
@@ -11440,7 +14792,7 @@
     sel.addEventListener("change", () => commit(sel.value));
     return sel;
   }
-  function button3(label4, title3, fn, cls = "") {
+  function button4(label4, title3, fn, cls = "") {
     return h(
       "button",
       { type: "button", class: `pbtn ${cls}`, title: title3, onclick: fn },
@@ -11497,7 +14849,7 @@
     for (const f2 of schema) {
       const label4 = f2.name.replace(/_/g, " ");
       box.append(
-        row4(
+        row5(
           label4,
           fieldControl(
             f2,
@@ -11545,7 +14897,7 @@
               { class: "media-poster" },
               poster ? String(poster).split("/").pop() : "None"
             ),
-            button3(
+            button4(
               poster ? "Change\u2026" : "Pick\u2026",
               poster ? `Poster: ${poster}` : "Still image shown before playback",
               async () => {
@@ -11554,7 +14906,7 @@
                 if (up) commit("poster", up.path);
               }
             ),
-            poster ? button3(
+            poster ? button4(
               "\u2715",
               "Remove the poster",
               () => commit("poster", null)
@@ -11579,7 +14931,7 @@
           { value: "off", label: "Never" }
         ];
         rows.push(
-          row4(
+          row5(
             label4,
             selectInput(
               opts2,
@@ -11593,7 +14945,7 @@
       if (f2.name === "start" || f2.name === "end") {
         const v2 = values[f2.name];
         rows.push(
-          row4(
+          row5(
             label4,
             numberInput(
               typeof v2 === "number" ? v2 : null,
@@ -11610,7 +14962,7 @@
         continue;
       }
       rows.push(
-        row4(
+        row5(
           label4,
           fieldControl(
             f2,
@@ -11649,7 +15001,7 @@
       { class: "prop-row" },
       h("span", { class: "prop-label" }, "Page"),
       numberInput(page, (n3) => show2(Math.max(1, Math.round(n3))), { min: 1 }),
-      button3("Pages\u2026", "See the PDF's pages and pick one", async () => {
+      button4("Pages\u2026", "See the PDF's pages and pick one", async () => {
         const choice = file ? await choosePage(file, page) : null;
         if (choice) show2(choice.page);
       })
@@ -11674,7 +15026,7 @@
       const box = h("input", { type: "checkbox" });
       box.checked = on2;
       box.addEventListener("change", () => fn(box.checked));
-      return row4(label4, box);
+      return row5(label4, box);
     };
     const series = h("div", { class: "chart-series" });
     const twoAxes = secondAxisAllowed(s2);
@@ -11720,11 +15072,11 @@
       } else series.append(entry);
     }
     const rows = [
-      row4(
+      row5(
         "Kind",
         selectInput(CHART_KINDS, s2.kind, (v2) => commit({ kind: v2 }))
       ),
-      row4(
+      row5(
         s2.kind === "scatter" ? "X values" : "Categories",
         selectInput(
           grid.columns.map((c2) => ({ value: c2, label: c2 })),
@@ -11742,7 +15094,7 @@
         ),
         series
       ),
-      row4(
+      row5(
         "Title",
         textInput(s2.title ?? "", (v2) => commit({ title: v2 }), "none")
       )
@@ -11783,7 +15135,7 @@
     }
     rows.push(
       check("Value labels", s2.labels, (v2) => commit({ labels: v2 })),
-      row4(
+      row5(
         "Legend",
         selectInput(
           [
@@ -11821,7 +15173,7 @@
     panel.append(
       section2(
         "Slide",
-        row4(
+        row5(
           "Title",
           textInput(slide.title ?? "", (v2) => {
             void edit({
@@ -11832,9 +15184,9 @@
             });
           })
         ),
-        row4(
+        row5(
           "Layout",
-          button3(
+          button4(
             `${currentLayout ? layoutLabel(currentLayout) : "None"} \u25BE`,
             "Pick a layout from previews",
             () => void openGallery({
@@ -11847,18 +15199,18 @@
         editable && h(
           "div",
           { class: "prop-buttons" },
-          button3(
+          button4(
             "Save as layout\u2026",
             "Make a new layout (a template) from this slide: new slides can start from it",
             () => saveAsLayout(di)
           ),
-          currentLayout ? button3(
+          currentLayout ? button4(
             "Edit its layout",
             "Open the slide master at the layout this slide is built on: edits change every slide on it",
             () => void openMaster()
           ) : null
         ),
-        row4(
+        row5(
           "Font size",
           numberInput(
             slide.fontSize,
@@ -11871,7 +15223,7 @@
             { placeholder: "deck default" }
           )
         ),
-        slide.visible && row4(
+        slide.visible && row5(
           "Starred",
           (() => {
             const cb = h("input", { type: "checkbox" });
@@ -11883,7 +15235,7 @@
             return cb;
           })()
         ),
-        row4(
+        row5(
           "Hidden",
           (() => {
             const cb = h("input", { type: "checkbox" });
@@ -11930,7 +15282,7 @@
     if (deckPath) addFile("Deck", fileName2(deckPath), deckPath);
     if (editable)
       files2.append(
-        button3(
+        button4(
           "Rename files\u2026",
           "Give this slide's drawing, Markdown, notes and ink one new name (its id follows)",
           () => renameSlideFiles(di)
@@ -11939,7 +15291,7 @@
     const textInDeck = slide.md?.kind !== "file" && (slide.md?.kind === "inline" || Object.values(slide.zones).some((z) => z.kind === "text"));
     if (textInDeck && editable)
       files2.append(
-        button3(
+        button4(
           "Move text to Markdown",
           "Move this slide's text out of deck.py into its own .md file",
           () => void edit({ action: "to-markdown", slide: di })
@@ -11962,7 +15314,7 @@
             { class: "hint warn" },
             `${stale} ${stale === 1 ? "arrow no longer meets its shape" : "arrows no longer meet their shapes"} (moved in draw.io or another editor).`
           ) : null,
-          button3(
+          button4(
             "Re-route all",
             "Re-attach every arrow to its shapes",
             () => reroute(arrows)
@@ -11990,7 +15342,7 @@
     ];
     const send = (spec) => void edit({ action: "slide", op: "transition", slide: di, spec });
     const body3 = [
-      row4(
+      row5(
         "Type",
         selectInput(opts2, value, (v2) => {
           if (!v2) send(null);
@@ -12087,13 +15439,13 @@
             },
             `#${cue.element}`
           ),
-          step2 != null && button3(
+          step2 != null && button4(
             icon("play", 12),
             "Preview from this animation",
             () => void playAnimations(step2),
             "anim-preview-ctl"
           ),
-          editable && button3(icon("up", 12), "Earlier", () => {
+          editable && button4(icon("up", 12), "Earlier", () => {
             if (i2 > 0)
               void edit({
                 action: "anim",
@@ -12103,7 +15455,7 @@
                 to: i2 - 1
               });
           }),
-          editable && button3(icon("down", 12), "Later", () => {
+          editable && button4(icon("down", 12), "Later", () => {
             if (i2 < cues.length - 1) {
               void edit({
                 action: "anim",
@@ -12114,7 +15466,7 @@
               });
             }
           }),
-          editable && button3(icon("trash", 12), "Remove", () => {
+          editable && button4(icon("trash", 12), "Remove", () => {
             void edit({
               action: "anim",
               slide: di,
@@ -12151,12 +15503,12 @@
     const controls = h(
       "div",
       { class: "btn-row anim-preview" },
-      playing ? button3(
+      playing ? button4(
         "\u25A0 Stop",
         "Stop the preview (Esc)",
         () => stopPreview(),
         "anim-preview-ctl"
-      ) : button3(
+      ) : button4(
         "\u25B6 Play",
         "Play this slide's animations here, click by click",
         () => void playAnimations(1),
@@ -12210,13 +15562,13 @@
             trigger: cue.fields.trigger ?? "on-click"
           })
         ) : h("span", {}, cue.type),
-        steps[index] != null && button3(
+        steps[index] != null && button4(
           icon("play", 12),
           `Preview (click ${steps[index]})`,
           () => void playAnimations(steps[index] ?? 1),
           "anim-preview-ctl"
         ),
-        editable && button3(icon("trash", 12), "Remove", () => {
+        editable && button4(icon("trash", 12), "Remove", () => {
           void edit({
             action: "anim",
             slide: di,
@@ -12330,12 +15682,12 @@
     const shown3 = boxShown(first);
     const token = shown3 ? tokenOf(first, prop) : null;
     const computed = shown3 ? getComputedStyle(first)[prop] : "none";
-    const send = (paint) => {
+    const send = (paint2) => {
       const plans = sel.map((s2) => ({
         sel: s2,
         ops: [
           ...boxOps(s2),
-          { kind: "paint", loc: s2.loc, prop, ...paint }
+          { kind: "paint", loc: s2.loc, prop, ...paint2 }
         ]
       }));
       void sendSvgOps(plans, prop === "fill" ? "Fill" : "Stroke");
@@ -12360,9 +15712,9 @@
     custom.addEventListener("change", () => send({ color: custom.value }));
     swatches.append(custom);
     swatches.append(
-      button3("\u2205", "None", () => send({ color: "none" }), "none-btn")
+      button4("\u2205", "None", () => send({ color: "none" }), "none-btn")
     );
-    return row4(prop === "fill" ? "Fill" : "Stroke", swatches);
+    return row5(prop === "fill" ? "Fill" : "Stroke", swatches);
   }
   function styleOps(sel, set, label4) {
     void sendSvgOps(
@@ -12405,7 +15757,7 @@
     });
     custom.addEventListener("change", () => pick2(custom.value));
     swatches.append(custom);
-    return row4(label4, swatches);
+    return row5(label4, swatches);
   }
   function renderCellPanel(sel) {
     const el2 = sel.el;
@@ -12437,8 +15789,8 @@
     panel.append(
       section2(
         "draw.io shape",
-        row4("Id", h("code", {}, el2.getAttribute("id") ?? "")),
-        row4("Label", area2),
+        row5("Id", h("code", {}, el2.getAttribute("id") ?? "")),
+        row5("Label", area2),
         cellColorRow(
           "Fill",
           hex(look?.fill),
@@ -12449,7 +15801,7 @@
           hex(look?.stroke),
           (v2) => style("strokeColor", v2, "Shape line")
         ),
-        row4(
+        row5(
           "Line width",
           numberInput(
             parseFloat(look?.strokeWidth ?? "1") || 1,
@@ -12464,7 +15816,7 @@
         h(
           "div",
           { class: "btn-row" },
-          button3("Leave the diagram", "Esc", () => enterGroup(null))
+          button4("Leave the diagram", "Esc", () => enterGroup(null))
         )
       )
     );
@@ -12485,7 +15837,7 @@
     panel.append(
       section2(
         tag,
-        row4(
+        row5(
           "Id",
           zone ? h("code", {}, id) : textInput(
             id,
@@ -12555,7 +15907,7 @@
             media.path ? openButton(media.path) : null,
             media.inline ? null : renameButton(media.path)
           ),
-          button3(
+          button4(
             "Edit data\u2026",
             "Edit the chart's table (double-click)",
             () => void editChart(name2)
@@ -12571,12 +15923,12 @@
             renameButton(projectFile(media.src))
           ),
           ...media.kind === "image" && isPdfRef(media.src ?? "") ? [zonePageRow(slide, name2, media.src ?? "")] : [],
-          button3(
+          button4(
             "Replace media\u2026",
             "Pick another image or video",
             () => void zoneMedia(name2)
           ),
-          button3("Clear", "Empty this zone", () => {
+          button4("Clear", "Empty this zone", () => {
             void edit({
               action: "zone-media",
               slide: slide.deckIndex,
@@ -12586,11 +15938,11 @@
           })
         );
         const video = media.kind === "video" ? videoOf(el2) : null;
-        if (video) body3.push(previewButton(video, button3));
+        if (video) body3.push(previewButton(video, button4));
         if (media.kind === "video" && media.src) {
           const src2 = media.src;
           body3.push(
-            button3(
+            button4(
               "Check & convert\u2026",
               "Can every browser play it? Convert it to MP4 or WebM, smaller or at another resolution",
               () => void openVideoCheck({
@@ -12603,7 +15955,7 @@
         }
       } else {
         body3.push(
-          button3(
+          button4(
             "Edit text",
             "Edit this zone's Markdown (double-click)",
             () => {
@@ -12622,7 +15974,7 @@
     }
     const innerVideo = zone ? null : videoOf(el2);
     if (innerVideo) {
-      panel.append(section2("Video", previewButton(innerVideo, button3)));
+      panel.append(section2("Video", previewButton(innerVideo, button4)));
     }
     const textZone = zone && el2.localName === "foreignObject" && !!el2.querySelector(".inkflow-content");
     if (textZone) {
@@ -12650,7 +16002,7 @@
           "Style",
           fills && !picture && paintRow([sel], "fill"),
           !picture && el2.localName !== "g" && paintRow([sel], "stroke"),
-          !picture && el2.localName !== "g" && row4(
+          !picture && el2.localName !== "g" && row5(
             "Stroke width",
             numberInput(
               strokeWidth,
@@ -12661,7 +16013,7 @@
               )
             )
           ),
-          row4(
+          row5(
             "Opacity",
             (() => {
               const r2 = h("input", {
@@ -12684,7 +16036,7 @@
               return r2;
             })()
           ),
-          shapeTag === "rect" && row4(
+          shapeTag === "rect" && row5(
             "Corner radius",
             numberInput(
               parseFloat(el2.getAttribute("rx") ?? "0") || 0,
@@ -12781,7 +16133,7 @@
     };
     return section2(
       "Connector",
-      row4(
+      row5(
         "Route",
         selectInput(
           [
@@ -12804,7 +16156,7 @@
           }
         )
       ),
-      row4(
+      row5(
         "Arrowheads",
         selectInput(
           [
@@ -12832,12 +16184,12 @@
       h(
         "div",
         { class: "btn-row" },
-        button3(
+        button4(
           "Re-route",
           "Re-attach to the shapes where they are now",
           () => reroute([sel])
         ),
-        el2.hasAttribute("inkflow:bend") && button3(
+        el2.hasAttribute("inkflow:bend") && button4(
           "Reset bend",
           "Put the elbow's middle segment back where it goes by default",
           () => {
@@ -12848,7 +16200,7 @@
             );
           }
         ),
-        button3(
+        button4(
           "Detach",
           "Free both ends",
           () => send(
@@ -12866,7 +16218,7 @@
     const n3 = sitesPerSide(sel.el);
     const box = section2(
       "Connection points",
-      row4(
+      row5(
         "Per side",
         selectInput(
           [1, 2, 3, 4, 5, 7, 9].map((k2) => ({
@@ -12939,8 +16291,8 @@
     const padding = parseFloat(value("--inkflow-padding"));
     return section2(
       "Text box",
-      row4("Draw the box", box),
-      row4(
+      row5("Draw the box", box),
+      row5(
         "Padding",
         numberInput(
           Number.isFinite(padding) ? padding : null,
@@ -12956,7 +16308,7 @@
           }
         )
       ),
-      row4(
+      row5(
         "Align",
         selectInput(
           [
@@ -12970,7 +16322,7 @@
           (v2) => setVar("--inkflow-align", v2 || null, "Text align")
         )
       ),
-      row4(
+      row5(
         "Vertical",
         selectInput(
           [
@@ -13044,7 +16396,7 @@
         on2 ? "Shrink text to fit" : "Keep text size"
       );
     };
-    const value = button3(
+    const value = button4(
       formatTextSize(current3),
       "Type a size (25\u2013300 %)",
       () => {
@@ -13083,13 +16435,13 @@
     );
     const smaller = nextTextSize(current3, -1);
     const larger = nextTextSize(current3, 1);
-    const down = button3(
+    const down = button4(
       "A\u2212",
       "Smaller text",
       () => setSize2(smaller),
       "text-size-step"
     );
-    const up = button3(
+    const up = button4(
       "A+",
       "Larger text",
       () => setSize2(larger),
@@ -13124,7 +16476,7 @@
       const actions = h("div", { class: "prop-buttons" });
       if (taller != null && have > 0 && taller > have + 1) {
         actions.append(
-          button3(
+          button4(
             "Make box taller",
             "Grow the box so the text fits at its size",
             () => void sendSvgOps(
@@ -13151,7 +16503,7 @@
       }
       if (smaller !== current3) {
         actions.append(
-          button3(
+          button4(
             "Smaller text",
             "One step smaller",
             () => setSize2(smaller)
@@ -13195,7 +16547,7 @@
       isDiagramHref(href) ? h(
         "div",
         { class: "btn-row" },
-        button3(
+        button4(
           "Edit diagram",
           "Open it in draw.io (or double-click it)",
           () => editDiagram(sel),
@@ -13206,7 +16558,7 @@
       h(
         "div",
         { class: "btn-row" },
-        button3(
+        button4(
           "Replace\u2026",
           "Pick another picture; it keeps this size and place",
           async () => {
@@ -13231,23 +16583,23 @@
             );
           }
         ),
-        ed.cropMode ? button3(
+        ed.cropMode ? button4(
           "Done cropping",
           "Enter",
           () => setCropMode(false),
           "on"
-        ) : button3(
+        ) : button4(
           "Crop",
           "Crop (double-click the picture)",
           () => void startCrop(sel)
         ),
-        cropped ? button3(
+        cropped ? button4(
           "Reset crop",
           "Show the whole picture again",
           () => void resetCrop(sel)
         ) : null
       ),
-      row4(
+      row5(
         "Fit",
         selectInput(
           FITS.map((f2) => ({ value: f2.value, label: f2.label })),
@@ -13294,14 +16646,14 @@
       numberInput(page, (n3) => void show2(Math.max(1, Math.round(n3))), {
         min: 1
       }),
-      button3("Pages\u2026", "See the PDF's pages and pick one", async () => {
+      button4("Pages\u2026", "See the PDF's pages and pick one", async () => {
         const choice = await choosePage(file, page);
         if (choice) void show2(choice.page, choice.url);
       })
     );
   }
   function showAsRow(sel, mode2) {
-    return row4(
+    return row5(
       "Show as",
       selectInput(
         DIAGRAM_MODES.map((m2) => ({ value: m2.value, label: m2.label })),
@@ -13350,7 +16702,7 @@
       h(
         "div",
         { class: "btn-row" },
-        button3(
+        button4(
           "Edit diagram",
           "Open it in draw.io (or double-click it)",
           () => editDiagram(sel),
@@ -13359,7 +16711,7 @@
       ),
       showAsRow(sel, diagramMode(svg)),
       editShapesRow(sel, svg),
-      row4(
+      row5(
         "Fit",
         selectInput(
           FITS.map((f2) => ({ value: f2.value, label: f2.label })),
@@ -13587,8 +16939,8 @@
     return section2(
       "Link & alt text",
       slideOptions(),
-      row4("Link", link),
-      row4(
+      row5("Link", link),
+      row5(
         "Alt text",
         textInput(
           title3,
@@ -13631,14 +16983,14 @@
     const anchor2 = cs.textAnchor;
     return section2(
       "Text",
-      row4(
+      row5(
         "Size",
         numberInput(
           parseFloat(cs.fontSize),
           (v2) => setAll({ "font-size": `${v2}px` }, "Font size")
         )
       ),
-      row4(
+      row5(
         "Font",
         textInput(
           cs.fontFamily,
@@ -13649,13 +17001,13 @@
       h(
         "div",
         { class: "btn-row" },
-        button3(
+        button4(
           h("b", {}, "B"),
           "Bold",
           () => setAll({ "font-weight": bold ? null : "bold" }, "Bold"),
           bold ? "on" : ""
         ),
-        button3(
+        button4(
           h("i", {}, "I"),
           "Italic",
           () => setAll(
@@ -13664,25 +17016,25 @@
           ),
           italic ? "on" : ""
         ),
-        button3(
+        button4(
           "\u27F8",
           "Align start",
           () => setAll({ "text-anchor": null }, "Align"),
           anchor2 === "start" ? "on" : ""
         ),
-        button3(
+        button4(
           "\u21D4",
           "Align middle",
           () => setAll({ "text-anchor": "middle" }, "Align"),
           anchor2 === "middle" ? "on" : ""
         ),
-        button3(
+        button4(
           "\u27F9",
           "Align end",
           () => setAll({ "text-anchor": "end" }, "Align"),
           anchor2 === "end" ? "on" : ""
         ),
-        button3("Edit", "Edit text (double-click)", () => emit("edit-text"))
+        button4("Edit", "Edit text (double-click)", () => emit("edit-text"))
       )
     );
   }
@@ -13700,10 +17052,10 @@
           width: b2.width * sx,
           height: b2.height * sy
         };
-        const plan = planResize(elementGeom(s2.el), b2, target);
+        const plan2 = planResize(elementGeom(s2.el), b2, target);
         return {
           sel: s2,
-          ops: [{ kind: "attrs", loc: s2.loc, set: plan }]
+          ops: [{ kind: "attrs", loc: s2.loc, set: plan2 }]
         };
       });
       void sendSvgOps(plans, "Resize");
@@ -13714,15 +17066,15 @@
       h(
         "div",
         { class: "grid2" },
-        row4(
+        row5(
           "X",
           numberInput(box.x, (v2) => resizeTo({ ...box, x: v2 }))
         ),
-        row4(
+        row5(
           "Y",
           numberInput(box.y, (v2) => resizeTo({ ...box, y: v2 }))
         ),
-        row4(
+        row5(
           "W",
           numberInput(
             box.width,
@@ -13730,7 +17082,7 @@
             { min: 1 }
           )
         ),
-        row4(
+        row5(
           "H",
           numberInput(
             box.height,
@@ -13739,7 +17091,7 @@
           )
         )
       ),
-      sels.length === 1 && row4(
+      sels.length === 1 && row5(
         "Rotation",
         numberInput(
           rot,
@@ -13749,7 +17101,7 @@
               x: box.x + box.width / 2,
               y: box.y + box.height / 2
             };
-            const plan = planRotate(
+            const plan2 = planRotate(
               elementGeom(s2.el),
               v2 - rot,
               center
@@ -13762,7 +17114,7 @@
                     {
                       kind: "attrs",
                       loc: s2.loc,
-                      set: plan
+                      set: plan2
                     }
                   ]
                 }
@@ -13789,26 +17141,26 @@
       h(
         "div",
         { class: "btn-row" },
-        button3("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
-        button3("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
-        button3("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
-        button3("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
-        button3(
+        button4("\u21C8", "Bring to front (Ctrl+Shift+\u2191)", () => order2("front")),
+        button4("\u2191", "Bring forward (Ctrl+\u2191)", () => order2("forward")),
+        button4("\u2193", "Send backward (Ctrl+\u2193)", () => order2("backward")),
+        button4("\u21CA", "Send to back (Ctrl+Shift+\u2193)", () => order2("back")),
+        button4(
           icon("copy", 14),
           "Duplicate (Ctrl+D)",
           () => emit("duplicate")
         ),
-        sels.length > 1 && button3(
+        sels.length > 1 && button4(
           icon("group", 14),
           "Group (Ctrl+G)",
           () => emit("group")
         ),
-        isGroup && button3(
+        isGroup && button4(
           "Ungroup",
           "Ungroup (Ctrl+Shift+G)",
           () => emit("ungroup")
         ),
-        button3(
+        button4(
           icon("trash", 14),
           "Delete (Del)",
           () => emit("delete"),
@@ -13861,7 +17213,7 @@
     const movable = sels.every((s2) => canTransform(s2.el));
     panel.append(section2(`${sels.length} objects`));
     if (movable) {
-      const a2 = (label4, title3, how) => button3(label4, title3, () => alignSelection(how));
+      const a2 = (label4, title3, how) => button4(label4, title3, () => alignSelection(how));
       panel.append(
         section2(
           "Align",
@@ -14069,7 +17421,7 @@
   var panel2 = document.getElementById("find-panel");
   var hits = [];
   var active = -1;
-  var timer2 = 0;
+  var timer3 = 0;
   var opts = { matchCase: false, wholeWord: false, regex: false };
   var scope = "deck";
   function el(sel) {
@@ -14116,8 +17468,8 @@
     renderResults();
   }
   function schedule() {
-    window.clearTimeout(timer2);
-    timer2 = window.setTimeout(() => void search(), 220);
+    window.clearTimeout(timer3);
+    timer3 = window.setTimeout(() => void search(), 220);
   }
   function fileLabel(path) {
     const root2 = ed.model?.projectDir ?? "";
@@ -14371,33 +17723,33 @@
   }
 
   // src/ts/editor/grid.ts
-  var view = document.getElementById("grid-view");
-  var list2 = document.getElementById("grid-list");
+  var view2 = document.getElementById("grid-view");
+  var list3 = document.getElementById("grid-list");
   var sizeInput = document.getElementById("grid-size");
   var starFilter = document.getElementById("grid-starred");
-  var thumbs3 = new Thumbs(list2);
+  var thumbs4 = new Thumbs(list3);
   var STARRED_KEY = "inkflow-editor-grid-starred";
   var starredOnly = false;
-  function toggleGrid(on2 = view.hidden === true) {
-    view.hidden = !on2;
+  function toggleGrid(on2 = view2.hidden === true) {
+    view2.hidden = !on2;
     document.body.classList.toggle("grid-mode", on2);
     document.getElementById("btn-grid")?.classList.toggle("on", on2);
     if (on2) {
       ed.focus = "sorter";
       renderGrid();
-      view.focus();
+      view2.focus();
     } else {
       ed.focus = "canvas";
       emit("slide");
     }
   }
-  function open3(i2) {
+  function open4(i2) {
     ed.slideSelection.clear();
     toggleGrid(false);
     gotoSlide(i2);
   }
   function lastMark() {
-    return list2.lastElementChild;
+    return list3.lastElementChild;
   }
   function gridItem(slide, i2) {
     const item2 = h(
@@ -14408,7 +17760,7 @@
         draggable: ed.model?.deckEditable && !starredOnly ? "true" : null,
         "data-index": i2
       },
-      thumbs3.thumb(slide),
+      thumbs4.thumb(slide),
       h(
         "div",
         { class: "grid-caption" },
@@ -14426,7 +17778,8 @@
             title: `${slide.animations.length} animation(s)`
           },
           "\u2726"
-        ) : null
+        ) : null,
+        changeBadge(i2)
       )
     );
     item2.classList.toggle("starred", isStarred(i2));
@@ -14434,7 +17787,7 @@
       pickSlide(i2, e2);
       ed.focus = "sorter";
     });
-    item2.addEventListener("dblclick", () => open3(i2));
+    item2.addEventListener("dblclick", () => open4(i2));
     item2.addEventListener("contextmenu", (e2) => {
       e2.preventDefault();
       if (!ed.slideSelection.has(i2)) {
@@ -14451,7 +17804,7 @@
     });
     item2.addEventListener("dragend", () => {
       dragging.now = null;
-      clearDropMarks(list2);
+      clearDropMarks(list3);
       item2.classList.remove("dragging");
     });
     item2.addEventListener("dragover", (e2) => {
@@ -14460,11 +17813,11 @@
       e2.preventDefault();
       e2.stopPropagation();
       if (drag.kind === "section") {
-        markGap(list2, sectionGapAtSlide(sections(), i2), lastMark());
+        markGap(list3, sectionGapAtSlide(sections(), i2), lastMark());
         return;
       }
       const r2 = item2.getBoundingClientRect();
-      clearDropMarks(list2);
+      clearDropMarks(list3);
       item2.classList.add(
         e2.clientX > r2.left + r2.width / 2 ? "drop-after" : "drop-before"
       );
@@ -14473,7 +17826,7 @@
       e2.preventDefault();
       e2.stopPropagation();
       const drag = dragging.now;
-      clearDropMarks(list2);
+      clearDropMarks(list3);
       if (!drag) return;
       if (drag.kind === "section") {
         void moveSectionToGap(
@@ -14499,7 +17852,7 @@
     head.addEventListener("dragend", () => {
       dragging.now = null;
       head.closest(".grid-section")?.classList.remove("dragging");
-      clearDropMarks(list2);
+      clearDropMarks(list3);
     });
     head.addEventListener("dragover", (e2) => {
       const drag = dragging.now;
@@ -14507,17 +17860,17 @@
       e2.preventDefault();
       e2.stopPropagation();
       if (drag.kind === "section") {
-        markGap(list2, headerGap(head, k2, e2), lastMark());
+        markGap(list3, headerGap(head, k2, e2), lastMark());
         return;
       }
-      clearDropMarks(list2);
+      clearDropMarks(list3);
       head.classList.add("drop-into");
     });
     head.addEventListener("drop", (e2) => {
       e2.preventDefault();
       e2.stopPropagation();
       const drag = dragging.now;
-      clearDropMarks(list2);
+      clearDropMarks(list3);
       if (!drag) return;
       if (drag.kind === "section") {
         void moveSectionToGap(drag.section, headerGap(head, k2, e2));
@@ -14542,11 +17895,11 @@
     renderGrid();
   }
   function renderGrid() {
-    if (view.hidden) return;
+    if (view2.hidden) return;
     renderFilter();
-    const top = list2.scrollTop;
-    clear(list2);
-    thumbs3.begin();
+    const top = list3.scrollTop;
+    clear(list3);
+    thumbs4.begin();
     const slides = ed.model?.slides ?? [];
     const all = sections();
     for (const block of sectionBlocks(slides.length, all)) {
@@ -14571,11 +17924,11 @@
         }
         wrap2.append(grid);
       }
-      list2.append(wrap2);
+      list3.append(wrap2);
     }
-    thumbs3.end();
+    thumbs4.end();
     if (starredOnly && !starCount()) {
-      list2.append(
+      list3.append(
         h(
           "div",
           { class: "grid-empty" },
@@ -14583,16 +17936,16 @@
         )
       );
     }
-    list2.scrollTop = top;
-    list2.querySelector(".grid-item.active")?.scrollIntoView({
+    list3.scrollTop = top;
+    list3.querySelector(".grid-item.active")?.scrollIntoView({
       block: "nearest"
     });
   }
   function shown() {
-    return [...list2.querySelectorAll(".grid-item")];
+    return [...list3.querySelectorAll(".grid-item")];
   }
-  function onKey(e2) {
-    if (view.hidden) return;
+  function onKey2(e2) {
+    if (view2.hidden) return;
     const target = e2.target;
     if (target.closest("input, textarea, select, #dialog, #find-panel")) return;
     const items2 = shown();
@@ -14635,7 +17988,7 @@
       case "Enter":
         e2.preventDefault();
         e2.stopPropagation();
-        open3(ed.current);
+        open4(ed.current);
         break;
       case "Escape":
         e2.preventDefault();
@@ -14645,36 +17998,36 @@
     }
   }
   function setSize(px2) {
-    view.style.setProperty("--grid-w", `${px2}px`);
+    view2.style.setProperty("--grid-w", `${px2}px`);
     try {
       localStorage.setItem("inkflow-editor-grid", String(px2));
     } catch {
     }
   }
   function initListDrop2() {
-    list2.addEventListener("dragover", (e2) => {
+    list3.addEventListener("dragover", (e2) => {
       const drag = dragging.now;
-      if (!drag || e2.target !== list2) return;
+      if (!drag || e2.target !== list3) return;
       e2.preventDefault();
       if (drag.kind === "section") {
-        markGap(list2, sections().length, lastMark());
+        markGap(list3, sections().length, lastMark());
       } else {
-        clearDropMarks(list2);
+        clearDropMarks(list3);
         lastMark()?.classList.add("drop-after");
       }
     });
-    list2.addEventListener("drop", (e2) => {
+    list3.addEventListener("drop", (e2) => {
       const drag = dragging.now;
-      if (!drag || e2.target !== list2) return;
+      if (!drag || e2.target !== list3) return;
       e2.preventDefault();
-      clearDropMarks(list2);
+      clearDropMarks(list3);
       dropAtEnd(drag);
     });
   }
   function initGrid() {
     document.getElementById("btn-grid")?.addEventListener("click", () => toggleGrid());
     document.getElementById("grid-close")?.addEventListener("click", () => toggleGrid(false));
-    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("keydown", onKey2, true);
     let saved = 280;
     try {
       saved = Number(localStorage.getItem("inkflow-editor-grid")) || 280;
@@ -14688,6 +18041,7 @@
     on("slide", renderGrid);
     on("slide-selection", renderGrid);
     on("stars", renderGrid);
+    on("slide-git", renderGrid);
     try {
       starredOnly = localStorage.getItem(STARRED_KEY) === "1";
     } catch {
@@ -14736,13 +18090,13 @@
   // src/ts/editor/panels.ts
   var KEY = "inkflow-editor-panels";
   var shown2 = parseShown(null);
-  function button4(panel4) {
+  function button5(panel4) {
     return document.getElementById(`btn-panel-${panel4}`);
   }
   function apply2() {
     for (const panel4 of PANELS) {
       document.body.classList.toggle(`hide-${panel4}`, !shown2[panel4]);
-      const b2 = button4(panel4);
+      const b2 = button5(panel4);
       if (!b2) continue;
       b2.classList.toggle("on", shown2[panel4]);
       b2.setAttribute("aria-pressed", String(shown2[panel4]));
@@ -14765,7 +18119,7 @@
     } catch {
     }
     for (const panel4 of PANELS) {
-      button4(panel4)?.addEventListener("click", () => togglePanel(panel4));
+      button5(panel4)?.addEventListener("click", () => togglePanel(panel4));
     }
     apply2();
   }
@@ -16399,7 +19753,7 @@ ${area2.value.slice(pos)}`;
     const preview2 = document.getElementById("notes-preview");
     return !!picked && !picked.isCollapsed && !!preview2 && preview2.contains(picked.anchorNode);
   }
-  function onKey2(e2) {
+  function onKey3(e2) {
     const target = e2.target;
     if (target.closest("input, textarea, select, [contenteditable]") || isEditingText()) {
       return;
@@ -16535,7 +19889,7 @@ ${area2.value.slice(pos)}`;
     $("btn-fullscreen").addEventListener("click", toggleFullscreen);
     document.addEventListener("fullscreenchange", updateFullscreen);
     initStepButton();
-    document.addEventListener("keydown", onKey2);
+    document.addEventListener("keydown", onKey3);
     on("render", renderStepButton);
     on("render", updateZoomLabel);
     on("zoom", updateZoomLabel);
@@ -16554,7 +19908,7 @@ ${area2.value.slice(pos)}`;
   }
 
   // src/ts/editor/canvasmenu.ts
-  var menu4 = document.getElementById("context-menu");
+  var menu5 = document.getElementById("context-menu");
   var at = { x: 0, y: 0 };
   function sep() {
     return h("div", { class: "menu-sep" });
@@ -16782,1317 +20136,16 @@ ${area2.value.slice(pos)}`;
     } else {
       clearSelection();
     }
-    clear(menu4);
-    menu4.append(...hit ? objectMenu() : slideMenu());
+    clear(menu5);
+    menu5.append(...hit ? objectMenu() : slideMenu());
     showMenu(e2.clientX, e2.clientY);
   }
   function initCanvasMenu() {
     document.getElementById("canvas")?.addEventListener("contextmenu", onContextMenu);
   }
 
-  // src/ts/editor/comparelib.ts
-  function isChange(p2) {
-    return p2.status !== "same" || p2.moved;
-  }
-  function visibleRows(pairs, onlyChanges2) {
-    const rows = [];
-    pairs.forEach((p2, i2) => {
-      if (!onlyChanges2 || isChange(p2)) rows.push(i2);
-    });
-    return rows;
-  }
-  function nextChange(pairs, from, dir) {
-    for (let i2 = from + dir; i2 >= 0 && i2 < pairs.length; i2 += dir) {
-      if (isChange(pairs[i2])) return i2;
-    }
-    return null;
-  }
-  function firstRow(pairs) {
-    const i2 = pairs.findIndex(isChange);
-    return i2 >= 0 ? i2 : 0;
-  }
-  function followRow(before, row6, after) {
-    const old = before?.pairs[row6];
-    if (!before || !old) return firstRow(after.pairs);
-    const lid = old.left != null ? before.left.slides[old.left]?.id : null;
-    const rid = old.right != null ? before.right.slides[old.right]?.id : null;
-    const same = after.pairs.findIndex(
-      (p2) => lid != null && p2.left != null && after.left.slides[p2.left]?.id === lid || rid != null && p2.right != null && after.right.slides[p2.right]?.id === rid
-    );
-    if (same >= 0) return same;
-    return Math.min(row6, Math.max(0, after.pairs.length - 1));
-  }
-  function badge2(p2) {
-    if (p2.status === "added")
-      return { symbol: "+", cls: "added", title: "Only on the right" };
-    if (p2.status === "removed")
-      return { symbol: "\u2212", cls: "removed", title: "Only on the left" };
-    if (p2.status === "changed")
-      return {
-        symbol: p2.moved ? "\u2195" : "~",
-        cls: p2.moved ? "changed moved" : "changed",
-        title: p2.moved ? "Changed and moved" : "Changed"
-      };
-    if (p2.moved) return { symbol: "\u2195", cls: "moved", title: "Moved" };
-    return { symbol: "", cls: "same", title: "The same" };
-  }
-  function rowSlide(m2, p2) {
-    if (p2.right != null) return m2.right.slides[p2.right] ?? null;
-    if (p2.left != null) return m2.left.slides[p2.left] ?? null;
-    return null;
-  }
-  function num2(s2) {
-    return s2?.number != null ? String(s2.number) : "\xB7";
-  }
-  function rowNumber(m2, p2) {
-    const l2 = p2.left != null ? m2.left.slides[p2.left] : null;
-    const r2 = p2.right != null ? m2.right.slides[p2.right] : null;
-    if (p2.moved && l2 && r2) return `${num2(l2)} \u2192 ${num2(r2)}`;
-    return num2(r2 ?? l2);
-  }
-  function whatChanged(p2) {
-    const parts = p2.files.filter((f2) => f2.role !== "notes").map((f2) => f2.path);
-    if (p2.notes || p2.files.some((f2) => f2.role === "notes")) parts.push("notes");
-    parts.push(...p2.settings.map((s2) => s2.replace(/_/g, " ")));
-    if (!parts.length && p2.visual) parts.push("look");
-    return parts;
-  }
-  function counts(pairs) {
-    const c2 = { changed: 0, added: 0, removed: 0, moved: 0, same: 0 };
-    for (const p2 of pairs) {
-      if (p2.status === "changed") c2.changed++;
-      else if (p2.status === "added") c2.added++;
-      else if (p2.status === "removed") c2.removed++;
-      else if (!p2.moved) c2.same++;
-      if (p2.moved) c2.moved++;
-    }
-    return c2;
-  }
-  function countText(c2) {
-    const parts = [
-      c2.changed && `${c2.changed} changed`,
-      c2.added && `${c2.added} added`,
-      c2.removed && `${c2.removed} removed`,
-      c2.moved && `${c2.moved} moved`
-    ].filter(Boolean);
-    return parts.length ? parts.join(" \xB7 ") : "No differences";
-  }
-  var MAX_CELLS = 4e6;
-  function tokens(text) {
-    return text.split(/(\s+)/).filter((t2) => t2 !== "");
-  }
-  function merge(parts) {
-    const out = [];
-    for (const p2 of parts) {
-      const last = out[out.length - 1];
-      if (last && last.kind === p2.kind) last.text += p2.text;
-      else out.push({ ...p2 });
-    }
-    return out;
-  }
-  function wordDiff(a2, b2) {
-    if (a2 === b2) return a2 ? [{ kind: "same", text: a2 }] : [];
-    const x2 = tokens(a2);
-    const y2 = tokens(b2);
-    let start = 0;
-    while (start < x2.length && start < y2.length && x2[start] === y2[start])
-      start++;
-    let endX = x2.length;
-    let endY = y2.length;
-    while (endX > start && endY > start && x2[endX - 1] === y2[endY - 1]) {
-      endX--;
-      endY--;
-    }
-    const head = start ? [{ kind: "same", text: x2.slice(0, start).join("") }] : [];
-    const tail = endX < x2.length ? [{ kind: "same", text: x2.slice(endX).join("") }] : [];
-    const xs = x2.slice(start, endX);
-    const ys = y2.slice(start, endY);
-    if (xs.length * ys.length > MAX_CELLS) {
-      return merge([
-        ...head,
-        { kind: "del", text: xs.join("") },
-        { kind: "ins", text: ys.join("") },
-        ...tail
-      ]).filter((p2) => p2.text);
-    }
-    const n3 = xs.length;
-    const m2 = ys.length;
-    const table = [];
-    for (let i3 = 0; i3 <= n3; i3++) table.push(new Uint32Array(m2 + 1));
-    for (let i3 = n3 - 1; i3 >= 0; i3--) {
-      for (let j3 = m2 - 1; j3 >= 0; j3--) {
-        table[i3][j3] = xs[i3] === ys[j3] ? table[i3 + 1][j3 + 1] + 1 : Math.max(table[i3 + 1][j3], table[i3][j3 + 1]);
-      }
-    }
-    const mid = [];
-    let i2 = 0;
-    let j2 = 0;
-    while (i2 < n3 && j2 < m2) {
-      if (xs[i2] === ys[j2]) {
-        mid.push({ kind: "same", text: xs[i2] });
-        i2++;
-        j2++;
-      } else if (table[i2 + 1][j2] >= table[i2][j2 + 1]) {
-        mid.push({ kind: "del", text: xs[i2++] });
-      } else {
-        mid.push({ kind: "ins", text: ys[j2++] });
-      }
-    }
-    while (i2 < n3) mid.push({ kind: "del", text: xs[i2++] });
-    while (j2 < m2) mid.push({ kind: "ins", text: ys[j2++] });
-    return merge([...head, ...mid, ...tail]);
-  }
-  function takeState(m2, row6) {
-    const p2 = m2.pairs[row6];
-    const liveLeft = m2.left.live && !m2.right.live;
-    const liveRight = m2.right.live && !m2.left.live;
-    if (!p2 || !(liveLeft || liveRight)) {
-      return {
-        enabled: false,
-        title: "One side must be the working copy to take a slide into it",
-        replace: false
-      };
-    }
-    const other = liveLeft ? m2.right : m2.left;
-    const theirs = liveLeft ? p2.right : p2.left;
-    const mine = liveLeft ? p2.left : p2.right;
-    if (theirs == null) {
-      return {
-        enabled: false,
-        title: `This slide is not in ${other.label}`,
-        replace: false
-      };
-    }
-    if (p2.status === "same") {
-      return {
-        enabled: false,
-        title: "Both versions are the same",
-        replace: true
-      };
-    }
-    return {
-      enabled: true,
-      title: mine == null ? `Insert ${other.label}'s slide into the working copy` : `Replace the working copy's slide with ${other.label}'s version (Ctrl+Z undoes it)`,
-      replace: mine != null
-    };
-  }
-  function mergeTarget(m2) {
-    if (m2.left.live && !m2.right.live) return m2.right.branch;
-    if (m2.right.live && !m2.left.live) return m2.left.branch;
-    return null;
-  }
-  async function mergeBranch(branch, send) {
-    const res = await send({ action: "worktree", op: "merge", branch });
-    if (!res.ok) {
-      return {
-        ok: false,
-        error: String(res.error ?? `could not merge ${branch}`)
-      };
-    }
-    return {
-      ok: true,
-      historyCleared: res.historyCleared === true,
-      message: typeof res.message === "string" ? res.message : `Merged ${branch} into the working copy`
-    };
-  }
-  function swapSources(m2) {
-    return [m2.right.source, m2.left.source];
-  }
-  function newFontRules(fonts, present2) {
-    const rules = fonts.match(/@font-face\s*\{[^{}]*\}/g) ?? [];
-    return rules.filter((r2) => !present2.includes(r2)).join("\n");
-  }
-  function toSlideBox(r2, slide, vb) {
-    if (!slide.width || !slide.height || !r2.width && !r2.height) return null;
-    const sx = vb.w / slide.width;
-    const sy = vb.h / slide.height;
-    return [
-      vb.x + (r2.left - slide.left) * sx,
-      vb.y + (r2.top - slide.top) * sy,
-      r2.width * sx,
-      r2.height * sy
-    ];
-  }
-
-  // src/ts/editor/gitnotice.ts
-  var NOTICE_KEY = "inkflow-git-undo-notice";
-  var noticeShown = false;
-  function undoNoticeDue() {
-    try {
-      return sessionStorage.getItem(NOTICE_KEY) !== "1" && !noticeShown;
-    } catch {
-      return !noticeShown;
-    }
-  }
-  function undoNoticeShown() {
-    noticeShown = true;
-    try {
-      sessionStorage.setItem(NOTICE_KEY, "1");
-    } catch {
-    }
-  }
-  var UNDO_NOTICE = "Note: git changes the deck's files on disk, so the editor's undo and redo history is cleared afterwards (Ctrl+Z cannot go back past this point). You are told this once per session.";
-
-  // src/ts/editor/compare.ts
-  var view2 = document.getElementById("compare-view");
-  var model = null;
-  var viewId = 0;
-  var open4 = null;
-  var row5 = 0;
-  var onlyChanges = readPref("inkflow-compare-only", "0") === "1";
-  var mode = readPref("inkflow-compare-mode", "side") || "side";
-  var outlines = readPref("inkflow-compare-outlines", "1") === "1";
-  var wipe = 50;
-  var error = null;
-  function readPref(key, fallback) {
-    try {
-      return localStorage.getItem(key) ?? fallback;
-    } catch {
-      return fallback;
-    }
-  }
-  function writePref(key, value) {
-    try {
-      localStorage.setItem(key, value);
-    } catch {
-    }
-  }
-  function openCompare(left, right) {
-    viewId += 1;
-    open4 = [left, right];
-    error = null;
-    if (!model) {
-      view2.hidden = false;
-      document.body.classList.add("compare-mode");
-      renderLoading("Building both versions\u2026");
-    } else {
-      view2.classList.add("busy");
-    }
-    view2.focus();
-    void whenConnected().then(
-      () => sendRaw({ type: "compare-open", view: viewId, left, right })
-    );
-  }
-  function closeCompare() {
-    if (view2.hidden) return;
-    sendRaw({ type: "compare-close" });
-    model = null;
-    open4 = null;
-    view2.hidden = true;
-    view2.classList.remove("busy");
-    clear(view2);
-    document.body.classList.remove("compare-mode");
-    document.getElementById("cmp-fonts")?.remove();
-    emit("slide");
-  }
-  function renderLoading(text) {
-    clear(view2);
-    view2.append(
-      h(
-        "div",
-        { class: "cmp-head" },
-        h("strong", { class: "cmp-title" }, "Compare"),
-        h("span", { class: "cmp-spacer" }),
-        closeButton()
-      ),
-      h("div", { class: "cmp-loading" }, text)
-    );
-  }
-  function closeButton() {
-    return h(
-      "button",
-      {
-        type: "button",
-        class: "pbtn",
-        title: "Back to editing (Esc)",
-        onclick: () => closeCompare()
-      },
-      "Close"
-    );
-  }
-  var BASE_CSS = `
-:host { display: block; position: relative; }
-.cmp-root {
-    all: initial;
-    display: block;
-    width: 100%;
-    height: 100%;
-    /* A slide's text that names no font: the deck's body font, as on a slide. */
-    font-family: var(--inkflow-body-font);
-}
-.cmp-root > svg { display: block; width: 100%; height: 100%; }
-`;
-  var baseSheet = null;
-  var sideSheets = /* @__PURE__ */ new Map();
-  function sheets(side) {
-    if (!baseSheet) {
-      baseSheet = new CSSStyleSheet();
-      baseSheet.replaceSync(BASE_CSS);
-    }
-    let entry = sideSheets.get(side.token);
-    if (!entry || entry.css !== side.css) {
-      const sheet = new CSSStyleSheet();
-      sheet.replaceSync(side.css);
-      entry = { css: side.css, sheet };
-      sideSheets.set(side.token, entry);
-    }
-    return [baseSheet, entry.sheet];
-  }
-  function addFonts(side) {
-    if (!side.fonts) return;
-    let style = document.getElementById("cmp-fonts");
-    if (!style) {
-      style = h("style", { id: "cmp-fonts" });
-      document.head.append(style);
-    }
-    const present2 = (document.getElementById("deck-styles")?.textContent ?? "") + style.textContent;
-    const rules = newFontRules(side.fonts, present2);
-    if (rules) style.textContent += `
-${rules}`;
-  }
-  function slideView(side, slide, cls) {
-    const host5 = h("div", {
-      class: `cmp-slide ${cls}`
-    });
-    if (!slide?.svg) {
-      host5.classList.add("empty");
-      host5.textContent = slide ? "hidden slide" : `not in ${side.label || "this version"}`;
-      return host5;
-    }
-    const root2 = host5.attachShadow({ mode: "open" });
-    root2.adoptedStyleSheets = sheets(side);
-    const wrap2 = document.createElement("div");
-    wrap2.className = "cmp-root";
-    if (document.documentElement.dataset.theme === "light") {
-      wrap2.dataset.theme = "light";
-    }
-    wrap2.innerHTML = slide.svg;
-    const svg = wrap2.querySelector("svg");
-    if (svg) {
-      const vb = parseViewBox(svg.getAttribute("viewBox"));
-      svg.setAttribute("width", "100%");
-      svg.setAttribute("height", "100%");
-      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-      host5.style.aspectRatio = `${vb.w} / ${vb.h}`;
-      svg.querySelectorAll(".anim-pending").forEach((el2) => {
-        el2.classList.remove("anim-pending");
-      });
-      svg.querySelectorAll("video").forEach((v2) => {
-        v2.removeAttribute("autoplay");
-        v2.removeAttribute("controls");
-      });
-      scheduleFit(svg);
-      host5.svg = svg;
-    }
-    root2.append(wrap2);
-    return host5;
-  }
-  var thumbs4 = /* @__PURE__ */ new Map();
-  function thumb2(side, index) {
-    const slide = index != null ? side.slides[index] ?? null : null;
-    if (!slide) return h("div", { class: "cmp-thumb none" });
-    const key = `${side.token}\0${slide.svg ?? `hidden:${slide.id}`}`;
-    const cached = thumbs4.get(key);
-    if (cached && !cached.isConnected) return cached;
-    const el2 = slideView(side, slide, "cmp-thumb");
-    thumbs4.set(key, el2);
-    return el2;
-  }
-  function onModel(msg) {
-    if (msg.view !== viewId || view2.hidden) return;
-    const next = msg;
-    const before = model;
-    row5 = before ? followRow(before, row5, next) : firstRow(next.pairs);
-    model = next;
-    view2.classList.remove("busy");
-    const tokens2 = /* @__PURE__ */ new Set([next.left.token, next.right.token]);
-    for (const key of [...thumbs4.keys()]) {
-      if (!tokens2.has(key.split("\0")[0])) thumbs4.delete(key);
-    }
-    addFonts(next.left);
-    addFonts(next.right);
-    render2();
-  }
-  function onError(msg) {
-    if (msg.for !== "compare-open" || msg.view !== viewId) return;
-    error = String(msg.message ?? "could not compare");
-    view2.classList.remove("busy");
-    if (!model) {
-      renderLoading(`Cannot compare: ${error}`);
-      view2.querySelector(".cmp-loading")?.classList.add("error");
-    } else {
-      toast(`Cannot compare: ${error}`, "error");
-    }
-  }
-  var listEl = null;
-  var mainEl = null;
-  function render2() {
-    if (!model) return;
-    const m2 = model;
-    clear(view2);
-    const c2 = counts(m2.pairs);
-    const merge2 = mergeTarget(m2);
-    const only = h("input", { type: "checkbox" });
-    only.checked = onlyChanges;
-    only.addEventListener("change", () => {
-      onlyChanges = only.checked;
-      writePref("inkflow-compare-only", onlyChanges ? "1" : "0");
-      renderList2();
-    });
-    const head = h(
-      "div",
-      { class: "cmp-head" },
-      h("strong", { class: "cmp-title" }, "Compare"),
-      sideChip(m2.left, "left"),
-      h(
-        "button",
-        {
-          type: "button",
-          class: "tb-btn cmp-swap",
-          title: "Swap the two sides",
-          onclick: () => {
-            const [l2, r2] = swapSources(m2);
-            openCompare(l2, r2);
-          }
-        },
-        "\u21C4"
-      ),
-      sideChip(m2.right, "right"),
-      h("span", { class: "cmp-counts" }, countText(c2)),
-      m2.deck.length ? h(
-        "span",
-        {
-          class: "cmp-deckdiff",
-          title: "Deck-wide settings that differ"
-        },
-        `Deck: ${m2.deck.map((s2) => s2.replace(/_/g, " ")).join(", ")}`
-      ) : null,
-      h("span", { class: "cmp-spacer" }),
-      h("label", { class: "cmp-only" }, only, "Only changes"),
-      h(
-        "button",
-        {
-          type: "button",
-          class: "tb-btn",
-          title: "Previous change (P)",
-          onclick: () => jump(-1)
-        },
-        "\u2191"
-      ),
-      h(
-        "button",
-        {
-          type: "button",
-          class: "tb-btn",
-          title: "Next change (N)",
-          onclick: () => jump(1)
-        },
-        "\u2193"
-      ),
-      merge2 ? h(
-        "button",
-        {
-          type: "button",
-          class: "pbtn",
-          title: `Merge ${merge2} into the working copy's branch`,
-          onclick: () => void merging(merge2)
-        },
-        "Merge branch"
-      ) : null,
-      closeButton()
-    );
-    listEl = h("div", { class: "cmp-list", role: "listbox" });
-    mainEl = h("div", { class: "cmp-main" });
-    view2.append(head, h("div", { class: "cmp-body" }, listEl, mainEl));
-    renderList2();
-    renderMain();
-  }
-  function sideChip(side, which) {
-    const kind = side.kind === "live" ? "working copy" : side.kind === "commit" ? "commit" : "folder";
-    const notes = [
-      side.error ? `does not build: ${side.error}` : "",
-      side.missing.length ? `${side.missing.length} Git LFS file(s) missing` : ""
-    ].filter(Boolean);
-    return h(
-      "button",
-      {
-        type: "button",
-        class: `cmp-chip ${which}${side.error ? " error" : ""}`,
-        title: [
-          side.deckPath,
-          ...notes,
-          "Click to show something else on this side"
-        ].join("\n"),
-        onclick: () => void openComparePicker(which)
-      },
-      h("span", { class: "cmp-chip-kind" }, which === "left" ? "L" : "R"),
-      side.label,
-      side.kind !== "live" && side.kind !== "commit" ? h("span", { class: "hint" }, ` (${kind})`) : null,
-      notes.length ? h("span", { class: "cmp-warn" }, " \u26A0") : null
-    );
-  }
-  function renderList2() {
-    if (!model || !listEl) return;
-    const m2 = model;
-    clear(listEl);
-    const rows = visibleRows(m2.pairs, onlyChanges);
-    const broken = [m2.left, m2.right].filter((s2) => s2.error);
-    for (const s2 of broken) {
-      listEl.append(
-        h(
-          "div",
-          { class: "cmp-empty error" },
-          `${s2.label} does not build: ${s2.error}`
-        )
-      );
-    }
-    if (!rows.length && !broken.length) {
-      listEl.append(h("div", { class: "cmp-empty" }, "No differences"));
-    }
-    for (const i2 of rows) {
-      const p2 = m2.pairs[i2];
-      const b2 = badge2(p2);
-      const slide = rowSlide(m2, p2);
-      listEl.append(
-        h(
-          "div",
-          {
-            class: `cmp-row s-${b2.cls.replace(/ /g, " s-")}${i2 === row5 ? " active" : ""}`,
-            role: "option",
-            "data-row": i2,
-            title: `${b2.title}${p2.status === "changed" ? `: ${whatChanged(p2).join(", ")}` : ""}`,
-            onclick: () => selectRow(i2)
-          },
-          h(
-            "div",
-            { class: "cmp-row-head" },
-            h("span", { class: "cmp-num" }, rowNumber(m2, p2)),
-            h("span", { class: "cmp-id" }, slide?.id ?? ""),
-            b2.symbol ? h("span", { class: `cmp-badge ${b2.cls}` }, b2.symbol) : null
-          ),
-          h(
-            "div",
-            { class: "cmp-row-thumbs" },
-            thumb2(m2.left, p2.left),
-            thumb2(m2.right, p2.right)
-          )
-        )
-      );
-    }
-    revealRow();
-  }
-  function revealRow() {
-    const el2 = listEl?.querySelector(".cmp-row.active");
-    if (!listEl || !el2) return;
-    const top = el2.offsetTop;
-    if (top < listEl.scrollTop) listEl.scrollTop = top - 8;
-    else if (top + el2.offsetHeight > listEl.scrollTop + listEl.clientHeight) {
-      listEl.scrollTop = top + el2.offsetHeight - listEl.clientHeight + 8;
-    }
-  }
-  function selectRow(i2) {
-    if (!model || i2 < 0 || i2 >= model.pairs.length) return;
-    row5 = i2;
-    listEl?.querySelectorAll(".cmp-row").forEach((el2) => {
-      el2.classList.toggle(
-        "active",
-        Number(el2.getAttribute("data-row")) === i2
-      );
-    });
-    revealRow();
-    renderMain();
-  }
-  function jump(dir) {
-    if (!model) return;
-    const next = nextChange(model.pairs, row5, dir);
-    if (next == null) {
-      toast(dir > 0 ? "No more changes below" : "No more changes above");
-      return;
-    }
-    if (onlyChanges || isChange(model.pairs[next])) selectRow(next);
-  }
-  function step(dir) {
-    if (!model) return;
-    const rows = visibleRows(model.pairs, onlyChanges);
-    const at3 = rows.indexOf(row5);
-    const next = rows[at3 < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, at3 + dir))];
-    if (next != null) selectRow(next);
-  }
-  function renderMain() {
-    if (!model || !mainEl) return;
-    const m2 = model;
-    clear(mainEl);
-    const p2 = m2.pairs[row5];
-    if (!p2) {
-      mainEl.append(h("div", { class: "cmp-empty" }, "Nothing to compare"));
-      return;
-    }
-    const left = p2.left != null ? m2.left.slides[p2.left] ?? null : null;
-    const right = p2.right != null ? m2.right.slides[p2.right] ?? null : null;
-    const modes = h(
-      "div",
-      { class: "cmp-modes", role: "tablist" },
-      ...[
-        ["side", "Side by side", "1"],
-        ["slider", "Slider", "2"],
-        ["diff", "Difference", "3"]
-      ].map(
-        ([id, label4, key]) => h(
-          "button",
-          {
-            type: "button",
-            class: `seg${mode === id ? " on" : ""}`,
-            title: `${label4} (${key})`,
-            onclick: () => setMode(id)
-          },
-          label4
-        )
-      )
-    );
-    const outlineBox = h("input", { type: "checkbox" });
-    outlineBox.checked = outlines;
-    outlineBox.addEventListener("change", () => {
-      outlines = outlineBox.checked;
-      writePref("inkflow-compare-outlines", outlines ? "1" : "0");
-      renderMain();
-    });
-    const bar = h(
-      "div",
-      { class: "cmp-stagebar" },
-      modes,
-      h(
-        "label",
-        { class: "cmp-only", title: "Outline what changed (O)" },
-        outlineBox,
-        "Outline changes"
-      ),
-      h("span", { class: "cmp-spacer" }),
-      h(
-        "span",
-        { class: "cmp-legend" },
-        h("i", { class: "lg changed" }),
-        "changed ",
-        h("i", { class: "lg added" }),
-        "added ",
-        h("i", { class: "lg removed" }),
-        "removed"
-      )
-    );
-    const stage = h("div", { class: `cmp-stage mode-${mode}` });
-    const both = left?.svg && right?.svg;
-    if (mode === "side" || !both) {
-      stage.classList.add("mode-side");
-      stage.append(
-        pane(m2.left, left, p2, "left", rowNumberOf(left)),
-        pane(m2.right, right, p2, "right", rowNumberOf(right))
-      );
-    } else {
-      stage.append(stacked(m2, left, right, p2));
-    }
-    mainEl.append(bar, stage, info(m2, p2, left, right));
-  }
-  function rowNumberOf(s2) {
-    if (!s2) return "";
-    return `${s2.number != null ? `${s2.number} \xB7 ` : "hidden \xB7 "}${s2.id}`;
-  }
-  function setMode(next) {
-    mode = next;
-    writePref("inkflow-compare-mode", mode);
-    renderMain();
-  }
-  function pane(side, slide, p2, which, caption) {
-    const frame = h("div", { class: "cmp-frame" });
-    const sv = slideView(side, slide, "cmp-big");
-    frame.append(sv);
-    if (outlines && sv.svg) {
-      const marks = p2.elements.filter(
-        (e2) => which === "left" ? e2.left : e2.right
-      );
-      afterLayout(() => drawOutlines(frame, sv.svg, marks, which));
-    }
-    return h(
-      "div",
-      { class: `cmp-pane ${which}` },
-      h(
-        "div",
-        { class: "cmp-pane-label" },
-        h("span", { class: "cmp-chip-kind" }, which === "left" ? "L" : "R"),
-        side.label,
-        caption ? h("span", { class: "hint" }, `  ${caption}`) : null
-      ),
-      frame
-    );
-  }
-  function stacked(m2, left, right, p2) {
-    const frame = h("div", { class: "cmp-frame stacked" });
-    const a2 = slideView(m2.left, left, "cmp-big under");
-    const b2 = slideView(m2.right, right, "cmp-big over");
-    frame.append(a2, b2);
-    if (mode === "slider") {
-      const handle2 = h("div", { class: "cmp-handle" });
-      const place = () => {
-        b2.style.clipPath = `inset(0 0 0 ${wipe}%)`;
-        handle2.style.left = `${wipe}%`;
-      };
-      place();
-      frame.append(handle2);
-      const move = (e2) => {
-        const r2 = frame.getBoundingClientRect();
-        wipe = Math.max(
-          0,
-          Math.min(100, (e2.clientX - r2.left) / r2.width * 100)
-        );
-        place();
-      };
-      frame.addEventListener("pointerdown", (e2) => {
-        frame.setPointerCapture(e2.pointerId);
-        move(e2);
-        frame.addEventListener("pointermove", move);
-      });
-      frame.addEventListener(
-        "pointerup",
-        () => frame.removeEventListener("pointermove", move)
-      );
-    }
-    if (outlines && b2.svg) {
-      const marks = p2.elements;
-      afterLayout(() => {
-        if (b2.svg) drawOutlines(frame, b2.svg, marks, "right", a2.svg);
-      });
-    }
-    const caption = mode === "slider" ? h(
-      "div",
-      { class: "cmp-pane-label" },
-      h("span", { class: "cmp-chip-kind" }, "L"),
-      `${m2.left.label}  \u25C0 drag \u25B6  `,
-      h("span", { class: "cmp-chip-kind" }, "R"),
-      m2.right.label
-    ) : h(
-      "div",
-      { class: "cmp-pane-label" },
-      "Difference: what is the same turns black, what differs lights up"
-    );
-    return h("div", { class: "cmp-pane wide" }, caption, frame);
-  }
-  function afterLayout(fn) {
-    requestAnimationFrame(() => requestAnimationFrame(fn));
-  }
-  function locate(svg, loc) {
-    let el2 = svg;
-    for (const i2 of loc.path) {
-      el2 = el2?.children[i2] ?? null;
-      if (!el2) break;
-    }
-    if (el2 && el2 !== svg && el2.localName.toLowerCase() === loc.tag.toLowerCase()) {
-      const box = toSlideBox(
-        el2.getBoundingClientRect(),
-        svg.getBoundingClientRect(),
-        parseViewBox(svg.getAttribute("viewBox"))
-      );
-      if (box && box[2] > 0 && box[3] > 0) return box;
-    }
-    return loc.box;
-  }
-  var SVG_NS2 = "http://www.w3.org/2000/svg";
-  function drawOutlines(frame, svg, marks, which, leftSvg) {
-    if (!frame.isConnected || !marks.length) return;
-    const vb = parseViewBox(svg.getAttribute("viewBox"));
-    const layer2 = document.createElementNS(SVG_NS2, "svg");
-    layer2.setAttribute("class", "cmp-outlines");
-    layer2.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
-    layer2.setAttribute("preserveAspectRatio", "xMidYMid meet");
-    const pad2 = Math.max(vb.w, vb.h) / 240;
-    const draw = (target, loc, cls, label4) => {
-      const box = loc ? locate(target, loc) : null;
-      if (!box) return;
-      const rect = document.createElementNS(SVG_NS2, "rect");
-      rect.setAttribute("x", String(box[0] - pad2));
-      rect.setAttribute("y", String(box[1] - pad2));
-      rect.setAttribute("width", String(box[2] + 2 * pad2));
-      rect.setAttribute("height", String(box[3] + 2 * pad2));
-      rect.setAttribute("rx", String(pad2));
-      rect.setAttribute("class", `mark ${cls}`);
-      const title3 = document.createElementNS(SVG_NS2, "title");
-      title3.textContent = label4;
-      rect.append(title3);
-      layer2.append(rect);
-    };
-    for (const mark of marks) {
-      const label4 = `${mark.change}${mark.id ? ` #${mark.id}` : ""}${mark.text ? `: ${mark.text}` : ""}`;
-      if (leftSvg) {
-        if (mark.left && mark.change !== "added") {
-          draw(
-            leftSvg,
-            mark.left,
-            `${mark.change} before`,
-            `${label4} (left)`
-          );
-        }
-        if (mark.right) draw(svg, mark.right, mark.change, label4);
-        continue;
-      }
-      draw(
-        svg,
-        which === "left" ? mark.left : mark.right,
-        mark.change,
-        label4
-      );
-    }
-    frame.append(layer2);
-  }
-  function info(m2, p2, left, right) {
-    const b2 = badge2(p2);
-    const take2 = takeState(m2, row5);
-    const what = p2.status === "changed" ? whatChanged(p2) : [];
-    const summary2 = p2.status === "added" ? `Only in ${m2.right.label}` : p2.status === "removed" ? `Only in ${m2.left.label}` : p2.status === "same" ? p2.moved ? "The same slide, moved" : "No differences" : `${p2.moved ? "Moved, and changed: " : "Changed: "}${what.join(", ")}`;
-    const box = h(
-      "div",
-      { class: "cmp-info" },
-      h(
-        "div",
-        { class: "cmp-info-head" },
-        b2.symbol ? h("span", { class: `cmp-badge ${b2.cls}` }, b2.symbol) : null,
-        h("strong", {}, summary2),
-        h("span", { class: "cmp-spacer" }),
-        h(
-          "button",
-          {
-            type: "button",
-            class: "pbtn primary",
-            disabled: !take2.enabled,
-            title: take2.title,
-            onclick: () => void taking()
-          },
-          "Take this slide"
-        )
-      )
-    );
-    if (p2.files.length) {
-      box.append(
-        h("h4", {}, "Files"),
-        h(
-          "div",
-          { class: "cmp-files" },
-          ...p2.files.map(
-            (f2) => h(
-              "div",
-              { class: "cmp-file" },
-              h("span", { class: `cmp-fstat ${f2.change}` }, f2.change),
-              h("code", {}, f2.path),
-              h("span", { class: "hint" }, f2.role)
-            )
-          )
-        )
-      );
-    }
-    if (p2.settings.length) {
-      box.append(
-        h("h4", {}, "In deck.py"),
-        h(
-          "div",
-          { class: "cmp-settings" },
-          p2.settings.map((s2) => s2.replace(/_/g, " ")).join(", ")
-        )
-      );
-    }
-    if (p2.elements.length) {
-      const n3 = (k2) => p2.elements.filter((e2) => e2.change === k2).length;
-      box.append(
-        h(
-          "div",
-          { class: "hint cmp-elcount" },
-          `Elements: ${n3("changed")} changed, ${n3("added")} added, ${n3("removed")} removed`
-        )
-      );
-    }
-    if (left || right) {
-      const a2 = left?.notes ?? "";
-      const bText = right?.notes ?? "";
-      const parts = wordDiff(a2, bText);
-      box.append(
-        h("h4", {}, p2.notes ? "Speaker notes (changed)" : "Speaker notes"),
-        parts.length ? h(
-          "div",
-          { class: "cmp-notes" },
-          ...parts.map(
-            (part) => part.kind === "same" ? document.createTextNode(part.text) : h(part.kind, {}, part.text)
-          )
-        ) : h("div", { class: "hint" }, "No notes")
-      );
-    }
-    return box;
-  }
-  async function taking() {
-    if (!model) return;
-    const m2 = model;
-    const p2 = m2.pairs[row5];
-    const state = takeState(m2, row5);
-    if (!p2 || !state.enabled) return;
-    const other = m2.left.live ? m2.right : m2.left;
-    const files2 = p2.files.map((f2) => `  ${f2.path}`).join("\n");
-    const question = state.replace ? `Replace this slide in the working copy with ${other.label}'s version?${files2 ? `
-
-Files written:
-${files2}` : ""}
-
-Ctrl+Z takes it back.` : `Insert ${other.label}'s slide into the working copy?`;
-    if (!confirm(question)) return;
-    const res = await edit({
-      action: "compare-take",
-      pair: row5,
-      left: p2.left,
-      right: p2.right
-    });
-    if (res.ok) {
-      const stepNo = res.step;
-      toast(String(res.label ?? "Took the slide"), "ok", {
-        label: "Undo",
-        run: () => void edit({
-          action: "undo",
-          ...typeof stepNo === "number" ? { step: stepNo } : {}
-        })
-      });
-    }
-  }
-  async function merging(branch) {
-    const notice = undoNoticeDue();
-    const question = `Merge ${branch} into the working copy's branch? Commit or discard your own changes first; git refuses a merge that would overwrite them.`;
-    if (!confirm(notice ? `${question}
-
-${UNDO_NOTICE}` : question)) {
-      return;
-    }
-    if (notice) undoNoticeShown();
-    view2.classList.add("busy");
-    const res = await mergeBranch(branch, request);
-    view2.classList.remove("busy");
-    if (!res.ok) {
-      toast(res.error ?? `Could not merge ${branch}`, "error");
-      return;
-    }
-    if (res.historyCleared) {
-      ed.canUndo = false;
-      ed.canRedo = false;
-      emit("history");
-    }
-    toast(res.message ?? `Merged ${branch}`, "ok");
-  }
-  var sourcesWaiting = null;
-  function fetchSources() {
-    return new Promise((resolve) => {
-      sourcesWaiting = resolve;
-      sendRaw({ type: "compare-sources" });
-    });
-  }
-  var LIVE = { kind: "live" };
-  async function openComparePicker(side = null) {
-    await whenConnected();
-    const data = await fetchSources();
-    const current3 = model;
-    const pick2 = (chosen) => {
-      closeDialog();
-      if (side && current3) {
-        const [l2, r2] = [current3.left.source, current3.right.source];
-        openCompare(
-          side === "left" ? chosen : l2,
-          side === "right" ? chosen : r2
-        );
-      } else {
-        openCompare(LIVE, chosen);
-      }
-    };
-    const sections2 = [];
-    if (side) {
-      sections2.push(
-        h(
-          "div",
-          { class: "btn-row" },
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn",
-              onclick: () => pick2(LIVE)
-            },
-            "The working copy"
-          )
-        )
-      );
-    }
-    if (data.repo) {
-      const rev = h("input", {
-        type: "text",
-        placeholder: "HEAD~2, a tag, a sha\u2026",
-        spellcheck: "false"
-      });
-      const go = () => {
-        if (rev.value.trim())
-          pick2({ kind: "commit", rev: rev.value.trim() });
-      };
-      rev.addEventListener("keydown", (e2) => {
-        if (e2.key === "Enter") {
-          e2.preventDefault();
-          go();
-        }
-      });
-      const others2 = (data.worktrees ?? []).filter(
-        (w2) => !w2.current && w2.deck
-      );
-      const inTree = new Set(others2.map((w2) => w2.branch));
-      const branches = (data.branches ?? []).filter(
-        (b2) => b2 !== data.branch && !inTree.has(b2)
-      );
-      if (others2.length || branches.length) {
-        sections2.push(
-          h("h3", {}, "A branch or worktree"),
-          h(
-            "div",
-            { class: "git-list" },
-            ...others2.map(
-              (w2) => h(
-                "div",
-                { class: "git-row" },
-                h(
-                  "div",
-                  { class: "git-commit" },
-                  h("strong", {}, w2.branch ?? "(detached)"),
-                  h(
-                    "span",
-                    { class: "hint" },
-                    `worktree \xB7 ${w2.path}`
-                  )
-                ),
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "pbtn",
-                    onclick: () => pick2({
-                      kind: "path",
-                      deck: w2.deck,
-                      ...w2.branch ? { label: w2.branch } : {}
-                    })
-                  },
-                  "Compare"
-                )
-              )
-            ),
-            ...branches.map(
-              (b2) => h(
-                "div",
-                { class: "git-row" },
-                h(
-                  "div",
-                  { class: "git-commit" },
-                  h("strong", {}, b2),
-                  h("span", { class: "hint" }, "branch")
-                ),
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "pbtn",
-                    onclick: () => pick2({ kind: "branch", name: b2 })
-                  },
-                  "Compare"
-                )
-              )
-            )
-          )
-        );
-      }
-      sections2.push(
-        h("h3", {}, "A commit"),
-        h(
-          "div",
-          { class: "git-list history cmp-commits" },
-          ...(data.commits ?? []).map(
-            (c2) => h(
-              "div",
-              { class: `git-row${c2.head ? " current" : ""}` },
-              h(
-                "div",
-                { class: "git-commit" },
-                h("strong", {}, c2.subject),
-                h(
-                  "span",
-                  { class: "hint" },
-                  `${c2.short} \xB7 ${c2.author} \xB7 ${c2.when}${c2.refs.length ? ` \xB7 ${c2.refs.join(", ")}` : ""}`
-                )
-              ),
-              h(
-                "button",
-                {
-                  type: "button",
-                  class: "pbtn",
-                  onclick: () => pick2({ kind: "commit", rev: c2.sha })
-                },
-                "Compare"
-              )
-            )
-          )
-        ),
-        h(
-          "div",
-          { class: "btn-row" },
-          rev,
-          h(
-            "button",
-            { type: "button", class: "pbtn", onclick: go },
-            "Compare"
-          )
-        )
-      );
-    }
-    const folderBtn = h(
-      "button",
-      { type: "button", class: "pbtn primary", disabled: true },
-      "Compare with this deck"
-    );
-    const start = (ed.model?.projectDir ?? "").replace(/[\\/][^\\/]*$/, "");
-    const picker = folderPicker(start, (f2) => {
-      folderBtn.disabled = !f2.isDeck;
-      folderBtn.textContent = f2.isDeck ? "Compare with this deck" : "No deck.py in this folder";
-    });
-    folderBtn.addEventListener("click", () => {
-      const f2 = picker.current();
-      if (f2?.isDeck)
-        pick2({ kind: "path", deck: joinPath(f2.path, "deck.py") });
-    });
-    sections2.push(
-      h("h3", {}, "Another deck folder"),
-      picker.el,
-      h("div", { class: "btn-row end" }, folderBtn)
-    );
-    openDialog(
-      side ? `Show on the ${side}\u2026` : "Compare the working copy with\u2026",
-      h("div", { class: "git-form cmp-picker" }, ...sections2),
-      { large: true }
-    );
-  }
-  function onKey3(e2) {
-    if (view2.hidden) return;
-    const target = e2.target;
-    const typing = target.closest(
-      "input:not([type=checkbox]):not([type=radio]), textarea, select, #dialog"
-    );
-    if (dialogOpen() || typing) {
-      return;
-    }
-    const mod = e2.ctrlKey || e2.metaKey;
-    if (mod && ["z", "y"].includes(e2.key.toLowerCase())) return;
-    const handled = () => {
-      e2.preventDefault();
-      e2.stopPropagation();
-    };
-    switch (e2.key) {
-      case "Escape":
-        handled();
-        closeCompare();
-        return;
-      case "ArrowDown":
-        handled();
-        step(1);
-        return;
-      case "ArrowUp":
-        handled();
-        step(-1);
-        return;
-      case "n":
-      case "N":
-        handled();
-        jump(1);
-        return;
-      case "p":
-      case "P":
-        handled();
-        jump(-1);
-        return;
-      case "1":
-        handled();
-        setMode("side");
-        return;
-      case "2":
-        handled();
-        setMode("slider");
-        return;
-      case "3":
-        handled();
-        setMode("diff");
-        return;
-      case "o":
-      case "O":
-        handled();
-        outlines = !outlines;
-        writePref("inkflow-compare-outlines", outlines ? "1" : "0");
-        renderMain();
-        return;
-    }
-    e2.stopPropagation();
-  }
-  function initCompare() {
-    onMessage("compare-model", onModel);
-    onMessage("compare-error", (msg) => {
-      if (msg.for === "compare-sources") {
-        toast(String(msg.message ?? "cannot list versions"), "error");
-        sourcesWaiting?.({ repo: false });
-        sourcesWaiting = null;
-        return;
-      }
-      onError(msg);
-    });
-    onMessage("compare-sources", (msg) => {
-      sourcesWaiting?.(msg);
-      sourcesWaiting = null;
-    });
-    onConnect(() => {
-      if (open4 && !view2.hidden) {
-        viewId += 1;
-        sendRaw({
-          type: "compare-open",
-          view: viewId,
-          left: open4[0],
-          right: open4[1]
-        });
-      }
-    });
-    document.addEventListener("keydown", onKey3, true);
-    new MutationObserver(() => {
-      if (!model || view2.hidden) return;
-      thumbs4.clear();
-      render2();
-    }).observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["data-theme"]
-    });
-    document.addEventListener("inkflow:compare", (e2) => {
-      const detail = e2.detail;
-      if (!detail?.deck) return;
-      openCompare(LIVE, {
-        kind: detail.kind ?? "path",
-        deck: detail.deck,
-        ...detail.label ? { label: detail.label } : {}
-      });
-    });
-    const params = new URLSearchParams(location.search);
-    const spec = params.get("compare");
-    if (spec) {
-      params.delete("compare");
-      const query2 = params.toString();
-      try {
-        history.replaceState(
-          null,
-          "",
-          `${location.pathname}${query2 ? `?${query2}` : ""}${location.hash}`
-        );
-      } catch {
-      }
-      openCompare(LIVE, { kind: "spec", spec });
-    }
-  }
-
   // src/ts/editor/context.ts
-  var timer3 = 0;
+  var timer4 = 0;
   function snapshot2() {
     const slide = currentSlide();
     const visible = ed.model?.slides.filter((s2) => s2.visible).length ?? 0;
@@ -18132,8 +20185,8 @@ ${UNDO_NOTICE}` : question)) {
     };
   }
   function report() {
-    window.clearTimeout(timer3);
-    timer3 = window.setTimeout(() => {
+    window.clearTimeout(timer4);
+    timer4 = window.setTimeout(() => {
       sendRaw({ type: "editor-context", context: snapshot2() });
     }, 250);
   }
@@ -18163,8 +20216,8 @@ ${UNDO_NOTICE}` : question)) {
   }
 
   // src/ts/editor/decks.ts
-  var menu5 = document.getElementById("context-menu");
-  var button5 = document.getElementById("btn-deck");
+  var menu6 = document.getElementById("context-menu");
+  var button6 = document.getElementById("btn-deck");
   function lookThumb(look) {
     const c2 = look.preview;
     if (!c2) return null;
@@ -18197,8 +20250,8 @@ ${UNDO_NOTICE}` : question)) {
   }
   function renderButton() {
     const dir = ed.model?.projectDir;
-    button5.textContent = `${dir ? baseName2(dir) : "deck"} \u25BE`;
-    button5.title = dir ? `${dir}
+    button6.textContent = `${dir ? baseName2(dir) : "deck"} \u25BE`;
+    button6.title = dir ? `${dir}
 Decks: new, open, recent` : "Decks";
   }
   async function info2() {
@@ -18209,35 +20262,88 @@ Decks: new, open, recent` : "Decks";
     }
     return res;
   }
-  async function openMenu2() {
+  async function openMenu3() {
     const data = await info2();
     if (!data) return;
-    clear(menu5);
-    menu5.append(
+    clear(menu6);
+    menu6.append(
       menuItem("New deck\u2026", () => newDeckDialog(data)),
       menuItem("Open deck\u2026", () => openDeckDialog(data))
     );
     if (data.recent.length) {
-      menu5.append(h("div", { class: "menu-title" }, "Recent decks"));
+      menu6.append(h("div", { class: "menu-title" }, "Recent decks"));
       for (const path of data.recent) {
         const dir = path.replace(/[\\/]deck\.py$/, "");
         const item2 = menuItem(baseName2(dir), () => void openDeck(path));
-        item2.title = dir;
-        menu5.append(item2);
+        item2.title = `${dir}
+Ctrl+click: open in a new tab`;
+        item2.addEventListener(
+          "click",
+          (e2) => {
+            if (!(e2.ctrlKey || e2.metaKey)) return;
+            e2.stopImmediatePropagation();
+            closeMenu();
+            void openDeckInTab(path);
+          },
+          { capture: true }
+        );
+        item2.addEventListener("auxclick", (e2) => {
+          if (e2.button !== 1) return;
+          e2.preventDefault();
+          closeMenu();
+          void openDeckInTab(path);
+        });
+        const tab = h(
+          "button",
+          {
+            type: "button",
+            class: "menu-side",
+            title: "Open in a new tab (with a server of its own; this deck stays open here)",
+            onclick: () => {
+              closeMenu();
+              void openDeckInTab(path);
+            }
+          },
+          "\u29C9"
+        );
+        menu6.append(h("div", { class: "menu-row" }, item2, tab));
       }
     }
     if (ed.model) {
-      menu5.append(
+      menu6.append(
         h("div", { class: "menu-sep" }),
         menuItem("Files\u2026", () => void openFiles())
       );
     }
-    menu5.append(
+    menu6.append(
       h("div", { class: "menu-sep" }),
       menuItem("Quit Inkflow", () => void quit())
     );
-    const r2 = button5.getBoundingClientRect();
+    const r2 = button6.getBoundingClientRect();
     showMenu(r2.left, r2.bottom + 4);
+  }
+  async function openDeckInTab(path) {
+    const tab = window.open("", "_blank");
+    if (tab) {
+      tab.document.title = "Opening deck\u2026";
+      tab.document.body.textContent = `Starting inkflow for ${baseName2(path.replace(/[\\/]deck\.py$/, ""))}\u2026`;
+    }
+    toast("Opening the deck in a new tab\u2026");
+    const res = await request({ action: "open-deck-tab", path });
+    if (!res.ok || typeof res.url !== "string") {
+      tab?.close();
+      toast(res.error ?? "Cannot open that deck", "error");
+      return false;
+    }
+    closeDialog();
+    const url = new URL(res.url, location.href).href;
+    if (tab && !tab.closed) {
+      tab.opener = null;
+      tab.location.href = url;
+    } else if (!window.open(url, "_blank", "noopener")) {
+      toast(`Open it at ${url}`, "error");
+    }
+    return true;
   }
   async function openDeck(path) {
     const res = await request({ action: "open-deck", path });
@@ -18445,16 +20551,31 @@ Decks: new, open, recent` : "Decks";
       { type: "button", class: "pbtn primary", disabled: true },
       "Open this deck"
     );
+    const inTab = h(
+      "button",
+      {
+        type: "button",
+        class: "pbtn",
+        disabled: true,
+        title: "With a server of its own; this deck stays open here"
+      },
+      "Open in a new tab"
+    );
     const picker = folderPicker(
       data.places?.default ?? data.current.replace(/[\\/][^\\/]*$/, ""),
       (f2) => {
         open5.disabled = !f2.isDeck;
+        inTab.disabled = !f2.isDeck || !ed.model;
         open5.textContent = f2.isDeck ? `Open ${baseName2(f2.path)}` : "No deck.py in this folder";
       }
     );
     open5.addEventListener("click", () => {
       const f2 = picker.current();
       if (f2?.isDeck) void openDeck(join(f2.path, "deck.py"));
+    });
+    inTab.addEventListener("click", () => {
+      const f2 = picker.current();
+      if (f2?.isDeck) void openDeckInTab(join(f2.path, "deck.py"));
     });
     openDialog(
       "Open deck",
@@ -18463,7 +20584,7 @@ Decks: new, open, recent` : "Decks";
         { class: "deck-form" },
         h("p", { class: "hint" }, "Go to a folder with a deck.py in it."),
         picker.el,
-        h("div", { class: "btn-row end" }, open5)
+        h("div", { class: "btn-row end" }, inTab, open5)
       ),
       { large: true }
     );
@@ -18570,7 +20691,7 @@ Decks: new, open, recent` : "Decks";
     document.body.append(page);
   }
   function initDecks() {
-    button5.addEventListener("click", () => void openMenu2());
+    button6.addEventListener("click", () => void openMenu3());
     on("model", renderButton);
     renderButton();
   }
@@ -18596,7 +20717,7 @@ Decks: new, open, recent` : "Decks";
       placeholder: (stem) => `${stem}.pdf`
     }
   ];
-  function size2(bytes) {
+  function size3(bytes) {
     if (bytes > 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
     return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
   }
@@ -18648,7 +20769,7 @@ Decks: new, open, recent` : "Decks";
       const r2 = result;
       status3.className = "export-status done";
       status3.replaceChildren(
-        h("span", {}, `Saved to ${r2.rel} \xB7 ${size2(r2.size)}`),
+        h("span", {}, `Saved to ${r2.rel} \xB7 ${size3(r2.size)}`),
         h(
           "a",
           { href: r2.download, class: "pbtn", download: "" },
@@ -18684,1582 +20805,6 @@ Decks: new, open, recent` : "Decks";
   }
   function initExport() {
     document.getElementById("btn-export")?.addEventListener("click", openExport);
-  }
-
-  // src/ts/editor/packtext.ts
-  function missingLines(summary2) {
-    return summary2.items.filter((i2) => i2.fixable).map((i2) => i2.message);
-  }
-  function consequences(summary2) {
-    const seen = /* @__PURE__ */ new Set();
-    const out = [];
-    for (const item2 of summary2.items.filter((i2) => i2.fixable)) {
-      const line = sentence(item2.consequence);
-      if (!seen.has(line)) {
-        seen.add(line);
-        out.push(line);
-      }
-    }
-    return out;
-  }
-  function remainingLines(items2) {
-    return items2.filter((i2) => !i2.fixable).map((i2) => sentence(i2.message));
-  }
-  function withoutPackingTitle(summary2) {
-    const all = consequences(summary2);
-    if (!all.length) return "Commit as it is";
-    const more = all.length > 1 ? ` (and ${all.length - 1} more)` : "";
-    return `Not recommended: ${all[0]}${more}`;
-  }
-  function sentence(text) {
-    const t2 = text.trim();
-    if (!t2) return t2;
-    const first = t2[0].toUpperCase() + t2.slice(1);
-    return /[.!?]$/.test(first) ? first : `${first}.`;
-  }
-  function commitPaths(ticked, packed) {
-    return [.../* @__PURE__ */ new Set([...ticked, ...packed])];
-  }
-
-  // src/ts/editor/pack.ts
-  var PACK_HELP = "Make the deck self-contained: fonts, outside files, lock file, git rules \u2014 so it looks the same on every machine";
-  async function packCheck() {
-    const res = await request({ action: "pack", op: "check" });
-    return res.ok ? res.pack : null;
-  }
-  async function applyPack() {
-    const res = await edit({ action: "pack", op: "apply" });
-    if (!res.ok) return null;
-    const lock = res.lock;
-    if (typeof lock === "string" && !lock.startsWith("uv.lock written")) {
-      toast(lock, "info");
-    }
-    const changes = res.changes ?? [];
-    return {
-      gitPaths: res.gitPaths ?? [],
-      changed: changes.map((c2) => `${c2.change}: ${c2.path}`),
-      remaining: res.remaining ?? []
-    };
-  }
-  function list3(lines, cls = "pack-list") {
-    return h("ul", { class: cls }, ...lines.map((l2) => h("li", {}, l2)));
-  }
-  function commitGate(summary2, packAndCommit, commitAnyway) {
-    const remaining = remainingLines(summary2.items);
-    const busy = (b2) => {
-      for (const btn of box.querySelectorAll("button"))
-        btn.disabled = b2;
-    };
-    const primary = h(
-      "button",
-      {
-        type: "button",
-        class: "pbtn primary",
-        "data-pack": "pack-and-commit",
-        onclick: async () => {
-          busy(true);
-          await packAndCommit();
-          busy(false);
-        }
-      },
-      "Pack and commit"
-    );
-    const box = openDialog(
-      "Commit: pack the deck first?",
-      h(
-        "div",
-        { class: "git-form pack-gate" },
-        h(
-          "p",
-          {},
-          "This deck depends on this computer, so it will not look the same elsewhere:"
-        ),
-        list3(missingLines(summary2)),
-        h(
-          "p",
-          { class: "hint" },
-          "Packing copies what is missing into the deck and adds the files it writes to this commit."
-        ),
-        h(
-          "div",
-          { class: "pack-without" },
-          h(
-            "p",
-            { class: "hint warn" },
-            "Without packing, on other machines:"
-          ),
-          list3(consequences(summary2), "pack-list warn")
-        ),
-        remaining.length ? h(
-          "details",
-          { class: "pack-remaining" },
-          h("summary", {}, "Packing cannot change"),
-          list3(remaining)
-        ) : null,
-        h(
-          "div",
-          { class: "btn-row end" },
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn",
-              "data-pack": "commit-anyway",
-              title: withoutPackingTitle(summary2),
-              onclick: async () => {
-                busy(true);
-                await commitAnyway();
-                busy(false);
-              }
-            },
-            "Commit without packing (not recommended)"
-          ),
-          primary
-        )
-      ),
-      { wide: true }
-    );
-    primary.focus();
-  }
-  async function openPackDialog() {
-    const body3 = h(
-      "div",
-      { class: "git-form pack-dialog" },
-      h("p", { class: "hint" }, "Checking the deck\u2026")
-    );
-    openDialog("Pack deck", body3, { wide: true, hint: PACK_HELP });
-    const res = await request({ action: "pack", op: "plan" });
-    if (!body3.isConnected) return;
-    body3.replaceChildren();
-    if (!res.ok) {
-      body3.append(h("p", { class: "hint warn" }, res.error ?? "cannot pack"));
-      return;
-    }
-    const summary2 = res.pack;
-    const remaining = remainingLines(summary2.items);
-    const copies = summary2.assets?.copies ?? [];
-    const warnings2 = summary2.fonts?.warnings ?? [];
-    if (!summary2.steps.length) {
-      body3.append(
-        h(
-          "p",
-          {},
-          "Nothing to pack: everything this deck needs is in its folder."
-        )
-      );
-    } else {
-      body3.append(h("p", {}, "Packing will:"), list3(summary2.steps));
-      if (copies.length) {
-        body3.append(
-          h(
-            "details",
-            {},
-            h("summary", {}, `Files copied in (${copies.length})`),
-            list3(copies.map((c2) => `${c2.from} \u2192 ${c2.to}`))
-          )
-        );
-      }
-    }
-    if (warnings2.length) {
-      body3.append(
-        h("p", { class: "hint warn" }, "Font licences:"),
-        list3(warnings2, "pack-list warn")
-      );
-    }
-    if (remaining.length) {
-      body3.append(
-        h(
-          "p",
-          { class: "hint" },
-          "Still depends on the machine afterwards:"
-        ),
-        list3(remaining)
-      );
-    }
-    const pack = h(
-      "button",
-      {
-        type: "button",
-        class: "pbtn primary",
-        "data-pack": "pack",
-        onclick: async () => {
-          pack.disabled = true;
-          const done = await applyPack();
-          if (!done) {
-            pack.disabled = false;
-            return;
-          }
-          showResult(done);
-        }
-      },
-      "Pack"
-    );
-    pack.disabled = !summary2.steps.length;
-    body3.append(
-      h(
-        "div",
-        { class: "btn-row end" },
-        h(
-          "button",
-          { type: "button", class: "pbtn", onclick: () => closeDialog() },
-          summary2.steps.length ? "Cancel" : "Close"
-        ),
-        pack
-      )
-    );
-    if (summary2.steps.length) pack.focus();
-  }
-  function showResult(done) {
-    const remaining = remainingLines(done.remaining);
-    openDialog(
-      "Deck packed",
-      h(
-        "div",
-        { class: "git-form pack-dialog" },
-        done.changed.length ? h(
-          "div",
-          {},
-          h(
-            "p",
-            {},
-            "Packed (one step: Ctrl+Z takes it back). Commit these files to share them:"
-          ),
-          list3(done.changed)
-        ) : h("p", {}, "Packed: nothing needed changing."),
-        remaining.length ? h(
-          "div",
-          {},
-          h(
-            "p",
-            { class: "hint" },
-            "Still depends on the machine:"
-          ),
-          list3(remaining)
-        ) : h(
-          "p",
-          { class: "hint" },
-          "Nothing else depends on this machine."
-        ),
-        h(
-          "div",
-          { class: "btn-row end" },
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn primary",
-              onclick: () => closeDialog()
-            },
-            "Done"
-          )
-        )
-      ),
-      { wide: true }
-    );
-  }
-
-  // src/ts/editor/publishtext.ts
-  function defaultHost(info4) {
-    return info4.configured?.host ?? info4.suggested ?? "github";
-  }
-  function filesFor(info4, host5, release) {
-    return info4.hosts[host5].files.filter((f2) => release || !f2.release);
-  }
-  function fileAction(file) {
-    if (file.exists === "inkflow") return "update";
-    if (file.exists === "other") return "replace";
-    return "new";
-  }
-  function linkParts(text) {
-    const parts = [];
-    const re2 = /https?:\/\/[^\s)]+[^\s).,;]/g;
-    let last = 0;
-    for (const m2 of text.matchAll(re2)) {
-      const at3 = m2.index ?? 0;
-      if (at3 > last) parts.push({ text: text.slice(last, at3) });
-      parts.push({ url: m2[0] });
-      last = at3 + m2[0].length;
-    }
-    if (last < text.length) parts.push({ text: text.slice(last) });
-    return parts;
-  }
-
-  // src/ts/editor/publish.ts
-  var HOST_NAMES = {
-    github: "GitHub Pages",
-    gitlab: "GitLab Pages"
-  };
-  function linked(text) {
-    return h(
-      "span",
-      {},
-      ...linkParts(text).map(
-        (p2) => "url" in p2 ? h(
-          "a",
-          { href: p2.url, target: "_blank", rel: "noopener" },
-          p2.url
-        ) : p2.text
-      )
-    );
-  }
-  function fileRow(action, path) {
-    const tone = action === "new" ? "new" : action === "replace" ? "deleted" : "modified";
-    return h(
-      "div",
-      { class: "git-file" },
-      h("span", { class: `git-status s-${tone}` }, action),
-      h("code", { class: "git-path" }, path)
-    );
-  }
-  function address(url, note) {
-    return h(
-      "div",
-      { class: "publish-url" },
-      url ? h("a", { href: url, target: "_blank", rel: "noopener" }, url) : h("span", { class: "hint" }, "not known yet"),
-      note ? h("p", { class: "hint publish-note" }, `(${note})`) : null
-    );
-  }
-  async function openPublishDialog(commit, canPush) {
-    const res = await request({ action: "publish", op: "status" });
-    if (!res.ok) {
-      toast(res.error ?? "could not read the publishing setup", "error");
-      return;
-    }
-    const info4 = res.publish;
-    let host5 = defaultHost(info4);
-    const release = h("input", { type: "checkbox" });
-    release.checked = info4.configured?.release ?? false;
-    const readme = h("input", { type: "checkbox" });
-    readme.checked = info4.readme === "missing";
-    const hostButtons = ["github", "gitlab"].map((value) => {
-      const radio = h("input", {
-        type: "radio",
-        name: "publish-host",
-        value
-      });
-      radio.checked = value === host5;
-      radio.addEventListener("change", () => {
-        host5 = value;
-        update();
-      });
-      return h(
-        "label",
-        { class: "look" },
-        radio,
-        h(
-          "span",
-          { class: "look-text" },
-          h("strong", {}, HOST_NAMES[value]),
-          h(
-            "span",
-            { class: "hint" },
-            value === "github" ? "A workflow in .github/workflows/" : "A pages job in .gitlab-ci.yml"
-          )
-        )
-      );
-    });
-    const files2 = h("div", { class: "git-files" });
-    const where = h("div", {});
-    const notes = h("div", { class: "publish-notes" });
-    const write2 = h(
-      "button",
-      { type: "button", class: "pbtn primary", onclick: () => void run() },
-      "Write files"
-    );
-    release.addEventListener("change", () => update());
-    readme.addEventListener("change", () => update());
-    function update() {
-      const hostInfo = info4.hosts[host5];
-      const list4 = filesFor(info4, host5, release.checked);
-      const rows = list4.map((f2) => fileRow(fileAction(f2), f2.path));
-      if (readme.checked && info4.readme !== "linked") {
-        const missing = info4.readme === "missing";
-        rows.push(fileRow(missing ? "new" : "link", "README.md"));
-      }
-      files2.replaceChildren(...rows);
-      where.replaceChildren(address(hostInfo.url, hostInfo.note));
-      notes.replaceChildren(
-        ...[...hostInfo.warnings, ...info4.fonts].map(
-          (w2) => h("p", { class: "hint warn publish-note" }, w2)
-        )
-      );
-      write2.textContent = list4.some((f2) => f2.exists !== "none") ? "Update files" : "Write files";
-    }
-    async function run() {
-      const list4 = filesFor(info4, host5, release.checked);
-      const theirs = list4.filter((f2) => f2.exists === "other");
-      if (theirs.length && !confirm(
-        `${theirs.map((f2) => f2.path).join(", ")} exists already and was not written by inkflow. Replace it?`
-      ))
-        return;
-      write2.disabled = true;
-      const out = await edit({
-        action: "publish",
-        op: "setup",
-        host: host5,
-        release: release.checked,
-        readme: readme.checked,
-        force: list4.some((f2) => f2.exists !== "none")
-      });
-      write2.disabled = false;
-      if (!out.ok) return;
-      done(out);
-    }
-    function done(out) {
-      const written = out.written ?? [];
-      const steps = out.steps ?? [];
-      const url = out.url ?? null;
-      const note = out.note ?? null;
-      const message = `Publish the slides on ${HOST_NAMES[host5]}`;
-      const commitBtn = (push) => h(
-        "button",
-        {
-          type: "button",
-          class: push ? "pbtn" : "pbtn primary",
-          onclick: async () => {
-            if (await commit(written, message, push)) closeDialog();
-          }
-        },
-        push ? "Commit and push" : "Commit"
-      );
-      openDialog(
-        `Publishing on ${HOST_NAMES[host5]}`,
-        h(
-          "div",
-          { class: "git-form publish-form" },
-          h(
-            "div",
-            { class: "field" },
-            h("span", { class: "field-label" }, "Written"),
-            h(
-              "div",
-              { class: "git-files" },
-              ...written.map(
-                (p2) => h("code", { class: "git-path" }, p2)
-              )
-            )
-          ),
-          h(
-            "div",
-            { class: "field" },
-            h("span", { class: "field-label" }, "Address"),
-            address(url, note)
-          ),
-          h(
-            "div",
-            { class: "field" },
-            h("span", { class: "field-label" }, "Next"),
-            h(
-              "ol",
-              { class: "publish-steps" },
-              ...steps.map((s2) => h("li", {}, linked(s2)))
-            )
-          ),
-          h(
-            "div",
-            { class: "btn-row end" },
-            h(
-              "button",
-              {
-                type: "button",
-                class: "pbtn",
-                onclick: () => closeDialog()
-              },
-              "Later"
-            ),
-            written.length > 0 && canPush && commitBtn(true),
-            written.length > 0 && commitBtn(false)
-          )
-        ),
-        { wide: true }
-      );
-    }
-    update();
-    openDialog(
-      "Publish the slides",
-      h(
-        "div",
-        { class: "git-form publish-form" },
-        h(
-          "p",
-          { class: "hint" },
-          `Every push to ${info4.branch} builds the deck with inkflow build and puts it online. The files below go in the repository${info4.scope ? ` (at its root, ${info4.root})` : ""}: commit and push them.`
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Host"),
-          h("div", { class: "look-list" }, ...hostButtons)
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Also"),
-          h(
-            "div",
-            {},
-            h(
-              "label",
-              { class: "check-row" },
-              release,
-              "Publish a release at every tag v\u2026 (the slides as one HTML file and a PDF)"
-            ),
-            info4.readme !== "linked" && h(
-              "label",
-              { class: "check-row" },
-              readme,
-              info4.readme === "missing" ? "Write a README.md that links to the slides" : "Add a link to the slides to README.md"
-            )
-          )
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Files"),
-          files2
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Address"),
-          where
-        ),
-        notes,
-        h("div", { class: "btn-row end" }, write2)
-      ),
-      { wide: true, hint: info4.remote ?? "no remote yet" }
-    );
-  }
-
-  // src/ts/editor/worktreetext.ts
-  function branchName(wt) {
-    return wt.branch ?? `@${wt.head}`;
-  }
-  function summary(wt) {
-    const parts = [
-      wt.ahead ? `${wt.ahead} ahead` : "",
-      wt.behind ? `${wt.behind} behind` : "",
-      wt.dirty ? "uncommitted changes" : "",
-      wt.deck ? "" : "no deck"
-    ].filter(Boolean);
-    return parts.length ? parts.join(" \xB7 ") : "up to date";
-  }
-  function deckDir(deck) {
-    const cut2 = Math.max(deck.lastIndexOf("/"), deck.lastIndexOf("\\"));
-    return cut2 > 0 ? deck.slice(0, cut2) : deck;
-  }
-  function shellQuote(path) {
-    return /^[\w@%+=:,./\\-]+$/.test(path) ? path : `'${path.replace(/'/g, "'\\''")}'`;
-  }
-  function agentPrompt(wt) {
-    const deck = wt.deck ?? `${wt.path}/deck.py`;
-    return [
-      `Work on this deck in the git worktree ${wt.path} (branch ${branchName(wt)}), not in the deck I have open.`,
-      `Pass --deck ${shellQuote(deck)} to every inkflow command, change only files under that folder, and commit there when you are done.`,
-      "Do not merge it: I will compare and merge it myself."
-    ].join(" ");
-  }
-  function agentCommand(wt) {
-    return `cd ${shellQuote(wt.deck ? deckDir(wt.deck) : wt.path)} && claude`;
-  }
-
-  // src/ts/editor/git.ts
-  var menu6 = document.getElementById("context-menu");
-  var button6 = document.getElementById("btn-git");
-  var label2 = button6.querySelector(".git-label");
-  var badge3 = button6.querySelector(".git-badge");
-  var status = { repo: false, git: false };
-  function render3() {
-    button6.hidden = !status.git;
-    if (!status.repo) {
-      label2.textContent = "Git";
-      badge3.hidden = true;
-      button6.title = "Not versioned: create a git repository for this deck";
-      return;
-    }
-    label2.textContent = status.branch ?? `@${status.detached ?? "?"}`;
-    const n3 = status.changes?.length ?? 0;
-    const lfsIssues = lfsFiles().length;
-    button6.classList.toggle("warn", lfsIssues > 0);
-    badge3.hidden = n3 === 0 && lfsIssues === 0;
-    badge3.textContent = n3 ? String(n3) : "!";
-    const sync = [
-      status.ahead ? `${status.ahead} to push` : "",
-      status.behind ? `${status.behind} to pull` : ""
-    ].filter(Boolean).join(", ");
-    button6.title = [
-      status.branch ? `Branch ${status.branch}` : `Viewing ${status.detached}`,
-      n3 ? `${n3} changed file${n3 === 1 ? "" : "s"}` : "No changes",
-      sync,
-      lfsIssues ? `${lfsIssues} media file${lfsIssues === 1 ? "" : "s"} not in Git LFS` : ""
-    ].filter(Boolean).join(" \xB7 ");
-  }
-  async function refreshGit() {
-    if (!connected()) return status;
-    const res = await request({ action: "git", op: "status" });
-    if (res.ok && res.git) status = res.git;
-    render3();
-    return status;
-  }
-  var REWRITES = /* @__PURE__ */ new Set([
-    "discard",
-    "pull",
-    "switch",
-    "view",
-    "revert",
-    "restore",
-    "create-branch"
-  ]);
-  async function git(op, args = {}, question = "") {
-    const notice = REWRITES.has(op) && undoNoticeDue();
-    if (question || notice) {
-      const text = [question, notice ? UNDO_NOTICE : ""].filter(Boolean).join("\n\n");
-      if (!confirm(question ? text : `${text}
-
-Continue?`)) return null;
-      if (notice) undoNoticeShown();
-    }
-    button6.classList.add("busy");
-    const res = await request({ action: "git", op, ...args });
-    button6.classList.remove("busy");
-    if (res.git) {
-      status = res.git;
-      render3();
-    }
-    if (!res.ok) {
-      toast(res.error ?? `git ${op} failed`, "error");
-      return null;
-    }
-    if (typeof res.message === "string") toast(res.message, "ok");
-    if (res.historyCleared) {
-      ed.canUndo = false;
-      ed.canRedo = false;
-      emit("history");
-    }
-    return res;
-  }
-  async function openMenu3() {
-    await refreshGit();
-    clear(menu6);
-    if (!status.repo) {
-      menu6.append(
-        h("div", { class: "menu-title" }, "Not versioned"),
-        menuItem("Create a git repository", async () => {
-          if (await git("init"))
-            toast("This deck is now versioned with git", "ok");
-        }),
-        menuItem("Create a git repository (git only, no LFS)", async () => {
-          if (await git("init", { lfs: false }))
-            toast("This deck is now versioned with git", "ok");
-        }),
-        h("div", { class: "menu-sep" }),
-        menuItem(
-          "Compare with another deck\u2026",
-          () => void openComparePicker()
-        ),
-        menuItem("Pack deck\u2026", () => void openPackDialog()),
-        h("div", { class: "menu-note" }, PACK_HELP)
-      );
-    } else {
-      const n3 = status.changes?.length ?? 0;
-      const deckChanges = (status.changes ?? []).filter((c2) => c2.inDeck);
-      const where = status.branch ? `On ${status.branch}` : `Viewing ${status.detached} (no branch)`;
-      menu6.append(
-        h(
-          "div",
-          { class: "menu-title" },
-          `${where} \xB7 ${n3 ? `${n3} change${n3 === 1 ? "" : "s"}` : "no changes"}`
-        )
-      );
-      if (status.last) {
-        menu6.append(
-          h(
-            "div",
-            { class: "menu-note" },
-            `Last: ${status.last.subject} (${status.last.when})`
-          )
-        );
-      }
-      const lfsCount = lfsFiles().length;
-      if (lfsCount) {
-        const item2 = menuItem(
-          `\u26A0 ${lfsCount} media file${lfsCount === 1 ? "" : "s"} not in Git LFS\u2026`,
-          () => lfsDialog()
-        );
-        item2.classList.add("warn");
-        menu6.append(item2);
-      } else if (status.lfs?.mode === "on" && !status.lfs.installed) {
-        menu6.append(
-          h(
-            "div",
-            { class: "menu-note warn" },
-            "git-lfs is not installed: this deck's media needs it"
-          )
-        );
-      }
-      menu6.append(
-        menuItem(
-          "Commit\u2026",
-          () => commitDialog(),
-          n3 === 0 || !status.branch
-        ),
-        menuItem(
-          status.ahead ? `Push (${status.ahead})` : "Push",
-          () => void git("push"),
-          !status.remotes?.length || !status.branch
-        ),
-        menuItem(
-          status.behind ? `Pull (${status.behind})` : "Pull",
-          () => void git("pull"),
-          !status.upstream
-        ),
-        menuItem(
-          "Discard changes\u2026",
-          () => discardDialog(),
-          deckChanges.length === 0
-        ),
-        menuItem("Pack deck\u2026", () => void openPackDialog()),
-        h("div", { class: "menu-note" }, PACK_HELP),
-        menuItem(
-          "Undo last commit",
-          async () => {
-            if (await git(
-              "undo-commit",
-              {},
-              `Take back "${status.last?.subject}"? Its changes stay, uncommitted.`
-            ))
-              toast(
-                "Last commit taken back; its changes are kept",
-                "ok"
-              );
-          },
-          !status.canUndoCommit
-        ),
-        h("div", { class: "menu-sep" }),
-        menuItem(
-          status.branch ? "Branches\u2026" : "Back to a branch\u2026",
-          () => void branchesDialog(),
-          !status.hasCommits
-        ),
-        menuItem(
-          "History\u2026",
-          () => void historyDialog(),
-          !status.hasCommits
-        ),
-        menuItem("Compare\u2026", () => void openComparePicker()),
-        h("div", { class: "menu-sep" }),
-        ...publishItems()
-      );
-      if (status.hasCommits) menu6.append(...await worktreeSection());
-    }
-    const r2 = button6.getBoundingClientRect();
-    showMenu(Math.max(8, r2.right - 260), r2.bottom + 4);
-  }
-  function publishItems() {
-    const pages = status.pages;
-    const items2 = [];
-    if (pages?.url) {
-      items2.push(
-        h(
-          "a",
-          {
-            class: "menu-item publish-link",
-            href: pages.url,
-            target: "_blank",
-            rel: "noopener",
-            title: "Open the published slides",
-            onclick: () => closeMenu()
-          },
-          `Published at ${pages.url.replace(/^https:\/\//, "")}`
-        )
-      );
-    }
-    items2.push(
-      menuItem(pages ? "Publish\u2026 (update)" : "Publish\u2026", () => {
-        void openPublishDialog(commitFiles, !!status.remotes?.length);
-      })
-    );
-    return items2;
-  }
-  async function commitFiles(paths, message, push) {
-    await refreshGit();
-    if (!status.identity) {
-      commitDialog(paths, message);
-      return true;
-    }
-    if (!await git("commit", { message, paths })) return false;
-    if (push) await git("push");
-    return true;
-  }
-  function lfsFiles() {
-    const l2 = status.lfs;
-    return l2 ? [...l2.uncovered, ...l2.unconverted] : [];
-  }
-  function size3(bytes) {
-    if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-    if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
-    return `${bytes} B`;
-  }
-  function lfsList(files2) {
-    return h(
-      "div",
-      { class: "git-files" },
-      ...files2.map(
-        (f2) => h(
-          "div",
-          { class: "git-file" },
-          h("span", { class: "git-status" }, f2.kind),
-          h("code", { class: "git-path" }, f2.path),
-          h("span", { class: "hint git-size" }, size3(f2.size))
-        )
-      )
-    );
-  }
-  function lfsDialog() {
-    const l2 = status.lfs;
-    if (!l2) return;
-    const paths = lfsFiles().map((f2) => f2.path);
-    openDialog(
-      "Large files and Git LFS",
-      h(
-        "div",
-        { class: "git-form" },
-        h(
-          "p",
-          { class: "hint" },
-          "Git keeps a full copy of a video or image in every version, so the repository grows with each change. Git LFS stores them outside the history; a small repository can do without it."
-        ),
-        l2.uncovered.length > 0 && h("h3", {}, "No Git LFS rule covers these"),
-        l2.uncovered.length > 0 && lfsList(l2.uncovered),
-        l2.unconverted.length > 0 && h("h3", {}, "Committed before Git LFS was set up"),
-        l2.unconverted.length > 0 && lfsList(l2.unconverted),
-        !l2.installed && h(
-          "p",
-          { class: "hint warn" },
-          "git-lfs is not installed on this computer: install it (git-lfs.com) to track files with it."
-        ),
-        h(
-          "p",
-          { class: "hint" },
-          "Tracking adds rules to the deck's .gitattributes and stages the files again as LFS files; commit to keep it. Earlier commits keep their full copies (git lfs migrate rewrites history, for everyone with a clone)."
-        ),
-        h(
-          "div",
-          { class: "btn-row end" },
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn",
-              title: "Record in .gitattributes that this deck stores media in git itself; no more warnings",
-              onclick: async () => {
-                if (await git("lfs-off")) closeDialog();
-              }
-            },
-            "Use git without LFS"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn primary",
-              disabled: !l2.installed,
-              onclick: async () => {
-                if (await git("lfs-track", { paths }))
-                  closeDialog();
-              }
-            },
-            "Track with Git LFS"
-          )
-        )
-      ),
-      { wide: true }
-    );
-  }
-  function fileRow2(change, checked) {
-    const box = h("input", {
-      type: "checkbox",
-      value: change.path
-    });
-    box.checked = checked;
-    return h(
-      "label",
-      { class: `git-file${change.inDeck ? "" : " outside"}` },
-      box,
-      h("span", { class: `git-status s-${change.status}` }, change.status),
-      h("code", { class: "git-path" }, change.path)
-    );
-  }
-  function checkedPaths(list4) {
-    return [...list4.querySelectorAll("input:checked")].map(
-      (b2) => b2.value
-    );
-  }
-  function commitDialog(ticked, text) {
-    const changes = status.changes ?? [];
-    const message = h("textarea", {
-      class: "git-message",
-      rows: "3"
-    });
-    message.value = text ?? status.suggestedMessage ?? "Update slides";
-    const files2 = h(
-      "div",
-      { class: "git-files" },
-      ...changes.map(
-        (c2) => fileRow2(c2, ticked ? ticked.includes(c2.path) : c2.inDeck)
-      )
-    );
-    const outside = changes.some((c2) => !c2.inDeck);
-    const name2 = h("input", {
-      type: "text",
-      placeholder: "Your name"
-    });
-    const email = h("input", {
-      type: "email",
-      placeholder: "you@example.com"
-    });
-    const identity = status.identity ? null : h(
-      "div",
-      { class: "git-identity" },
-      h(
-        "p",
-        { class: "hint" },
-        "git needs to know who commits (kept in this repository only):"
-      ),
-      h("div", { class: "btn-row" }, name2, email)
-    );
-    const commit = async (paths, push) => {
-      const res = await git("commit", {
-        message: message.value,
-        paths,
-        ...identity ? { name: name2.value, email: email.value } : {}
-      });
-      if (!res) return;
-      closeDialog();
-      if (push) await git("push");
-    };
-    const run = async (push) => {
-      const paths = checkedPaths(files2);
-      const summary2 = paths.length ? await packCheck() : null;
-      if (!summary2?.needed) {
-        await commit(paths, push);
-        return;
-      }
-      commitGate(
-        summary2,
-        async () => {
-          const packed = await applyPack();
-          if (!packed) return;
-          await refreshGit();
-          await commit(commitPaths(paths, packed.gitPaths), push);
-        },
-        () => commit(paths, push)
-      );
-    };
-    const canPush = !!status.remotes?.length;
-    const changed2 = new Set(changes.map((c2) => c2.path));
-    const heavy = lfsFiles().filter((f2) => changed2.has(f2.path));
-    const lfsNote = heavy.length > 0 && h(
-      "p",
-      { class: "hint warn" },
-      `${heavy.length} of these ${heavy.length === 1 ? "is a media file" : "are media files"} git would store whole, not in Git LFS. `,
-      h(
-        "button",
-        {
-          type: "button",
-          class: "link-btn",
-          onclick: () => lfsDialog()
-        },
-        "Review\u2026"
-      )
-    );
-    message.addEventListener("keydown", (e2) => {
-      if (e2.key === "Enter" && (e2.ctrlKey || e2.metaKey)) {
-        e2.preventDefault();
-        void run(false);
-      }
-    });
-    openDialog(
-      "Commit",
-      h(
-        "div",
-        { class: "git-form" },
-        h(
-          "label",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Message"),
-          message
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Files"),
-          h(
-            "div",
-            {},
-            files2,
-            outside && h(
-              "p",
-              { class: "hint" },
-              "Files outside this deck are left out unless you tick them."
-            )
-          )
-        ),
-        lfsNote,
-        identity,
-        h(
-          "div",
-          { class: "btn-row end" },
-          canPush && h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn",
-              onclick: () => void run(true)
-            },
-            "Commit and push"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn primary",
-              title: "Ctrl+Enter",
-              onclick: () => void run(false)
-            },
-            "Commit"
-          )
-        )
-      ),
-      { wide: true, hint: status.branch ? `on ${status.branch}` : void 0 }
-    );
-    message.focus();
-    message.select();
-  }
-  function discardDialog() {
-    const changes = (status.changes ?? []).filter((c2) => c2.inDeck);
-    const files2 = h(
-      "div",
-      { class: "git-files" },
-      ...changes.map((c2) => fileRow2(c2, true))
-    );
-    openDialog(
-      "Discard changes",
-      h(
-        "div",
-        { class: "git-form" },
-        h(
-          "p",
-          { class: "hint warn" },
-          "The ticked files go back to how they were in the last commit; new files are deleted. This cannot be undone."
-        ),
-        files2,
-        h(
-          "div",
-          { class: "btn-row end" },
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn danger",
-              onclick: async () => {
-                const paths = checkedPaths(files2);
-                if (!paths.length) return;
-                if (await git("discard", { paths })) {
-                  closeDialog();
-                  toast(
-                    `Discarded changes to ${paths.length} file${paths.length === 1 ? "" : "s"}`,
-                    "ok"
-                  );
-                }
-              }
-            },
-            "Discard"
-          )
-        )
-      ),
-      { wide: true }
-    );
-  }
-  async function branchesDialog() {
-    const res = await git("branches");
-    if (!res) return;
-    const branches = res.branches;
-    const name2 = h("input", {
-      type: "text",
-      placeholder: "new-branch-name"
-    });
-    const create = async () => {
-      if (!name2.value.trim()) return;
-      if (await git("create-branch", { name: name2.value.trim() })) {
-        closeDialog();
-        toast(`Created and switched to ${name2.value.trim()}`, "ok");
-      }
-    };
-    name2.addEventListener("keydown", (e2) => {
-      if (e2.key === "Enter") {
-        e2.preventDefault();
-        void create();
-      }
-    });
-    openDialog(
-      "Branches",
-      h(
-        "div",
-        { class: "git-form" },
-        h(
-          "div",
-          { class: "git-list" },
-          ...branches.map(
-            (b2) => h(
-              "div",
-              { class: `git-row${b2.current ? " current" : ""}` },
-              h("strong", {}, b2.name),
-              h(
-                "span",
-                { class: "hint" },
-                b2.current ? "current" : b2.when
-              ),
-              !b2.current && h(
-                "button",
-                {
-                  type: "button",
-                  class: "pbtn",
-                  onclick: async () => {
-                    if (await git("switch", {
-                      name: b2.name
-                    })) {
-                      closeDialog();
-                      toast(
-                        `Switched to ${b2.name}`,
-                        "ok"
-                      );
-                    }
-                  }
-                },
-                "Switch"
-              )
-            )
-          )
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "New branch"),
-          h(
-            "div",
-            { class: "btn-row" },
-            name2,
-            h(
-              "button",
-              {
-                type: "button",
-                class: "pbtn primary",
-                onclick: create
-              },
-              "Create and switch"
-            )
-          )
-        ),
-        h(
-          "p",
-          { class: "hint" },
-          "Uncommitted changes come along to the branch you switch to; git refuses a switch that would overwrite them."
-        )
-      ),
-      { wide: true }
-    );
-  }
-  async function historyDialog() {
-    const res = await git("log");
-    if (!res) return;
-    const log = res.log;
-    const act = async (op, c2, question, done) => {
-      if (await git(op, { sha: c2.sha }, question)) {
-        closeDialog();
-        toast(done, "ok");
-      }
-    };
-    openDialog(
-      "History",
-      h(
-        "div",
-        { class: "git-form" },
-        log.length ? h(
-          "div",
-          { class: "git-list history" },
-          ...log.map(
-            (c2) => h(
-              "div",
-              { class: `git-row${c2.head ? " current" : ""}` },
-              h(
-                "div",
-                { class: "git-commit" },
-                h("strong", {}, c2.subject),
-                h(
-                  "span",
-                  { class: "hint" },
-                  `${c2.short} \xB7 ${c2.author} \xB7 ${c2.when}${c2.refs.length ? ` \xB7 ${c2.refs.join(", ")}` : ""}`
-                )
-              ),
-              h(
-                "div",
-                { class: "btn-row" },
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "pbtn",
-                    title: "Compare with the working copy, slide by slide",
-                    onclick: () => {
-                      closeDialog();
-                      openCompare(
-                        { kind: "live" },
-                        {
-                          kind: "commit",
-                          rev: c2.sha
-                        }
-                      );
-                    }
-                  },
-                  "Compare"
-                ),
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "pbtn",
-                    title: "Show the deck as it was then (switch back with Branches)",
-                    onclick: () => void act(
-                      "view",
-                      c2,
-                      `Show the deck as it was at "${c2.subject}"? Edits there are not on any branch until you create one.`,
-                      `Viewing ${c2.short}; switch back to a branch from the git menu`
-                    )
-                  },
-                  "View"
-                ),
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "pbtn",
-                    title: "Make the deck's files what they were then, as uncommitted changes",
-                    onclick: () => void act(
-                      "restore",
-                      c2,
-                      `Restore the deck's files to "${c2.subject}"? Your current files are replaced (commit first to keep them).`,
-                      `Restored the deck to ${c2.short}; commit to keep it`
-                    )
-                  },
-                  "Restore"
-                ),
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    class: "pbtn",
-                    title: "A new commit that undoes this one",
-                    onclick: () => void act(
-                      "revert",
-                      c2,
-                      `Undo "${c2.subject}" with a new commit?`,
-                      `Reverted ${c2.short}`
-                    )
-                  },
-                  "Revert"
-                )
-              )
-            )
-          )
-        ) : h("p", { class: "hint" }, "No commits touch this deck yet."),
-        h(
-          "p",
-          { class: "hint" },
-          "View: look at an old version (no branch). Restore: bring the deck back to it as changes you can commit. Revert: undo one commit with a new one."
-        )
-      ),
-      {
-        wide: true,
-        hint: status.scope ? `changes to ${status.scope}/` : void 0
-      }
-    );
-  }
-  async function worktreeOp(op, args = {}, question = "", rewrites = false, quiet = false) {
-    const notice = rewrites && undoNoticeDue();
-    if (question || notice) {
-      const text = [question, notice ? UNDO_NOTICE : ""].filter(Boolean).join("\n\n");
-      if (!confirm(text)) return null;
-      if (notice) undoNoticeShown();
-    }
-    button6.classList.add("busy");
-    const res = await request({ action: "worktree", op, ...args });
-    button6.classList.remove("busy");
-    if (res.git) {
-      status = res.git;
-      render3();
-    }
-    if (!res.ok) {
-      if (!quiet) toast(res.error ?? `worktree ${op} failed`, "error");
-      return res;
-    }
-    if (typeof res.message === "string") toast(res.message, "ok");
-    if (typeof res.note === "string") toast(res.note, "info");
-    if (res.historyCleared) {
-      ed.canUndo = false;
-      ed.canRedo = false;
-      emit("history");
-    }
-    return res;
-  }
-  async function worktreeList() {
-    const res = await request({ action: "worktree", op: "list" });
-    return res.ok ? res.worktrees : [];
-  }
-  async function worktreeSection() {
-    const others2 = (await worktreeList()).filter((w2) => !w2.main);
-    return [
-      h("div", { class: "menu-sep" }),
-      h("div", { class: "menu-title" }, "Worktrees"),
-      ...others2.map(
-        (wt) => h(
-          "div",
-          { class: "menu-wt" },
-          h(
-            "button",
-            {
-              type: "button",
-              class: "menu-item",
-              title: `${wt.path}
-Merge, remove, or what to tell the agent`,
-              onclick: () => {
-                closeMenu();
-                worktreeDialog(wt);
-              }
-            },
-            h("span", { class: "wt-branch" }, branchName(wt)),
-            h("span", { class: "wt-state" }, summary(wt))
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "menu-mini",
-              disabled: !wt.deck,
-              title: "Compare its slides with this deck",
-              onclick: () => {
-                closeMenu();
-                compareWith(wt);
-              }
-            },
-            "Compare"
-          )
-        )
-      ),
-      menuItem("New worktree for an agent\u2026", () => newWorktreeDialog())
-    ];
-  }
-  function compareWith(wt) {
-    if (!wt.deck) return;
-    document.dispatchEvent(
-      new CustomEvent("inkflow:compare", {
-        detail: { kind: "path", deck: wt.deck, label: branchName(wt) }
-      })
-    );
-  }
-  function copyBlock(text) {
-    return h(
-      "div",
-      { class: "wt-copy" },
-      h("pre", { class: "wt-command" }, text),
-      h(
-        "button",
-        {
-          type: "button",
-          class: "pbtn",
-          onclick: () => void navigator.clipboard.writeText(text).then(
-            () => toast("Copied", "ok"),
-            () => toast("Could not copy: select the text", "error")
-          )
-        },
-        "Copy"
-      )
-    );
-  }
-  function newWorktreeDialog() {
-    const name2 = h("input", {
-      type: "text",
-      placeholder: "e.g. bolder-colours",
-      spellcheck: "false"
-    });
-    const create = async () => {
-      const value = name2.value.trim().replace(/\s+/g, "-");
-      if (!value) return;
-      const res = await worktreeOp("add", { name: value });
-      if (res?.ok) worktreeDialog(res.worktree, true);
-    };
-    name2.addEventListener("keydown", (e2) => {
-      if (e2.key === "Enter") {
-        e2.preventDefault();
-        void create();
-      }
-    });
-    openDialog(
-      "New worktree for an agent",
-      h(
-        "div",
-        { class: "git-form" },
-        h(
-          "p",
-          { class: "hint" },
-          `A copy of the deck on a branch of its own, deck/<name>, from the last commit of ${status.branch ?? "this version"}. A coding agent works and commits there while your deck stays as it is; then compare and merge it, or remove it.`
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Name"),
-          h(
-            "div",
-            { class: "btn-row" },
-            name2,
-            h(
-              "button",
-              {
-                type: "button",
-                class: "pbtn primary",
-                onclick: () => void create()
-              },
-              "Create"
-            )
-          )
-        ),
-        (status.changes ?? []).some((c2) => c2.inDeck) && h(
-          "p",
-          { class: "hint warn" },
-          "Your uncommitted changes to the deck are not in it: commit first to include them."
-        )
-      ),
-      { wide: true }
-    );
-    name2.focus();
-  }
-  function worktreeDialog(wt, created = false) {
-    const into = status.branch;
-    const merge2 = async () => {
-      const n3 = wt.ahead;
-      const question = [
-        `Merge ${branchName(wt)} (${n3} commit${n3 === 1 ? "" : "s"}) into ${into}? Its changes land in your deck's files now.`,
-        wt.dirty ? "Its uncommitted changes are not merged (commit them there first)." : ""
-      ].filter(Boolean).join("\n\n");
-      const res = await worktreeOp(
-        "merge",
-        { branch: wt.branch },
-        question,
-        true
-      );
-      if (res?.ok) closeDialog();
-    };
-    const remove = async () => {
-      const lost = [
-        wt.dirty ? "uncommitted changes" : "",
-        wt.ahead ? `${wt.ahead} unmerged commit${wt.ahead === 1 ? "" : "s"}` : ""
-      ].filter(Boolean);
-      if (!confirm(
-        `Remove the worktree ${wt.name} (${wt.path})?${lost.length ? `
-
-It has ${lost.join(" and ")}.` : ""}`
-      ))
-        return;
-      let res = await worktreeOp(
-        "remove",
-        { name: wt.path },
-        "",
-        false,
-        true
-      );
-      if (res && !res.ok) {
-        if (!confirm(
-          `${res.error}
-
-Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
-        ))
-          return;
-        res = await worktreeOp("remove", { name: wt.path, force: true });
-      }
-      if (res?.ok) closeDialog();
-    };
-    openDialog(
-      `Worktree ${branchName(wt)}`,
-      h(
-        "div",
-        { class: "git-form" },
-        h(
-          "p",
-          { class: "hint" },
-          created ? `Created from the last commit${into ? ` of ${into}` : ""} \xB7 ` : `${summary(wt)} \xB7 `,
-          h("code", { class: "git-path" }, wt.path)
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Tell the agent"),
-          copyBlock(agentPrompt(wt))
-        ),
-        h(
-          "div",
-          { class: "field" },
-          h("span", { class: "field-label" }, "Or start one there"),
-          copyBlock(agentCommand(wt))
-        ),
-        h(
-          "div",
-          { class: "btn-row end" },
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn danger",
-              onclick: () => void remove()
-            },
-            "Remove\u2026"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn",
-              disabled: !wt.deck,
-              title: "Its slides side by side with this deck's",
-              onclick: () => {
-                closeDialog();
-                compareWith(wt);
-              }
-            },
-            "Compare"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "pbtn primary",
-              disabled: !wt.branch || !into || wt.ahead === 0,
-              title: into ? `Bring its commits into ${into}` : "Switch the deck to a branch first",
-              onclick: () => void merge2()
-            },
-            into ? `Merge into ${into}\u2026` : "Merge\u2026"
-          )
-        )
-      ),
-      { wide: true }
-    );
-  }
-  var timer4 = 0;
-  function initGit() {
-    button6.addEventListener("click", () => void openMenu3());
-    on("model", () => {
-      window.clearTimeout(timer4);
-      timer4 = window.setTimeout(() => void refreshGit(), 600);
-    });
   }
 
   // node_modules/.pnpm/perfect-freehand@1.2.3/node_modules/perfect-freehand/dist/esm/index.mjs
@@ -24433,12 +24978,12 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return box;
   }
   async function bundleFonts() {
-    const plan = await request({ action: "fonts", op: "bundle", dryRun: true });
-    if (!plan.ok) {
-      toast(plan.error ?? "cannot bundle fonts", "error");
+    const plan2 = await request({ action: "fonts", op: "bundle", dryRun: true });
+    if (!plan2.ok) {
+      toast(plan2.error ?? "cannot bundle fonts", "error");
       return;
     }
-    const b2 = plan.bundle;
+    const b2 = plan2.bundle;
     if (!b2.copies.length) {
       toast("No font comes from this computer only", "info");
       return;

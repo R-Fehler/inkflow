@@ -20,6 +20,7 @@ import {
     counts,
     countText,
     firstRow,
+    focusRow,
     followRow,
     isChange,
     type Loc,
@@ -61,6 +62,8 @@ let model: CompareModel | null = null;
 let viewId = 0;
 let open: [Source, Source] | null = null;
 let row = 0;
+// The right side's slide (deck index) to show first, once the model comes.
+let focus: number | null = null;
 let onlyChanges = readPref("inkflow-compare-only", "0") === "1";
 let mode: Mode = (readPref("inkflow-compare-mode", "side") as Mode) || "side";
 let outlines = readPref("inkflow-compare-outlines", "1") === "1";
@@ -87,10 +90,16 @@ export function compareOpen(): boolean {
     return !view.hidden;
 }
 
-/** Compare two sides (usually the working copy and something else). */
-export function openCompare(left: Source, right: Source): void {
+/** Compare two sides (usually the working copy and something else);
+ * `focus`: the right side's slide (deck index) to show first. */
+export function openCompare(
+    left: Source,
+    right: Source,
+    opts: { focus?: number } = {},
+): void {
     viewId += 1;
     open = [left, right];
+    focus = opts.focus ?? null;
     error = null;
     if (!model) {
         view.hidden = false;
@@ -260,6 +269,11 @@ function onModel(msg: Record<string, unknown>): void {
     const next = msg as unknown as CompareModel;
     const before = model;
     row = before ? followRow(before, row, next) : firstRow(next.pairs);
+    if (focus != null) {
+        const at = focusRow(next, focus);
+        if (at >= 0) row = at;
+        focus = null;
+    }
     model = next;
     view.classList.remove("busy");
     // Thumbnails of sides no longer shown go.

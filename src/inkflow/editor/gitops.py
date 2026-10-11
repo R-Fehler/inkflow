@@ -36,10 +36,21 @@ def available() -> bool:
     return shutil.which("git") is not None
 
 
-def run(cwd: Path, *args: str, timeout: float = _TIMEOUT) -> str:
-    """``git <args>`` in ``cwd``; its stdout, or a ``GitError`` with its message."""
+def run(
+    cwd: Path,
+    *args: str,
+    timeout: float = _TIMEOUT,
+    env: dict[str, str] | None = None,
+    stdin: str | None = None,
+    ok: tuple[int, ...] = (0,),
+) -> str:
+    """``git <args>`` in ``cwd``; its stdout, or a ``GitError`` with its message.
+    ``env`` adds variables (``GIT_INDEX_FILE``), ``stdin`` is fed to git, and
+    ``ok`` lists the exit statuses that are not failures (``diff --no-index``
+    exits 1 when the files differ)."""
     env = {
         **os.environ,
+        **(env or {}),
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_ASKPASS": "",
         "LC_ALL": "C",
@@ -53,13 +64,14 @@ def run(cwd: Path, *args: str, timeout: float = _TIMEOUT) -> str:
             text=True,
             env=env,
             timeout=timeout,
-            stdin=subprocess.DEVNULL,
+            # (Empty when there is nothing to feed: git never waits for input.)
+            input=stdin or "",
         )
     except FileNotFoundError as exc:
         raise GitError("git is not installed") from exc
     except subprocess.TimeoutExpired as exc:
         raise GitError(f"git {args[0]} took too long and was stopped") from exc
-    if result.returncode != 0:
+    if result.returncode not in ok:
         message = (result.stderr or result.stdout).strip()
         raise GitError(message or f"git {args[0]} failed")
     return result.stdout
@@ -105,8 +117,34 @@ class Repo:
         rel = self.deck_dir.resolve().relative_to(self.root.resolve()).as_posix()
         return rel if rel != "." else ""
 
-    def git(self, *args: str, timeout: float = _TIMEOUT) -> str:
-        return run(self.root, *args, timeout=timeout)
+    def git(
+        self,
+        *args: str,
+        timeout: float = _TIMEOUT,
+        env: dict[str, str] | None = None,
+        stdin: str | None = None,
+        ok: tuple[int, ...] = (0,),
+    ) -> str:
+        return run(self.root, *args, timeout=timeout, env=env, stdin=stdin, ok=ok)
+
+    def rel(self, path: Path) -> str | None:
+        """``path`` relative to the repository root, or None outside it."""
+        try:
+            return path.resolve().relative_to(self.root.resolve()).as_posix()
+        except ValueError:
+            return None
+
+    def has_head(self) -> bool:
+        return _try(self.root, "rev-parse", "--verify", "--quiet", "HEAD") is not None
+
+    def head_text(self, rel: str) -> str | None:
+        """The last commit's version of the file at ``rel`` (None: not in it)."""
+        if not self.has_head():
+            return None
+        try:
+            return self.git("show", f"HEAD:{rel}")
+        except GitError:
+            return None
 
     def in_deck(self, path: str) -> bool:
         return not self.scope or path == self.scope or path.startswith(f"{self.scope}/")
@@ -303,6 +341,62 @@ def commit(repo: Repo, message: str, paths: list[str] | None) -> str:
         repo.git("add", "-A")
         repo.git("commit", "-q", "-m", message)
     return repo.git("rev-parse", "--short", "HEAD").strip()
+
+
+def commit_with(
+    repo: Repo, message: str, paths: list[str], blobs: dict[str, str]
+) -> str:
+    """Commit ``paths`` as they are on disk and each of ``blobs`` (path ->
+    text) as given, whatever its file holds: part of a file's changes, the
+    rest left uncommitted (``git add -p``'s job, done for one deck.py). The
+    commit is made from an index of its own, so nothing else the user staged
+    goes in; afterwards the real index takes the committed paths' new
+    versions, which leaves their uncommitted rest as an unstaged change."""
+    if not blobs:
+        return commit(repo, message, paths)
+    if not message.strip():
+        raise GitError("write a commit message")
+    index = repo.git("rev-parse", "--git-path", "inkflow-index").strip()
+    index_path = Path(index) if Path(index).is_absolute() else repo.root / index
+    env = {"GIT_INDEX_FILE": str(index_path)}
+    try:
+        if repo.has_head():
+            repo.git("read-tree", "HEAD", env=env)
+        else:
+            repo.git("read-tree", "--empty", env=env)
+        if paths:
+            repo.git("add", "-A", "--", *paths, env=env)
+        for rel, text in blobs.items():
+            sha = repo.git(
+                "hash-object", "-w", f"--path={rel}", "--stdin", stdin=text
+            ).strip()
+            mode = "100644"
+            listed = _try(repo.root, "ls-files", "-s", "--", rel)
+            if listed:
+                mode = listed.split()[0]
+            repo.git(
+                "update-index", "--add", "--cacheinfo", f"{mode},{sha},{rel}", env=env
+            )
+        repo.git("commit", "-q", "-m", message, env=env)
+    finally:
+        index_path.unlink(missing_ok=True)
+    repo.git("reset", "-q", "--", *paths, *blobs)
+    return repo.git("rev-parse", "--short", "HEAD").strip()
+
+
+def diff_text(repo: Repo, paths: list[str], untracked: list[str]) -> str:
+    """``git diff`` of ``paths`` since the last commit (the repository's own
+    diff drivers apply: inkflow's SVG driver shows only visual changes), and
+    each of ``untracked`` as a new file."""
+    out: list[str] = []
+    if paths:
+        if repo.has_head():
+            out.append(repo.git("diff", "HEAD", "--", *paths))
+        else:
+            untracked = [*paths, *untracked]
+    for rel in untracked:
+        out.append(repo.git("diff", "--no-index", "--", os.devnull, rel, ok=(0, 1)))
+    return "".join(out)
 
 
 def _can_undo_commit(repo: Repo) -> bool:

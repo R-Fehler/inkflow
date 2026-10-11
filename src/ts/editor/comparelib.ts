@@ -110,6 +110,13 @@ export function firstRow(pairs: PairModel[]): number {
     return i >= 0 ? i : 0;
 }
 
+/** The row showing the right side's slide at deck index `index` (-1: none). */
+export function focusRow(m: CompareModel, index: number): number {
+    return m.pairs.findIndex(
+        (p) => p.right != null && m.right.slides[p.right]?.index === index,
+    );
+}
+
 /** The row now showing `prev`'s pair again after a new model, by slide ids. */
 export function followRow(
     before: CompareModel | null,
