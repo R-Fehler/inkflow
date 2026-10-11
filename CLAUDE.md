@@ -271,7 +271,8 @@ src/
                                sheet's body size a hint, body text below 0.8) and
                                raster pictures checked at their printed dpi
                                (`low-res`: <150 hint, <100 problem);
-                               `--check` = no output path; the contact sheet
+                               `--check` = no output path; `--by-id` names the
+                               images `<id>.png` (`image_name`); the contact sheet
                                (`sheet_layout`/`sheet_pages`/`sheet_html`: ≤1600 px wide,
                                ≤16 slides per image) is one more page screenshot of the
                                slide shots, each taken at its cell's size;
@@ -571,8 +572,10 @@ src/
                                and `files clean [-n] [--templates]` = `delete-files`;
                                `_edits.deletion_warnings` = the dialog's git words),
                                authoring.py
-                               (clean, label2id, add, parent group, sync, layouts), color.py (colorize,
-                               palette), verify.py, worktree.py (the `worktree` group: add,
+                               (clean, label2id, add, parent group, sync, layouts
+                               [--plain | --json]), color.py (colorize,
+                               palette), verify.py (each line: the slide's number
+                               and id; a closing count, `verify_summary`), worktree.py (the `worktree` group: add,
                                list, merge, remove over editor/worktrees.py; `add` prints
                                `path:`/`deck:` on stdout). Submodules register on `main` by import.
     launcher.py       `inkflow setup-desktop`: an application-menu launcher (Linux
@@ -968,6 +971,8 @@ src/
                       `fitSlide`, waits for load/fonts/first video frames, fits
                       again), measure.ts (zone
                       text vs its foreignObject box, code blocks cut off, drawn
+                      side-by-side text boxes shrunk to fit by different
+                      amounts (`unevenFits`, a hint: `uneven-fit`),
                       objects vs the viewBox — skipping clipped/masked content,
                       unpainted shapes and anything spanning the slide — and text
                       below 1/80 of the slide height; all in slide units),
