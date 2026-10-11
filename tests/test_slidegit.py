@@ -4,6 +4,7 @@ slides only (editor/slidegit.py, the session's git action)."""
 from __future__ import annotations
 
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 from typing import BinaryIO, cast
@@ -236,8 +237,8 @@ def test_untracked_deck_makes_every_slide_new(tmp_path: Path) -> None:
     assert 'md="a.md"' in head
     assert "intro.svg" not in head and 'md="b.md"' not in head
     files = _git(deck, "show", "--name-only", "--format=", "HEAD").split()
-    # The layout is shared: offered, not committed unless ticked.
-    assert sorted(files) == ["deck.py", "slides/a.md"]
+    # Complete: the layout it is drawn on goes in too.
+    assert sorted(files) == ["deck.py", "layouts/two.svg", "slides/a.md"]
 
 
 # ── Committing chosen slides ──
@@ -248,7 +249,9 @@ def test_commit_a_slide_whose_files_changed_leaves_deck_py(deck_py: Path) -> Non
     before = deck_py.read_text(encoding="utf-8")
     found = _changes(deck_py)
     plan = slidegit.commit_plan(found, [2], with_removed=False)
-    assert plan.paths == ["talk/slides/b.md"]
+    assert plan.paths == [
+        {"path": "talk/slides/b.md", "status": "modified", "why": "own"}
+    ]
     assert plan.deck == "none"
     assert plan.left == 2
     slidegit.commit_slides(found, [2], "B", False, [])
@@ -268,6 +271,7 @@ def test_commit_a_slide_whose_entry_changed_commits_part_of_deck_py(
     plan = slidegit.commit_plan(found, [3], with_removed=False)
     assert plan.deck == "partial"
     assert plan.paths == []
+    assert plan.missing == []
     slidegit.commit_slides(found, [3], "C titled", False, [])
     head = _head_deck(deck_py)
     assert 'title="C"' in head
@@ -463,3 +467,64 @@ def test_open_deck_tab_is_the_owners(deck_py: Path) -> None:
         {"action": "open-deck-tab", "path": str(deck_py), "_local": True}, None
     )
     assert res["url"] == "/edit"
+
+
+# ── A committed slide is complete ──
+
+
+def test_shared_and_deck_wide_files_go_in(deck_py: Path) -> None:
+    deck = deck_py.parent
+    (deck / "slides" / "b.md").write_text("# B\n\nMore\n", "utf-8")
+    (deck / "layouts" / "two.svg").write_text(
+        LAYOUT.replace('y="60"', 'y="70"'), "utf-8"
+    )
+    (deck / "styles.css").write_text(":root { --x: 1; }\n", "utf-8")
+    found = _changes(deck_py)
+    # styles.css is new: every slide is drawn with it.
+    assert [s.state for s in found.slides] == ["shared", "shared", "modified", "shared"]
+    plan = slidegit.commit_plan(found, [2], with_removed=False)
+    assert plan.paths == [
+        {"path": "talk/slides/b.md", "status": "modified", "why": "own"},
+        {"path": "talk/layouts/two.svg", "status": "modified", "why": "shared"},
+        {"path": "talk/styles.css", "status": "new", "why": "deck"},
+    ]
+    # Slides a and c are on the layout, intro is drawn with styles.css.
+    assert plan.touched == 3
+    assert plan.left == 0
+    slidegit.commit_slides(found, [2], "B", False, [])
+    assert _head_files(deck_py) == [
+        "talk/layouts/two.svg",
+        "talk/slides/b.md",
+        "talk/styles.css",
+    ]
+    assert _git(deck, "status", "--porcelain") == ""
+
+
+def test_python_the_deck_imports_goes_in(
+    deck_py: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deck = deck_py.parent
+    name = f"slidegit_helpers_{next(_modules)}"
+    (deck / f"{name}.py").write_text("TITLE = 'A'\n", "utf-8")
+    monkeypatch.setattr(sys, "path", [str(deck), *sys.path])
+    _edit_deck(
+        deck_py,
+        "from inkflow import Deck, Slide\n",
+        f"from inkflow import Deck, Slide\nfrom {name} import TITLE\n",
+    )
+    _edit_deck(deck_py, 'md="a.md")', 'md="a.md", title=TITLE)')
+    found = _changes(deck_py)
+    plan = slidegit.commit_plan(found, [1], with_removed=False)
+    assert {"path": f"talk/{name}.py", "status": "new", "why": "deck"} in plan.paths
+    assert plan.deck == "whole"
+
+
+def test_files_a_clone_would_lack_are_named(deck_py: Path) -> None:
+    deck = deck_py.parent
+    (deck / ".gitignore").write_text("secret/\n", "utf-8")
+    (deck / "secret").mkdir()
+    (deck / "secret" / "pic.svg").write_text(INTRO, "utf-8")
+    (deck / "slides" / "b.md").write_text("# B\n\n![](../secret/pic.svg)\n", "utf-8")
+    found = _changes(deck_py)
+    plan = slidegit.commit_plan(found, [2], with_removed=False)
+    assert plan.missing == [{"path": "talk/secret/pic.svg", "why": "ignored"}]

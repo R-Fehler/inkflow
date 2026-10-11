@@ -9,19 +9,29 @@ compared with the last commit's deck.py, entry by entry (`match_entries`).
 - ``new``: its ``Slide(...)`` is not in the last commit (VS Code's U)
 - ``modified``: its entry or one of its own files changed (M)
 - ``shared``: only files it shares changed: its layout, an overlay, a
-  picture or Markdown file other slides use too (a dot)
+  picture or Markdown file other slides use too, or what every slide is
+  drawn with (`deck_inputs`: styles.css, fonts, a theme in the deck's
+  folder, Python files deck.py imports) (a dot)
 
-Committing chosen slides commits their own changed files and a deck.py made
-for the commit (`partial_deck`): the working deck.py with every other
-slide's entry as it was in the last commit (a new one left out, a removed
-one put back unless its removal goes in too), so the other slides' changes
-stay uncommitted. What deck.py says besides its slides (imports, the
-``Deck(...)`` settings, sections, the order) goes in as it is now.
+A committed slide is complete: a fresh clone of the commit shows it exactly
+as it looks now. So committing chosen slides commits every changed file they
+are made of, the shared ones and the deck-wide ones included (a layout
+change then reaches the other slides on it too), and a deck.py made for the
+commit (`partial_deck`): the working deck.py with every other slide's entry
+as it was in the last commit (a new one left out, a removed one put back
+unless its removal goes in too), so the other slides' own changes stay
+uncommitted. What deck.py says besides its slides (imports, the ``Deck(...)``
+settings, sections, the order) goes in as it is now. Files a clone would
+lack whatever is committed (ignored by git, outside the repository) are
+named (`CommitPlan.missing`).
 """
 
 from __future__ import annotations
 
 import difflib
+import os
+import re
+import sys
 import textwrap
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -30,9 +40,13 @@ from typing import cast
 
 import libcst as cst
 
+from inkflow.assets import is_local_ref
 from inkflow.editor import gitops
 from inkflow.editor.comparesrc import SideBuild, slide_paths
 from inkflow.editor.deckedit import DeckEditError, DeckSource, SlideRef
+from inkflow.fonts import font_sources
+from inkflow.loaders import load_deck_styles
+from inkflow.manifest import Inline
 from inkflow.pipeline import slide_ids
 
 NEW = "new"
@@ -40,7 +54,7 @@ MODIFIED = "modified"
 SHARED = "shared"
 
 _KINDS = ("id", "md", "src")
-_SHARED_ROLES = frozenset({"layout", "overlay"})
+_SHARED_ROLES = frozenset({"layout", "overlay", "deck"})
 _MAX_DIFF = 400_000
 """Characters of diff text sent to the page at most."""
 
@@ -342,6 +356,11 @@ class Changes:
     claimed: set[str]
     """The changed files some slide is made of."""
     titles: list[str]
+    outside: list[set[str]]
+    """Per slide, the files it is made of that are outside the repository
+    (a clone lacks them)."""
+    made_of: list[list[str]]
+    """Per slide, every file it is made of (relative to the repository)."""
 
     def removed_json(self) -> list[dict[str, object]]:
         head = self.diff.head or []
@@ -375,6 +394,61 @@ class Changes:
         return rest != self.diff.head_code
 
 
+_CSS_URL = re.compile(r"""url\(\s*['"]?([^'")]+)['"]?\s*\)""")
+
+
+def _inside(path: Path, folder: Path) -> bool:
+    return Path(os.path.abspath(path)).is_relative_to(os.path.abspath(folder))
+
+
+def deck_inputs(build: SideBuild) -> tuple[dict[Path, str], list[Path]]:
+    """What every slide is drawn with, besides deck.py: the project's
+    styles.css and scripts.js and the files its ``url()``s name, the fonts
+    the build embeds from the deck's folder, and the Python files deck.py
+    imports from it; and the folder of a theme that lives in the deck's
+    folder (any file in it counts). Files outside the folder are not the
+    deck's to commit and are left out."""
+    project = build.project_dir
+    files: dict[Path, str] = {}
+
+    def add(path: Path) -> None:
+        if path.is_file() and _inside(path, project):
+            files.setdefault(Path(os.path.abspath(path)), "deck")
+
+    styles = project / "styles.css"
+    add(styles)
+    add(project / "scripts.js")
+    if styles.is_file():
+        text = styles.read_text(encoding="utf-8", errors="replace")
+        for ref in cast("list[str]", _CSS_URL.findall(text)):
+            if is_local_ref(ref):
+                add(project / ref.split("?", 1)[0].split("#", 1)[0])
+    deck = build.deck
+    try:
+        css = load_deck_styles(deck, project)
+        fonts_dir = deck.theme.fonts_dir
+        for _, font in font_sources(build.slides, project, fonts_dir, styles_css=css):
+            if font is not None:
+                add(font)
+    except (OSError, ValueError):
+        pass  # (a font that cannot be read is not the commit's concern)
+    deck_file = Path(os.path.abspath(build.deck_path))
+    for module in list(sys.modules.values()):
+        file = getattr(module, "__file__", None)
+        if isinstance(file, str) and file.endswith(".py"):
+            path = Path(os.path.abspath(file))
+            if path != deck_file and _inside(path, project):
+                add(path)
+    dirs: list[Path] = []
+    try:
+        theme_dir = deck.theme.asset_dir()
+    except ValueError:
+        theme_dir = None
+    if theme_dir is not None and _inside(theme_dir, project):
+        dirs.append(Path(os.path.abspath(theme_dir)))
+    return files, dirs
+
+
 def _deck_rel(repo: gitops.Repo, deck_path: Path) -> str:
     rel = repo.rel(deck_path)
     if rel is None:
@@ -394,6 +468,17 @@ def changes(build: SideBuild, repo: gitops.Repo) -> Changes:
     deck = build.deck
     model_slides = cast("list[dict[str, object]]", build.model["slides"])
     ids = slide_ids(deck.slides)
+    common, theme_dirs = deck_inputs(build)
+    common_rel = {
+        rel: role
+        for path, role in common.items()
+        if (rel := repo.rel(path)) is not None and rel != deck_rel
+    }
+    root = repo.root.resolve()
+    for rel in changed:
+        if any(_inside(root / rel, d) for d in theme_dirs):
+            common_rel.setdefault(rel, "deck")
+    outside: list[set[str]] = []
     per_slide: list[dict[str, str]] = []
     uses: dict[str, int] = defaultdict(int)
     titles: list[str] = []
@@ -403,11 +488,26 @@ def changes(build: SideBuild, repo: gitops.Repo) -> Changes:
         slide_id = data["id"] if data is not None else ids[index]
         titles.append(str(entry.get("title") or slide_id))
         files: dict[str, str] = {}
-        for path, role in slide_paths(build, slide, entry, data, slide_id).items():
+        away: set[str] = set()
+        found = slide_paths(build, slide, entry, data, slide_id)
+        style = slide.extra_style
+        if style and not isinstance(style, Inline):
+            path = Path(str(style))
+            path = path if path.is_absolute() else build.project_dir / path
+            if path.is_file():
+                found.setdefault(Path(os.path.abspath(path)), "style")
+        for path, role in found.items():
             rel = repo.rel(path)
-            if rel is not None and rel != deck_rel:
+            if rel is None:
+                # (inkflow's own theme files come with inkflow.)
+                if _inside(path, build.project_dir):
+                    away.add(str(path))
+            elif rel != deck_rel:
                 files.setdefault(rel, role)
+        for rel, role in common_rel.items():
+            files.setdefault(rel, role)
         per_slide.append(files)
+        outside.append(away)
         for rel in files:
             uses[rel] += 1
     states: list[SlideState] = []
@@ -432,7 +532,17 @@ def changes(build: SideBuild, repo: gitops.Repo) -> Changes:
         else:
             state = None
         states.append(SlideState(state, entry_state, mine))
-    return Changes(repo, deck_rel, diff, states, changed, claimed, titles)
+    return Changes(
+        repo,
+        deck_rel,
+        diff,
+        states,
+        changed,
+        claimed,
+        titles,
+        outside,
+        [list(files) for files in per_slide],
+    )
 
 
 # ── One slide's diff ──
@@ -460,11 +570,13 @@ def slide_diff(found: Changes, index: int, shared: bool = True) -> str:
 
 @dataclass
 class CommitPlan:
-    paths: list[str]
-    """The chosen slides' own changed files: committed as they are."""
+    paths: list[dict[str, object]]
+    """Every changed file the chosen slides are made of, committed as it is
+    (``why``: ``own``, ``shared`` with other slides, or ``deck`` = what every
+    slide is drawn with)."""
     offered: list[dict[str, object]]
-    """Changed files that may go along, unticked: the chosen slides' shared
-    files (used by other slides too) and deleted files no slide uses."""
+    """Changed files that may go along: deleted files no slide uses (ticked
+    with the removal of slides)."""
     deck: str
     """How deck.py goes in: ``none``, ``whole`` or ``partial``."""
     deck_text: str | None
@@ -472,46 +584,52 @@ class CommitPlan:
     """deck.py's changes besides slides (imports, settings, order) go in."""
     removed: list[dict[str, object]]
     left: int
-    """Other slides with changes that stay uncommitted."""
+    """Other slides with changes of their own that stay uncommitted."""
+    missing: list[dict[str, object]] = field(default_factory=list)
+    """Files the slides are made of that a clone would lack whatever is
+    committed: ``ignored`` by git, or ``outside`` the repository."""
+    touched: int = 0
+    """Other slides that look different in the commit too (a shared file)."""
 
     def json(self, found: Changes) -> dict[str, object]:
         return {
-            "paths": [{"path": p, "status": found.changed[p]} for p in self.paths],
+            "paths": self.paths,
             "offered": self.offered,
             "deck": self.deck,
             "deckPath": found.deck_rel,
             "other": self.other,
             "removed": self.removed,
             "left": self.left,
+            "missing": self.missing,
+            "touched": self.touched,
         }
+
+
+_WHY = ("own", "shared", "deck")
 
 
 def commit_plan(found: Changes, selected: list[int], with_removed: bool) -> CommitPlan:
     chosen = {i for i in selected if 0 <= i < len(found.slides)}
     if not chosen:
         raise gitops.GitError("choose the slides to commit")
-    paths: list[str] = []
-    offered: dict[str, dict[str, object]] = {}
+    paths: dict[str, dict[str, object]] = {}
     for i in sorted(chosen):
         for f in found.slides[i].files:
-            if not f.shared:
-                if f.path not in paths:
-                    paths.append(f.path)
-            elif f.path not in offered:
-                offered[f.path] = {
-                    "path": f.path,
-                    "status": f.status,
-                    "why": f.role if f.role in _SHARED_ROLES else "shared",
-                }
-    paths = [p for p in paths if p not in offered]
-    for rel, status in sorted(found.changed.items()):
-        if (
-            status == "deleted"
-            and rel not in found.claimed
-            and found.repo.in_deck(rel)
-            and rel not in offered
-        ):
-            offered[rel] = {"path": rel, "status": status, "why": "deleted"}
+            why = "deck" if f.role == "deck" else "shared" if f.shared else "own"
+            paths.setdefault(f.path, {"path": f.path, "status": f.status, "why": why})
+    ordered = sorted(
+        paths.values(), key=lambda p: (_WHY.index(str(p["why"])), str(p["path"]))
+    )
+    offered: list[dict[str, object]] = [
+        {"path": rel, "status": status, "why": "deleted"}
+        for rel, status in sorted(found.changed.items())
+        if status == "deleted" and rel not in found.claimed and found.repo.in_deck(rel)
+    ]
+    touched = sum(
+        1
+        for i, s in enumerate(found.slides)
+        if i not in chosen and any(f.path in paths for f in s.files)
+    )
     deck = "none"
     deck_text: str | None = None
     other = False
@@ -523,14 +641,42 @@ def commit_plan(found: Changes, selected: list[int], with_removed: bool) -> Comm
         elif text != found.diff.head_code:
             deck, deck_text = "partial", text
     left = sum(
-        1 for i, s in enumerate(found.slides) if s.state is not None and i not in chosen
+        1
+        for i, s in enumerate(found.slides)
+        if s.state in (NEW, MODIFIED) and i not in chosen
     )
     removed = [] if not with_removed else found.removed_json()
     if not paths and deck == "none" and not with_removed:
         raise gitops.GitError("these slides have no changes to commit")
     return CommitPlan(
-        paths, list(offered.values()), deck, deck_text, other, removed, left
+        ordered,
+        offered,
+        deck,
+        deck_text,
+        other,
+        removed,
+        left,
+        _missing(found, chosen),
+        touched,
     )
+
+
+def _missing(found: Changes, chosen: set[int]) -> list[dict[str, object]]:
+    """The chosen slides' files a clone would lack: ignored by git, or
+    outside the repository."""
+    out: list[dict[str, object]] = [
+        {"path": path, "why": "outside"}
+        for path in sorted({p for i in chosen for p in found.outside[i]})
+    ]
+    rels = sorted({rel for i in chosen for rel in found.made_of[i]})
+    root = found.repo.root
+    states = gitops.file_states(found.repo.deck_dir, [root / rel for rel in rels])
+    out.extend(
+        {"path": rel, "why": "ignored"}
+        for rel in rels
+        if states.get(root / rel) == gitops.IGNORED
+    )
+    return out
 
 
 def commit_slides(
@@ -540,11 +686,13 @@ def commit_slides(
     with_removed: bool,
     extra: list[str],
 ) -> str:
-    """Commit the chosen slides (see `commit_plan`) and those of the offered
-    files ``extra`` names; the short sha of the commit."""
+    """Commit the chosen slides (see `commit_plan`) and the changed files
+    ``extra`` names (the offered ones ticked); the
+    short sha of the commit."""
     plan = commit_plan(found, selected, with_removed)
-    allowed = {str(o["path"]) for o in plan.offered}
-    paths = [*plan.paths, *(p for p in extra if p in allowed and p not in plan.paths)]
+    paths = [str(p["path"]) for p in plan.paths]
+    # Also: the offered files ticked (any changed file is accepted).
+    paths += [p for p in extra if p in found.changed and p not in paths]
     blobs: dict[str, str] = {}
     if plan.deck == "whole":
         paths.append(found.deck_rel)

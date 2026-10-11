@@ -9,9 +9,11 @@ import {
     diffLine,
     leftWords,
     letter,
+    missingWords,
     removedName,
     type SlideChanges,
-    tickedOffer,
+    touchedWords,
+    whyWords,
 } from "./slidegittext";
 
 const changes: SlideChanges = {
@@ -60,6 +62,8 @@ const plan: CommitPlan = {
     other: false,
     removed: [],
     left: 1,
+    missing: [],
+    touched: 0,
 };
 
 describe("letter", () => {
@@ -132,17 +136,32 @@ describe("plan words", () => {
         expect(leftWords({ ...plan, left: 0 })).toBe("");
     });
 
-    it("tick a new shared file, and deleted ones with the removals", () => {
-        expect(tickedOffer({ status: "new", why: "layout" }, false)).toBe(true);
-        expect(tickedOffer({ status: "modified", why: "layout" }, false)).toBe(
-            false,
+    it("say why a file goes in and what else changes", () => {
+        expect(whyWords("own")).toBe("");
+        expect(whyWords("shared")).toBe("shared with other slides");
+        expect(whyWords("deck")).toBe("every slide is drawn with it");
+        expect(touchedWords(plan)).toBe("");
+        expect(touchedWords({ ...plan, touched: 1 })).toBe(
+            "1 other slide shares these files and will look different in this commit too.",
         );
-        expect(tickedOffer({ status: "deleted", why: "deleted" }, false)).toBe(
-            false,
+        expect(touchedWords({ ...plan, touched: 3 })).toContain(
+            "3 other slides share",
         );
-        expect(tickedOffer({ status: "deleted", why: "deleted" }, true)).toBe(
-            true,
-        );
+    });
+
+    it("name the files a clone would lack", () => {
+        expect(
+            missingWords({
+                ...plan,
+                missing: [
+                    { path: "talk/secret/a.png", why: "ignored" },
+                    { path: "/home/me/logo.svg", why: "outside" },
+                ],
+            }),
+        ).toEqual([
+            "talk/secret/a.png: ignored by git, so a clone will not have it",
+            "/home/me/logo.svg: outside the repository, so a clone will not have it",
+        ]);
     });
 
     it("name a removed slide", () => {

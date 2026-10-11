@@ -36,13 +36,19 @@ export interface SlideChanges {
 }
 
 export interface CommitPlan {
-    paths: { path: string; status: string }[];
+    // Every changed file the slides are made of: their own, shared with
+    // other slides, or what every slide is drawn with ("deck").
+    paths: { path: string; status: string; why: "own" | "shared" | "deck" }[];
+    // Deleted files no slide uses (they go with the removal of slides).
     offered: { path: string; status: string; why: string }[];
     deck: "none" | "whole" | "partial";
     deckPath: string;
     other: boolean;
     removed: RemovedSlide[];
     left: number;
+    // Files a fresh clone would lack whatever is committed.
+    missing: { path: string; why: "ignored" | "outside" }[];
+    touched: number; // other slides that look different in the commit too
 }
 
 export function letter(state: SlideState): string {
@@ -68,6 +74,8 @@ const ROLE_WORDS: Record<string, string> = {
     asset: "a picture",
     diagram: "a diagram",
     slide: "its SVG",
+    style: "its stylesheet",
+    deck: "every slide uses it",
 };
 
 /** The tooltip of a slide's mark: what changed, file by file. */
@@ -140,14 +148,27 @@ export function leftWords(plan: CommitPlan): string {
     return `${plan.left} other changed slide${plan.left === 1 ? "" : "s"} stay${plan.left === 1 ? "s" : ""} uncommitted.`;
 }
 
-/** An offered file is ticked when the slides need it: a new shared file
- * (a layout made for them) or a deleted one whose slides go too. */
-export function tickedOffer(
-    offer: { status: string; why: string },
-    withRemoved: boolean,
-): boolean {
-    if (offer.why === "deleted") return withRemoved;
-    return offer.status === "new";
+/** Why a file goes into a slide commit, beside its path. */
+export function whyWords(why: string): string {
+    if (why === "shared") return "shared with other slides";
+    if (why === "deck") return "every slide is drawn with it";
+    return "";
+}
+
+/** Other slides a commit changes too, through the files they share. */
+export function touchedWords(plan: CommitPlan): string {
+    const n = plan.touched;
+    if (!n) return "";
+    return `${n} other slide${n === 1 ? " shares" : "s share"} these files and will look different in this commit too.`;
+}
+
+/** Files a fresh clone of the commit would not have. */
+export function missingWords(plan: CommitPlan): string[] {
+    return plan.missing.map((m) =>
+        m.why === "ignored"
+            ? `${m.path}: ignored by git, so a clone will not have it`
+            : `${m.path}: outside the repository, so a clone will not have it`,
+    );
 }
 
 export type DiffLine = "add" | "del" | "hunk" | "meta" | "";

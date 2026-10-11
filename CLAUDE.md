@@ -494,16 +494,25 @@ src/
                                GIT_TERMINAL_PROMPT=0),
                                slidegit.py (each slide's changes since the last commit:
                                `changes` = per slide `new`/`modified`/`shared` from the
-                               git status of its files (`slide_paths`; layouts, overlays
-                               and files several slides use are shared) and its
-                               `Slide(...)` entry against HEAD's deck.py (`entries`,
-                               `match_entries`: same code, then the same id / md / src
-                               with no other name disagreeing); `slide_diff` (entry diff
-                               + git diff of its files); `commit_plan`/`commit_slides`:
-                               the chosen slides' own files + `partial_deck` = the
-                               working deck.py with every other slide's entry as
-                               committed (`Foreign`, comments kept), new ones left out,
-                               removed ones put back unless `with_removed`; the
+                               git status of its files (`slide_paths` + its style file +
+                               `deck_inputs` = styles.css, scripts.js and their url()s,
+                               embedded project fonts, project .py files in
+                               sys.modules, a theme folder inside the deck; layouts,
+                               overlays, deck inputs and files several slides use are
+                               shared) and its `Slide(...)` entry against HEAD's
+                               deck.py (`entries`, `match_entries`: same code, then the
+                               same id / md / src with no other name disagreeing);
+                               `slide_diff` (entry diff + git diff of its files);
+                               `commit_plan`/`commit_slides`: a committed slide is
+                               complete (a fresh clone shows it as it looks now): every
+                               changed file the chosen slides are made of, shared and
+                               deck-wide included (`touched` = other slides that change
+                               with them, `missing` = ignored or outside-the-repo files
+                               a clone lacks), + `partial_deck` = the working deck.py
+                               with every other slide's entry as committed (`Foreign`,
+                               comments kept), new ones left out, removed ones put back
+                               unless `with_removed`; extra paths = ticked deleted
+                               leftovers (any changed file is accepted); the
                                session's git ops `status` + `slides`, `slide-diff`,
                                `commit-slides` (`dryRun` = the plan; commit local
                                only), read off `EditorSession.live` = the server's

@@ -22,10 +22,12 @@ import {
     diffLine,
     leftWords,
     letter,
+    missingWords,
     removedName,
     type SlideChange,
     type SlideChanges,
-    tickedOffer,
+    touchedWords,
+    whyWords,
 } from "./slidegittext";
 import { ed, emit } from "./state";
 
@@ -215,12 +217,13 @@ async function plan(
     return res.plan as CommitPlan;
 }
 
-function fileLine(path: string, status: string): HTMLElement {
+function fileLine(path: string, status: string, why = ""): HTMLElement {
     return h(
         "div",
         { class: "git-file" },
         h("span", { class: `git-status s-${status}` }, status),
         h("code", { class: "git-path" }, path),
+        why ? h("span", { class: "hint" }, why) : null,
     );
 }
 
@@ -245,7 +248,7 @@ export async function commitSlides(slides: number[]): Promise<void> {
     const ticked = new Set<string>();
     const draw = (p: CommitPlan) => {
         files.replaceChildren(
-            ...p.paths.map((f) => fileLine(f.path, f.status)),
+            ...p.paths.map((f) => fileLine(f.path, f.status, whyWords(f.why))),
             ...(p.deck !== "none"
                 ? [
                       h(
@@ -267,41 +270,52 @@ export async function commitSlides(slides: number[]): Promise<void> {
                     type: "checkbox",
                     value: o.path,
                 }) as HTMLInputElement;
-                box.checked = ticked.has(o.path) || tickedOffer(o, withRemoved);
-                if (box.checked) ticked.add(o.path);
+                box.checked = ticked.has(o.path);
                 box.addEventListener("change", () => {
                     if (box.checked) ticked.add(o.path);
                     else ticked.delete(o.path);
                 });
-                const why =
-                    o.why === "deleted"
-                        ? "deleted, no slide uses it"
-                        : o.why === "layout" || o.why === "overlay"
-                          ? `${o.why}: other slides use it too`
-                          : "other slides use it too";
                 return h(
                     "label",
                     { class: "git-file" },
                     box,
                     h("span", { class: `git-status s-${o.status}` }, o.status),
                     h("code", { class: "git-path" }, o.path),
-                    h("span", { class: "hint" }, why),
                 );
             }),
         );
         offers.hidden = !p.offered.length;
         offersLabel.hidden = !p.offered.length;
         notes.replaceChildren(
-            ...[leftWords(p)]
+            ...[touchedWords(p), leftWords(p)]
                 .filter(Boolean)
                 .map((t) => h("p", { class: "hint" }, t)),
+        );
+        // What a fresh clone would lack, whatever this commit holds.
+        const lacking = missingWords(p);
+        missing.replaceChildren(
+            ...(lacking.length
+                ? [
+                      h(
+                          "p",
+                          { class: "hint warn" },
+                          "A clone of this commit will not show these slides as they look here:",
+                      ),
+                      h(
+                          "ul",
+                          { class: "pack-list" },
+                          ...lacking.map((t) => h("li", {}, t)),
+                      ),
+                  ]
+                : []),
         );
     };
     const offersLabel = h(
         "span",
         { class: "field-label" },
-        "Also commit (shared with other slides, or left over)",
+        "Also commit (deleted files no slide uses)",
     );
+    const missing = h("div", {});
     const removed = changes?.removed ?? [];
     const removedBox = h("input", { type: "checkbox" }) as HTMLInputElement;
     removedBox.addEventListener("change", async () => {
@@ -342,7 +356,7 @@ export async function commitSlides(slides: number[]): Promise<void> {
               ),
               h("div", { class: "btn-row" }, name, email),
           );
-    const run = async (push: boolean) => {
+    const commit = async (push: boolean) => {
         if (!current) return;
         const res = await runGit("commit-slides", {
             slides,
@@ -357,6 +371,7 @@ export async function commitSlides(slides: number[]): Promise<void> {
         closeDialog();
         if (push) await runGit("push");
     };
+    const run = (push: boolean) => commit(push);
     message.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
@@ -399,7 +414,7 @@ export async function commitSlides(slides: number[]): Promise<void> {
                 "div",
                 { class: "field" },
                 h("span", { class: "field-label" }, "Goes in"),
-                h("div", {}, files, notes),
+                h("div", {}, files, notes, missing),
             ),
             h("div", { class: "field" }, offersLabel, offers),
             removed.length

@@ -247,7 +247,9 @@ mark for its changes since the last commit, as VS Code marks files:
 - **M** (amber): a changed slide: its `Slide(...)` in `deck.py` or one of its
   own files changed (its SVG, Markdown, notes, ink, chart data, a picture).
 - **•** (blue): only a file it shares with other slides changed: its layout,
-  an overlay, a picture or a Markdown file other slides use too.
+  an overlay, a picture or a Markdown file other slides use too, or what
+  every slide is drawn with (the deck's `styles.css` and `scripts.js`, its
+  fonts, a theme kept in the deck's folder, Python files `deck.py` imports).
 
 Hover a mark for the files behind it. A slide's right-click menu then has:
 
@@ -258,15 +260,18 @@ Hover a mark for the files behind it. A slide's right-click menu then has:
   `Slide(...)` entry, then its files (SVGs through inkflow's SVG diff driver
   once `inkflow setup-git` set it up, so only visual changes show).
 - **Commit this slide…** (or **Commit N changed slides…** with several
-  picked) commits those slides and nothing else: their own files, and
-  `deck.py` with only their `Slide(...)` entries changed, every other slide's
-  entry as it was in the last commit (a new one left out, a removed one kept).
-  `deck.py` itself is not touched: the other slides' changes stay as
+  picked) commits those slides complete: a fresh clone of the commit shows
+  them exactly as they look now. Every changed file they are made of goes
+  in, the shared and deck-wide ones too (so other slides on a changed layout
+  change in the commit as well; the dialog says how many), and `deck.py`
+  with only their `Slide(...)` entries changed, every other slide's entry as
+  it was in the last commit (a new one left out, a removed one kept).
+  `deck.py` itself is not touched: the other slides' own changes stay as
   uncommitted changes. What `deck.py` says besides its slides (imports,
-  `Deck(...)` settings, sections, the slide order) goes in as it is now. The
-  dialog lists what goes in, offers the files the slides share with others
-  (a new layout made for them is ticked), and, when slides were removed since
-  the last commit, whether their removal goes in too. The Git menu's
+  `Deck(...)` settings, sections, the slide order) goes in as it is now.
+  The dialog names files a clone would still lack (ignored by git, or
+  outside the repository). When slides were removed since the
+  last commit, it asks whether their removal goes in too. The Git menu's
   **Commit slide N only…** does the same for the slide being edited or the
   picked ones.
 

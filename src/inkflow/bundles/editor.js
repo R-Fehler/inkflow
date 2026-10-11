@@ -9240,7 +9240,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     data: "chart data",
     asset: "a picture",
     diagram: "a diagram",
-    slide: "its SVG"
+    slide: "its SVG",
+    style: "its stylesheet",
+    deck: "every slide uses it"
   };
   function changeTitle(c2) {
     if (!c2?.state) return "";
@@ -9285,9 +9287,20 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     if (!plan2.left) return "";
     return `${plan2.left} other changed slide${plan2.left === 1 ? "" : "s"} stay${plan2.left === 1 ? "s" : ""} uncommitted.`;
   }
-  function tickedOffer(offer, withRemoved) {
-    if (offer.why === "deleted") return withRemoved;
-    return offer.status === "new";
+  function whyWords(why) {
+    if (why === "shared") return "shared with other slides";
+    if (why === "deck") return "every slide is drawn with it";
+    return "";
+  }
+  function touchedWords(plan2) {
+    const n3 = plan2.touched;
+    if (!n3) return "";
+    return `${n3} other slide${n3 === 1 ? " shares" : "s share"} these files and will look different in this commit too.`;
+  }
+  function missingWords(plan2) {
+    return plan2.missing.map(
+      (m2) => m2.why === "ignored" ? `${m2.path}: ignored by git, so a clone will not have it` : `${m2.path}: outside the repository, so a clone will not have it`
+    );
   }
   function diffLine(line) {
     if (line.startsWith("diff ") || line.startsWith("index ") || line.startsWith("+++ ") || line.startsWith("--- ") || line.startsWith("new file") || line.startsWith("deleted file") || line.startsWith("Binary files"))
@@ -9443,12 +9456,13 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     }
     return res.plan;
   }
-  function fileLine(path, status3) {
+  function fileLine(path, status3, why = "") {
     return h(
       "div",
       { class: "git-file" },
       h("span", { class: `git-status s-${status3}` }, status3),
-      h("code", { class: "git-path" }, path)
+      h("code", { class: "git-path" }, path),
+      why ? h("span", { class: "hint" }, why) : null
     );
   }
   async function commitSlides(slides) {
@@ -9471,7 +9485,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     const ticked = /* @__PURE__ */ new Set();
     const draw = (p2) => {
       files2.replaceChildren(
-        ...p2.paths.map((f2) => fileLine(f2.path, f2.status)),
+        ...p2.paths.map((f2) => fileLine(f2.path, f2.status, whyWords(f2.why))),
         ...p2.deck !== "none" ? [
           h(
             "div",
@@ -9491,34 +9505,47 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             type: "checkbox",
             value: o2.path
           });
-          box.checked = ticked.has(o2.path) || tickedOffer(o2, withRemoved);
-          if (box.checked) ticked.add(o2.path);
+          box.checked = ticked.has(o2.path);
           box.addEventListener("change", () => {
             if (box.checked) ticked.add(o2.path);
             else ticked.delete(o2.path);
           });
-          const why = o2.why === "deleted" ? "deleted, no slide uses it" : o2.why === "layout" || o2.why === "overlay" ? `${o2.why}: other slides use it too` : "other slides use it too";
           return h(
             "label",
             { class: "git-file" },
             box,
             h("span", { class: `git-status s-${o2.status}` }, o2.status),
-            h("code", { class: "git-path" }, o2.path),
-            h("span", { class: "hint" }, why)
+            h("code", { class: "git-path" }, o2.path)
           );
         })
       );
       offers.hidden = !p2.offered.length;
       offersLabel.hidden = !p2.offered.length;
       notes.replaceChildren(
-        ...[leftWords(p2)].filter(Boolean).map((t2) => h("p", { class: "hint" }, t2))
+        ...[touchedWords(p2), leftWords(p2)].filter(Boolean).map((t2) => h("p", { class: "hint" }, t2))
+      );
+      const lacking = missingWords(p2);
+      missing.replaceChildren(
+        ...lacking.length ? [
+          h(
+            "p",
+            { class: "hint warn" },
+            "A clone of this commit will not show these slides as they look here:"
+          ),
+          h(
+            "ul",
+            { class: "pack-list" },
+            ...lacking.map((t2) => h("li", {}, t2))
+          )
+        ] : []
       );
     };
     const offersLabel = h(
       "span",
       { class: "field-label" },
-      "Also commit (shared with other slides, or left over)"
+      "Also commit (deleted files no slide uses)"
     );
+    const missing = h("div", {});
     const removed = changes?.removed ?? [];
     const removedBox = h("input", { type: "checkbox" });
     removedBox.addEventListener("change", async () => {
@@ -9556,7 +9583,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       ),
       h("div", { class: "btn-row" }, name2, email)
     );
-    const run = async (push) => {
+    const commit = async (push) => {
       if (!current3) return;
       const res = await runGit("commit-slides", {
         slides,
@@ -9569,6 +9596,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       closeDialog();
       if (push) await runGit("push");
     };
+    const run = (push) => commit(push);
     message.addEventListener("keydown", (e2) => {
       if (e2.key === "Enter" && (e2.ctrlKey || e2.metaKey)) {
         e2.preventDefault();
@@ -9609,7 +9637,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
           "div",
           { class: "field" },
           h("span", { class: "field-label" }, "Goes in"),
-          h("div", {}, files2, notes)
+          h("div", {}, files2, notes, missing)
         ),
         h("div", { class: "field" }, offersLabel, offers),
         removed.length ? h(
