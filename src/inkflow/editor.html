@@ -65,8 +65,17 @@
       </div>
     </main>
     <section id="notes">
-      <div class="notes-head"><span>Speaker notes</span><span id="notes-file"></span></div>
+      <hr id="notes-resize" tabindex="0" aria-orientation="horizontal" aria-label="Height of the speaker notes" aria-valuenow="150" title="Drag to make the notes taller or shorter (double-click: the usual height)">
+      <div class="notes-head">
+        <span>Speaker notes</span>
+        <span id="notes-file"></span>
+        <span class="notes-view">
+          <button type="button" id="notes-write" class="on" aria-pressed="true" title="Write the notes (Markdown)">Write</button>
+          <button type="button" id="notes-read" aria-pressed="false" title="Read the notes as the presenter panel shows them">Preview</button>
+        </span>
+      </div>
       <textarea id="notes-input" placeholder="Click to add speaker notes (Markdown)"></textarea>
+      <section id="notes-preview" hidden aria-label="Speaker notes as the presenter panel shows them"></section>
       <div id="zone-dock"></div>
     </section>
     <section id="grid-view" hidden tabindex="-1" aria-label="All slides">

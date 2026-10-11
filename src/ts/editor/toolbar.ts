@@ -238,6 +238,18 @@ const TOOL_KEYS: Record<string, Tool> = {
     p: "pen",
 };
 
+/** Whether the page's text selection is in the notes as read (notes.ts). */
+function readingNotes(): boolean {
+    const picked = window.getSelection();
+    const preview = document.getElementById("notes-preview");
+    return (
+        !!picked &&
+        !picked.isCollapsed &&
+        !!preview &&
+        preview.contains(picked.anchorNode)
+    );
+}
+
 function onKey(e: KeyboardEvent): void {
     const target = e.target as HTMLElement;
     if (
@@ -267,6 +279,8 @@ function onKey(e: KeyboardEvent): void {
         handled();
         if (e.code === "KeyC") copyStyle();
         else void pasteStyle();
+    } else if (mod && lower === "c" && readingNotes()) {
+        // Text picked in the notes preview: the browser's own copy.
     } else if (mod && lower === "c") {
         handled();
         if (ed.focus === "sorter") void copySlides();

@@ -2428,7 +2428,7 @@
   function convertDialog(path, data, purpose) {
     const info4 = data.info;
     let format = data.remux ? "copy" : "mp4";
-    let height = null;
+    let height2 = null;
     let quality = 2;
     let audio = !!info4.acodec;
     const inserting = purpose.kind === "insert";
@@ -2482,11 +2482,11 @@
         { value: String(p2.height ?? "") },
         p2.height ? `${p2.label}${bigger ? " (no larger than the source)" : ""}` : `${p2.label}${info4.width && info4.height ? ` (${info4.width}\xD7${info4.height})` : ""}`
       );
-      option2.selected = p2.height === height;
+      option2.selected = p2.height === height2;
       size4.append(option2);
     }
     size4.addEventListener("change", () => {
-      height = size4.value ? Number(size4.value) : null;
+      height2 = size4.value ? Number(size4.value) : null;
       void update();
     });
     const slider = h("input", {
@@ -2552,7 +2552,7 @@
         action: "convert-plan",
         path,
         format,
-        height,
+        height: height2,
         quality,
         audio
       });
@@ -2577,7 +2577,7 @@
         action: "convert",
         path,
         format,
-        height,
+        height: height2,
         quality,
         audio
       });
@@ -3357,7 +3357,7 @@
       "image"
     );
   }
-  async function insertDiagramImage(path, width, height) {
+  async function insertDiagramImage(path, width, height2) {
     if (!await ensureOwnDrawing()) return false;
     const src = ownSource();
     if (!src) return false;
@@ -3365,9 +3365,9 @@
     const vb = svg?.viewBox.baseVal;
     const slideW = vb?.width || 1920;
     const slideH = vb?.height || 1080;
-    const k2 = Math.min(1, slideW * 0.6 / width, slideH * 0.6 / height);
+    const k2 = Math.min(1, slideW * 0.6 / width, slideH * 0.6 / height2);
     const w2 = width * k2;
-    const ht = height * k2;
+    const ht = height2 * k2;
     const parent = insertParent().el;
     const p2 = toParent(parent, (slideW - w2) / 2, (slideH - ht) / 2);
     return insertXml(
@@ -8061,19 +8061,19 @@
         if (!end) continue;
         const p2 = apply(m2, end);
         const attached = connector.hasAttribute(ENDS[which]);
-        const handle = svgEl("circle", {
+        const handle2 = svgEl("circle", {
           cx: p2.x,
           cy: p2.y,
           r: 6,
           class: `handle endpoint${attached ? " attached" : ""}`
         });
-        handle.dataset.handle = `c-${which}`;
-        overlay2.append(handle);
+        handle2.dataset.handle = `c-${which}`;
+        overlay2.append(handle2);
       }
       const bend = connectorRoute(connector)?.bend;
       if (bend) {
         const p2 = apply(m2, bend.mid);
-        const handle = svgEl("rect", {
+        const handle2 = svgEl("rect", {
           x: p2.x - 5,
           y: p2.y - 5,
           width: 10,
@@ -8081,8 +8081,8 @@
           transform: `rotate(45 ${p2.x} ${p2.y})`,
           class: `handle bend ${bend.axis === "x" ? "ew" : "ns"}`
         });
-        handle.dataset.handle = "c-bend";
-        overlay2.append(handle);
+        handle2.dataset.handle = "c-bend";
+        overlay2.append(handle2);
       }
     }
     if (box && ed.step == null) {
@@ -8737,23 +8737,23 @@
     return targetsFor(slideSize(), boxes);
   }
   var pointer = null;
-  function beginDrag(handle) {
+  function beginDrag(handle2) {
     const sels = ed.selection.filter((s2) => canTransform(s2.el));
     if (!sels.length || sels.length !== ed.selection.length || ed.step != null)
       return null;
     const snaps = sels.map(snapshot);
     const start = unionBoxes(snaps.map((s2) => s2.box));
     if (!start) return null;
-    if (handle === "c-bend") return { kind: "bend", snaps };
-    if (handle === "c-start" || handle === "c-end") {
+    if (handle2 === "c-bend") return { kind: "bend", snaps };
+    if (handle2 === "c-start" || handle2 === "c-end") {
       return {
         kind: "endpoint",
-        which: handle === "c-start" ? "start" : "end",
+        which: handle2 === "c-start" ? "start" : "end",
         snaps
       };
     }
     const targets2 = snapTargets(new Set(sels.map((s2) => s2.el)));
-    if (handle === "rot") {
+    if (handle2 === "rot") {
       return {
         kind: "rotate",
         snaps,
@@ -8763,31 +8763,31 @@
         }
       };
     }
-    if (handle) return { kind: "resize", handle, snaps, start, targets: targets2 };
+    if (handle2) return { kind: "resize", handle: handle2, snaps, start, targets: targets2 };
     return { kind: "move", snaps, start, targets: targets2 };
   }
-  function resizedBox(start, handle, dx, dy, keepAspect) {
-    let { x: x2, y: y2, width, height } = start;
-    if (handle.includes("w")) {
+  function resizedBox(start, handle2, dx, dy, keepAspect) {
+    let { x: x2, y: y2, width, height: height2 } = start;
+    if (handle2.includes("w")) {
       x2 += dx;
       width -= dx;
     }
-    if (handle.includes("e")) width += dx;
-    if (handle.includes("n")) {
+    if (handle2.includes("e")) width += dx;
+    if (handle2.includes("n")) {
       y2 += dy;
-      height -= dy;
+      height2 -= dy;
     }
-    if (handle.includes("s")) height += dy;
+    if (handle2.includes("s")) height2 += dy;
     if (keepAspect && start.width > 0 && start.height > 0) {
       const ratio = start.width / start.height;
-      const corner = handle.length === 2;
-      if (corner || handle === "e" || handle === "w") {
+      const corner = handle2.length === 2;
+      if (corner || handle2 === "e" || handle2 === "w") {
         const h22 = width / ratio;
-        if (handle.includes("n")) y2 += height - h22;
+        if (handle2.includes("n")) y2 += height2 - h22;
         else if (!corner) y2 = start.y + (start.height - h22) / 2;
-        height = h22;
+        height2 = h22;
       } else {
-        const w2 = height * ratio;
+        const w2 = height2 * ratio;
         x2 = start.x + (start.width - w2) / 2;
         width = w2;
       }
@@ -8796,11 +8796,11 @@
       x2 += width;
       width = -width;
     }
-    if (height < 0) {
-      y2 += height;
-      height = -height;
+    if (height2 < 0) {
+      y2 += height2;
+      height2 = -height2;
     }
-    return { x: x2, y: y2, width: Math.max(width, 1), height: Math.max(height, 1) };
+    return { x: x2, y: y2, width: Math.max(width, 1), height: Math.max(height2, 1) };
   }
   function keepsAspect(snaps, shift) {
     const natural = snaps.some(
@@ -9037,9 +9037,9 @@
       return;
     }
     if (e2.button !== 0) return;
-    const handle = target.closest("[data-handle]")?.dataset.handle;
+    const handle2 = target.closest("[data-handle]")?.dataset.handle;
     const pt = clientToSlide(e2.clientX, e2.clientY);
-    if (!handle && ed.tool !== "select") {
+    if (!handle2 && ed.tool !== "select") {
       if (hooks.toolDown(e2, pt)) return;
     }
     try {
@@ -9051,8 +9051,8 @@
     let clickTarget = null;
     let drag = null;
     let deselectOnClick = false;
-    if (handle) {
-      drag = beginDrag(handle);
+    if (handle2) {
+      drag = beginDrag(handle2);
     } else {
       clickTarget = pick(e2.clientX, e2.clientY);
       if (clickTarget) {
@@ -9663,8 +9663,8 @@
     }
     const table = h("table", { class: "chart-grid" });
     const fields = h("div", { class: "chart-fields" });
-    const preview = h("div", { class: "chart-preview" });
-    preview.style.aspectRatio = `${size4.width} / ${size4.height}`;
+    const preview2 = h("div", { class: "chart-preview" });
+    preview2.style.aspectRatio = `${size4.width} / ${size4.height}`;
     const status3 = h("span", { class: "hint chart-status" });
     const schedule2 = () => {
       window.clearTimeout(timer6);
@@ -9688,7 +9688,7 @@
         return;
       }
       status3.textContent = "";
-      preview.innerHTML = String(res.svg ?? "");
+      preview2.innerHTML = String(res.svg ?? "");
     }
     function cellInput(row6, col, value) {
       const input = h("input", {
@@ -10091,7 +10091,7 @@
         { class: "chart-side" },
         fields,
         h("h3", {}, "Preview"),
-        preview,
+        preview2,
         status3
       ),
       h(
@@ -16168,6 +16168,11 @@ ${area2.value.slice(pos)}`;
     c: "curve",
     p: "pen"
   };
+  function readingNotes() {
+    const picked = window.getSelection();
+    const preview2 = document.getElementById("notes-preview");
+    return !!picked && !picked.isCollapsed && !!preview2 && preview2.contains(picked.anchorNode);
+  }
   function onKey2(e2) {
     const target = e2.target;
     if (target.closest("input, textarea, select, [contenteditable]") || isEditingText()) {
@@ -16193,6 +16198,7 @@ ${area2.value.slice(pos)}`;
       handled();
       if (e2.code === "KeyC") copyStyle();
       else void pasteStyle();
+    } else if (mod && lower === "c" && readingNotes()) {
     } else if (mod && lower === "c") {
       handled();
       if (ed.focus === "sorter") void copySlides();
@@ -17293,13 +17299,13 @@ ${rules}`;
     const b2 = slideView(m2.right, right, "cmp-big over");
     frame.append(a2, b2);
     if (mode === "slider") {
-      const handle = h("div", { class: "cmp-handle" });
+      const handle2 = h("div", { class: "cmp-handle" });
       const place = () => {
         b2.style.clipPath = `inset(0 0 0 ${wipe}%)`;
-        handle.style.left = `${wipe}%`;
+        handle2.style.left = `${wipe}%`;
       };
       place();
-      frame.append(handle);
+      frame.append(handle2);
       const move = (e2) => {
         const r2 = frame.getBoundingClientRect();
         wipe = Math.max(
@@ -20209,9 +20215,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   var HIGHLIGHTER_OPACITY = 0.35;
   var REFERENCE_WIDTH = 1920;
   var REFERENCE_HEIGHT = 1080;
-  function inkScale(width, height = 0) {
+  function inkScale(width, height2 = 0) {
     const w2 = width > 0 ? width / REFERENCE_WIDTH : 0;
-    const h3 = height > 0 ? height / REFERENCE_HEIGHT : 0;
+    const h3 = height2 > 0 ? height2 / REFERENCE_HEIGHT : 0;
     return Math.max(w2, h3) || 1;
   }
   var PEN_SIZES = [3, 6, 12];
@@ -20731,7 +20737,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   function sizesOf(tool) {
     return tool === "highlighter" ? HIGHLIGHTER_SIZES : PEN_SIZES;
   }
-  function styleFor(s2, tool, width, tokenColor2, height = 0) {
+  function styleFor(s2, tool, width, tokenColor2, height2 = 0) {
     const t2 = s2[tool];
     const swatch = t2.swatch === null ? null : SWATCHES[t2.swatch];
     const fill = swatch ? swatch.token && tokenColor2(swatch.token) || swatch.hex : t2.custom;
@@ -20739,7 +20745,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       tool,
       fill: normalizeHex(fill) ?? "#000000",
       token: swatch?.token ?? null,
-      size: sizesOf(tool)[t2.size] * inkScale(width, height)
+      size: sizesOf(tool)[t2.size] * inkScale(width, height2)
     };
   }
   function normalizeHex(color) {
@@ -21110,13 +21116,36 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     on("render", showPending);
   }
 
+  // src/ts/editor/notestext.ts
+  var NOTES_DEFAULT = 150;
+  var NOTES_MIN = 72;
+  var CANVAS_MIN = 160;
+  function clampHeight(px2, available) {
+    const most = Math.max(NOTES_MIN, available - CANVAS_MIN);
+    return Math.round(Math.min(Math.max(px2, NOTES_MIN), most));
+  }
+  function readNumber(stored2) {
+    if (stored2 == null || stored2.trim() === "") return null;
+    const n3 = Number(stored2);
+    return Number.isFinite(n3) && n3 > 0 ? n3 : null;
+  }
+
   // src/ts/editor/notes.ts
   var area = document.getElementById("notes-input");
+  var preview = document.getElementById("notes-preview");
   var label3 = document.getElementById("notes-file");
+  var handle = document.getElementById("notes-resize");
+  var writeBtn = document.getElementById("notes-write");
+  var readBtn = document.getElementById("notes-read");
+  var workspace = document.getElementById("workspace");
+  var panel3 = document.getElementById("notes");
+  var HEIGHT_KEY = "inkflow-editor-notes-height";
+  var VIEW_KEY = "inkflow-editor-notes-view";
   var timer5 = 0;
   var slideIndex = -1;
   var sent = "";
   var burst = "";
+  var reading = false;
   async function save2() {
     window.clearTimeout(timer5);
     const slide = ed.model?.slides[slideIndex];
@@ -21141,12 +21170,121 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   function load() {
     const slide = currentSlide();
     if (!slide) return;
+    showPreview();
     if (document.activeElement === area && slideIndex === slide.deckIndex)
       return;
     slideIndex = slide.deckIndex;
     area.value = slide.notes.text;
     sent = area.value;
     label3.textContent = slide.notes.kind === "file" ? slide.notes.rel ?? "" : slide.notes.kind === "inline" ? "inline in deck.py" : "new notes file on first edit";
+  }
+  function emptyNote(text) {
+    const p2 = document.createElement("p");
+    p2.className = "notes-empty";
+    p2.textContent = text;
+    return p2;
+  }
+  function showPreview() {
+    if (!reading) return;
+    const slide = currentSlide();
+    if (slide && !slide.visible) {
+      delete preview.dataset.shown;
+      preview.replaceChildren(
+        emptyNote("A hidden slide is not built: show it to read its notes")
+      );
+      return;
+    }
+    const html = currentRendered()?.notes ?? "";
+    if (preview.dataset.shown === html) return;
+    preview.dataset.shown = html;
+    if (!html.trim()) {
+      preview.replaceChildren(emptyNote("No speaker notes on this slide"));
+      return;
+    }
+    preview.innerHTML = html;
+    preview.scrollTop = 0;
+    for (const a2 of preview.querySelectorAll("a[href]")) {
+      a2.setAttribute("target", "_blank");
+      a2.setAttribute("rel", "noopener noreferrer");
+    }
+  }
+  function setView(read3, remember = true) {
+    reading = read3;
+    area.hidden = read3;
+    preview.hidden = !read3;
+    writeBtn.classList.toggle("on", !read3);
+    readBtn.classList.toggle("on", read3);
+    writeBtn.setAttribute("aria-pressed", String(!read3));
+    readBtn.setAttribute("aria-pressed", String(read3));
+    if (remember) {
+      try {
+        localStorage.setItem(VIEW_KEY, read3 ? "read" : "write");
+      } catch {
+      }
+    }
+    if (!read3) return;
+    delete preview.dataset.shown;
+    void save2();
+    showPreview();
+  }
+  function followLink(e2) {
+    const link = e2.target.closest?.("[data-inkflow-slide]");
+    if (!link) return;
+    e2.preventDefault();
+    const id = link.getAttribute("data-inkflow-slide");
+    const to = ed.model?.slides.find((s2) => s2.id === id);
+    if (to) gotoSlide(to.deckIndex);
+  }
+  function setHeight(px2, remember = true) {
+    const h3 = clampHeight(px2, workspace.getBoundingClientRect().height);
+    workspace.style.setProperty("--notes-h", `${h3}px`);
+    handle.setAttribute("aria-valuenow", String(h3));
+    if (!remember) return;
+    try {
+      localStorage.setItem(HEIGHT_KEY, String(h3));
+    } catch {
+    }
+  }
+  function height() {
+    return panel3.getBoundingClientRect().height;
+  }
+  function initResize() {
+    let from = null;
+    handle.addEventListener("pointerdown", (e2) => {
+      if (e2.button !== 0) return;
+      e2.preventDefault();
+      from = { y: e2.clientY, height: height() };
+      try {
+        handle.setPointerCapture(e2.pointerId);
+      } catch {
+      }
+      document.body.classList.add("notes-resizing");
+    });
+    handle.addEventListener("pointermove", (e2) => {
+      if (from) setHeight(from.height + from.y - e2.clientY, false);
+    });
+    const done = () => {
+      if (!from) return;
+      from = null;
+      document.body.classList.remove("notes-resizing");
+      setHeight(height());
+    };
+    handle.addEventListener("pointerup", done);
+    handle.addEventListener("pointercancel", done);
+    handle.addEventListener("dblclick", () => setHeight(NOTES_DEFAULT));
+    handle.addEventListener("keydown", (e2) => {
+      const step2 = e2.shiftKey ? 80 : 20;
+      if (e2.key === "ArrowUp") setHeight(height() + step2);
+      else if (e2.key === "ArrowDown") setHeight(height() - step2);
+      else if (e2.key === "Home") setHeight(NOTES_DEFAULT);
+      else return;
+      e2.preventDefault();
+      e2.stopPropagation();
+    });
+    window.addEventListener("resize", () => {
+      if (workspace.style.getPropertyValue("--notes-h"))
+        setHeight(height(), false);
+    });
   }
   function initNotes() {
     area.addEventListener("focus", () => {
@@ -21158,6 +21296,27 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     });
     area.addEventListener("blur", () => void save2());
     area.addEventListener("keydown", (e2) => e2.stopPropagation());
+    writeBtn.addEventListener("click", () => {
+      setView(false);
+      area.focus();
+    });
+    readBtn.addEventListener("click", () => setView(true));
+    preview.addEventListener("click", followLink);
+    preview.addEventListener("dblclick", (e2) => {
+      if (e2.target.closest?.("a")) return;
+      setView(false);
+      area.focus();
+    });
+    initResize();
+    let view3 = null;
+    let stored2 = null;
+    try {
+      view3 = localStorage.getItem(VIEW_KEY);
+      stored2 = readNumber(localStorage.getItem(HEIGHT_KEY));
+    } catch {
+    }
+    if (stored2 != null) setHeight(stored2, false);
+    if (view3 === "read") setView(true, false);
     on("slide", () => {
       void save2().then(load);
     });
@@ -22650,10 +22809,10 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     };
     return _this;
   };
-  var gifImage = function(width, height) {
+  var gifImage = function(width, height2) {
     const _width = width;
-    const _height = height;
-    const _data = new Array(width * height);
+    const _height = height2;
+    const _data = new Array(width * height2);
     const _this = {};
     _this.setPixel = function(x2, y2, pixel) {
       _data[y2 * _width + x2] = pixel;
@@ -22778,9 +22937,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     };
     return _this;
   };
-  var createDataURL = function(width, height, getPixel) {
-    const gif = gifImage(width, height);
-    for (let y2 = 0; y2 < height; y2 += 1) {
+  var createDataURL = function(width, height2, getPixel) {
+    const gif = gifImage(width, height2);
+    for (let y2 = 0; y2 < height2; y2 += 1) {
       for (let x2 = 0; x2 < width; x2 += 1) {
         gif.setPixel(x2, y2, getPixel(x2, y2));
       }
