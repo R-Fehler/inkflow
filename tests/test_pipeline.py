@@ -20,6 +20,7 @@ from inkflow.animations import (
     PlayVideo,
     ScaleIn,
     SlideIn,
+    Zoom,
 )
 from inkflow.enums import Direction, Trigger
 from inkflow.logging import collect_logs
@@ -387,6 +388,66 @@ class TestAnnotatePlayVideo:
         with collect_logs(logging.WARNING) as warnings:
             annotate_svg(_PLAIN_SVG, [(PlayVideo("media"), 1)])
         assert any("PlayVideo" in w.message for w in warnings)
+
+
+def _parse_camera(svg: str) -> list[dict[str, object]]:
+    raw = parse_svg(svg).get("data-camera")
+    return cast("list[dict[str, object]]", json.loads(raw)) if raw else []
+
+
+class TestAnnotateCamera:
+    def test_zoom_writes_camera_entry_on_root(self) -> None:
+        cues: list[tuple[Cue, int]] = [(Zoom("box", margin=10, duration=1.2), 1)]
+        [entry] = _parse_camera(annotate_svg(_PLAIN_SVG, cues))
+        assert entry == {
+            "step": 1,
+            "offset": 0.0,
+            "target": "box",
+            "margin": 10,
+            "opts": {"duration": 1.2, "delay": 0.0, "easing": "ease-in-out"},
+        }
+
+    def test_full_slide_serializes_as_null_target(self) -> None:
+        [entry] = _parse_camera(annotate_svg(_PLAIN_SVG, [(Zoom(), 2)]))
+        assert entry["target"] is None
+
+    def test_entries_sorted_by_step_keeping_timeline_order(self) -> None:
+        cues: list[tuple[Cue, int]] = [
+            (Zoom("dot"), 2),
+            (Zoom("box"), 1),
+            (Zoom(trigger=Trigger.AFTER_PREVIOUS), 1),
+        ]
+        entries = _parse_camera(annotate_svg(_PLAIN_SVG, cues))
+        assert [(e["step"], e["target"]) for e in entries] == [
+            (1, "box"),
+            (1, None),
+            (2, "dot"),
+        ]
+
+    def test_after_previous_zoom_starts_when_the_previous_ends(self) -> None:
+        pairs = resolve_steps(
+            [Zoom("box"), Zoom("dot", Trigger.AFTER_PREVIOUS, delay=0.1)]
+        )
+        entries = _parse_camera(annotate_svg(_PLAIN_SVG, pairs))
+        assert [(e["step"], e["offset"]) for e in entries] == [(1, 0.0), (1, 0.8)]
+
+    def test_with_previous_first_zoom_lands_on_step_zero(self) -> None:
+        pairs = resolve_steps([Zoom("box", Trigger.WITH_PREVIOUS, duration=0)])
+        [entry] = _parse_camera(annotate_svg(_PLAIN_SVG, pairs))
+        assert entry["step"] == 0
+
+    def test_zoom_does_not_touch_the_target_element(self) -> None:
+        result = annotate_svg(_PLAIN_SVG, [(Zoom("box"), 1)])
+        assert _parse_cues(result, "box") == []
+
+    def test_no_zoom_no_camera_attribute(self) -> None:
+        result = annotate_svg(_PLAIN_SVG, [(FadeIn("box"), 1)])
+        assert parse_svg(result).get("data-camera") is None
+
+    def test_missing_target_warns(self) -> None:
+        with collect_logs(logging.WARNING) as warnings:
+            annotate_svg(_PLAIN_SVG, [(Zoom("nope"), 1)])
+        assert any("zoom target #nope" in w.message for w in warnings)
 
 
 class TestResolveTransitions:
