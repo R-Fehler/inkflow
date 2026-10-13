@@ -10,8 +10,10 @@ from inkflow.animations import (
     ScaleOut,
     SlideIn,
     SlideOut,
+    TimedCue,
+    Zoom,
 )
-from inkflow.enums import Direction, Easing, Trigger
+from inkflow.enums import Direction, Easing, Trigger, ZoomTarget
 
 
 def test_shared_params_concrete_defaults() -> None:
@@ -81,3 +83,26 @@ def test_all_types_are_animations() -> None:
         Highlight,
     ):
         assert isinstance(cls("a"), Animation)
+
+
+def test_zoom_defaults_to_the_full_slide() -> None:
+    zoom = Zoom()
+    assert zoom.element == ZoomTarget.FULL_SLIDE
+    assert (zoom.margin, zoom.duration, zoom.easing, zoom.delay) == (
+        0.0,
+        0.8,
+        Easing.EASE_IN_OUT,
+        0.0,
+    )
+
+
+def test_zoom_takes_a_positional_trigger() -> None:
+    zoom = Zoom("frame", Trigger.WITH_PREVIOUS, margin=40, duration=0)
+    assert (zoom.element, zoom.trigger) == ("frame", Trigger.WITH_PREVIOUS)
+    assert (zoom.margin, zoom.duration) == (40, 0)
+
+
+def test_zoom_is_timed_but_not_an_animation() -> None:
+    assert isinstance(Zoom(), TimedCue)
+    assert not isinstance(Zoom(), Animation)
+    assert isinstance(FadeIn("a"), TimedCue)
