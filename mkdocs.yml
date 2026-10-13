@@ -76,6 +76,7 @@ nav:
     - Markdown content: authoring/markdown.md
     - Steps: authoring/steps.md
     - Animations: authoring/animations.md
+    - Zooming: authoring/zoom.md
     - Transitions: authoring/transitions.md
     - Morph in depth: authoring/morph.md
     - Working in Inkscape: authoring/inkscape.md
