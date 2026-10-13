@@ -44,6 +44,7 @@ __all__ = [
     "ScaleOut",
     "SlideIn",
     "SlideOut",
+    "TimedCue",
 ]
 
 
@@ -55,7 +56,6 @@ class Cue:
     """Base for anything on a slide's step timeline.
 
     Carries just the target ``element`` and the ``trigger`` that decides its step.
-    `Animation` adds timing on top; `PlayVideo` is a sibling that carries no timing.
     """
 
     element: str
@@ -64,16 +64,33 @@ class Cue:
     """When the cue fires. Defaults to `Trigger.ON_CLICK`."""
 
 
+@dataclass
+class TimedCue(Cue):
+    """Base for cues that play over time.
+
+    Adds the shared keyword-only timing params on top of `Cue`.
+    """
+
+    duration: float = field(default=0.4, kw_only=True)
+    """Duration in seconds."""
+    easing: Easing = field(default=Easing.EASE, kw_only=True)
+    """Easing curve — an ``Easing`` preset (e.g. ``Easing.EASE_IN_OUT``) or a
+    custom curve via ``Easing.cubic_bezier(...)``."""
+    delay: float = field(default=0.0, kw_only=True)
+    """Seconds to wait before the cue starts playing."""
+
+
 # ── Base + semantic bases ──────────────────────────────────────────────────────
 
 
 @dataclass
-class Animation(Cue, Slugged):
+class Animation(TimedCue, Slugged):
     """Base for every animation type.
 
     Concrete types subclass one of `Enter` / `Exit` / `Emphasis` (which fix the
     `AnimationKind`), adding their own fields. ``element``/``trigger`` come from `Cue`;
-    ``duration``, ``easing``, and ``delay`` are shared keyword-only timing params.
+    ``duration``, ``easing``, and ``delay`` are the shared keyword-only timing params
+    from `TimedCue`.
 
     **Custom animations.** Subclass a semantic base in ``deck.py`` — no changes to
     inkflow are needed. Write a matching ``@keyframes`` rule named after the kebab-cased
