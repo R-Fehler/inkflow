@@ -23,6 +23,7 @@ __all__ = [
     "Slugged",
     "Trigger",
     "VAlign",
+    "ZoomTarget",
     "camel_to_kebab",
 ]
 
@@ -187,6 +188,14 @@ class ColorMode(StrEnum):
     """Dark theme (``data-theme=""``)."""
     LIGHT = auto()
     """Light theme (``data-theme="light"``)."""
+
+
+class ZoomTarget(StrEnum):
+    """Targets for ``animations.Zoom`` that are not an element id."""
+
+    FULL_SLIDE = "@full-slide"
+    """The whole slide, as authored. ``@`` cannot appear in an id, so the value never
+    matches an element."""
 
 
 class Easing(str):
