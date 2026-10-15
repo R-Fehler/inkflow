@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080">
+  <rect width="1920" height="1080" fill="#222831"/>
+  <text x="960" y="130" font-family="sans-serif" font-size="56" fill="#eeeeee" text-anchor="middle">one request, stage by stage</text>
+
+  <!-- Four stages. The detail lines are too small to read at full size; each step
+       zooms to one stage so they become legible. -->
+  <g font-family="sans-serif" fill="#eeeeee">
+    <rect x="120" y="400" width="360" height="280" rx="20" fill="#00adb5"/>
+    <text x="300" y="470" font-size="44" text-anchor="middle">ingest</text>
+    <text x="150" y="540" font-size="18">validates the payload schema</text>
+    <text x="150" y="570" font-size="18">rejects anything over 2 MB</text>
+    <text x="150" y="600" font-size="18">stamps a trace id</text>
+
+    <rect x="560" y="400" width="360" height="280" rx="20" fill="#393e46"/>
+    <text x="740" y="470" font-size="44" text-anchor="middle">queue</text>
+    <text x="590" y="540" font-size="18">durable, at-least-once</text>
+    <text x="590" y="570" font-size="18">dead-letters after 5 tries</text>
+    <text x="590" y="600" font-size="18">ordered per tenant</text>
+
+    <rect x="1000" y="400" width="360" height="280" rx="20" fill="#393e46"/>
+    <text x="1180" y="470" font-size="44" text-anchor="middle">workers</text>
+    <text x="1030" y="540" font-size="18">idempotent handlers</text>
+    <text x="1030" y="570" font-size="18">one lease per message</text>
+    <text x="1030" y="600" font-size="18">heartbeat every 10 s</text>
+
+    <rect x="1440" y="400" width="360" height="280" rx="20" fill="#393e46"/>
+    <text x="1620" y="470" font-size="44" text-anchor="middle">storage</text>
+    <text x="1470" y="540" font-size="18">write-ahead log first</text>
+    <text x="1470" y="570" font-size="18">compacted nightly</text>
+    <text x="1470" y="600" font-size="18">replicated across 3 zones</text>
+  </g>
+
+  <g stroke="#eeeeee" stroke-width="6" fill="none">
+    <path d="M 490 540 L 550 540"/>
+    <path d="M 930 540 L 990 540"/>
+    <path d="M 1370 540 L 1430 540"/>
+  </g>
+
+  <text id="workers-note" x="1180" y="740" font-family="sans-serif" font-size="22" fill="#00adb5" text-anchor="middle">scaled to queue depth</text>
+
+  <!-- Camera frames on a hidden layer, as Inkscape writes one: stroked so they are easy
+       to edit while the layer is shown, never painted during the talk. -->
+  <g id="camera-frames" style="display:none" fill="none" stroke="#ff2e63" stroke-width="4">
+    <rect id="frame-ingest" x="100" y="380" width="400" height="320"/>
+    <rect id="frame-queue" x="540" y="380" width="400" height="320"/>
+    <rect id="frame-workers" x="980" y="380" width="400" height="390"/>
+    <rect id="frame-storage" x="1420" y="380" width="400" height="320"/>
+  </g>
+</svg>
