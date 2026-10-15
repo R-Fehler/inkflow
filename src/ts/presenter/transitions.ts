@@ -515,7 +515,7 @@ function loadSlideBody(
     entryPlay: boolean,
 ): void {
     // The zoom-out ease (if any) has finished; settle the camera state and make
-    // sure the outgoing <svg> carries its authored viewBox before it is captured.
+    // sure the outgoing <svg> carries its step's viewBox before it is captured.
     resetCamera();
 
     // A step run in flight (mid-chain when a slide change is triggered) is landed on its
