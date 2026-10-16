@@ -5,13 +5,15 @@ from inkflow.animations import (
     Bounce,
     FadeIn,
     FadeOut,
+    Frame,
     Highlight,
     ScaleIn,
     ScaleOut,
     SlideIn,
     SlideOut,
+    TimedCue,
 )
-from inkflow.enums import Direction, Easing, Trigger
+from inkflow.enums import Direction, Easing, FrameTarget, Trigger
 
 
 def test_shared_params_concrete_defaults() -> None:
@@ -81,3 +83,26 @@ def test_all_types_are_animations() -> None:
         Highlight,
     ):
         assert isinstance(cls("a"), Animation)
+
+
+def test_frame_defaults_to_the_full_slide() -> None:
+    frame = Frame()
+    assert frame.element == FrameTarget.FULL_SLIDE
+    assert (frame.margin, frame.duration, frame.easing, frame.delay) == (
+        0.0,
+        0.8,
+        Easing.EASE_IN_OUT,
+        0.0,
+    )
+
+
+def test_frame_takes_a_positional_trigger() -> None:
+    frame = Frame("frame", Trigger.WITH_PREVIOUS, margin=40, duration=0)
+    assert (frame.element, frame.trigger) == ("frame", Trigger.WITH_PREVIOUS)
+    assert (frame.margin, frame.duration) == (40, 0)
+
+
+def test_frame_is_timed_but_not_an_animation() -> None:
+    assert isinstance(Frame(), TimedCue)
+    assert not isinstance(Frame(), Animation)
+    assert isinstance(FadeIn("a"), TimedCue)

@@ -17,6 +17,7 @@ import {
     serializePathData,
     transformSegments,
 } from "../shared/path-data";
+import { boxFrame, screenMatrix } from "../shared/svg-geometry";
 import { referencedDefinitions } from "../shared/svg-refs";
 import type { TransitionData } from "../shared/types";
 import {
@@ -239,37 +240,20 @@ interface ChildSnapshot {
 
 // ── geometry capture ─────────────────────────────────────────────────────────
 
-// Geometry is measured via getScreenCTM() rather than getCTM(). getCTM()'s
-// reference frame depends on where the nearest SVG viewport is in the tree, so a
-// child's getCTM() and the root's are not in the same space and cannot be
-// directly compared. getScreenCTM() always uses the screen origin, so every
-// element's frame is directly comparable regardless of nesting depth.
 interface CapturedFrame {
     comp: AffineComponents;
     screenScale: { x: number; y: number };
     bbox: DOMRect;
 }
 
-// The affine map that takes the element's local unit square to the screen:
-// screenCTM · translate(bbox) · scale(bbox). Decomposed once here so the morph
-// loop only pays for recomposition. The per-axis screen scale is kept for length
-// (rx/ry/stroke-width) morphing.
-//
-// getScreenCTM() returns a legacy SVGMatrix whose scale() is uniform-only — it
-// keeps the first factor and silently drops the second (non-uniform scaling lived
-// on the separate scaleNonUniform()). So calling scale(width, height) on it would
-// square the box to width × width and leak the box's aspect ratio into the morph
-// as a vertical stretch on any non-square element (e.g. a wide title or the footer
-// logo; square shapes are unaffected, which is why it went unnoticed). Re-wrapping
-// it in a real DOMMatrix makes scale(width, height) genuinely non-uniform.
+// The affine map that takes the element's local unit square to the screen, decomposed
+// once here so the morph loop only pays for recomposition. The per-axis screen scale is
+// kept for length (rx/ry/stroke-width) morphing.
 function captureFrame(element: SVGGraphicsElement): CapturedFrame {
     const bbox = element.getBBox();
-    const screenCTM = DOMMatrix.fromMatrix(element.getScreenCTM()!);
-    const frame = screenCTM
-        .translate(bbox.x, bbox.y)
-        .scale(bbox.width, bbox.height);
+    const screenCTM = screenMatrix(element)!;
     return {
-        comp: decomposeAffine(frame),
+        comp: decomposeAffine(boxFrame(screenCTM, bbox)),
         screenScale: { x: matrixScaleX(screenCTM), y: matrixScaleY(screenCTM) },
         bbox,
     };
