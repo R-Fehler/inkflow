@@ -1,14 +1,12 @@
-// Pure math for authored camera moves: the `animations.Zoom` cues a slide root carries in
+// Pure math for authored camera moves: the `animations.Frame` cues a slide root carries in
 // `data-camera`. Everything here is in SVG user units and independent of the DOM; target
 // views come in through a `ResolveView`.
 //
 // A step's cues form a camera timeline that its step run seeks, so a camera move reverses
 // and snaps exactly like the element animations. The resting camera at a step is that
 // timeline's end. The arrival state (step -1, landed while an entry transition runs) is the
-// step-0 timeline at time 0: a zero-length step-0 zoom is already in place when the slide
+// step-0 timeline at time 0: a zero-length step-0 frame is already in place when the slide
 // arrives, a timed one plays once it has.
-//
-// Unrelated to the `transitions.Zoom` slide transition.
 
 import { cubicBezierEasing } from "./easing";
 import type { ViewBox } from "./viewbox";

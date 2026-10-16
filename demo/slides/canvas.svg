@@ -92,7 +92,7 @@
     <path d="M 552,-110 V -122 H 564 M 592,-110 V -122 H 580 M 552,-94 V -82 H 564 M 592,-94 V -82 H 580" fill="none" stroke-width="6" stroke-linecap="round" class="inkflow-stroke-accent" id="path25"/>
     <text x="520" y="60" text-anchor="middle" font-family="sans-serif" font-size="30px" class="inkflow-fill-text-muted" id="text25">a detail, however small</text>
     <text x="0" y="220" text-anchor="middle" font-family="sans-serif" font-size="38px" class="inkflow-fill-text" id="text26">Point the camera at any element by its id</text>
-    <text x="0" y="280" text-anchor="middle" font-family="monospace" font-size="28px" class="inkflow-fill-text-muted" id="text27">animations=[ Zoom("slide-2"), Zoom("node-b"), Zoom("detail") ]</text>
+    <text x="0" y="280" text-anchor="middle" font-family="monospace" font-size="28px" class="inkflow-fill-text-muted" id="text27">animations=[ Frame("slide-2"), Frame("node-b"), Frame("detail") ]</text>
   </g>
   <g inkscape:groupmode="layer" inkscape:label="__inkflow:overlay:footer__" sodipodi:insensitive="true" inkflow:overlay-src="footer" inkflow:overlay-hash="f664c57d" id="g29">
     <defs id="defs27"/>

@@ -80,7 +80,7 @@ A second screen or a following window keeps its own view,
 so magnifying a detail on your laptop does not disturb the projector.
 Navigating while zoomed eases back to the slide's view first.
 
-On a slide with [`Zoom` cues](../authoring/zoom.md),
+On a slide with [`Frame` cues](../authoring/camera.md),
 the step decides the view and zooming by hand works inside it:
 <kbd>0</kbd> returns to the step's view rather than the whole slide.
 Unlike zooming by hand, those cues are part of the step,

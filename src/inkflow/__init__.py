@@ -6,12 +6,12 @@ from inkflow.enums import (
     ColorMode,
     Direction,
     Easing,
+    FrameTarget,
     MediaAlign,
     MediaFit,
     Muted,
     Trigger,
     VAlign,
-    ZoomTarget,
 )
 from inkflow.manifest import (
     Content,
@@ -37,6 +37,7 @@ __all__ = [
     "Deck",
     "Direction",
     "Easing",
+    "FrameTarget",
     "Image",
     "Inline",
     "Media",
@@ -54,7 +55,6 @@ __all__ = [
     "VAlign",
     "Video",
     "ZoneContent",
-    "ZoomTarget",
     "animations",
     "transitions",
 ]

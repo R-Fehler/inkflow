@@ -143,9 +143,9 @@ def main() -> Deck:
                 "canvas.svg",
                 transition=transitions.Crossfade(),
                 animations=[
-                    animations.Zoom("period", margin=4, duration=1.5),
-                    animations.Zoom("explanation", duration=3.5),
-                    animations.Zoom(duration=2),
+                    animations.Frame("period", margin=4, duration=1.5),
+                    animations.Frame("explanation", duration=3.5),
+                    animations.Frame(duration=2),
                 ],
                 notes="notes/canvas.md",
             ),

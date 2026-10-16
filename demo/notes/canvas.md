@@ -1,4 +1,4 @@
-A `Zoom` cue points the slide's camera at any element by its id:
+A `Frame` cue points the slide's camera at any element by its id:
 a word, a shape, even a frame on a hidden layer.
 That covers a whole talk laid out on one canvas,
 a diagram explained one part at a time,

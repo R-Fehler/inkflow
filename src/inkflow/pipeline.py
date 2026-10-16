@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import NamedTuple, TypedDict, cast
 
 from inkflow import ns
-from inkflow.animations import Animation, Cue, PlayVideo, TimedCue, Zoom
+from inkflow.animations import Animation, Cue, Frame, PlayVideo, TimedCue
 from inkflow.assets import AssetRoots, AssetSource, read_resolved_svg
 from inkflow.content import (
     inject_style,
@@ -19,7 +19,7 @@ from inkflow.content import (
     substitute_content,
     substitute_zone_numbers,
 )
-from inkflow.enums import AnimationKind, ColorMode, Direction, Trigger, ZoomTarget
+from inkflow.enums import AnimationKind, ColorMode, Direction, FrameTarget, Trigger
 from inkflow.layout import (
     AssetKind,
     resolve_chain,
@@ -324,13 +324,13 @@ def _annotate_play_video(root: SvgElement, cue: PlayVideo, step: int) -> None:
     video.set("data-play-on-step", str(step))
 
 
-def _camera_entry(cue: Zoom, step: int, offset: float) -> dict[str, object]:
-    """Serialize one `Zoom` cue to a `data-camera` entry. The full slide is a null
+def _camera_entry(cue: Frame, step: int, offset: float) -> dict[str, object]:
+    """Serialize one `Frame` cue to a `data-camera` entry. The full slide is a null
     target, so the sentinel never reaches the presenter."""
     return {
         "step": step,
         "offset": offset,
-        "target": None if cue.element == ZoomTarget.FULL_SLIDE else cue.element,
+        "target": None if cue.element == FrameTarget.FULL_SLIDE else cue.element,
         "margin": cue.margin,
         "opts": {"duration": cue.duration, "delay": cue.delay, "easing": cue.easing},
     }
@@ -340,14 +340,14 @@ def _annotate_camera(root: SvgElement, entries: list[dict[str, object]]) -> None
     for entry in entries:
         target = entry["target"]
         if target is not None and root.find(f'.//*[@id="{target}"]') is None:
-            logger.warning(f"zoom target #{target} not found in SVG")
+            logger.warning(f"frame target #{target} not found in SVG")
     root.set("data-camera", json.dumps(entries, separators=(",", ":")))
 
 
 def annotate_svg(root: SvgElement, cues: list[tuple[Cue, int]]) -> SvgElement:
     """Annotate the SVG for the step engine: `PlayVideo` cues stamp
     `data-play-on-step`; animation cues are grouped per target element into one
-    `data-cues` JSON list (sorted by step); `Zoom` cues form one `data-camera` JSON
+    `data-cues` JSON list (sorted by step); `Frame` cues form one `data-camera` JSON
     list on the root (in timeline order, which is step then offset order).
 
     ``cues`` are in timeline order, so the per-cue run ``offset`` (which cue's slot
@@ -357,7 +357,7 @@ def annotate_svg(root: SvgElement, cues: list[tuple[Cue, int]]) -> SvgElement:
     for cue, step, offset in _resolve_run_offsets(cues):
         if isinstance(cue, PlayVideo):
             _annotate_play_video(root, cue, step)
-        elif isinstance(cue, Zoom):
+        elif isinstance(cue, Frame):
             camera_entries.append(_camera_entry(cue, step, offset))
         elif isinstance(cue, Animation):
             entries_by_element.setdefault(cue.element, []).append(

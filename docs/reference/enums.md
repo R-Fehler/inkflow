@@ -15,7 +15,7 @@ from inkflow import (
     Muted,
     Trigger,
     VAlign,
-    ZoomTarget,
+    FrameTarget,
 )
 ```
 
@@ -79,7 +79,7 @@ value-object shape: presets (`Trigger.ON_CLICK`, `Trigger.WITH_PREVIOUS`,
       summary:
         attributes: true
 
-::: inkflow.enums.ZoomTarget
+::: inkflow.enums.FrameTarget
     options:
       docstring_section_style: spacy
       summary:

@@ -7,7 +7,7 @@
 // also suppresses the laser draw, so the two never fight over a drag.
 //
 // The camera works inside the view the current step sets (the full slide, or the frame
-// of an authored `animations.Zoom` cue). Navigating while zoomed eases back to that view
+// of an authored `animations.Frame` cue). Navigating while zoomed eases back to that view
 // first (resetCameraThen), then the step or transition runs — so nothing here needs to
 // know the transition type.
 //

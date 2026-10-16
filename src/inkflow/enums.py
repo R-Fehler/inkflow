@@ -17,13 +17,13 @@ __all__ = [
     "ColorMode",
     "Direction",
     "Easing",
+    "FrameTarget",
     "MediaAlign",
     "MediaFit",
     "Muted",
     "Slugged",
     "Trigger",
     "VAlign",
-    "ZoomTarget",
     "camel_to_kebab",
 ]
 
@@ -190,8 +190,8 @@ class ColorMode(StrEnum):
     """Light theme (``data-theme="light"``)."""
 
 
-class ZoomTarget(StrEnum):
-    """Targets for ``animations.Zoom`` that are not an element id."""
+class FrameTarget(StrEnum):
+    """Targets for ``animations.Frame`` that are not an element id."""
 
     FULL_SLIDE = "@full-slide"
     """The whole slide, as authored. ``@`` cannot appear in an id, so the value never

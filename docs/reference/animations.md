@@ -46,8 +46,8 @@ class Glow(animations.Emphasis):
 
 The `animations` namespace also holds [`PlayVideo`](#inkflow.animations.PlayVideo),
 a non-animating cue that starts a `Video` on a step,
-and [`Zoom`](#inkflow.animations.Zoom), which moves the slide's camera
-to frame an element (see [Zooming](../authoring/zoom.md)).
+and [`Frame`](#inkflow.animations.Frame), which moves the slide's camera
+to frame an element (see [Camera](../authoring/camera.md)).
 
 ::: inkflow.animations
     options:
