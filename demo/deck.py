@@ -138,6 +138,17 @@ def main() -> Deck:
                 transition=transitions.Morph(duration=1.5),
                 notes="notes/morph.md",
             ),
+            # Frame elements: one slide with several stops
+            Slide(
+                "canvas.svg",
+                transition=transitions.Crossfade(),
+                animations=[
+                    animations.Zoom("period", margin=4, duration=1.5),
+                    animations.Zoom("explanation", duration=3.5),
+                    animations.Zoom(duration=2),
+                ],
+                notes="notes/canvas.md",
+            ),
             # Media: image and video injection, light/dark mode
             Slide(
                 "media.svg",
