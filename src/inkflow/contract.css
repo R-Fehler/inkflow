@@ -266,11 +266,6 @@
     color: var(--inkflow-heading);
     font-weight: 600;
 }
-.inkflow-content .footnote-ref a {
-    color: inherit;
-    text-decoration: none;
-}
-
 /* Footnote block is hoisted to .inkflow-wrapper level by content.py */
 .inkflow-wrapper .footnotes {
     margin-top: auto;
@@ -286,11 +281,6 @@
 }
 .inkflow-wrapper .footnotes p {
     margin: 0;
-}
-.inkflow-wrapper .footnote-backref {
-    color: var(--inkflow-accent);
-    text-decoration: none;
-    margin-left: 0.2em;
 }
 
 /* ── Pygments syntax-highlight token classes ──────────────────────────────── */
