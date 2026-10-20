@@ -28,6 +28,7 @@ from inkflow.layout import (
     resolve_chain,
     resolve_default_zone,
     resolve_parent_path,
+    zone_placeholder_css,
 )
 from inkflow.loaders import LoadedText, load_md, load_notes, load_style, notes_path
 from inkflow.logging import logger
@@ -39,6 +40,7 @@ from inkflow.manifest import (
     TextBox,
     Video,
 )
+from inkflow.ns import INKFLOW_HINT
 from inkflow.overlay import Overlay
 from inkflow.provenance import INK, stamper
 from inkflow.steps import StepResolver
@@ -70,6 +72,8 @@ class EmptyZone(TypedDict):
     width: float
     height: float
     transform: str | None
+    hint: NotRequired[str]
+    """What the zone is for, as its layout says (an ``inkflow:hint``)."""
 
 
 class SlideEditInfo(TypedDict):
@@ -590,21 +594,38 @@ class SlideSvg:
                 ],
             )
 
-    def empty_zones(self) -> list[EmptyZone]:
+    def pop_hints(self) -> dict[str, str]:
+        """The layouts' placeholder prompts (``<inkflow:hint zone=…>``), by
+        zone name, taken out of the slide: they are for an editor only. The
+        nearest layout's wins (ancestors are composed first)."""
+        hints: dict[str, str] = {}
+        for el in list(self.root.iter(INKFLOW_HINT)):
+            zone = el.get("zone")
+            text = (el.text or "").strip()
+            if zone and text:
+                hints[zone] = text
+            parent = el.getparent()
+            if parent is not None:
+                parent.remove(el)
+        return hints
+
+    def empty_zones(self, hints: dict[str, str] | None = None) -> list[EmptyZone]:
         zones: list[EmptyZone] = []
         for el in empty_zone_shapes(self.root):
             x, y, width, height = zone_box(el)
-            zones.append(
-                {
-                    "zone": (el.get("id") or "").removeprefix("zone-"),
-                    "locator": el.get(INK, ""),
-                    "x": x,
-                    "y": y,
-                    "width": width,
-                    "height": height,
-                    "transform": el.get("transform"),
-                }
-            )
+            name = (el.get("id") or "").removeprefix("zone-")
+            zone: EmptyZone = {
+                "zone": name,
+                "locator": el.get(INK, ""),
+                "x": x,
+                "y": y,
+                "width": width,
+                "height": height,
+                "transform": el.get("transform"),
+            }
+            if hints and name in hints:
+                zone["hint"] = hints[name]
+            zones.append(zone)
         return zones
 
     def tag_layout(self, chain: list[Path], overlay_chains: list[list[Path]]) -> None:
@@ -717,9 +738,13 @@ def process_slide(
     parsed: ParsedMarkdown | None,
     md_source: AssetSource,
     slide_id: str,
+    keep_zones: bool = False,
 ) -> ProcessedSlide:
     """Return the processed SVG string, the slide's markdown-derived notes and,
-    in an editor build, its editor facts."""
+    in an editor build, its editor facts.
+
+    ``keep_zones`` leaves the unfilled zones in, drawn as dashed placeholders
+    (a slide-master view showing a layout's zones as objects)."""
     src = resolve_slide_src(slide.src, ctx.project_dir, ctx.theme)
     chain = resolve_chain(src, ctx.project_dir, ctx.theme)
     overlays = slide.overlays if slide.overlays is not None else ctx.overlays
@@ -730,6 +755,7 @@ def process_slide(
     doc = SlideSvg.read(src, ctx.assets, sources)
     doc.compose_ancestors(chain, ctx.assets)
     doc.compose_overlays(overlay_chains, ctx.assets)
+    hints = doc.pop_hints()
     for zone_id in doc.duplicate_zone_ids():
         logger.warning(
             f"{slide_id}: {zone_id} is declared more than once after composition — "
@@ -783,10 +809,13 @@ def process_slide(
     if sources is not None:
         edit = {
             "sources": [str(p) for p in sources.paths],
-            "emptyZones": doc.empty_zones(),
+            "emptyZones": doc.empty_zones(hints),
             "zoneOrigins": zone_origins,
         }
-    doc.prune_zones()
+    if keep_zones:
+        doc.add_style(zone_placeholder_css(doc.root))
+    else:
+        doc.prune_zones()
     doc.scope_styles(slide_number)
     return ProcessedSlide(doc.to_svg(), md_notes, edit)
 

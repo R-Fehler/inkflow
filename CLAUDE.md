@@ -83,10 +83,16 @@ src/
                                stays `str` and `trigger` stays positional
     transitions.py    concrete transition types (Cut, Crossfade, Morph, Push, Cover,
                                Zoom, Fade, Wipe) subclassing manifest.Transition
-    pipeline.py       animation annotation + layout inlining; `build_slide` (one slide
-                               from its files) and `slide_notes` (its notes file as HTML)
-                               are what `process_deck` runs per slide, or asks its `cache`
-                               for (a `SlideStore`: incremental.py)
+    pipeline.py       animation annotation + layout inlining; `process_slide(keep_zones=)`
+                               keeps unfilled zones as dashed boxes (a slide master);
+                               `pop_hints` takes `<inkflow:hint>` out, into `EmptyZone.hint`
+                               (the nearest layout's wins); `EmptyZone`s are
+                               `content.empty_zone_shapes`: the pruned zones plus
+                               unfilled `inkflow:show-shape` ones, which stay drawn;
+                               `build_slide` (one slide from its files) and `slide_notes`
+                               (its notes file as HTML) are what `process_deck` runs per
+                               slide, or asks its `cache` for (a `SlideStore`:
+                               incremental.py)
     deps.py           which files a piece of the build read: `note(path)` at every
                                read or lookup of the slide pipeline (svgio, layout,
                                loaders, the slide's own file), collected by
@@ -107,7 +113,11 @@ src/
                                what the pages are sent: `set_keys` (each slide's
                                content digest), `keys_of`, `as_patch`
     content.py        TextBox / Image / Video injection into zone rects, with alignment
-                               support; Video emits data-* playback attrs (driven by video.ts)
+                               support; Video emits data-* playback attrs (driven by video.ts);
+                               a zone shape's own `--inkflow-*` style properties reach its
+                               text, and one marked `inkflow:show-shape` paints the text's
+                               box (`zone_shape_css`: fill, border, radius) and is kept
+                               when empty (`unreferenced_zones` = what is pruned)
     layout.py         parent inject/set/strip: layout chain resolution and Inkscape layer
                                writing. `AssetKind` (layouts/overlays) selects the searched
                                subdir, so `resolve_parent_path`/`resolve_chain` serve both
@@ -116,6 +126,15 @@ src/
                                (`behind` + `overlays` + css), each layer a
                                `PreviewLayer(path, ref)` — refs come from the caller since
                                a backdrop or an overlay is not named by an inkflow:parent.
+                               Copy-on-write: `deck_copy` = the project's
+                               `<kind>/<same name>.svg` carrying `inkflow:copy-of`
+                               (`theme_ref`: `builtin:x`/`theme:x`) stands in for that
+                               theme file wherever any reference resolves to it, the
+                               theme's own `./base` chains included
+                               (`resolve_parent_path(follow_copies=False)` names the
+                               theme's file; `resolve_chain` falls back to it rather
+                               than loop); unmarked same-named files never do.
+                               `copy_of`/`label_of` read the root attributes.
                                Layer digests are canonical (c14n, whitespace-stripped), so a
                                synced ancestor does not read as stale forever.
                                `create_slide(canvas=)` (a blank slide at the deck's
@@ -127,7 +146,8 @@ src/
                                would paint them black over the slide
     catalog.py        the layouts and overlays a deck offers and which slides use
                                each (`layout_entries`: the project's own winning, parent,
-                               `slides` on it directly, `reach` through it, `shadows`;
+                               `slides` on it directly, `reach` through it, `copy_of`
+                               (a marked copy), `shadows` (an unmarked same name), `label`;
                                `background_name`; `overlay_entries`; `slide_layouts`):
                                `inkflow layouts`' counts and a slide-master view's list
     overlay.py        the `Overlay` DSL type (src only). Its own module because both
@@ -496,6 +516,9 @@ Inline styles are only emitted when the corresponding param is non-`None`; CSS v
 `inject-layout` writes locked Inkscape preview layers into SVGs for authoring reference,
 but the pipeline resolves `inkflow:parent` chains in memory and composites layers on the fly.
 SVG files on disk are never modified by the serve/build pipeline.
+
+**A theme's layout is copied on write, and the copy stands in for it everywhere.**
+The ask is PowerPoint's slide master: edit the background of every slide, or every slide of one type, without touching each slide. Theme and built-in layouts live in an installed package and are never written, so the deck gets its own copy: `layouts/<name>.svg`, the theme's file with only its root attributes changed (`inkflow:copy-of="builtin:agenda"`, `inkflow:parent` re-expressed as `builtin:title`), so element locators taken on the theme's file still hold for an edit a frontend makes in the same step. The decision is in resolution (`layout.deck_copy`): any reference that lands on a theme file the project has a marked copy of gets the copy, including the built-in layouts' own `./base` and `./title` parents. That is what makes "edit the background" reach every built-in layout while copying only `base`, and per-type edits copy only that layout. Copying the whole chain was the alternative; it would freeze every ancestor at the time of the copy and make each later copy's edits invisible to the others. Only *marked* copies redirect, so an existing project `layouts/title.svg` (a title slide of the user's own) keeps shadowing the bare name only, as before. Revert = delete the copy. Overlays follow the same rule in `overlays/`. `copy_of` is noted (`deps.note`), so a copy appearing or going away rebuilds the slides it reaches; `sync` writes it into the previews and `verify` calls the old ones stale. What a layout says to an editor is also core: `<inkflow:hint zone>` prompts, popped by the pipeline before output into `EmptyZone.hint`, `inkflow:label` (the typed name `inkflow layouts` shows), zones drawn from a shape (`inkflow:show-shape`), and `process_slide(keep_zones=True)` for a view that shows a layout's zones as objects.
 
 **Overlays are the second composition axis, not multiple inheritance.**
 `inkflow:parent` means "what am I built on" and composites *behind* a slide; an `Overlay` means "what goes on top regardless of what I'm built on" and composites *above* it. That keeps each axis single-purpose, and it is why chrome (a logo, a footer) reaches every layout without a wrapper layout per layout. `process_slide` calls `compose_overlays` right after `compose_ancestors` and *before* numbering/injection/annotation, so an overlay's `zone-slide-number` is filled, an overlay-declared zone can be targeted by `zones={...}` (and is pruned when unfilled), and cues can animate overlay elements — all for free. Resolution is `Slide.overlays` → `Deck.overlays` → `Theme.overlays`, each an override (`None` inherits, `[]` means none), matching `effective_transition`.

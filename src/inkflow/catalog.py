@@ -1,10 +1,11 @@
 """The layouts and overlays a deck offers, and which slides use each.
 
-What ``inkflow layouts`` lists with its slide counts, and what a frontend's
-slide-master view can be built from: every layout in the deck's shape (the
-project's own winning over a theme's of the same name), its parent, the
-slides built on it directly and every slide whose chain goes through it; the
-deck's overlays, a slide's own, and overlay files nothing uses yet.
+What ``inkflow layouts`` lists with its slide counts, and what a slide-master
+view (a frontend's) is built from: every layout in the deck's shape (the
+project's own winning over a theme's of the same name, a marked copy noted),
+its parent, the slides built on it directly and every slide whose chain goes
+through it; the deck's overlays, a slide's own, and overlay files nothing
+uses yet.
 """
 
 from __future__ import annotations
@@ -16,7 +17,9 @@ from typing import TYPE_CHECKING
 from inkflow.layout import (
     AssetKind,
     builtin_theme_dir,
+    copy_of,
     discover_assets,
+    label_of,
     layouts_for,
     resolve_chain,
     theme_ref,
@@ -36,9 +39,12 @@ class LayoutEntry:
     """The file slides get: the project's own when it has one."""
     source: str
     """``local`` (the project's own), ``theme`` or ``builtin``."""
+    copy_of: str | None = None
+    """For the project's copy of a theme layout: the ref it replaces."""
     shadows: bool = False
-    """A project layout named like a theme's: it replaces the theme's for
-    slides naming it, not inside the theme's chains."""
+    """A project layout named like a theme's, not a marked copy of it: it
+    replaces the theme's for slides naming it, not inside the theme's chains."""
+    label: str | None = None
     parent: str | None = None
     slides: list[int] = field(default_factory=list)
     """Deck indices of the slides built directly on it."""
@@ -58,8 +64,10 @@ def _layout_entries(deck: Deck, project_dir: Path) -> dict[str, LayoutEntry]:
         sources = by_name[name]
         source = next(s for s in ("local", "theme", "builtin") if s in sources)
         path = sources[source]
-        shadows = source == "local" and len(sources) > 1
-        entry = LayoutEntry(name, path, source, shadows=shadows)
+        entry = LayoutEntry(name, path, source, label=label_of(path))
+        if source == "local":
+            entry.copy_of = copy_of(path)
+            entry.shadows = entry.copy_of is None and len(sources) > 1
         try:
             chain = resolve_chain(path, project_dir, deck.theme)
         except ValueError:
@@ -98,7 +106,7 @@ def _is_layout_file(path: Path, project_dir: Path, theme: Theme | None) -> bool:
 
 
 def layout_entries(deck: Deck, project_dir: Path) -> dict[str, LayoutEntry]:
-    """Every layout the deck offers (`layouts_for`), the project's own
+    """Every layout the deck offers (`layouts_for`), the project's own copy
     winning, with its parent and the slides using it."""
     entries = _layout_entries(deck, project_dir)
     by_path = {e.path.resolve(): e for e in entries.values()}
@@ -133,6 +141,7 @@ class OverlayEntry:
     name: str
     path: Path | None
     source: str
+    copy_of: str | None = None
     deck: bool = True
     """Among the deck's default overlays (else: a slide's own or a draft)."""
     slides: list[int] = field(default_factory=list)
@@ -170,6 +179,7 @@ def overlay_entries(deck: Deck, project_dir: Path) -> list[OverlayEntry]:
             Path(overlay.src).stem,
             path,
             _overlay_source(path, project_dir, deck.theme) if path else "missing",
+            copy_of(path) if path is not None else None,
             in_deck,
         )
         seen[key] = entry
@@ -186,7 +196,9 @@ def overlay_entries(deck: Deck, project_dir: Path) -> list[OverlayEntry]:
     if folder.is_dir():
         for path in sorted(folder.glob("*.svg")):
             if path.resolve() not in seen:
-                entry = OverlayEntry(path.stem, path.stem, path, "local", False)
+                entry = OverlayEntry(
+                    path.stem, path.stem, path, "local", copy_of(path), False
+                )
                 seen[path.resolve()] = entry
                 out.append(entry)
     return out

@@ -31,10 +31,13 @@ from inkflow.layout import (
     PreviewLayers,
     are_preview_layers_current,
     chain_layers,
+    copy_of,
     create_slide,
+    deck_copy,
     discover_layouts,
     discover_overlays,
     inject_preview_layers,
+    label_of,
     layout_zones,
     layouts_for,
     resolve_chain,
@@ -463,7 +466,7 @@ class _LayoutRow:
     slides: int | None = None
     """Slides built directly on it (None: no deck to count)."""
     note: str = ""
-    """A theme's layout the deck's own of the same name shadows."""
+    """The deck's copy of a theme's, replaced by such a copy, a typed name."""
 
 
 def _asset_rows(
@@ -473,8 +476,8 @@ def _asset_rows(
     deck: Deck | None = None,
 ) -> dict[str, list[_LayoutRow]]:
     """Group discovered layouts or overlays by source, with their chains and
-    zones; with a deck, only the layouts offered to its size (`layouts_for`)
-    and how many slides use each."""
+    zones; with a deck, only the layouts offered to its size (`layouts_for`),
+    how many slides use each and which the deck has its own copy of."""
     discover = discover_layouts if kind is AssetKind.LAYOUT else discover_overlays
     found = discover(project_dir, theme)
     if deck is not None and kind is AssetKind.LAYOUT:
@@ -497,8 +500,18 @@ def _asset_rows(
             raise click.ClickException(str(exc)) from exc
         parent_str = " → ".join(p.stem for p in chain) if chain else "—"
         info = layout_zones(path, project_dir, theme, kind)
-        shadowed = source_label != "local" and path.stem in local
-        known = (deck is not None and source_label == "local") or not shadowed
+        notes: list[str] = []
+        if source_label == "local":
+            if marked := copy_of(path):
+                notes.append(f"the deck's copy of {marked}")
+            if typed := label_of(path):
+                notes.append(f"“{typed}”")
+        elif path.stem in local:
+            replaced = deck_copy(path, project_dir, theme, kind) is not None
+            notes.append(
+                "replaced by the deck's copy" if replaced else "shadowed by the deck's"
+            )
+        known = (deck is not None and source_label == "local") or path.stem not in local
         groups.setdefault(source_label, []).append(
             _LayoutRow(
                 path.stem,
@@ -507,7 +520,7 @@ def _asset_rows(
                 info.numbered,
                 info.default_zone,
                 uses.get(path.resolve(), 0) if deck is not None and known else None,
-                "shadowed by the deck's" if shadowed else "",
+                ", ".join(notes),
             )
         )
     return groups
@@ -578,8 +591,10 @@ def layouts_cmd(deck_path: Path, no_deck: bool, plain: bool, as_json: bool) -> N
 
     With a deck, the built-in layouts listed are those drawn in its size's
     shape (`Deck(size="a0")`: the poster layouts; a 16:9 deck: the 16:9 ones),
-    SLIDES counts the slides built directly on each, and NOTE marks a theme's
-    layout the deck's own of the same name shadows.
+    SLIDES counts the slides built directly on each, and NOTE marks the deck's
+    own copies of theme layouts (`inkflow:copy-of`), the theme layouts they
+    replace, one the deck's own of the same name only shadows, and a layout's
+    typed name (`inkflow:label`).
 
     `--plain` prints the same as one line per layout (`name  [source]
     parents: …  zones: …`, the default zone starred), and `--json` as

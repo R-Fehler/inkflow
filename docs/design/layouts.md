@@ -22,6 +22,28 @@ When inkflow builds the slide it replaces that shape with a `<foreignObject>`
 of the same bounding box, holding the rendered content.
 A zone that the slide never fills is removed rather than left showing.
 
+The zone shape itself is a placeholder: its fill and stroke are never painted
+(Inkscape gives every rect a style). Custom properties in its own `style`
+(`--inkflow-padding: 20px`, `--inkflow-valign: center`) do apply to its text,
+like the layout CSS that sets them.
+
+### A zone drawn as a box
+
+Mark the shape `inkflow:show-shape="true"` and it is drawn instead: its fill
+becomes the background of the box the text is in, its stroke a border, its
+`rx`/`ry` (or an ellipse's outline) the corner radius, with some padding to
+keep the text off the edge. On an accent-coloured fill (`inkflow-fill-accent`
+or another vivid theme colour) the text takes the theme's `accent-fg` colour.
+Text and box stay one element, so an animation or a transition moves them
+together. Such a zone stays on the slide, drawn and empty, when nothing fills
+it.
+
+```xml
+<rect id="zone-callout" x="1200" y="300" width="600" height="300" rx="24"
+      class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:3"
+      inkflow:show-shape="true"/>
+```
+
 !!! tip
     Inkscape's Layers & Objects panel edits an element's *label*, not its `id`.
     Label the rect `zone-content` there and run
@@ -151,10 +173,70 @@ inkflow layouts
 ```
 
 It prints every layout and overlay with its parent chain, its zones and how
-many slides use it (with a deck, the layouts in its size's shape), and notes a
-theme's layout the deck's own of the same name shadows.
+many slides use it (with a deck, the layouts in its size's shape), and notes
+the deck's own copies of theme layouts (below), the theme layouts they
+replace, and a theme's layout the deck's own of the same name only shadows.
 `inkflow layouts --plain` prints one line per layout instead of tables (for a
 narrow terminal, or a program reading it), `--json` the same as data.
+
+## Changing a theme's layout: the deck's own copy
+
+A theme's layouts (the built-in ones included) live in an installed package
+and are never written. To change one for a deck, give the deck its own copy:
+copy the theme's file to `layouts/<same name>.svg` in the project and add
+`inkflow:copy-of` to its root, naming the file it replaces. If the original
+has an `inkflow:parent`, name that parent explicitly too (the theme's
+`./title` would now look in your `layouts/`):
+
+```xml
+<svg ... inkflow:copy-of="builtin:base">              <!-- base has no parent -->
+<svg ... inkflow:copy-of="builtin:agenda" inkflow:parent="builtin:title">
+```
+
+For a pip-installed theme's layout, write `theme:agenda` and `theme:title`
+instead. The built-in files are in the installed package
+(`python -c "import inkflow, pathlib; print(pathlib.Path(inkflow.__file__).parent / 'theme/layouts')"`);
+an editor's slide master can make the copy for you on the first edit.
+
+The copy then stands in for the theme's file **everywhere**, not only for
+slides naming it: when any reference (a bare name, `builtin:base`,
+`theme:agenda`, or the theme's own `./base` inside `numbered.svg`) resolves to
+the theme's file, the project's copy is used instead. So a copy of `base` is
+the background of every built-in layout, and of every layout of yours built on
+them, and a copy of `title` changes `content`, `agenda` and the other layouts
+built on `title`. The copy's own parent names the theme's ancestor, which the
+project's copy of that ancestor stands in for whenever there is one. Only what
+you copy changes: copying `agenda` touches agenda slides only.
+
+The rule follows only marked copies. A project layout that merely shares a
+name with a theme's (an own `title.svg` drawn as a title slide) replaces it for
+slides naming it, as the search above says, but never slips into the theme's
+chains. A copy built on its own original (`inkflow:parent="builtin:content"`
+in a copy of `content`) goes on to the theme's file rather than looping.
+
+Delete the copy and the theme's layout is used again. Run
+[`inkflow sync`](../authoring/inkscape.md#previewing-the-full-slide-sync)
+after making or deleting one, so the Inkscape previews show the new
+background (`inkflow verify` reports the previews it made stale).
+
+## Placeholder prompts and names
+
+A layout's zones are its placeholders: what each slide on it fills. Two
+optional additions are for editors:
+
+```xml
+<svg ... inkflow:label="Code examples">
+  <rect id="zone-code" x="100" y="300" width="1000" height="600"/>
+  <inkflow:hint zone="code">Paste the code example</inkflow:hint>
+</svg>
+```
+
+`<inkflow:hint zone="<name>">` is the prompt an editor shows in that zone
+while a slide leaves it empty. The build takes it out of every slide; a
+layout's prompt for a zone replaces one its parent gives the same zone.
+`inkflow:label` is the layout's name as its author typed it, which
+`inkflow layouts` shows beside the file's own name for the deck's
+own layouts.
 
 ## Built-in layouts
 

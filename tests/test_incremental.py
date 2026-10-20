@@ -23,6 +23,7 @@ from websockets.asyncio.server import ServerConnection
 from inkflow import deps, server
 from inkflow.edit import NO_EDIT_COMMANDS
 from inkflow.incremental import SlideCache, as_patch, frozen, keys_of, set_keys
+from inkflow.layout import builtin_theme_dir
 from inkflow.logging import collect_logs, resolve_levels
 from inkflow.manifest import Inline, Slide
 from inkflow.pipeline import SlideData, process_deck
@@ -239,6 +240,29 @@ def test_a_file_that_now_shadows_a_layout_rebuilds_its_slides(
     assert project.rebuilt() == ["one", "two-2", "five"]
     (project.root / "slides" / "two.svg").unlink()
     assert project.rebuilt() == ["one", "two-2", "five"]
+
+
+def test_a_copy_of_a_theme_layout_rebuilds_the_slides_on_it(
+    project: Project,
+) -> None:
+    project.edit(
+        "deck.py", 'Slide("two", md="one.md")', 'Slide("content", md="one.md")'
+    )
+    assert project.rebuilt() == ["one"]
+    theme = builtin_theme_dir() / "layouts"
+    copy = (theme / "base.svg").read_text(encoding="utf-8")
+    assert "<svg" in copy
+    marked = copy.replace(
+        "<svg",
+        '<svg xmlns:inkflow="urn:inkflow"' + ' inkflow:copy-of="builtin:base"',
+        1,
+    )
+    # The built-in "content" is built on "base": the deck's own copy of base
+    # stands in for it from the moment it exists.
+    _ = project.write("layouts/base.svg", marked)
+    assert project.rebuilt() == ["one"]
+    (project.root / "layouts" / "base.svg").unlink()
+    assert project.rebuilt() == ["one"]
 
 
 def test_a_missing_file_fails_like_a_full_build(project: Project) -> None:
