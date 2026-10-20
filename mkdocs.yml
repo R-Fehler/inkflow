@@ -75,6 +75,7 @@ nav:
     - Slides: authoring/slides.md
     - Markdown content: authoring/markdown.md
     - PDF figures: authoring/pdf-figures.md
+    - draw.io diagrams: authoring/diagrams.md
     - Steps: authoring/steps.md
     - Animations: authoring/animations.md
     - Camera: authoring/camera.md

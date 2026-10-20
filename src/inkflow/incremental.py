@@ -9,8 +9,8 @@ of the slide's inputs changed. One-shot commands (`build`, `export`,
 What a slide's result depends on, and how each part is watched:
 
 - **The files it read or looked for** (its SVG, layout chain, overlays,
-  Markdown, chart data, PDFs and their converted or committed pages, a style
-  file, every candidate a name was searched at):
+  Markdown, chart data, PDFs and their converted or committed pages, a
+  drawn-in diagram, a style file, every candidate a name was searched at):
   recorded while it is processed (`inkflow.deps`) and compared by stamp
   (time, size, inode; "not there" included) at the next build. A layout or an
   overlay edited is thus every slide built on it, and nothing else.

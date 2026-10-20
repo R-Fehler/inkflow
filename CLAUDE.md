@@ -41,7 +41,8 @@ src/
                                is `list[Cue]`. Media is a `_MediaBase` shared by Image +
                                Video; `Media` is the `Image | Video` union alias (not
                                callable). `Image(page=)` (a PDF's page) is kept in `src`
-                               as `#page=N`. Video adds playback fields (controls, autoplay,
+                               as `#page=N`; `Image(background=)` paints behind it
+                               (backgrounds.py). Video adds playback fields (controls, autoplay,
                                muted, loop, poster, start, end). `Chart` is the third zone
                                value kind (data file `src` or inline `data`, kind, x, y…).
                                `Slugged` mixin (kebab slug from class name) is shared by
@@ -271,6 +272,37 @@ src/
                                `data-inkflow-pdf-digest`) is used instead while the hash
                                matches (`committed_page`), so references keep naming
                                the PDF
+    drawio.py         draw.io editable SVGs (*.drawio.svg): the `<mxfile>` source in the
+                               root's `content` attribute; `source`/`normalize` store it
+                               uncompressed (inflate + unquote per page), `size`, `cells`
+                               (each cell's kind and page box), `textconv` (what `inkflow
+                               clean --stdout`, git's SVG diff driver, prints for one;
+                               `clean` never rewrites one)
+    drawio_inline.py  a draw.io picture drawn into its slide: `inkflow:drawio="inline"`
+                               or `"themed"` on the `<image>` (`DiagramMode`; none = picture)
+                               makes `process_slide` (before annotation) swap it for a
+                               nested `<svg>` with the image's box, id, transform and
+                               provenance (`data-ink-tag="image"`, `data-drawio`, class
+                               `inkflow-diagram`), every id inside prefixed and each
+                               `data-cell-id` cell named `<image id>-<cell id>` so cues
+                               target shapes (`data-cell-kind` vertex/edge/label/other
+                               from the source, `data-cell-geometry` a shape's page box;
+                               in an editor build shapes and layers get `<key>:#<cell id>`
+                               locators into the diagram file); Helvetica (draw.io's
+                               default) becomes `var(--inkflow-body-font)`; "themed" maps
+                               colours to theme tokens (draw.io's palette by name, else
+                               hue/lightness; `light-dark()` by its light half) and moves
+                               recoloured presentation attributes into style (no var()
+                               there). contract.css sets its `color-scheme` from
+                               `data-theme`. The diagram file is read through
+                               `parse_svg_file`, so it is a noted dependency
+    backgrounds.py    a background behind a picture (`Image(background=...)`,
+                               `inkflow:background` on an `<image>` or a drawn-in diagram):
+                               `background_paint` (paper = white in any mode, surface,
+                               a theme colour, #hex); a zone `<img>` gets CSS, a slide's
+                               own picture a pipeline-only `<rect>` behind it (margin
+                               `MARGIN` = 4% of its shorter side, or
+                               `inkflow:background-padding`; `pointer-events: none`)
     workdir.py        the project's `.inkflow/` (`WORK_DIR`, `work_dir` = created
                                ignoring itself in git): caches (PDF pages) and plugins'
                                files; never watched
@@ -284,7 +316,8 @@ src/
                                (clean, label2id, add, parent group, sync, layouts [--plain | --json]), color.py (colorize,
                                palette), verify.py. Submodules register on `main` by import,
                                then each plugin's `register_cli` (cli/__init__.py)
-    clean.py          SVG Inkscape metadata stripping (used by cli and pre-commit hook)
+    clean.py          SVG Inkscape metadata stripping (used by cli and pre-commit hook;
+                               the `clean` command skips draw.io files, drawio.py)
     label2id.py       `inkflow label2id`: promote each element's inkscape:label to its
                                SVG id (Inkscape convenience for Morph/animation targets).
                                Slugifies non-id labels, skips clashes and preview-layer
@@ -434,7 +467,7 @@ Non-fatal records collected during the rebuild (`inkflow.logging.collect_logs`, 
 The HTTP response includes `Cache-Control: no-store` so hard refreshes always get fresh content.
 
 **A served deck rebuilds what a change touched (`incremental.py`).**
-The watcher still rebuilds on every change of any project file, and `server.rebuild` still runs deck.py and walks every slide, but `process_deck(cache=)` takes a slide from the last build unless one of its inputs changed (`server.Kept`: a `SlideCache` per served deck; `build`, `export`, `verify` pass none and are untouched). A slide's inputs and how each is watched: the files it read or looked for, recorded by `deps.note` while it is processed and compared by stamp at the next build, "not there" included (so its layout chain and overlays, its Markdown and style file, chart data, PDFs and their converted or committed pages, each candidate of a name search: a `slides/x.svg` that now shadows the layout `x` is a change); what deck.py says of it and of the deck, compared by value (`frozen`: types count, `Inline("a")` is not the path `"a"`; a class deck.py defines is a new class on every load, so slides using one are always processed; a Markdown reveal's `type=Name` makes the slide depend on deck.py, whether the name was found or not); its id. **Not** its number or the slide count: they reach the output only as the root's `inkflow-slide-N` id (and the `@scope` naming it) and the text of `zone-slide-number`/`-total`, so the cache processes a slide with stand-in numbers and puts the real ones into the result (`_Template`), and inserting or moving a slide processes no other slide (a slide whose result shows a stand-in anywhere else is kept by its numbers instead, `_plain`). The notes file is a cache entry of its own, so typing a note processes no slide. What is deliberately outside the cache and done for every slide on every build: the asset time stamps (`server._versioned`, which is how a changed picture reaches the pages), the keys, the deck stylesheet, fonts, transitions. A slide whose build fell short for a reason that may pass (a PDF page that could not be converted) is not kept (`deps.retry`). Warnings logged while a slide (or its notes) was processed are logged again when it is kept; the one "no PDF converter" warning per build is said by `Build.finish`, and the converter is part of the deck's key, so one installed while the server runs shows the figures. Whoever adds a file read to the slide pipeline must `note` it: tests/test_incremental.py compares every incremental build with a full one and holds each slide's recorded files to what an audit hook saw Python open. `r` in the terminal (`rebuild(full=True)`) forgets what is kept; the TUI says how many slides a rebuild processed (`(N changed)`).
+The watcher still rebuilds on every change of any project file, and `server.rebuild` still runs deck.py and walks every slide, but `process_deck(cache=)` takes a slide from the last build unless one of its inputs changed (`server.Kept`: a `SlideCache` per served deck; `build`, `export`, `verify` pass none and are untouched). A slide's inputs and how each is watched: the files it read or looked for, recorded by `deps.note` while it is processed and compared by stamp at the next build, "not there" included (so its layout chain and overlays, its Markdown and style file, chart data, PDFs and their converted or committed pages, a drawn-in diagram, each candidate of a name search: a `slides/x.svg` that now shadows the layout `x` is a change); what deck.py says of it and of the deck, compared by value (`frozen`: types count, `Inline("a")` is not the path `"a"`; a class deck.py defines is a new class on every load, so slides using one are always processed; a Markdown reveal's `type=Name` makes the slide depend on deck.py, whether the name was found or not); its id. **Not** its number or the slide count: they reach the output only as the root's `inkflow-slide-N` id (and the `@scope` naming it) and the text of `zone-slide-number`/`-total`, so the cache processes a slide with stand-in numbers and puts the real ones into the result (`_Template`), and inserting or moving a slide processes no other slide (a slide whose result shows a stand-in anywhere else is kept by its numbers instead, `_plain`). The notes file is a cache entry of its own, so typing a note processes no slide. What is deliberately outside the cache and done for every slide on every build: the asset time stamps (`server._versioned`, which is how a changed picture reaches the pages), the keys, the deck stylesheet, fonts, transitions. A slide whose build fell short for a reason that may pass (a PDF page that could not be converted) is not kept (`deps.retry`). Warnings logged while a slide (or its notes) was processed are logged again when it is kept; the one "no PDF converter" warning per build is said by `Build.finish`, and the converter is part of the deck's key, so one installed while the server runs shows the figures. Whoever adds a file read to the slide pipeline must `note` it: tests/test_incremental.py compares every incremental build with a full one and holds each slide's recorded files to what an audit hook saw Python open. `r` in the terminal (`rebuild(full=True)`) forgets what is kept; the TUI says how many slides a rebuild processed (`(N changed)`).
 
 **Position sync is a dumb relay with client-side authority + modes.**
 Clients send `{"type":"nav","slideIndex","step"}` (validated + clamped server-side by `_coerce_nav_position`; a view link's are dropped, and its page starts in `follow`); the server stores the last position and rebroadcasts it as `{"type":"position",...}` to the *other* clients, and pushes it once to each newly connected client. A window that booted from a deep link (a slide named in the URL, captured by `readURL()` before `syncURL()` rewrites the bar) or reconnected asserts its own position and ignores that first push; a bare window adopts it. Each client also has a per-tab **sync mode** (`two-way`/`present`/`follow`/`solo`, `shared/types.ts`) deciding locally whether it broadcasts nav (`sends()`) and applies incoming positions (`receives()`) — the server knows nothing about modes. `s` cycles the mode; `syncmenu.ts` owns the status-bar widget, `websocket.ts` the network/state. Switching into a receiving mode sends `{"type":"sync-request"}` to catch up. Persisted in `sessionStorage`.

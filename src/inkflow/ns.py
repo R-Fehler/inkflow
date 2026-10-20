@@ -16,6 +16,14 @@ INKFLOW_SHOW_SHAPE = f"{{{INKFLOW}}}show-shape"
 """On a zone shape (``"true"``): the shape is drawn, its fill and stroke the
 box its text is in (see content.zone_shape_css), and it stays while empty.
 Without it a zone's shape is only a placeholder and never painted."""
+INKFLOW_DRAWIO = f"{{{INKFLOW}}}drawio"
+"""On the ``<image>`` of a draw.io diagram: ``inline`` or ``themed`` draws the
+diagram into the slide instead of its picture (see drawio_inline.py)."""
+INKFLOW_BACKGROUND = f"{{{INKFLOW}}}background"
+"""On a picture: what to paint behind it (see backgrounds.background_paint)."""
+INKFLOW_BACKGROUND_PADDING = f"{{{INKFLOW}}}background-padding"
+"""On a picture with a background: its margin in user units (else 4 % of the
+picture's shorter side, backgrounds.MARGIN)."""
 INKFLOW_LAYOUT_SRC = f"{{{INKFLOW}}}layout-src"
 INKFLOW_LAYOUT_HASH = f"{{{INKFLOW}}}layout-hash"
 INKFLOW_OVERLAY_SRC = f"{{{INKFLOW}}}overlay-src"
