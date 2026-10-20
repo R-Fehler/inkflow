@@ -1,5 +1,8 @@
-// Back from presenting to the visual editor, at the slide on screen. Only a
-// served deck has an editor (a static build has no server: WS_PORT is null).
+// Back from presenting to an editor, at the slide on screen. Only a server
+// with an editor says where one is: its "welcome" names the page
+// (`{"editor": "/edit"}`, from a server extension such as inkflow-editor's).
+// A static build, a bare `inkflow serve` and a view link have none, and the
+// button stays hidden.
 //
 // The editor's Present button opens this page in a window of its own; when
 // that editor tab is still there, it is moved to this slide and brought back,
@@ -7,10 +10,10 @@
 
 import { state } from "./state";
 
-let served = false;
+let editorPath: string | null = null;
 
 export function backToEditor(): void {
-    if (!served) return;
+    if (editorPath === null) return;
     const hash = `#slide=${state.slideIndex + 1}`;
     const opener = window.opener as Window | null;
     try {
@@ -18,7 +21,7 @@ export function backToEditor(): void {
             opener &&
             !opener.closed &&
             opener.location.origin === location.origin &&
-            opener.location.pathname.startsWith("/edit")
+            opener.location.pathname.startsWith(editorPath)
         ) {
             opener.location.hash = hash;
             opener.focus();
@@ -28,16 +31,19 @@ export function backToEditor(): void {
     } catch {
         // Another origin, or a window that is gone: take this tab instead.
     }
-    location.href = `/edit${hash}`;
+    location.href = `${editorPath}${hash}`;
 }
 
-export function initToEditor(wsPort: number | null): void {
+// Where the server's editor is (a same-origin path), or null for none.
+export function setEditor(path: string | null): void {
+    editorPath = path?.startsWith("/") ? path : null;
     const button = document.getElementById("btn-to-editor");
-    served = wsPort != null;
+    if (button) button.style.display = editorPath === null ? "none" : "";
+}
+
+export function initToEditor(): void {
+    const button = document.getElementById("btn-to-editor");
     if (!button) return;
-    if (!served) {
-        button.style.display = "none";
-        return;
-    }
+    button.style.display = "none"; // until the server names an editor
     button.addEventListener("click", backToEditor);
 }

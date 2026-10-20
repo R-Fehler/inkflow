@@ -1,13 +1,32 @@
 # Inkflow — codebase guide
 
+This repository holds two packages, developed side by side as a uv workspace:
+
+- **inkflow** (`src/inkflow`, `src/ts`, `src/css`, `tests/`): the core. It reads
+  a deck, builds it, presents it, exports and checks it, and serves it with
+  live reload. It knows nothing of any editor: it offers plugins
+  (`plugins.py`) and server extensions (`extensions.py`) for frontends to
+  build on, and the TypeScript client library they share (`src/ts/shared`,
+  imported as `@inkflow/shared/*`).
+- **inkflow-editor** (`inkflow-editor/`, package `inkflow_editor`): the visual
+  editor, its editing session and the commands an agent uses, as a plugin of
+  the core. It has its own guide: `inkflow-editor/CLAUDE.md`.
+
+The core must never import `inkflow_editor`: `mise run test-core` runs the
+core's tests where it is not installed at all. A change the editor needs from
+the core is a hook any frontend could use (a plugin or extension hook, a
+`ServerContext` capability, a `@inkflow/shared` module), never an editor
+special case. See "Frontends are plugins; the core never knows them" below.
+
 ## Running
 
 ```bash
 uv run inkflow serve --deck demo/deck.py   # start server at localhost:7777
-uv run inkflow edit --deck demo/deck.py    # same server, opens the visual editor at /edit
-uv run inkflow edit --deck demo/deck.py --share   # also on the LAN: editor + view links
-mise run check                      # lint + format + typecheck + test (Python and JS)
-mise run bundle                     # rebuild JS/CSS bundles from src/ts/ and src/css/
+uv run inkflow edit --deck demo/deck.py    # (inkflow-editor) the same server with the editor at /edit
+uv run inkflow serve --deck demo/deck.py --share   # also on the LAN: view (and editor) links
+mise run check                      # lint + format + typecheck + test (Python and JS, both packages)
+mise run test-core                  # the core's tests with no plugin installed
+mise run bundle                     # rebuild the JS/CSS bundles of both packages
 ```
 
 ## Git setup (one-time, per clone)
@@ -163,14 +182,50 @@ src/
                                `set_zone_params` (a marker's params changed in place;
                                auto-extracted zones get explicit markers, an unnamed
                                zone an empty one at the end), `zone_params`
-    server.py         HTTP server (the WebSocket on the same port, `/_inkflow/ws`),
-                               file watcher, build pipeline; the door (`_share`:
-                               `Access` + `People`, `allowed(role, msg)`), sharing
-                               on/off (`Listener.move`), `listening` (the one port
-                               without TUI/watcher: tests);
+    server.py         the server `inkflow serve` runs: HTTP and the WebSocket on one
+                               port (`/_inkflow/ws`), file watcher, build pipeline; the door
+                               (`_share`: `Access` + `People`, `allowed(role, msg)`: the core's
+                               messages, then each extension's `messages` by least role), sharing
+                               on/off (`Listener.move`), `share_status` (+ each extension's
+                               `share_status`/`share_op`/`share_lines`); the served deck in
+                               `_served` (its extensions, last deck, `built_hash`/`failed_hash` for
+                               `build-status`, said only after the extensions' `built`); `context`
+                               = the `ServerContext` extensions act through (send, broadcast,
+                               rebuild, `open_deck`, `shutdown`, `serve_connection`/`serve_request`
+                               for connections that came another way); `extensions_for` (the
+                               plugins'); `_save_ink` = the presenter's "Keep" when no extension
+                               handles `edit-op` (`ink.save_ink`); `listening(ui, deck, extensions)`
+                               (the one port without TUI/watcher: tests, embedding);
                                `load_deck` turns any failure in deck.py into `DeckError`
                                (`deck.py:42: NameError: …` + the line), which the CLI's
                                `_Group` prints as one error line instead of a traceback
+    extensions.py     the server-extension API (see "Frontends are plugins" below):
+                               `ServerExtension` (hooks: start/stop, open/close per deck,
+                               before_build/build in a worker thread, built/build_failed,
+                               welcome, hello/message/disconnected, http, keys, share_*;
+                               `provenance` = the editor build, `messages` = type -> least role,
+                               `serves_without_deck`), `ServerContext` (Protocol), `Build`
+                               (deck, slides as built, `served` = the pages' copies, `fresh`),
+                               `HttpRequest` (respond/send_file/refuse), `ServeConfig`, and the
+                               `State`/`ResponseWriter` types the server shares
+    plugins.py        plugins: the `inkflow.plugins` entry-point group; `Plugin`
+                               (register_cli, slide_checks, deck_checks, server_extensions,
+                               completion_spec, current_slide; all no-ops by default), `loaded()`
+                               (found once; `INKFLOW_NO_PLUGINS=1` = none), `register`/`unregister`
+                               (tests, embedding), `Issue`/`SlideCheck`/`DeckCheck`
+    provenance.py     source locators on the composed SVG (`data-ink="<source>:<child
+                               path>"`, counted on the tree as parsed from disk) and `locate`, their
+                               inverse: what `process_deck(editor=True)` stamps for any frontend that
+                               writes back (`INK_TOP`/`INK_LAYER`/`INK_LOCKED`/`INK_TAG`,
+                               `is_element`, `is_link_wrapper`)
+    workdir.py        the project's `.inkflow/` (`WORK_DIR`, `work_dir` = created
+                               ignoring itself in git): caches (PDF pages) and plugins' files;
+                               never watched
+    catalog.py        the layouts and overlays a deck offers and which slides use
+                               each (`layout_entries`: the project's copy winning, parent, `slides`
+                               on it directly, `reach` through it; `background_name`;
+                               `overlay_entries`; `slide_layouts`): `inkflow layouts`' counts and a
+                               slide-master view's list
     access.py         who may reach a server and as whom (pure): `parse_request`,
                                `Access.host_ok` (Host: loopback names, IP literals,
                                `machine_names`, `--allow-host`; DNS rebinding),
@@ -208,32 +263,6 @@ src/
                                handler hands it an upgrade request it has read
                                (`adopt`), so pages, files and the WebSocket share
                                one port
-    online/           sharing online through a relay (see "Sharing online" below):
-                               crypto.py (link/room secrets, `room_id`, HKDF, the
-                               hello/welcome handshake `hello`/`accept`/`finish`,
-                               `Session` seal/open with sequence numbers; AES-GCM
-                               from `cryptography`, the optional `online` extra,
-                               imported by name: `available`, `INSTALL_HINT`),
-                               frames.py (envelope `pack`/`unpack`, `wrap`/`unwrap`
-                               coding byte (host-only DEFLATE), `chunks`/
-                               `Reassembler` below 512 KiB frames), relay.py (the
-                               Python relay = `inkflow relay`: `Relay` rooms, host
-                               proof, caps, `Bucket` rate limits, close codes, the
-                               guest page as static files, `--dump`), host.py
-                               (`OnlineHost`: the room, reconnects, `rotate`/`stop`
-                               with `bye`; `Guest` per relay peer; `VirtualConnection`
-                               shaped as a `ServerConnection`; `_Capture` turning a
-                               routed HTTP response into `res`/`body`/`end`; `Hooks`
-                               given by server.py), config.py (`relay.json` in the
-                               user config dir, `INKFLOW_RELAY_URL`/`_TOKEN`),
-                               deploy.py (`inkflow relay deploy cloudflare`: stages
-                               cloudflare/worker.js + guest/ with a generated
-                               wrangler.toml, `npx wrangler@<pinned> deploy
-                               --secrets-file`, the URL from
-                               `WRANGLER_OUTPUT_FILE_PATH`), guest/ (the guest page:
-                               index.html, `_headers`, `_guest/boot.js|sw.js` bundled
-                               from src/ts/guest), cloudflare/worker.js (bundled from
-                               relay/cloudflare/src/worker.ts)
     handout.py        the slides with their speaker notes: `handout_body`
                                (`.h-item`s, each svg in a `.trim` for fit.js),
                                `handout_page` (layouts notes / compact, paper a4 /
@@ -286,9 +315,8 @@ src/
                                (`sheet_layout`/`sheet_pages`/`sheet_html`: ≤1600 px wide,
                                ≤16 slides per image) is one more page screenshot of the
                                slide shots, each taken at its cell's size;
-                               `render_comparison` (`inkflow compare --sheet`) shoots both
-                               decks' differing slides in the same browser, each with its
-                               own deck's page (`_page_template`), onto pair sheets
+                               `page_template`/`slide_page` (a slide on a page of its
+                               own deck, what inkflow-editor's compare sheet reuses)
                                `--boxes`: `window.inkflowBoxes()` (src/ts/render/boxes.ts)
                                read back as `SlideBoxes` of `ElementBox` (every element
                                with an id, zones with content extent + `free` height,
@@ -300,7 +328,6 @@ src/
                                `window.inkflowContrast(shown, hidden)` returns `contrast`
                                findings (`ratio`/`needs`/`color`/`background`; below 3:1
                                a problem, 3–4.5:1 for small text a hint)
-                               (`pair_sheet_layout`/`pair_sheet_html`, boxes outlined)
     cdp.py            minimal DevTools client over `websockets`: `Browser.launch`
                                (--remote-debugging-port=0, port read from the profile's
                                DevToolsActivePort, socket opened directly so no proxy
@@ -312,350 +339,21 @@ src/
                                absolute path and a canonical ref both ways; `AssetSource`
                                resolves the refs written in one file; `svg_reader` is the
                                composition reader that canonicalises each SVG as it is read
-    editor/           visual editor backend (see "The visual editor" below):
-                               provenance.py (data-ink locators stamped on the composed
-                               SVG + `locate`), svgops.py (write-back ops on one SVG:
-                               attrs/style/paint/text/insert/delete/duplicate/order/group;
-                               `OpResult.duplicates`: per duplicate op, every id copied ->
-                               its copy's),
-                               deckedit.py (libcst edits of deck.py: slide list, Slide(...)
-                               args, animations=[...], zones={...}, imports; keeps comments;
-                               the slide list is read as `Group`s (unsectioned + one per
-                               Section) and every list edit is `restructure(groups)`: pure
-                               `move_in_groups`/`add_section`/`remove_section`/
-                               `move_section`, slides reindented to their new list; a
-                               group may also carry a `Foreign` slide: one of another
-                               version of deck.py with its comments, `slide_items`),
-                               codegen.py (DSL object -> shortest constructor source; field
-                               schemas for the property panels), session.py (one request ->
-                               one undoable whole-file step; EditorSession/History; the
-                               `fonts` action (report / bundle / set) and the `pack`
-                               action (check / plan / apply, `gitPaths` for the commit);
-                               `_Txn.copy` = a file copied in without its bytes;
-                               the `svg` action with `zoneSlide` (the slide's own SVG):
-                               deleting an element takes the content of every `zone-*`
-                               inside it (Markdown section, zones= entry, Inline) and the
-                               slide's `animations=[...]` of it and everything inside it
-                               (`_drop_cues`; a zone's `-series-`/`-slice-`, a drawn-in
-                               diagram's `<id>-` shapes), duplicating copies every zone's
-                               content under its copy's id; `zone-format` (a zone's
-                               `size`/`fit` on one slide: its marker's params or its
-                               TextBox's fields, a zones= string moved to Markdown first;
-                               a zone shape's own `--inkflow-font-scale`/`--inkflow-fit`
-                               are the `svg` action's `style` op); a video
-                               inserted anywhere is a new zone-video rect + a Video(...)
-                               zones= entry in one step; the `ink` action adds / erases /
-                               clears strokes, owner or share-link editor, and slide-list edits move a
-                               slide's ink file when its id changes: `_follow_ink`; the
-                               `slide` action's ops: new (optional `md` text) / delete
-                               (`files`: also what the deck reaches only through it,
-                               `slide_drop_files`) / duplicate / move (`slides` for several, `section`
-                               target) / hide / title / id (ink and
-                               `slide:` links follow) / detach / layout / font-size /
-                               transition / section-add / -rename / -remove / -move
-                               (`follow`: deck index whose new place comes back as
-                               `select`); a request's `agent` text labels its step
-                               "Agent: …" and `deckHash` must match the build; each
-                               result lists `changes` and the step's `seq`, which
-                               `undo` may name to take back only that step;
-                               `delete-files` and `slide` (`_DELETES`) return `deleted`
-                               (path, git state, size) + `written` + `repo`, and with
-                               `dryRun` only that, nothing written; the
-                               `rename` action (`from`/`to`, or `slide`/`stem`, `dryRun`
-                               returns the plan) records file moves as `_Move`s without
-                               their bytes and removes the folders a step empties),
-                               remote.py (one request from the CLI, any session action:
-                               through the server serving the deck over the WebSocket,
-                               waiting on `build-status` before and after, else an
-                               offline EditorSession),
-                               shapes.py (`inkflow shape`'s commands, run by the session's
-                               `shape` action (`EditorSession._shapes`): each command runs
-                               the editor's own actions (`svg` ops, `insert-textbox`,
-                               `shape-text` (`zone`: a requested zone name),
-                               `insert-chart` (`src`: an existing data file), `zone-text`,
-                               `slide` detach) as requests of their own under one
-                               `coalesce` key, so a batch is one History step that sees
-                               its own earlier writes, taken back whole when a command is
-                               refused; deck.py changed meanwhile is reloaded as
-                               `_inkflow_shape_deck`, `shape_deck_hash` passing the build
-                               check; a command object's first key names it),
-                               scene.py (the slide composed from source as the canvas
-                               shows it, own file key 0, + canvas.ts's connector logic:
-                               corners/sites, `connector_path`, `is_stale`,
-                               `with_connectors`, `move_ops`/`movingTogether`),
-                               bbox.py (getBBox/getScreenCTM on lxml: transforms, nested
-                               svg viewport+viewBox+preserveAspectRatio, zones as
-                               `content.zone_box`, path tight bounds, `<use>`; `<text>`
-                               estimated, so arrows never attach to plain text),
-                               routing.py + geometry.py (ports of connectors.ts and
-                               geom.ts with JS rounding/number printing; held to them by
-                               tests/data/connector_routes.json, written from the TS by
-                               make_connector_routes.mjs and checked by both
-                               connectors.fixture.test.ts and tests/test_routing.py),
-                               model.py (build_model: per-slide sources, zones, cues for the
-                               editor; `ModelCache` keeps what it read of each slide's
-                               files (`_slide_facts`) between a server's builds, the
-                               positions and `usedBy` are put in each time; deck.py's
-                               animation counts read once per content), drawioedit.py (a drawn-in diagram's shapes edited
-                               on the slide: geometry/label/style/delete in its source,
-                               the picture patched until draw.io redraws it), context.py (.inkflow/context.json for agents),
-                               outline.py (`inkflow outline`: `## <section>` lines, `STARRED` and `--starred`, per-slide files, layout chain,
-                               zones with their origin, text, size and fit, animations and clicks, read
-                               off `build_model` + the editor build; `--slide N` adds zone
-                               boxes, canvas size and the slide SVG's named ids; with
-                               `--boxes` also the rendered boxes of `render --boxes`),
-                               transfer.py (clipboard bundles: copy slides/objects with their
-                               files, paste into any project; pasted Slide(...) must pass the
-                               `check_slide_code` allowlist, never arbitrary Python),
-                               chartedit.py (the chart actions' checks: settings and grid
-                               tables from the browser, `chart_json` for the model, the next
-                               `data/chart-N.csv`),
-                               compare.py (pure: `normalize_svg`, `pair_slides`,
-                               `element_changes`, `compare_decks` over `DeckFacts`, the
-                               CLI's text/JSON), comparesrc.py (compare sides: `Source`,
-                               commits materialized into `.inkflow/cache/compare/<sha>/`,
-                               worktrees, `build_side` with an injected loader,
-                               `deck_facts`, `slide_paths` (the files a slide is made of,
-                               by role), `shadow_css`, `display_svg`), comparehub.py
-                               (the server's compare views: shared sides, live rebuilds,
-                               folder watchers, `/_cmp/<token>/` assets, `take_request`,
-                               `compare-sources`; see "The compare view" below),
-                               filerename.py (rename/move a project file with every
-                               reference following: `plan_rename` (no writes) resolves
-                               each reference against the file it is written in (SVG
-                               href/src/poster, CSS url(), inkflow:parent and preview-layer
-                               markers via `_Chains`, Markdown images/links/chart `data:`,
-                               deck.py literals via libcst) and re-expresses it in the same
-                               style (bare layout name, `local:`, path); ids inferred from
-                               renamed files follow (ink moved, `slide:` links rewritten);
-                               `plan_slide_rename` = a slide's own files to one stem;
-                               `reference_counts` (the rename's counts), `project_files`;
-                               `file_uses` (the Files view): reachability from deck.py's
-                               objects (+ any deck.py string naming a file) through
-                               `_reference_graph` (preview-layer markers reach, never
-                               count), states used/unused/orphan (only unused files name
-                               it, `by`)/template (layouts/, overlays/ nothing uses);
-                               `slide_drop_files` = reached before, not after a delete
-                               (no layouts/overlays, inferred ink left to `_follow_ink`);
-                               `plan_copy_in` = every file named outside the deck or
-                               through a symlink copied in (assets/, layouts/,
-                               overlays/, slides/) and its references re-expressed
-                               relative by the same `_World` (`relative=True`), for
-                               `inkflow pack`),
-                               previews.py (layout gallery renders; like the model's
-                               layout list, `layout.layouts_for`: built-in layouts
-                               in the deck's shape, the project's own always; zones
-                               show a template's hints; `roots` adds `base`),
-                               master.py (the slide master: `layout_entries` (every
-                               layout, the project's copy winning, parent, `slides`
-                               on it directly, `reach` through it), `background_name`,
-                               `overlay_entries`, `master_tree` (the editor's list),
-                               `copy_bytes` (a theme file as the deck's copy: only
-                               root attributes change, so locators hold; parent as
-                               `builtin:`/`theme:`), `template_bytes` (a slide as a
-                               layout: preview layers dropped, refs rebased, zones
-                               empty, `<inkflow:hint zone>` prompts, pictures to
-                               `zone-picture` rects), `overlay_bytes`, `master_slide`
-                               (the one-slide composition `master-render` draws);
-                               the session's `master` action (copy / revert / save /
-                               rename / delete / new-overlay / add-zone / previews),
-                               `master-tree`, `master-render`, and `copyLayout` on any
-                               request with a `file`: `_copy_on_write` makes the copy
-                               in the same step and points the request at it;
-                               copy/revert/delete/new-overlay set `_previews`, so
-                               `_refresh_previews` rewrites the deck's stale Inkscape
-                               previews into that step after the commit; `attach`
-                               joins the author's last step (leaving the master)),
-                               placeholders.py (a layout's or overlay's zones as the
-                               master edits them: `target` (the file, its copy's
-                               theme original as an alias, the slides that get it,
-                               child layouts), `placeholders` (kind from the name:
-                               `is_media_zone`; prompt, nearest wins; box; `filled`),
-                               `taken_ids`, `zone_name`/`name_problem`, `set_prompt`,
-                               `plan_rename` / `plan_remove` = a `Plan` of writes made
-                               without writing: the zone, prompts, `<style>`
-                               `#zone-old`, arrows, `inkflow:default-zone` (set when
-                               `content` is renamed), and per slide `zones.rename_zone`
-                               on its Markdown (auto title/content get markers),
-                               `rename_zone_key` / animation targets in deck.py;
-                               refused when a slide already names the new zone or
-                               shares its Markdown with a slide off the layout; the
-                               session's `master` ops add-zone (`prompt`, `exact`, a
-                               `layout`/`overlay` name, a default box), zone-make
-                               (a drawn shape, `inkflow:show-shape`), zone-rename
-                               (`dryRun` writes nothing, not even the copy),
-                               zone-prompt, zone-remove (`dropContent`), and the
-                               read `master-placeholders`),
-                               themeedit.py (Theme
-                               dialog: token overrides as one marked block in the project's
-                               styles.css, values validated, never raw CSS; the session's
-                               `theme-set` also takes `theme` = a `THEMES` name, written
-                               as `Deck(theme=Paper())`), findreplace.py
-                               (find/replace over SVG text, Markdown and deck.py author-text
-                               literals only; `deckSlide` keeps deck.py to one slide's
-                               text, the dialog's "This slide"), gitops.py (the Git menu: status, commit,
-                               push/pull, discard, undo commit, branches, deck-scoped log,
-                               view/revert/restore a commit, `lfs_status` = media
-                               no LFS rule covers or committed as full copies, `lfs_track`
-                               / `lfs_off`; `file_states` = per file committed/modified/
-                               untracked/ignored/no-repo (one `status --ignored`);
-                               `commit_with` (paths + blobs given as text, from an index
-                               of its own), `diff_text`; shells out to git with
-                               GIT_TERMINAL_PROMPT=0),
-                               slidegit.py (each slide's changes since the last commit:
-                               `changes` = per slide `new`/`modified`/`shared` from the
-                               git status of its files (`slide_paths` + its style file +
-                               `deck_inputs` = styles.css, scripts.js and their url()s,
-                               embedded project fonts, project .py files in
-                               sys.modules, a theme folder inside the deck; layouts,
-                               overlays, deck inputs and files several slides use are
-                               shared) and its `Slide(...)` entry against HEAD's
-                               deck.py (`entries`, `match_entries`: same code, then the
-                               same id / md / src with no other name disagreeing);
-                               `slide_diff` (entry diff + git diff of its files);
-                               `commit_plan`/`commit_slides`: a committed slide is
-                               complete (a fresh clone shows it as it looks now): every
-                               changed file the chosen slides are made of, shared and
-                               deck-wide included (`touched` = other slides that change
-                               with them, `missing` = ignored or outside-the-repo files
-                               a clone lacks), + `partial_deck` = the working deck.py
-                               with every other slide's entry as committed (`Foreign`,
-                               comments kept), new ones left out, removed ones put back
-                               unless `with_removed`; extra paths = ticked deleted
-                               leftovers (any changed file is accepted);
-                               `discard_plan`/`discard_writes` = the opposite (own
-                               files from `gitops.head_bytes`, deck.py =
-                               `partial_deck(others, with_removed=True)`, shared
-                               files only when ticked); `slide_log` = commits that
-                               changed its own files or its entry (each deck.py
-                               blob's entries matched to the working entry); the
-                               session's git ops `status` + `slides`, `slide-diff`,
-                               `slide-log`, `commit-slides` and `discard-slides`
-                               (`dryRun` = the plan; writes local only; a discard
-                               is one History step), read off
-                               `EditorSession.live` = the server's last editor
-                               build),
-                               problems.py (each slide's problems for the editor's
-                               marks: `Problems.verify` = verify_slide for the
-                               entries whose key (salted with deck.py's hash) is new,
-                               stale-preview warnings dropped; `measure` = the
-                               layout check (`Exporters.layout` =
-                               `render.check_built`, handed in: render builds on the
-                               server) for slides whose SVG digest (+ contrast) is
-                               new, once `layout_on`; `json` = per deck index +
-                               layout state; the server runs it after each build
-                               (`_check_problems`) and on `problems-check`, sends
-                               `{"type":"problems"}`),
-                               comments.py (review comments: threads by slide id in
-                               `.inkflow/comments.json` like stars: add (x/y or
-                               `target`) / reply / resolve / delete (its starter
-                               or the owner), `follow` id changes with the stars,
-                               `visible`; the session's `comment` action (no History
-                               step), the model's `comments`, the server's
-                               `{"type":"comments"}` to every editor),
-                               worktrees.py (the session's `worktree` action and
-                               `inkflow worktree`: `list_worktrees` = every worktree with
-                               the deck.py at the same relative path, ahead/behind the
-                               deck's branch, dirty, `main`; `add` = branch `deck/<name>`
-                               in `<main worktree>/.inkflow/worktrees/<name>`, ignored by
-                               git and unwatched, with a `note` when uncommitted deck
-                               changes stay behind; `merge` = ff or a "Merge X into Y"
-                               commit, refused while the deck is dirty, a conflict
-                               aborted and named; `remove` refuses dirty/unmerged unless
-                               forced, deletes only merged (or forced) `deck/` branches),
-                               projects.py (new deck in one of seven
-                               looks, each with `preview` colours for its thumbnail,
-                               folder browsing, recent decks, `serve_elsewhere`: the
-                               session's `open-deck-tab` (local only, unlocked) = the
-                               deck's own server, started hidden like the launcher's
-                               (`launcher.hidden_python`, `--no-open --quit-when-idle`)
-                               when none has it, its `owner_url`), places.py (favourite
-                               folders + the default deck location, user config dir),
-                               stars.py (starred slides, the author's marks:
-                               `.inkflow/stars.json` = `{"starred": [slide ids]}`,
-                               not committed, unwatched, no History step; the
-                               session's `star` action (`slides`: deck indices,
-                               `on`), `follow` carries them through a step's id
-                               changes (`_Step.ids`: `_id_changes` for the `slide`
-                               ops, `RenamePlan.ids`), back on undo; a new slide's id
-                               starts without one; the model lists them as `stars`,
-                               the server tells editors `{"type":"stars"}`),
-                               nativedialog.py (the OS folder/file chooser shown by the
-                               server: zenity/kdialog, osascript, PowerShell; `system-pick`,
-                               local only), media.py (files of any
-                               size: by path (`import_path`, local only) or in chunks
-                               (`Uploads`), staged in .inkflow/incoming/ and moved into
-                               assets/ in one rename; both return an `Arrival`, which
-                               says `convert=True` for a video browsers cannot play but
-                               ffmpeg can read (by path: converted from where it is;
-                               uploaded: kept in incoming/<id>/ until converted, then
-                               `discard_source`); `probe` (ffprobe), `issues`, `plan`
-                               (ffmpeg MP4/WebM command + rough size, or `fmt="copy"`:
-                               remux via `remux_target`, sound re-encoded only if it
-                               does not fit), `Conversions` (background ffmpeg jobs,
-                               also staged))
     cli/              CLI package (entry point inkflow.cli:main). _common.py holds the
-                               `main` group, shared options, and the Project/Target helpers;
+                               `main` group, shared options, the Project/Target helpers and
+                               `DeckSlides`/`slide_number` (SLIDE = presentation number or id);
                                commands are grouped by area: project.py (init, setup-git,
-                               setup-pages, completion), present.py (serve, edit, build, export), agent.py
-                               (outline, context, render, goto, select, setup-claude),
-                               compare.py (`inkflow compare [LEFT] RIGHT`),
-                               comments.py (`inkflow comments [--all] [--json]`),
-                               master.py
-                               (`inkflow layout` copy/revert/save/rename/delete,
-                               `layout placeholder` add/rename/prompt/remove and
-                               `layout placeholders [--json]`, and
-                               `inkflow overlay` new/copy/revert: the session's
-                               `master` action through editor/remote.py), slides.py
-                               (the `slide` group: add, delete, duplicate, move, hide, show,
-                               star, unstar, rename, title, and `slide section`
-                               add/rename/move/remove;
-                               SLIDE = presentation number or id, SECTION = name or
-                               1-based position; runs the
-                               session's `slide` action via editor/remote.py, so with an
-                               editor open it is an undoable "Agent: …" step there),
-                               shapes.py (the `shape` group over editor/shapes.py: add,
-                               connect, sites, reroute, move, resize, align, distribute,
-                               style, text, delete, duplicate, group, ungroup, order,
-                               rename, lock/unlock, hide/show, link, batch, list; `-s`
-                               defaults to the editor's slide in a fresh context.json),
-                               _edits.py (`DeckSlides`, `apply_edit`: what slide, shape,
-                               text and anim share),
-                               text.py (`find`/`replace`: the session's `find`
-                               and `replace` actions over the files `build_model` lists
-                               per slide, as the Find dialog sends them; `-s` sends
-                               `deckSlide`, deck.py text of that Slide(...) only),
-                               anim.py (the `anim` group: `list` = the slide built alone
-                               (hidden ones as if shown), Markdown reveals read off its
-                               `inkflow-step-*` data-cues and code highlight stages, then
-                               `resolve_steps(animations, reveal max)`; add/set/move/
-                               remove send the session's `anim` action (Animation panel
-                               ops; `remove` takes `indices` for several in one step),
-                               types from inkflow.animations + the deck module, targets
-                               from the built slide's ids, nearest names on a miss),
-                               fonts.py (`inkflow fonts [--json]` = the fontreport
-                               table; `fonts bundle`/`fonts set` send the session's
-                               `fonts` action, `inkflow pack [--zip] [-n]
-                               [--with-pdf-pages]` its `pack` action, all through
-                               editor/remote.py, then zips locally),
-                               files.py (`inkflow mv OLD NEW [-n]`: the session's
-                               `rename` action, through editor/remote.py; slides.py adds
-                               `slide rename-files`; `inkflow files [--unused] [--json]`
-                               and `files clean [-n] [--templates]` = `delete-files`;
-                               `_edits.deletion_warnings` = the dialog's git words),
-                               authoring.py
-                               (clean, label2id, add, parent group, sync, layouts
-                               [--plain | --json]), color.py (colorize,
-                               palette), verify.py (each line: the slide's number
-                               and id; a closing count, `verify_summary`), worktree.py (the `worktree` group: add,
-                               list, merge, remove over editor/worktrees.py; `add` prints
-                               `path:`/`deck:` on stdout). Submodules register on `main` by import.
-    launcher.py       `inkflow setup-desktop`: an application-menu launcher (Linux
-                               .desktop + icon, macOS ~/Applications/Inkflow.app, Windows
-                               Start menu .lnk) running `<this python> -m inkflow edit
-                               --start --quit-when-idle=60` hidden (pythonw on Windows;
-                               `__main__.py` gives a console-less process devnull
-                               streams), or in a terminal with `--terminal`
+                               setup-pages, completion: `carapace_spec` merges each plugin's
+                               `completion_spec` into completions/inkflow.yaml), present.py (serve,
+                               build, export; `share_options`/`sharing`/`port_for`/`already_served`
+                               for any command starting a server), render.py (`inkflow render`;
+                               `current_slide` asks the plugins), fonts.py (`inkflow fonts [--json]`
+                               = the fontreport table; plugins add subcommands: `group_deck`),
+                               authoring.py (clean, label2id, add, parent group, sync, layouts
+                               [--plain | --json]), color.py (colorize, palette), verify.py (each
+                               line: the slide's number and id; a closing count, `verify_summary`;
+                               `--no-deck-checks`). Submodules register on `main` by import; then
+                               `plugins.loaded()` each `register_cli(main)`
     instances.py      one server per deck: each server records {pid, host, port,
                                ws_port (= port unless `--ws-port`), deck, tls,
                                owner_token (SSH mode)} in the user state dir (dir 0700,
@@ -767,18 +465,16 @@ src/
                                files, or a variable font, to fonts/<family>/ with
                                licences + fonts/README.md table, warnings never
                                refusals); `token_value` (what `fonts set` writes)
-    pack.py           `inkflow pack`: `plan_pack` = fonts bundle + `plan_copy_in` +
-                               `plan_pyproject` (pin inkflow and a pip-installed theme,
-                               nearest pyproject.toml or a new one) + uv.lock
-                               (`run_uv_lock`, patched out in tests by conftest) +
-                               `plan_attributes` (LF rules one per pattern, SVG diff
-                               line, LFS block or missing font rules, lfs-off kept) +
-                               committed PDF pages; `Item`s (key, message,
-                               consequence, fixable) are what `verify_portable`, the
-                               commit question and the CLI report read; `make_zip`
-                               (git ls-files or .gitignore, LFS smudged);
-                               `ensure_text_rules`/`bundle_fonts_now`/`lock_new_deck`
-                               for `init` and the editor's new decks
+    pack.py           the building blocks of a portable deck: `Item`s (key, message,
+                               consequence, fixable), `plan_pyproject` (pin inkflow and a
+                               pip-installed theme, nearest pyproject.toml or a new one), uv.lock
+                               (`run_uv_lock`, patched out in tests by conftest), `plan_attributes`
+                               (LF rules one per pattern, SVG diff line, LFS block or missing font
+                               rules, lfs-off kept), `make_zip` (git ls-files or .gitignore, LFS
+                               smudged), `show_path`; `ensure_text_rules`/`bundle_fonts_now`/
+                               `lock_new_deck` for `init --self-contained` and new decks.
+                               inkflow-editor's `pack.plan_pack` puts them together with its copy-in
+                               of outside files (`inkflow pack`, its verify lines)
     init.py           project scaffolding (inkflow init): copies templates/ into
                                slides/ + notes/, writes a 3-slide deck.py and a bare
                                pyproject.toml pinning inkflow (`~=` compatible release);
@@ -818,22 +514,19 @@ src/
                                compose_with_ancestors, compose_overlays,
                                duplicate_zone_ids, is_full_canvas_fill)
     svgio.py          SVG parse/serialize primitives: one hardened parser, SvgElement alias
-    verify.py         slide authoring checks (inkflow verify; arrows whose shapes moved: editor/scene.py);
-                               `verify_portable` = the deck-wide "deck" lines from
-                               pack's items (machine/missing/generic fonts, outside
-                               files, web pictures, pyproject, uv.lock, eol rules;
-                               `--no-portable`); `render --check` does not repeat them
+    verify.py         slide authoring checks (inkflow verify); every plugin's
+                               `slide_checks` run after the core's on each slide, `verify_deck` =
+                               the plugins' `deck_checks` (inkflow-editor: arrows whose shapes
+                               moved, what ties the deck to this machine); `render --check` does
+                               not repeat them
     ns.py             XML namespace constants
     tui.py            terminal UI (Rich)
     presenter.html    shell template — inlined with CSS/JS at serve time
-    editor.html       visual editor shell, served at /edit (editor bundle + deck styles)
     render.html       single-slide page `inkflow render` measures and screenshots
-    claude/SKILL.md   the inkflow skill `inkflow setup-claude` installs into a project
     pdf.html          PDF export template
     bundles/          pre-built JS/CSS output (committed; no Node needed at install time)
       presenter.js    navigation, transitions, WebSocket, presenter panel
       presenter.css   all presenter styles including the sidebar panel
-      editor.js/.css  the visual editor (src/ts/editor, src/css/editor)
       render.js       single-slide renderer + layout measurement (src/ts/render)
       fit.js          shrink-to-fit for the PDF export page (src/ts/fit, pdf.html)
     theme/            built-in theme: layouts/*.svg (the 16:9 ones, and poster-base/
@@ -906,166 +599,9 @@ src/
                       hidden in a static build), ink.ts (ink mode: strokes held per
                       slide in inkstore.ts, mounted into the slide's <svg> through
                       slidehooks.ts, relayed as `ink` messages, saved with "Keep"
-                      through the session's `ink` edit-op), and deck-url.ts
+                      as an `edit-op` `ink`), and deck-url.ts
                       (pure position<->fragment codec behind syncURL/readURL; the
                       only module reading location.pathname/search/hash)
-    editor/           (editing together: collab.ts = presence (avatars, slide
-                      dots, others' selections via `hooks.drawPeers`, the name
-                      dialog), share.ts = the owner's Share… dialog (links, QR
-                      via qrcode-generator, New links, Disconnect; in SSH mode
-                      "Turn on links", localhost links without QR),
-                      sshdialog.ts = its "Share via SSH" view (not SSH mode: move
-                      the deck to a server, steps + Next time; SSH mode: the
-                      collaborator's tunnel + link message per role) over
-                      sshtext.ts (pure + tested: `shellQuote`, commands, messages),
-                      conflict.ts = the box keeping typing a stale write
-                      refused; shared/identity.ts = name + private key in
-                      localStorage, shared/wsurl.ts = `socketUrl(location)` and
-                      `openSocket()`: the relay channel when the page runs in
-                      the guest page's frame; share.ts's Online section, its
-                      words in sharetext.ts)
-                      visual editor: canvas.ts (render + fit, the "Doesn't fit" badge, hit-testing, handles, drag ->
-                      attribute plans), geom.ts (pure matrices + move/resize/rotate plans),
-                      snap.ts (smart guides), textedit.ts, insert.ts (tools, images,
-                      paste), sorter.ts (slide list rows + the drag model shared
-                      with grid.ts; `Thumbs` draws a thumbnail when it nears the
-                      part of its list on screen and empties it when it leaves
-                      (IntersectionObserver on the scroller); `renderSorter`
-                      redraws only the rows whose picture changed and just moves
-                      the marks when none did), sections.ts (pure: rows, drop targets, move
-                      requests), sectionui.ts (section headers, collapse state in
-                      localStorage, section menu, rename, section-* edits), props.ts (its Text size section: A−/A+, a typed size, Shrink text to fit, Make box taller), notes.ts (the speaker notes panel: Write = the Markdown, saved as typed; Preview = the built `SlideData.notes` HTML, `slide:` links followed; its top edge `#notes-resize` drags the panel's height (`--notes-h` on `#workspace`); height and view kept in localStorage; pure height maths in notestext.ts, tested), toolbar.ts (shortcuts),
-                      panels.ts (the slide list, notes and properties each
-                      hidden and shown: `body.hide-left|bottom|right` set
-                      `--sorter-w` / `--notes-row` / `--props-w` on
-                      `#workspace` to 0 (css/editor/panels.css), a `.panel-tab`
-                      on each edge of the canvas and the keys 1 2 3, kept in
-                      localStorage; pure part in panelstext.ts, tested),
-                      stars.ts (starred slides: `S`, the ☆ on a slide's row
-                      and grid tile, the slide panel's Starred, the grid's
-                      "Starred only (N)" filter; `ed.model.stars` + the `stars`
-                      message; pure part in starstext.ts, tested),
-                      context.ts (agent context + goto/select), net.ts (edit-op requests),
-                      animpreview.ts (▶ Play in the Animation order list and an
-                      animation's panel: shared/step.ts runs played on the canvas
-                      click by click, in preview mode; Esc/a click/a re-render
-                      stops it), animsteps.ts (`cueSteps`: each listed
-                      animation's click, read off the built slide's data-cues),
-                      clipboard.ts (system-clipboard copy/paste of slides and objects),
-                      richtext.ts (zone HTML <-> Markdown for in-place rich editing; throws
-                      Unsupported rather than drop content), crop.ts, objects.ts (Objects
-                      tab: hide/lock), gallery.ts, grid.ts (grid view of all slides;
-                      shares sorter.ts's Thumbs cache class and slide menu), theme.ts
-                      (its Fonts section: the session's `fonts` report colour-coded,
-                      Bundle fonts into the deck with the licence warnings in a
-                      confirm; font fields send `fonts` op `set`),
-                      find.ts, exportdlg.ts, openwith.ts ("Open ▾" in other programs),
-                      decks.ts ("deck ▾": new/open/recent decks, start page;
-                      `openDeckInTab`: ⧉ / Ctrl+click on a recent deck, "Open in a
-                      new tab" in Open deck…, the tab opened at the click and sent
-                      to the `open-deck-tab` result's URL),
-                      folderpicker.ts (the folder picker those and the video picker
-                      share: Tab completion, type-to-filter, keyboard list, places,
-                      Browse… = system dialog; its pure path maths in pathtext.ts),
-                      rename.ts ("Rename…" beside a file's Open ▾, "Rename files…"
-                      for a slide, the deck menu's "Files…" view: a dialog that
-                      previews the session's `rename` dry run as the name is
-                      typed; path maths in pathtext.ts; the Files view's states,
-                      git badges, Pick all unused, Delete…), deletedlg.ts (the
-                      delete-from-disk dialog: a `dryRun`'s `deleted` files with
-                      git badges and warnings; slide deletes' "Also delete its
-                      files from disk") over deletetext.ts (pure words; tested),
-                      master.ts (the slide master: "Slide master" in the
-                      toolbar; its list replaces the sorter (`#master`), each
-                      entry drawn by the session's `master-render` into
-                      `ed.master`, which `currentSlide()`/`currentRendered()`
-                      return, so the canvas, insert tools and panels work
-                      unchanged; only `ed.master.path`'s objects select, the
-                      others get `.master-context`; a theme file's source gets
-                      `copyTo` and net.ts adds `copyLayout` to requests naming
-                      it, then follows `copied`; Save as layout…, New overlay,
-                      placeholders, rename/delete/revert dialogs; the props
-                      panel's `masterPanel`) over mastertree.ts (pure: the
-                      layout tree under the background, badges, usage words,
-                      `copyTarget`; tested); placeholders.ts (the add / make
-                      placeholder dialog, the panel's Placeholder section: name
-                      with a `zone-rename` dry run as it is typed, prompt,
-                      Remove; `ed.master.placeholders` from
-                      `master-placeholders`) over placeholdertext.ts (pure: the
-                      server's name rules, panel words; tested),
-                      git.ts (Git menu; its Worktrees section: rows with
-                      Compare = `inkflow:compare` CustomEvent {kind: "path",
-                      deck, label} for the compare view, a dialog with what to
-                      tell the agent (worktreetext.ts, pure + tested), Merge,
-                      Remove with a force retry, New worktree for an agent…;
-                      "Published at <url>" + Publish… → publish.ts: host,
-                      release, README link, files to write, then commit + next
-                      steps; its pure parts in publishtext.ts, tested; Pack deck…
-                      and Commit's pack question → pack.ts: `pack` op `check`
-                      first, "Pack and commit" (focused) = op `apply` then commit
-                      the ticked paths + its `gitPaths` in the same commit,
-                      "Commit without packing (not recommended)"; its words in
-                      packtext.ts, tested),
-                      canvasmenu.ts (right-click menu on the canvas; text fields and
-                      Shift+right-click keep the browser's), videopreview.ts (canvas
-                      videos lose controls + pointer events so they select and drag;
-                      "Play preview" plays one in place; the presenter is unaffected),
-                      videocheck.ts (Video check after insert: browser decode test +
-                      ffprobe issues; Convert dialog with remux/presets/quality/
-                      estimate; `convertForInsert` makes it mandatory for formats
-                      only ffmpeg reads),
-                      drawioshapes.ts (a drawn-in diagram's shapes for the
-                      Shapes/Animate list),
-                      pdfpages.ts (a PDF figure's page: `choosePage` dialog of
-                      thumbnails from the `pdf-pages`/`pdf-page` session actions;
-                      `sourceRef` = `data-inkflow-pdf` or the href, what the panel,
-                      Open ▾ and copy write back),
-                      drawio.ts (draw.io embed mode in a full-screen iframe, JSON
-                      postMessage protocol checked by source + origin: configure
-                      → load → save → export xmlsvg → `drawio-save`; a new diagram's
-                      picture is placed on first save via insert.insertDiagramImage),
-                      stylecopy.ts (format painter: Copy/Paste style, Ctrl+Alt+C/V;
-                      theme colours go through the server's `paint` op),
-                      dialog.ts (the one modal), connectors.ts (connection sites
-                      and straight/elbow/curved routes, pure + tested),
-                      chart.ts (the chart dialog: data grid, settings, server-drawn
-                      preview; insert-chart / chart-save-data) over chartgrid.ts
-                      (pure: TSV paste, grid edits, series settings; tested),
-                      ink.ts (the pen tool: one session `ink` step per stroke /
-                      erase / clear), touchzoom.ts (the canvas's `GesturePad`:
-                      pinch / Ctrl+wheel -> canvas.zoomAbout, one finger
-                      deferred), compare.ts (the compare view: paired list,
-                      side by side / slider / difference, outlines, notes diff,
-                      picker, Take this slide, Merge branch; `openCompare(…,
-                      {focus})` starts on a right-hand slide, `focusRow`) over
-                      comparelib.ts (pure: rows, jumps, badges, word diff,
-                      take/merge rules; tested), slidegit.ts (each slide's
-                      U/M/• mark on its list row and grid tile, from the
-                      `slides` git.ts asks for with every git status and after
-                      every git op (`setSlideChanges`, event `slide-git`); the
-                      slide menu's Compare with the last commit, Show git diff
-                      and Commit this slide / N changed slides…; the
-                      commit-slides, discard and slide history dialogs,
-                      `jumpToChange` (Alt+F5), `isMarked` for the grid's
-                      "Changed only") over slidegittext.ts (pure words;
-                      tested), problems.ts (the ⚠ marks, the toolbar's
-                      `#btn-problems`, the Problems list with the layout
-                      check and its contrast setting: `problems-check`) over
-                      problemstext.ts (pure; tested), comments.ts (Shift+C,
-                      pins via `hooks.drawComments`, the 💬 marks, a slide's
-                      threads dialog) over commentstext.ts (pure; tested),
-                      keys.ts (the shortcuts on the page: `commandFor`/
-                      `matches`/`keyLabel` over the person's own keys in
-                      localStorage, `data-keys` titles retitled, the Keyboard
-                      shortcuts dialog, the toolbar's ? Help menu
-                      `#btn-help`; toolbar.ts's `COMMANDS` run them) over
-                      keystext.ts (pure: `SHORTCUTS` with defaults, fixed
-                      ones only shown, `comboOf`, `assign`/`reset`; tested),
-                      palette.ts (Space / Ctrl+K / Ctrl+Shift+P: the
-                      toolbar's buttons by title, editor commands,
-                      `gitCommands`, `deckCommands`, every slide) over
-                      palettetext.ts (pure `score`/`rank`/`fromTitle`;
-                      tested)
     fit/              main.ts: the PDF export page's script (bundles/fit.js, inlined
                       into pdf.html by export.py): `fitSlide` on every slide, again
                       on load and once fonts are ready
@@ -1083,14 +619,6 @@ src/
                       contrast.ts (each text run vs the hidden-text shot's pixels
                       where its glyphs are, worst tenth decides; halo strokes,
                       shadows that help, alpha blended; pure WCAG maths tested)
-    guest/            the guest page for sharing online (bundled into
-                      src/inkflow/online/guest/_guest/): crypto.ts (Web Crypto
-                      twin of online/crypto.py), frames.ts, channel.ts (`Channel`:
-                      handshake, sealed frames, `RelaySocket` page connections,
-                      `fetch` through the host), boot.ts (top mode: link from the
-                      fragment -> sessionStorage, service worker, channel, the
-                      page frame; frame mode: the host's page for this address,
-                      document.open/write), sw.ts (the service worker)
   css/                CSS source
     shared/           theme variables, animation keyframes, ink.css (the ink palette)
     presenter/        presenter partials including pv.css (sidebar panel)
@@ -1101,13 +629,6 @@ demo/
   deck.py             12-slide demo deck (SVG slides, some filling zones with Markdown via md=)
   slides/             source SVGs and Markdown content files
   data/               chart data (sales.csv)
-relay/
-  cloudflare/         the relay as a Cloudflare Worker (src/worker.ts: one Durable
-                      Object per room, Hibernation API; wrangler.toml for `wrangler
-                      dev` from the repo; its own package.json/tsconfig with
-                      @cloudflare/workers-types, `pnpm install --ignore-workspace`)
-  e2e/online.e2e.mjs  sharing online end to end in Chromium (Playwright), against
-                      the Python relay or the Worker under `wrangler dev`
 mise.toml             task runner + tool versions (replaces poethepoet)
 package.json          JS devDependencies: biome, esbuild, typescript
 pnpm-lock.yaml        pnpm lockfile (JS deps); package manager is pnpm, not npm
@@ -1117,6 +638,11 @@ tsconfig.json         TypeScript config (noEmit, verbatimModuleSyntax — tsc as
 ```
 
 ## Key architecture decisions
+
+**Frontends are plugins; the core never knows them.**
+A frontend (inkflow-editor's visual editor, a remote control, a review tool) is an installed package naming a `plugins.Plugin` under the `inkflow.plugins` entry point. The core finds plugins once per process (`plugins.loaded()`; `INKFLOW_NO_PLUGINS=1` turns them off) and asks each, at the place it matters: `register_cli(main)` after the core's own commands (a plugin may add subcommands to a core group, as inkflow-editor does to `fonts`); `slide_checks`/`deck_checks` in `inkflow verify`; `completion_spec` in `inkflow completion carapace` (command blocks merged into the core's spec, one named like a core command replacing it); `current_slide` for `inkflow render`'s default; `server_extensions(config)` when `serve` starts without a list of its own. A plugin's command that starts a server (`inkflow edit`) passes its extensions to `server.serve(..., extensions=)` itself.
+A server extension (`extensions.ServerExtension`) is how a frontend lives in the server: per deck it is opened and closed; per build `before_build` and `build(Build)` run in the worker thread inside the build (raising fails it, as any build error), `built` after the pages have the new slides; `provenance = True` makes it the editor build (`process_deck(editor=True)`: source locators on every element, `SlideData.edit` facts, both for writing back). Its `messages` (type -> least role) are the only extra messages the door lets through (`server.allowed`); `hello` tells it what a page is (the editor says `role: "editor"`); `http` answers what the core does not (after its own pages, fonts and the deck's assets); `welcome` adds to the first message a page gets (the presenter's back-to-the-editor button appears only when one names an `editor` page); `keys` adds terminal keys, `share_*` the Share dialog's operations and the terminal's share lines. It acts through the `ServerContext` (`server.context`): the served state, the people and the door, send/broadcast/notify, `rebuild`, `open_deck` (the server closes this deck and serves another on the same port), `shutdown`, and `serve_connection`/`serve_request`, which run a page connection or a GET that came another way (an online guest's, through a relay) exactly as one from the network, for its role. The order matters once: `build-status` says a build is done only after every extension's `built`, so a program that changed the deck (an agent's command) and waits for its build finds the editor's session on it too.
+Without any extension the server is the presenter's alone, and still saves the presenter's ink with "Keep" (`ink.save_ink`, no undo). The TypeScript side mirrors this: `src/ts/shared` is the client library (step engine, fit, patches, ink, gestures, the socket, identity), and a frontend's bundle imports it as `@inkflow/shared/*` (tsconfig `paths`, vitest alias), never a path into the presenter.
 
 **No SVG editor subprocess at serve time.**
 Any SVG editor writes the files; the pipeline reads them directly with lxml,
@@ -1136,7 +662,7 @@ The watcher still rebuilds on every change of any project file, and `server.rebu
 Clients send `{"type":"nav","slideIndex","step"}` (validated + clamped server-side by `_coerce_nav_position`; a view link's are dropped, and its page starts in `follow`); the server stores the last position and rebroadcasts it as `{"type":"position",...}` to the *other* clients, and pushes it once to each newly connected client. A window that booted from a deep link (a slide named in the URL, captured by `readURL()` before `syncURL()` rewrites the bar) or reconnected asserts its own position and ignores that first push; a bare window adopts it. Each client also has a per-tab **sync mode** (`two-way`/`present`/`follow`/`solo`, `shared/types.ts`) deciding locally whether it broadcasts nav (`sends()`) and applies incoming positions (`receives()`) — the server knows nothing about modes. `s` cycles the mode; `syncmenu.ts` owns the status-bar widget, `websocket.ts` the network/state. Switching into a receiving mode sends `{"type":"sync-request"}` to catch up. Persisted in `sessionStorage`.
 
 **Ink is drawn into the slide, held per slide, and saved to a file of its own.**
-A stroke is perfect-freehand's outline around the pen's track (`shared/ink.ts`), written as one filled `<path>` so it renders anywhere without inkflow. `shared/inkpad.ts` turns pointer input into strokes for both pages: every coalesced sample is kept, the live stroke is one path redrawn once per animation frame (plus the browser's predicted samples) straight into the slide's own `<svg>`, so it is in slide units through the zoom camera, resizes and transitions; a pen's real pressure is used, a mouse's or finger's is simulated. By default only a pen draws (a mouse click and a swipe stay navigation, a palm near a pen is swallowed), and the click a gesture ends with never reaches the page. In the presenter (`presenter/ink.ts`, key `i`) ink is held per slide id (`inkstore.ts`, with undo) and re-mounted as `g.inkflow-live-ink` whenever `transitions.ts` mounts a slide (`slidehooks.ts`, which keeps transitions.ts and its tests free of ink). Other windows get it as `{"type":"ink","op":"draw"|"add"|"erase"|"abandon"|"request"|"state",...}`, relayed by the server untouched (or over the window link in a static build) and gated by the same `sends()`/`receives()` as the position; receivers validate every field (`strokeFrom`). With "Keep", a stroke also goes to the session as `edit-op` action `ink`, which only the owner and share-link editors may send (`_role`), so an audience screen (a view link) never writes files. Saved ink is `ink/<slide id>.svg` (or `Slide(ink=)`), strokes directly under its root so each is an editor object (source role `ink`, selectable and movable like the slide's own shapes); `process_slide` composes it right after the overlays and before annotation (a cue can reveal a stroke). A slide's id is inferred from file names, so `EditorSession._follow_ink` renames, copies or deletes ink files in the same step as a slide edit that changes ids, never overwriting a file nothing vacates. `serialize_ink` writes exactly what `inkflow clean` would, so the pre-commit hook leaves ink files alone.
+A stroke is perfect-freehand's outline around the pen's track (`shared/ink.ts`), written as one filled `<path>` so it renders anywhere without inkflow. `shared/inkpad.ts` turns pointer input into strokes for both pages: every coalesced sample is kept, the live stroke is one path redrawn once per animation frame (plus the browser's predicted samples) straight into the slide's own `<svg>`, so it is in slide units through the zoom camera, resizes and transitions; a pen's real pressure is used, a mouse's or finger's is simulated. By default only a pen draws (a mouse click and a swipe stay navigation, a palm near a pen is swallowed), and the click a gesture ends with never reaches the page. In the presenter (`presenter/ink.ts`, key `i`) ink is held per slide id (`inkstore.ts`, with undo) and re-mounted as `g.inkflow-live-ink` whenever `transitions.ts` mounts a slide (`slidehooks.ts`, which keeps transitions.ts and its tests free of ink). Other windows get it as `{"type":"ink","op":"draw"|"add"|"erase"|"abandon"|"request"|"state",...}`, relayed by the server untouched (or over the window link in a static build) and gated by the same `sends()`/`receives()` as the position; receivers validate every field (`strokeFrom`). With "Keep", a stroke also goes to the server as `edit-op` action `ink`, which only the owner and share-link editors may send, so an audience screen (a view link) never writes files: with an editor extension it becomes an undoable step of its session, without one the server writes the ink file itself (`server._save_ink`, `ink.save_ink`). Saved ink is `ink/<slide id>.svg` (or `Slide(ink=)`), strokes directly under its root so each is an editor object (source role `ink`, selectable and movable like the slide's own shapes); `process_slide` composes it right after the overlays and before annotation (a cue can reveal a stroke). A slide's id is inferred from file names, so inkflow-editor's `EditorSession._follow_ink` renames, copies or deletes ink files in the same step as a slide edit that changes ids, never overwriting a file nothing vacates. `serialize_ink` writes exactly what `inkflow clean` would, so the pre-commit hook leaves ink files alone.
 
 **Zoom gestures are one shared layer; a pinch never leaves a trace of its first finger.**
 `shared/gestures.ts` holds the pure parts and `shared/gesturepad.ts` (`GesturePad`) the DOM glue; the presenter (`presenter/zoom.ts`, the viewBox camera) and the editor (`editor/touchzoom.ts` → `canvas.zoomAbout`, which lays the paper out at the new size and scrolls the canvas so the anchored slide point lands where it belongs) each give it a host saying what a zoom, a pan and a cancelled finger mean. Ctrl/⌘+wheel (Chrome/Firefox's trackpad pinch) zooms by exp(-deltaY/100), each event's step bounded to ×1.2 so a mouse notch (100 px, 3 lines, a page; `wheelPixels` normalises `deltaMode`) is one even step; Safari's `gesturechange` zooms by its `scale` ratio; everything is summed and applied once per animation frame (`zoom(factor, from, to)`: about `from`, moved to `to`, so a pinch's midpoint pans as it zooms). Over the surface the page `preventDefault`s Ctrl+wheel and gesture events and sets `touch-action: none` (`#stage-wrap`, `#canvas`); elsewhere the browser keeps its page zoom. A plain wheel is the page's: the presenter pans the camera with it only while zoomed in (otherwise it does nothing, as before, so a trackpad's inertial tail never navigates), the editor scrolls natively. While zoomed the editor pads `#canvas` by half its size on every side (`layoutPaper`), so the paper can sit off-centre and the anchor always holds; `ZoomAnchor` keeps the anchored slide point across a gesture's frames so whole-pixel layout and scroll rounding never accumulate (per-frame layout measured at 1–4 ms median on the demo, so no CSS-transform stand-in).
@@ -1190,11 +716,8 @@ An asset must live under an allowed root: the project dir (canonical prefix `""`
 
 `build`/`export` copy every referenced local file into the output dir, mirroring the source tree; a canonical ref is relative and `..`-free by construction, so `out_dir / ref` always lands inside and needs no rewriting. `_slide_refs` scans the *emitted* SVG and notes rather than walking the deck, so a pruned zone takes its asset with it. A reference that resolves to nothing is a `logger.warning`, not a silent skip. `serve` streams the same refs on demand instead of copying.
 
-**Renaming a file rewrites every reference to it, by the same rule.**
-`editor/filerename.py` finds references where they are written and resolves each against its own file (never by matching a name across the project), then writes the new one in the style it was written: a bare layout name stays a name (`local:` when a `slides/` file would shadow it), a path stays a path relative to its file, a `#page=` stays. SVGs are rewritten by a small tokenizer (only the attribute values change), contents of preview layers are copies and left alone, but their markers are followed through the chain that declared them (`_Chains`: an ancestor's parent is relative to that ancestor). The session applies the plan as one step whose moves are kept without bytes (videos), so undo moves files back and restores the folders; the extension never changes; `styles.css`, `deck.py` and files in hidden folders are refused. `inkflow mv` and `inkflow slide rename-files` are the same action from the CLI.
-
 **A deck is portable when a clone of its folder looks the same anywhere.**
-Only the deck's own files and the pinned inkflow/theme travel with a `git clone`, so `fontreport.py` classifies every font as project / theme (portable) or machine / missing / generic, and `pack.py` lists everything else that ties the deck to this computer as `Item`s (fixable or not): outside or symlinked files (`filerename.plan_copy_in`, references rewritten by the rename machinery, never string-replaced), pyproject pin + uv.lock, `.gitattributes` LF/diff/LFS rules, PDF pages. The same plan feeds `inkflow fonts`/`pack`, `verify`'s "deck" warnings, the Theme dialog's Fonts section and the commit's pack question, so they cannot disagree. Writes go through the session (`fonts`, `pack` actions; `pack` and copying fonts are local only) as one undoable step; `_Txn.copy` records a file copied in from anywhere without holding its bytes (undo deletes it, redo copies again, emptied folders are pruned), and `pack` runs `uv lock` after the commit and adds the lock file's change to the same step. Licences warn, never refuse. The other agent's fonts.py owns embedding; fontreport only reads its discovery (`_font_dirs`, `_read_font_record`) with its own uncached index, so a just-bundled font is seen at once.
+Only the deck's own files and the pinned inkflow/theme travel with a `git clone`, so `fontreport.py` classifies every font as project / theme (portable) or machine / missing / generic (`inkflow fonts`), and `pack.py` holds the building blocks that take the rest away as `Item`s (fixable or not): pyproject pin + uv.lock, `.gitattributes` LF/diff/LFS rules, a zip of the source tree. inkflow-editor's `pack.plan_pack` puts them together with copying in files from outside the deck (its reference-rewriting engine) and PDF pages, for `inkflow pack`, its `verify` lines and its commit question. Licences warn, never refuse. fontreport only reads fonts.py's discovery (`_font_dirs`, `_read_font_record`) with its own uncached index, so a just-bundled font is seen at once.
 
 **PDF figures are a derived asset, converted at build time and never committed.**
 Browsers show no PDF in `<image>`/`<img>`, so `pdf.PdfPages.apply` (a pipeline step after content injection, so SVG pictures, `Image` zones and Markdown images are covered alike) points each PDF reference at its page converted to SVG in `.inkflow/cache/pdf/` (git-ignored, unwatched; named by content hash + page + converter, so a saved PDF converts again and the watcher's rebuild shows it). The cache is a third `AssetRoots` root with the canonical prefix `_pdf/`, reserved like `_theme/`: `serve`, `build` (inlined; with `--assets-folder` copied to `out/_pdf/`, not a hidden folder static hosts may refuse) and `export` handle a converted page exactly as any picture, with no special case. The PDF reference survives beside it as `data-inkflow-pdf`, which the editor reads instead of the href (`pdfpages.sourceRef`), so nothing it writes back (page change, replace, copy/paste) ever names the cache; moves and crops edit the source SVG, whose href is the PDF. PyMuPDF is optional (`inkflow[pdf]`) and loaded with `importlib` so inkflow stays MIT and type-checks without it; the system tools are the fallback. With no converter the picture becomes a placeholder data URI and the build warns once.
@@ -1277,85 +800,6 @@ Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop +
 **A theme's layout is copied on write, and the copy stands in for it everywhere.**
 The ask is PowerPoint's slide master: edit the background of every slide, or every slide of one type, without touching each slide. Theme and built-in layouts live in an installed package and are never written, so editing one (the slide master, `inkflow layout copy`) writes `layouts/<name>.svg`: the theme's file with only its root attributes changed (`inkflow:copy-of="builtin:agenda"`, `inkflow:parent` re-expressed as `builtin:title`), so element locators taken on the theme's file still hold for the edit made in the same step. The decision is in resolution (`layout.deck_copy`): any reference that lands on a theme file the project has a marked copy of gets the copy, including the built-in layouts' own `./base` and `./title` parents. That is what makes "edit the background" reach every built-in layout while copying only `base`, and per-type edits copy only that layout. Copying the whole chain was the alternative; it would freeze every ancestor at the time of the copy and make each later copy's edits invisible to the others. Only *marked* copies redirect, so an existing project `layouts/title.svg` (a title slide of the user's own) keeps shadowing the bare name only, as before. Revert = delete the copy. A template is a layout made from a slide (`master.template_bytes`): zones stay as empty zones (their text lives in Markdown/deck.py anyway), optional `<inkflow:hint zone>` prompts that the pipeline pops before output and the editor shows on empty zones. Master edits that change what other files preview (copy, revert, new overlay) refresh the deck's Inkscape previews inside the same History step after the commit (`_refresh_previews`, from disk); ordinary drags do not, and leaving the master view sends `previews` with `attach`, merged into the last step, so `verify` stays clean and Undo still takes back exactly what was seen.
 
-**The visual editor writes the deck's own files; it has no document model of its own.**
-`inkflow edit` (or `/edit` on any `serve`) is a second page on the same server. The server builds with `process_deck(editor=True)`, which stamps every element read from a source file with `data-ink="<source index>:<child path>"` — the child path counted on the tree *as parsed from disk*, before cleaning (`clean_inkscape_tree(before_clean=...)`), so `provenance.locate` finds the same node when an edit is written back. `SlideData.edit` carries the source list, the pruned empty zones and where each zone's content was written; the presenter copy drops it (`_without_edit`), the editor gets it inside `build_model`'s model (`editor-model` message, sent after each `update` to clients that said `hello` as editors).
-The browser never writes a file: it sends `{"type":"edit-op", "action": ...}` and `editor.session.EditorSession` turns that into new bytes for SVGs (lxml, only touched nodes change), Markdown (`zones.zone_spans` mirrors the parser to replace one zone's section) or `deck.py` (libcst via `deckedit`, values generated by `codegen` from the real DSL object so the dataclass validates them). Each request is one `History` step of whole-file before/after snapshots; undo refuses if a file changed outside the editor. So an agent changes the slide list through the session too: `inkflow slide` (`cli/slides.py` → `editor/remote.py`) sends the same `edit-op` to the server serving the deck (found with `instances.serving`), with `agent` (the step becomes "Agent: …") and `deckHash` (the deck.py it numbered slides against; refused unless that is the build), and polls `{"type":"build-status"}` (`deckHash`/`failedHash` of the last build) until the build caught up, before and after; the server then tells every editor `{"type":"agent-edit", label, step, undoLabel…}`, shown as a toast whose Undo sends `undo` with that `step` (refused once another step followed). With no server it applies the request with a fresh `EditorSession`. Undo/Redo buttons are titled with `undoLabel`/`redoLabel` (in each result and in `editor-model`'s `history`). An SVG request carries the file hash the client rendered from and is refused when stale; results return new hashes so quick consecutive edits chain. Writes go through the normal watcher → rebuild → push, which is also how the editor, Inkscape and an agent see each other's changes. `load_deck` compiles deck.py from source each time (the bytecode cache's whole-second mtime check loads stale code after a same-size edit such as a slide reorder).
-The client previews a drag by setting attributes on the live DOM and sends the same plan (`geom.ts`: x/y/width/height for rects/images/rect-backed zones, cx/cy for ellipses, endpoints for lines, a merged leading translate for everything else, a matrix for resize/rotate of transformed elements). Objects from layouts/overlays and slides drawn straight from a shared layout are not selectable outside "Edit layout"; drawing on such a slide first gives it its own `slides/<id>.svg` built on that layout (never named like a layout, which would shadow it). `.inkflow/` (editor context, renders) ignores itself in git and is excluded from the watcher.
-Everything the editor adds is plain deck source, so Inkscape, an agent and the presenter need no editor knowledge: a **text box** or a **video placed anywhere** is a `zone-text`/`zone-video` rect in the slide's own SVG filled through the slide's Markdown or `zones={...}` (deleting or duplicating such a rect takes its content along — `_svg` with `zoneSlide`); **rich text** is edited as the zone's rendered HTML and written back by `richtext.ts`, only when serializing the zone as rendered gives back its source (`sameMarkdown`), otherwise the Markdown pane opens; a **crop** is a nested `<svg x y width height viewBox>` frame around the `<image>` (the canvas measures it by its viewport, not getBBox); a **connector** (line/arrow; four tools: line, arrow, elbow, curve) is a `<path>` with `inkflow:connector="straight|elbow|curved"` and `inkflow:connect-start/-end="<id>:<site>"`, a site being a side (`top`, its middle) or `side@fraction` (`top@0.25`, clockwise from the side's first corner) — a shape's `inkflow:sites="N"` only decides how many points per side are *offered* (copied onto a zone's foreignObject by `content.py`), a named site is always computable, so fewer points later never detaches an arrow; an elbow's adjustable segment is `inkflow:bend="x:640"` (axis and slide-unit coordinate, ignored when the route's axis changes) with a drag handle; `connectors.ts` holds the pure site/route maths, `canvas.withConnectors` re-routes attached connectors inside every `sendSvgOps` (so drags, nudges and geometry fields all carry them in the same step), connector moves detach ends whose shapes do not move along (`movingTogether`), and an id rename rewrites `connect-*` references (`svgops._rename_connections`); a shape moved elsewhere leaves its arrow until "Re-route all" (or `inkflow shape reroute`, the Python port in editor/scene.py; `verify` warns about such arrows); a **link** is an `<a href>` wrapper that provenance treats as transparent (`is_link_wrapper`: the object inside stays the selectable one), and `pipeline.resolve_links` turns `slide:<id>` into `data-inkflow-slide` and gives web links `target="_blank"`; **slide text goes to Markdown**: a zone write on a slide with no `.md` (`_slide_markdown`) creates `slides/<slide-id>.md` named after the slide's *current* id (ids are inferred from the md stem, so `slide:` links survive; `id=` is written when the name is taken), sets `md=`, and moves the slide's plain-string `zones={...}` into it in the same step; `TextBox` and `md=Inline` stay in deck.py (the `to-markdown` action converts those on request); **text in a shape** is that shape renamed to a `zone-text*` zone plus `inkflow:show-shape="true"` (centred both ways via `--inkflow-align/-valign` in its style unless already set), which makes `content.zone_shape_css` paint the shape's own fill/stroke/rx as the text box's CSS (without it a zone shape stays an unpainted placeholder; `--inkflow-padding/-align/-valign` in its style carry over either way); a **formula** in rich text is a chip around the rendered `<math data-latex>` (`markdown._math_to_mathml` stamps the source), edited through the `math` session action, which renders exactly as the build does; **lock** is `inkflow:locked` (survives the pre-commit cleaner, unlike `sodipodi:insensitive`), **hide** is `display:none`; **theme** edits are one marked block in `styles.css`. A rebuild pushes the deck stylesheet and colour mode on `update` only when they changed (`styles`/`mode` keys, `shared/deck-styles.ts`), so theme edits restyle open pages without a reload. **Open ▾** (`openwith.ts`) asks the session for `open-apps` (`edit.open_choices`: the configured `INKFLOW_EDIT_CMD*` command, installed programs for the file's kind, the system opener) and launches with `open-file`, which only takes project files of a known kind and only from the owner (the server sets `_local` = owner on every edit-op from the connection's role, overwriting the client's); for an SVG it first brings the Inkscape preview (layout layers + theme CSS, what `sync` writes) up to date as one History step, and `_new_slide_file` writes it on creation, since Inkscape draws only what is in the file. **Ctrl+drag** copies: `canvas.ts` previews by moving the originals with stand-in clones (`showGhosts`) left in place, and drops `duplicate` ops whose `set`/`kids` carry the move's attributes for the copy (resolved before any op runs); `apply_ops` re-attaches connectors copied together with their shapes. **draw.io diagrams**: `drawio-load` (source + `INKFLOW_DRAWIO_URL`, default embed.diagrams.net) / `drawio-save` (normalized SVG; no path = new `diagrams/diagram-N.drawio.svg`; `image` = the slide's picture keeps its width and takes the new height, same History step); without internet (`navigator.onLine` false, or no `configure`/`init` from the frame within 15 s) `drawio.ts` offers draw.io desktop: `drawio-new` writes `drawio.blank()` (an empty source behind a placeholder picture), the picture is placed, and `open-file` launches the app (`edit` kind DIAGRAM; Open ▾ never writes Inkscape preview layers into a `.drawio.svg`). "Show as" in a diagram's panel sets `inkflow:drawio` (plus `ensure-id`); a drawn-in diagram (`drawio.drawnDiagram`) selects, moves, resizes and rotates as its `<image>`, and `selectById` climbs from a shape to it. Its vertex cells (`data-cell-kind`, read from the source by `drawio.cells`) are connector targets too (`canvas.attachables`/`attachTargetAt`, sites on `drawioshapes.cellShape`, not the label); renaming the picture renames `<id>-*` connections and cues (`OpResult.renamed_prefixes`); a save through the editor re-routes the arrows into it in the same step (`coalesce`), and the slide panel counts arrows whose ends no longer meet their shapes (`canvas.isStale`). **Editing a diagram's shapes on the slide** (`inkflow:drawio-edit="shapes"`, "Edit shapes here"): editor builds stamp vertex cells `data-ink="<k>:#<cell>"` (and layers, so `enterGroup` survives re-renders) into a source of role `diagram`, plus `data-cell-geometry` (the page box the drawing shows); double-click enters the layer, `canvas.diagramPlans` turns plans into `cell-geometry` (the shape's measured page box: drawn box − `drawioshapes.pageOffset`, the median of drawn − geometry), `cell-delete`; the panel sends `cell-label`/`cell-style`; the session routes a `.drawio.svg` `svg` action to `editor/drawioedit.apply_cell_ops`, which edits the mxGraphModel and patches the picture meanwhile (moved shapes under a transform, `data-drawn-geometry`). `hooks.diagramEdited` → `drawio.diagramEdited` debounces a redraw: a hidden, `inert` draw.io frame loads the source and exports xmlsvg, `alignedBox` measures how the page moved (median per shape, rendered off-screen) so unmoved shapes keep their place, and `drawio-save` (`box`, `expect` = the hash `drawio-load` returned, `coalesce` = the edit's step) writes both in the edit's undo step. **Quitting**: the `quit` action (local only, "Quit Inkflow") sets `_editor["shutdown"]`; `serve(quit_when_idle=…)` adds `_quit_when_idle`, which stops the server once `ws_clients` has been empty that long. **Start mode**: `serve(None)` / `EditorSession(None)` (`has_deck=False`) serves only the editor's start page at any path (`decks.showStart`), allowing just the project actions; opening a deck switches the server as usual and the page goes to `/edit`. An empty zone's **+** label writes the zone's name as its text and opens it for rich editing with that text selected (`afterRender.placeholder`); finishing with it untouched or empty, or Escape, undoes that write. **Decks and git**: `serve()` loops over `_serve_deck`, which returns the deck.py the editor asked for (`EditorSession.switch_to`, set by `open-deck`/`new-deck` and signalled through `_editor["switch"]`) and starts again on the same port; an editor page reloads when a model for a different `deckPath` arrives. Git operations, folder browsing and deck creation go through the same session (`git`, `browse`, `new-deck`, …); every git operation that writes (commit, push/pull, `git init`, switch…) and anything touching paths outside the deck are refused unless the request is the owner's, and operations that rewrite files reset the editor's History (the result carries `historyCleared`; `git.ts` warns once per session before the first one). **Worktrees** (`{"action":"worktree","op":"list"|"add"|"remove"|"merge"}`, editor/worktrees.py; add/remove/merge local only) let an agent work on branch `deck/<name>` in `.inkflow/worktrees/<name>` while the author edits on: list → `{worktrees:[{name,path,branch,head,deck,dirty,ahead,behind,main}]}`, add → `{worktree, note?}`, merge → `{message, files, historyCleared}` (only when files changed), remove (`force`) → `{message}`; every result also carries the fresh `worktrees`. The agent's own server for its worktree deck is a second server on the next free port. Exports run through `Exporters` the CLI hands to `serve()` (export.py imports server.py, so the session cannot import it) and are downloadable at `/_export/<token>/…`, which serves only what the session exported.
-
-**Several people edit one deck through one session; each undoes their own steps.**
-`History` is shared, but every `_Step` has an `author` (`collab.Client.author`:
-`"owner"` for the owner's pages and agents, `guest:<page key>`) and `name`. Undo
-takes back the author's latest step only when no later step (anyone's) wrote one
-of its files (`History.blocker`; else refused with `blocked` and the other's
-name: "Ana changed a.md after you"); redo likewise; a new step clears only its
-author's redo; typing coalesces only within one author. `history_state(author)`
-is per person, so `editor-model` and the `history` message after every change
-are sent per client (`_send_editors(callable)`). Writes are serialized by the
-session's lock (`_UNLOCKED`: long reads like export). **Stale writes are
-refused, never merged:** each rebuild takes `session.snapshot()` (every project
-file's mtime+size) and stamps its number into the model (`build`); every page
-request carries `baseBuild`, and `_check_fresh` refuses (`stale`, `by`, `path`)
-a write to any file (and deck.py, whose numbering every request relies on)
-changed since that build, unless the change is the requester's own still
-rebuilding (`last_writer`: author + hash). Text edits pin the build they began
-on (`textedit.ts`); when only something else changed (another zone, deck.py)
-they save again on the newer build (`zoneUnchanged`), otherwise `conflict.ts`
-shows the typing to copy or put back ("Use mine instead"). A guest's write never
-creates code or settings (`_guest_writes`: `.py`, scripts, `.toml`/`.lock`,
-anything in a hidden folder), and every machine-reaching action is `_local_only`
-(Open in programs, git writes, decks/browse/system-pick/places, import by path,
-files outside the deck, worktree add/merge/remove, publish setup, pack, fonts
-bundle, quit).
-
-**Sharing online: a dumb relay, end-to-end encryption, guests as virtual connections.**
-The host (`online/host.OnlineHost`, started by the Share dialog's `share` ops
-`online-on`/`-off`/`-rotate`/`relay-set` or `--share-online`) connects out to
-the relay's `/_relay/host?room=<id>` with `Inkflow-Room-Secret` (room id =
-b64url(SHA-256("inkflow-room/1" + secret))[:22], so a guest link cannot host)
-and, if the relay has one, `Authorization: Bearer <access token>`. The relay
-(Python `online/relay.py` or the Worker, same rules, tested by the same
-`TestAnyRelay` with `INKFLOW_TEST_RELAY_PORT`) forwards binary frames: host side
-`u32 peer + frame`, guest side the frame; text `ready`/`join`/`leave` to the
-host and `kick` from it; a room lives while its host is connected (4404 no
-room, 4410 host gone, 4409 full, 4401 refused, 4403 kicked, 4429 rate, 4408
-replaced). Crypto (`online/crypto.py` = `src/ts/guest/crypto.ts`, held together
-by tests/data/online_vectors.json): per-role 32-byte link secrets in the link
-fragment (`<relay>/#r=<room>&k=<secret>`); `hello` = guest nonce + HMAC(auth key);
-the host tries each role's auth key (the one that matches is the role) and
-answers `welcome` = host nonce + HMAC over both (only the host can); session keys
-per connection and direction = HKDF(link secret, both nonces); frames =
-`0x03 | seq u64 | AES-256-GCM` with the header as AAD, each side expecting the
-next seq (replay/reorder/tamper ends the guest). Messages (`online/frames.py`):
-a coding byte (DEFLATE from the host only; the host refuses it from guests),
-envelope `u32 len | JSON header | body`, chunks of < 512 KiB. Inner protocol:
-`open`/`ws`/`close` per page connection `c`, `get`(path, range)/`cancel` ->
-`res`/`body`/`end`, `hi` {role}, `bye` {reason}. Each `open` becomes a
-`VirtualConnection` run through the deck server's own `make_ws_handler`
-(`_share.ws_handler`, joined as a `collab.Client` with `online=True`), and each
-`get` through `make_http_route` (`_share.route`) for that role, so roles,
-`allowed()`, presence, per-person undo, stale-write refusal and owner-only
-actions are the LAN ones; open byte ranges are capped at 4 MiB. LAN share
-off/rotate leaves online guests alone and vice versa; a deck switch drops the
-online pages' connections (they reconnect to the new deck). The guest page
-(`src/ts/guest`, static on the relay; the relay answers every navigation with
-index.html): **top mode** reads the fragment, keeps the link in sessionStorage
-(the address bar loses the key; a reload or a window the page opens finds it
-there), registers `/_guest/sw.js` (scope `/`, `Service-Worker-Allowed`), opens
-the `Channel` and shows `/edit` (editor link) or `/` in a full-window iframe;
-**frame mode** (the same index.html inside that iframe) fetches the host's page
-for its own path through `parent.__inkflowRelay` and replaces itself with it
-(`document.open/write`), so the host's own editor/presenter of its own version
-runs at the right path. Its socket is `wsurl.openSocket()` -> `RelaySocket`; its
-subresource requests (pictures, fonts, video ranges, downloads) reach the
-service worker, which posts them to the requesting client (`inkflow-fetch` +
-MessagePort), whose boot.ts forwards them through the channel and streams the
-answer back (no keys or channel in the worker, nothing else routed). Chosen over
-rewriting URLs to blob:, which would need every asset (videos) fetched up front.
-
-**The compare view builds both decks in one server (`editor/comparehub.py`).**
-A side is a `comparesrc.Source`: `{"kind":"live"}`, `{"kind":"commit","rev"}` (any rev git resolves; refused if it starts with `-`), `{"kind":"path","deck"}` (a deck.py or its folder; outside the project only for a local request), `{"kind":"branch","name"}` (its worktree when one has it checked out, the live deck if that is this one, else its commit; a remote request falls back to the commit), plus `{"kind":"spec","spec"}` for `?compare=` (`inkflow edit --compare REV|PATH`) and the CLI, resolved by `spec_source`. A commit is materialized into `.inkflow/cache/compare/<sha>/` (ignored, unwatched) with a throwaway `GIT_INDEX_FILE`: `read-tree` + `checkout-index` of the deck's folder only, so filters run (LFS smudged; `filter.lfs.required=false`) and nothing is registered as a worktree; a pointer left over is replaced by the working copy's file when its sha256 is the pointer's oid (`missing` lists the rest); `prune` keeps the 6 most recent plus those in use. Other decks load as their own module (`load_deck(path, module)`, `build_model(deck_module=…)`), never `_inkflow_deck`, so the served deck's custom classes stay the session's; comparesrc/comparehub cannot import server.py (a cycle), so the loader is handed in (`CompareHub(deck, load_deck)`). The live side is the server's own build (`side_build_from` after every `rebuild`), never rebuilt by the hub. Protocol: `{"type":"compare-open","view":n,"left":src,"right":src}` → `{"type":"compare-model","view":n,"left":side,"right":side,"deck":[…],"pairs":[pair_json…]}`, where a side carries `kind/label/branch/sha/live/deckPath/token/missing/error/source`, `css` (its `load_deck_styles` with `:root` aimed at `.cmp-root`, `@font-face` split off into `fonts` for the document; `shadow_css`) and `slides` (`display_svg`: no `data-ink*`, pictures at `/_cmp/<token>/<ref>?v=<mtime>`, plus plain-text `notes`); re-sent to every page comparing a side whenever it rebuilds (live: each rebuild; a path side: its own `awatch`, ignoring its `.inkflow/`/`build/`/`.git`; a commit: never). `{"type":"compare-close"}` (or disconnecting) drops sides nobody compares, their tokens and modules. `{"type":"compare-sources"}` → commits, branches and worktrees for the picker; failures answer `{"type":"compare-error","for","view","message"}`. `/_cmp/<token>/<ref>` resolves with that side's own `AssetRoots.locate` and the served-suffix list, so it reaches nothing outside that deck's roots. Pairing (`compare.pair_slides`): ids that name a slide whatever its place (explicit, or an inferred id no other slide shares), then the file it is written in (`key_file`: its Markdown, or its own unshared SVG), then identical normalized SVG+notes, then the remaining ids (`content-2` numbering), then what is left by order between pairs kept in order, only when built on the same layout or file (`_related`); rows follow the right deck, a slide only on the left before what was added in its place; `moved` = outside the longest in-order run. Normalization drops `data-ink*`/`data-cell-geometry`/`data-drawn-geometry`, `?v=` stamps, the root's `inkflow-slide-N` id and its `@scope`, and the slide number/total texts. A pair is `changed` when the normalized SVG, the notes text, the slide's settings (`_slide_settings`: hidden, layout, id, title, md, notes file, transition, animations, zones, overlays, style, font size; model JSON minus `custom`/`path`/chart columns) or its files (sources by role, md, notes, ink, chart data, pictures) differ. `element_changes` matches elements with an id by id, the rest as sequences under their nearest named ancestor (`difflib`), leaf units being SVG shapes and HTML blocks; boxes are approximate server-side (transforms, path points, a foreignObject's box for its HTML) and the page measures the element at the same child-index `path` in the shadow DOM instead when it finds it. The page draws each slide in a shadow root with the side's constructed stylesheet (both in the colour mode the editor's light/dark button shows), so neither deck's CSS reaches the other or the editor. "Take this slide" is the edit-op `compare-take` (`pair`, `left`, `right` must match the hub's current pair): the server pops any client `_take` and puts the hub's `take_request` there (`export_slides` of the other deck, `replace` = the live index or `after`, `inPlace` when every file can keep its path, its ink), and the session's `_compare_take` writes it as one History step (`transfer.plan_slide_replace` writes files at their own paths; else `plan_slide_paste`). "Merge branch" sends `{"action":"worktree","op":"merge","branch"}` (the worktrees session action) and shows its error; `document` event `inkflow:compare` (`{kind:"path",deck,label}`) opens the view on a deck. While the view is open, keys other than its own and Ctrl+Z/Y stop in its capture listener, and the toolbar's tools are disabled (`body.compare-mode`).
-
 ## Server
 
 - HTTP on port 7777 (asyncio streams, custom handler); assets are streamed in
@@ -1365,10 +809,10 @@ A side is a `comparesrc.Source`: `{"kind":"live"}`, `{"kind":"commit","rev"}` (a
   page keeps pictures it loaded by URL: a diagram or picture changed on disk is
   then a changed slide at a new URL. build/export never stamp; the editor drops
   the stamp before writing anything back (`pathtext.assetRef`, `cleanForPaste`)
-- `/_cmp/<token>/<ref>`: a compared deck's picture (comparehub.py), 404 when the
-  token is unknown or the ref leaves that deck's roots
 - `/handout?layout=notes|compact&paper=a4|letter`: the handout view
-  (handout.py), editors only like `/edit`
+  (handout.py), not for a view link (it shows the notes)
+- anything else an extension's `http` answers (inkflow-editor: `/edit`,
+  `/_export/`, `/_cmp/`), then the presenter at any path
 - WebSocket on the same port at `/_inkflow/ws` (`access.WS_PATH`): the HTTP
   handler reads the request head, checks it, and hands an upgrade to
   `wsbridge.Bridge` (websockets 16.0's `ServerConnection` adopted onto the
@@ -1378,7 +822,7 @@ A side is a `comparesrc.Source`: `{"kind":"live"}`, `{"kind":"commit","rev"}` (a
   says whether the page is served (null in a static build). `--ws-port`
   (deprecated) additionally opens the old separate port on this machine only,
   behind the same checks (`_ws_check`, origin = the HTTP port's pages);
-  `editor/remote.py` and `inkflow goto/select` use `Instance.ws_url()` (with the
+  inkflow-editor's `agent/remote.py` and `inkflow goto/select` use `Instance.ws_url()` (with the
   owner token in SSH mode; goto/select look the instance up first) / the
   context's `server.wsPath` (never a token: context.json is in the project)
 - The door, before anything else, for every HTTP request and WebSocket
@@ -1390,13 +834,15 @@ A side is a `comparesrc.Source`: `{"kind":"live"}`, `{"kind":"commit","rev"}` (a
   the owner link", `_SSH_401`, never the token). A `?k=` request answers
   `enter_page` with `Set-Cookie: inkflow-<browser port>=…; HttpOnly;
   SameSite=Strict` (+ `Secure` with `--tls`). Viewers get the presenter
-  only (403 on `/edit`, `/_export/`, `/_cmp/`; `/_inkflow/instance` is the
-  owner's). Pages carry `X-Frame-Options`/`frame-ancestors 'self'` and
-  `Referrer-Policy: no-referrer`. Messages by role: `allowed()` (owner only:
-  `edit`, `editor-context`, `editor-command`, `share`; editors: `edit-op`,
-  compare; a viewer sends no `nav` and no ink but `request`). The server sets
-  `_local` (owner), `_role`, `_author`, `_name` on every edit-op, dropping any
-  `_*` key the page sent
+  only (no handout; an extension refuses them its pages too, inkflow-editor
+  `/edit`, `/_export/`, `/_cmp/`; `/_inkflow/instance` is the owner's). Pages
+  carry `X-Frame-Options`/`frame-ancestors 'self'` and `Referrer-Policy:
+  no-referrer`. Messages by role: `allowed()` (owner only: `edit`, `share`;
+  owner and editors: `edit-op`, a `hello` as `role: "editor"`; each
+  extension's `messages` by their least role; a viewer sends no `nav` and no
+  ink but `request`). inkflow-editor's extension sets `_local` (owner),
+  `_role`, `_author`, `_name` on every edit-op from the connection's client,
+  dropping any `_*` key the page sent
 - Sharing (`--share`, a non-loopback `--host`, or the Share dialog's `share` ops
   status/on/off/rotate/kick, owner only): `Listener.move` rebinds the one port
   between this machine and every interface (or `--host`) without dropping
@@ -1445,7 +891,9 @@ Three tools, each with a distinct role:
 
 - **Biome** — linter and formatter for TypeScript and CSS. Run via `mise run lint-js`. Config in `biome.json`.
 - **tsc** — type-checker only (`noEmit: true`). Never emits files; esbuild does that. Run via `mise run typecheck-js`.
-- **esbuild** — bundler. Produces committed bundles in `src/inkflow/bundles/` that the Python inlining pipeline reads at serve/build time. Run via `mise run bundle`.
+- **esbuild** — bundler. Produces committed bundles in `src/inkflow/bundles/` (and inkflow-editor's in `inkflow-editor/src/inkflow_editor/bundles/`) that the Python inlining pipeline reads at serve/build time. Run via `mise run bundle`.
+
+One `package.json`, `tsconfig.json` and `vitest.config.ts` at the root cover both packages' TypeScript; `@inkflow/shared/*` resolves to `src/ts/shared/*` for all three tools.
 
 JS dependencies are managed with **pnpm** (`pnpm-lock.yaml`). Every JS task depends on an `install-js` task that runs `pnpm install`, so `node_modules` stays in sync with the lockfile on each `mise run` and cannot drift (CI uses `pnpm install --frozen-lockfile`). `pnpm-workspace.yaml` allowlists esbuild's postinstall build script, which pnpm blocks by default.
 
@@ -1463,6 +911,7 @@ platformdirs>=4.0    per-user log + font directories (inkflow.logging, fonts.py)
 rich>=15.0           terminal UI
 watchfiles>=0.21     inotify-based file watcher
 websockets>=12.0     WebSocket server (uses 16.x asyncio API)
-libcst>=1.9          deck.py edits from the visual editor (formatting-preserving)
-cryptography>=42     optional (`inkflow[online]`): AES-GCM for sharing online
 ```
+
+inkflow-editor adds libcst (deck.py edits that keep formatting and comments)
+and, optionally (`inkflow-editor[online]`), cryptography (sharing online).

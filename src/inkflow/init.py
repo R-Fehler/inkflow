@@ -54,8 +54,8 @@ def _project_name(target: Path) -> str:
     return slug or "my-deck"
 
 
-def inkflow_requirement() -> str:
-    """Pin the scaffold to the running inkflow via a compatible-release bound.
+def compatible_requirement(distribution: str) -> str:
+    """Pin to the installed ``distribution`` via a compatible-release bound.
 
     ``~=X.Y.Z`` lets patch fixes flow in but caps at the next minor, so a deck is
     not silently upgraded across a breaking release while the DSL is unstable. The
@@ -63,13 +63,36 @@ def inkflow_requirement() -> str:
     requirement if the version cannot be parsed to a release triple.
     """
     try:
-        raw = version("inkflow")
+        raw = version(distribution)
     except PackageNotFoundError:
-        return "inkflow"
+        return distribution
     match = re.match(r"^(\d+)\.(\d+)\.(\d+)", raw)
     if match is None:
-        return f"inkflow>={raw}"
-    return f"inkflow~={match.group(1)}.{match.group(2)}.{match.group(3)}"
+        return f"{distribution}>={raw}"
+    return f"{distribution}~={match.group(1)}.{match.group(2)}.{match.group(3)}"
+
+
+def inkflow_requirement() -> str:
+    """Pin the scaffold to the running inkflow (``compatible_requirement``)."""
+    return compatible_requirement("inkflow")
+
+
+def plugin_requirements() -> list[str]:
+    """What the installed plugins need a deck to depend on, so their commands
+    work in a clone too (``uv run inkflow edit`` with inkflow-editor)."""
+    from inkflow import plugins
+
+    found: list[str] = []
+    for plugin in plugins.loaded():
+        requirement = plugin.requirement()
+        if requirement and requirement not in found:
+            found.append(requirement)
+    return found
+
+
+def deck_requirements() -> list[str]:
+    """A new deck's dependencies: inkflow, then the installed plugins'."""
+    return [inkflow_requirement(), *plugin_requirements()]
 
 
 def with_theme(deck_py: str, theme: str) -> str:
@@ -203,7 +226,8 @@ def write_pyproject_text(target: Path, requirements: list[str]) -> str:
 
 
 def write_pyproject(target: Path) -> None:
-    """A bare ``pyproject.toml`` declaring the deck's inkflow dependency."""
+    """A bare ``pyproject.toml`` declaring the deck's dependencies: inkflow
+    and the installed plugins (``deck_requirements``)."""
     (target / "pyproject.toml").write_text(
-        write_pyproject_text(target, [inkflow_requirement()]), encoding="utf-8"
+        write_pyproject_text(target, deck_requirements()), encoding="utf-8"
     )

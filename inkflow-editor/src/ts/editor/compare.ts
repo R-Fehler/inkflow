@@ -10,8 +10,8 @@
 // (`inkflow edit --compare`). Editing stays off while it is open, except
 // "Take this slide" (one undoable step) and undo/redo.
 
-import { scheduleFit } from "../shared/fit";
-import { parseViewBox } from "../shared/viewbox";
+import { scheduleFit } from "@inkflow/shared/fit";
+import { parseViewBox } from "@inkflow/shared/viewbox";
 import {
     type Box,
     badge,

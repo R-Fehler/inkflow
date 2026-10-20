@@ -160,6 +160,9 @@ and serve the result to your browser.
 </p>
 
 `inkflow edit` opens a slide editor in the browser, in the spirit of PowerPoint and Google Slides.
+It is a package of its own built on inkflow, **inkflow-editor** (`pip install inkflow-editor`,
+or `uv add inkflow-editor` in a deck's folder), which adds `inkflow edit` and the agent
+commands below to the `inkflow` command.
 There is no project format of its own: every change goes straight back into the deck's
 SVG, Markdown and `deck.py` files, so Inkscape, your text editor and
 [Claude Code](https://ll-nick.github.io/inkflow/editor/claude-code/) work on the same deck
@@ -198,6 +201,7 @@ at the same time and see each other's changes live.
   for every change.
 
 ```bash
+pip install inkflow-editor   # once: the editor (it brings inkflow along)
 inkflow edit             # the deck in this folder (or: --deck path/to/deck.py)
 inkflow edit --start     # no deck yet: create one, open one, or pick a recent one
 inkflow setup-desktop    # add Inkflow to your application menu
@@ -211,6 +215,13 @@ every file it touches (an undoable step in the open editor), `inkflow shape …`
 shapes, text boxes and attached arrows exactly as the editor does, and `inkflow render --check`
 reports text that overflows its box or objects off the slide, with `--sheet` for all
 slides in one image ([Editing with Claude Code](https://ll-nick.github.io/inkflow/editor/claude-code/)).
+`render`, `verify` and `build` are inkflow's own; the editing commands come with inkflow-editor.
+
+inkflow itself knows nothing about the editor: a frontend is a plugin that adds commands,
+`verify` checks and server extensions (its own pages and messages on the deck's server, the
+builds with every element traced to its source file), and imports the presenter's client
+library. The editor is one; [Extending inkflow](https://ll-nick.github.io/inkflow/reference/extending/)
+shows how to build another.
 
 ## Quick start
 

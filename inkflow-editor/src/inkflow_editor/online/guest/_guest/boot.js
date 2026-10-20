@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  // src/ts/guest/crypto.ts
+  // inkflow-editor/src/ts/guest/crypto.ts
   var HELLO = 1;
   var WELCOME = 2;
   var DATA = 3;
@@ -198,7 +198,7 @@
     }
   };
 
-  // src/ts/guest/frames.ts
+  // inkflow-editor/src/ts/guest/frames.ts
   var LAST = 1;
   var CHUNK = MAX_PLAINTEXT - 1;
   var MAX_MESSAGE = 96 * 1024 * 1024;
@@ -279,7 +279,7 @@
     }
   };
 
-  // src/ts/guest/channel.ts
+  // inkflow-editor/src/ts/guest/channel.ts
   var NO_ROOM = 4404;
   var ROOM_FULL = 4409;
   var HOST_GONE = 4410;
@@ -570,7 +570,7 @@
     }
   };
 
-  // src/ts/guest/boot.ts
+  // inkflow-editor/src/ts/guest/boot.ts
   var STORE = "inkflow-online-link";
   function parentRelay() {
     try {

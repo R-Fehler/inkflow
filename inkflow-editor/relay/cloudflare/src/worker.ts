@@ -2,7 +2,7 @@
 // the WebSocket Hibernation API (an idle room costs nothing), and the guest
 // page served as static assets (no Worker invocation for those).
 //
-// The same protocol as src/inkflow/online/relay.py (read its docstring):
+// The same protocol as src/inkflow_editor/online/relay.py (read its docstring):
 // - /_relay/host?room=<id>: the host, proving the room secret (header
 //   Inkflow-Room-Secret, whose SHA-256 names the room) and, when the Worker
 //   has one, RELAY_ACCESS_TOKEN (Authorization: Bearer …);

@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING, cast
 
 from inkflow import fontreport, lfs
 from inkflow.fontreport import BundlePlan
-from inkflow.init import inkflow_requirement, write_pyproject_text
+from inkflow.init import deck_requirements, write_pyproject_text
 
 if TYPE_CHECKING:
     from inkflow.manifest import Deck
@@ -243,10 +243,10 @@ class ProjectPlan:
 
 
 def plan_pyproject(deck: Deck, deck_dir: Path) -> ProjectPlan:
-    """The ``pyproject.toml`` pinning inkflow and the deck's theme: the
-    nearest one (inkflow's own project counts as pinning it), else a new one
-    in the deck's folder."""
-    wanted = [inkflow_requirement()]
+    """The ``pyproject.toml`` pinning inkflow, the installed plugins and the
+    deck's theme: the nearest one (inkflow's own project counts as pinning
+    it), else a new one in the deck's folder."""
+    wanted = deck_requirements()
     theme = theme_requirement(deck.theme, deck_dir)
     if theme:
         wanted.append(theme)

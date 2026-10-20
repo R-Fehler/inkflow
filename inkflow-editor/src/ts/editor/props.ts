@@ -8,8 +8,8 @@ import {
     neededBoxHeight,
     nextTextSize,
     parseTextSize,
-} from "../shared/fit";
-import { maxStep } from "../shared/step";
+} from "@inkflow/shared/fit";
+import { maxStep } from "@inkflow/shared/step";
 import {
     cueSteps,
     playAnimations,

@@ -18,6 +18,7 @@ adds:
 - ``server_extensions`` adds pages, messages and build steps to the server
   (``inkflow.extensions.ServerExtension``);
 - ``completion_spec`` adds its commands to the shell completion spec;
+- ``requirement`` is pinned beside inkflow in a new deck's pyproject.toml;
 - ``current_slide`` says which slide the author is looking at, for commands
   that default to it (``inkflow render``).
 
@@ -84,6 +85,12 @@ class Plugin:
         """Carapace command blocks for ``inkflow completion carapace``: YAML
         list items (``  - name: …``) as the core's spec lists its commands;
         a block named like a core command replaces the core's."""
+        return None
+
+    def requirement(self) -> str | None:
+        """What a deck's ``pyproject.toml`` should depend on for this plugin's
+        commands to work in a clone of it (``inkflow-editor~=0.1.0``): ``init``
+        and ``pack`` pin it beside inkflow."""
         return None
 
     def current_slide(self, project_dir: Path) -> int | None:

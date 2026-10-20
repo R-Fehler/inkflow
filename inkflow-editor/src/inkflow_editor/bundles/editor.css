@@ -208,7 +208,7 @@
   pointer-events: none;
 }
 
-/* src/css/editor/compare.css */
+/* inkflow-editor/src/css/editor/compare.css */
 #compare-view {
   grid-column: 1 / -1;
   grid-row: 1 / -1;
@@ -686,7 +686,7 @@ button.cmp-chip:hover {
   word-break: break-word;
 }
 
-/* src/css/editor/collab.css */
+/* inkflow-editor/src/css/editor/collab.css */
 .people {
   display: inline-flex;
   align-items: center;
@@ -1064,7 +1064,7 @@ body.guest .open-with {
   gap: 8px;
 }
 
-/* src/css/editor/master.css */
+/* inkflow-editor/src/css/editor/master.css */
 #master {
   grid-area: sorter;
   display: none;
@@ -1304,7 +1304,7 @@ body.master-mode #canvas {
   font-size: 12px;
 }
 
-/* src/css/editor/notes.css */
+/* inkflow-editor/src/css/editor/notes.css */
 #notes-resize {
   position: absolute;
   top: -4px;
@@ -1435,7 +1435,7 @@ body.notes-resizing {
   margin-bottom: 0;
 }
 
-/* src/css/editor/panels.css */
+/* inkflow-editor/src/css/editor/panels.css */
 body.hide-left #workspace {
   --sorter-w: 0px;
 }
@@ -1512,7 +1512,7 @@ body.compare-mode .panel-tab {
   display: none;
 }
 
-/* src/css/editor/stars.css */
+/* inkflow-editor/src/css/editor/stars.css */
 .star-btn {
   padding: 0;
   border: none;
@@ -1550,7 +1550,7 @@ body.compare-mode .panel-tab {
   color: var(--sel);
 }
 
-/* src/css/editor/slidegit.css */
+/* inkflow-editor/src/css/editor/slidegit.css */
 .git-mark {
   font-family: var(--font-ui-mono);
   font-size: 11px;
@@ -1723,7 +1723,7 @@ body.compare-mode .panel-tab {
   align-items: center;
 }
 
-/* src/css/editor/comments.css */
+/* inkflow-editor/src/css/editor/comments.css */
 .comment-mark {
   font-size: 10px;
   line-height: 1;
@@ -1872,7 +1872,7 @@ body.placing-comment #canvas {
   color: var(--subtext);
 }
 
-/* src/css/editor/keys.css */
+/* inkflow-editor/src/css/editor/keys.css */
 .keys-dialog {
   display: flex;
   flex-direction: column;
@@ -1992,7 +1992,7 @@ body.placing-comment #canvas {
   margin-right: 30px;
 }
 
-/* src/css/editor/index.css */
+/* inkflow-editor/src/css/editor/index.css */
 :root {
   --ui-bg: var(--bg);
   --ui-panel: color-mix(in srgb, var(--bg) 88%, var(--surface));

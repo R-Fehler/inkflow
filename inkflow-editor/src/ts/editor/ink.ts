@@ -7,14 +7,18 @@
 // blinks out after the pen lifts. Saved strokes are ordinary objects of the
 // slide's `ink` source, so the select tool picks, moves and deletes them too.
 
-import type { InkStroke } from "../shared/ink";
-import { InkPad, strokeElement } from "../shared/inkpad";
-import { InkPalette, loadSettings, saveSettings } from "../shared/inkpalette";
+import type { InkStroke } from "@inkflow/shared/ink";
+import { InkPad, strokeElement } from "@inkflow/shared/inkpad";
+import {
+    InkPalette,
+    loadSettings,
+    saveSettings,
+} from "@inkflow/shared/inkpalette";
 import {
     type InkSettings,
     normalizeHex,
     styleFor,
-} from "../shared/inksettings";
+} from "@inkflow/shared/inksettings";
 import { slideRoot } from "./canvas";
 import { toast } from "./dom";
 import { edit } from "./net";

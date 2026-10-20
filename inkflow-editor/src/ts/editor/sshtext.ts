@@ -13,6 +13,8 @@ export interface SshInfo {
     user: string;
     /** `inkflow~=X.Y.Z`: the version this deck runs on. */
     requirement: string;
+    /** The plugins it runs with (`inkflow-editor~=X.Y.Z`): installed with it. */
+    plugins?: string[];
     inRepo: boolean;
     remote: string | null;
     /** The repository's folder name (where `git clone` puts it). */
@@ -159,8 +161,14 @@ export function moveSteps(
 
     const install = ["curl -LsSf https://astral.sh/uv/install.sh | sh"];
     install.push("source $HOME/.local/bin/env");
-    if (!info.pinned)
-        install.push(`uv tool install ${shellQuote(info.requirement)}`);
+    if (!info.pinned) {
+        const plugins = (info.plugins ?? []).map(
+            (p) => ` --with ${shellQuote(p)}`,
+        );
+        install.push(
+            `uv tool install ${shellQuote(info.requirement)}${plugins.join("")}`,
+        );
+    }
     install.push(`git clone ${remote} ${folder}`, `cd ${folder}`);
     steps.push({
         title: "On the server, once: install inkflow and get the deck",

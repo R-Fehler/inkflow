@@ -8,7 +8,8 @@ live.
 
 ## Setup
 
-Once per project:
+Once per project (the agent commands come with
+[inkflow-editor](index.md), `pip install inkflow-editor`):
 
 ```bash
 inkflow setup-claude

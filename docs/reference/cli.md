@@ -3,6 +3,10 @@
 All commands are available through the `inkflow` entry point. Run `inkflow --help`
 for the top-level list, or `inkflow COMMAND --help` for any single command.
 
+The list below includes the commands of [inkflow-editor](../editor/index.md)
+(`edit`, `slide`, `shape`, `anim`, `outline`, `pack`…), which a plugin adds to
+`inkflow` when it is installed ([Extending inkflow](extending.md)).
+
 ::: mkdocs-click
     :module: inkflow.cli
     :command: main

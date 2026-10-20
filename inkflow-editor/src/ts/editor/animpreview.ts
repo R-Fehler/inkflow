@@ -9,7 +9,7 @@ import {
     buildStepRun,
     maxStep,
     seekStepRun,
-} from "../shared/step";
+} from "@inkflow/shared/step";
 import { render, slideRoot } from "./canvas";
 import { toast } from "./dom";
 import { ed, emit } from "./state";

@@ -38,7 +38,10 @@ jobs:
       - run: mise run fmt-py
       - run: mise run typecheck-py
       - run: mise run lint-deps
+      - run: mise run lint-deps-editor
       - run: mise run test
+      - run: mise run test-editor
+      - run: mise run test-core
       - run: mise run lint-js
       - run: mise run typecheck-js
       - run: mise run test-js

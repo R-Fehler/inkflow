@@ -2,7 +2,7 @@
 // deck's own theme, colour mode and overlays, for inserting a new slide or
 // switching the current one to another layout.
 
-import { parseViewBox } from "../shared/viewbox";
+import { parseViewBox } from "@inkflow/shared/viewbox";
 import { clear, h, toast } from "./dom";
 import { edit, request } from "./net";
 import { newSlide } from "./sorter";

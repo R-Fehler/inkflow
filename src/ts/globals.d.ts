@@ -1,4 +1,3 @@
-import type { EditorModel } from "./editor/types";
 import type { Render, TransitionFactory } from "./presenter/transitions";
 import type {
     EditCommandsConfig,
@@ -15,7 +14,6 @@ declare global {
     const __EDIT_COMMANDS_JSON__: EditCommandsConfig;
     const __ERROR_JSON__: string | null;
     const __LOGS_JSON__: LogEntry[];
-    const __MODEL_JSON__: EditorModel | null;
     const __RENDER_SVG__: string;
     const __RENDER_STEP__: number | null;
     const __RENDER_PRINT__: import("./render/measure").PrintCheck | null;

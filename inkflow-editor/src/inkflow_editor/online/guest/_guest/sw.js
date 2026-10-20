@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  // src/ts/guest/sw.ts
+  // inkflow-editor/src/ts/guest/sw.ts
   var sw = self;
   sw.addEventListener("install", () => {
     void sw.skipWaiting();

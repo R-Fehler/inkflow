@@ -14,8 +14,8 @@
 //
 // Run from the repository root:
 //   PLAYWRIGHT=/path/to/node_modules/playwright-core \
-//   CHROMIUM=/path/to/chrome node relay/e2e/online.e2e.mjs
-// (RELAY=worker needs `pnpm install --ignore-workspace` in relay/cloudflare.)
+//   CHROMIUM=/path/to/chrome node inkflow-editor/relay/e2e/online.e2e.mjs
+// (RELAY=worker needs `pnpm install --ignore-workspace` in inkflow-editor/relay/cloudflare.)
 // Ports: OWNER_PORT (8000), RELAY_PORT (8001).
 
 import { spawn, spawnSync } from "node:child_process";
@@ -24,7 +24,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const root = resolve(new URL("../..", import.meta.url).pathname);
+const root = resolve(new URL("../../..", import.meta.url).pathname);
 const require = createRequire(import.meta.url);
 const { chromium } = require(
     process.env.PLAYWRIGHT ?? "/opt/node-tools/node_modules/playwright-core",
@@ -115,7 +115,7 @@ const relayLog =
                   "--ip",
                   "127.0.0.1",
               ],
-              { cwd: join(root, "relay/cloudflare") },
+              { cwd: join(root, "inkflow-editor/relay/cloudflare") },
           )
         : run(
               "uv",

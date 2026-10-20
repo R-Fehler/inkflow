@@ -24,11 +24,26 @@ run = "uv run basedpyright"
 [tasks.lint-deps]
 run = "uv run deptry src"
 
+[tasks.lint-deps-editor]
+dir = "inkflow-editor"
+run = "uv run deptry src"
+
 [tasks.lint-lock]
 run = "uv lock --check"
 
+# Each package's suite in its own session (both are a package named `tests`).
 [tasks.test]
 run = "uv run pytest"
+
+[tasks.test-editor]
+dir = "inkflow-editor"
+run = "uv run pytest"
+
+# The core's suite where inkflow-editor is not installed at all: the core must
+# never come to depend on its plugin.
+[tasks.test-core]
+env = { UV_PROJECT_ENVIRONMENT = ".venv-core" }
+run = "uv run --no-default-groups --group test pytest"
 
 [tasks.lint-js]
 depends = ["install-js"]
@@ -43,13 +58,13 @@ depends = ["install-js"]
 run = [
   "pnpm exec esbuild src/ts/presenter/main.ts --bundle --outfile=src/inkflow/bundles/presenter.js",
   "pnpm exec esbuild src/css/presenter/index.css --bundle --outfile=src/inkflow/bundles/presenter.css",
-  "pnpm exec esbuild src/ts/editor/main.ts --bundle --outfile=src/inkflow/bundles/editor.js",
-  "pnpm exec esbuild src/css/editor/index.css --bundle --outfile=src/inkflow/bundles/editor.css",
+  "pnpm exec esbuild inkflow-editor/src/ts/editor/main.ts --bundle --outfile=inkflow-editor/src/inkflow_editor/bundles/editor.js",
+  "pnpm exec esbuild inkflow-editor/src/css/editor/index.css --bundle --outfile=inkflow-editor/src/inkflow_editor/bundles/editor.css",
   "pnpm exec esbuild src/ts/render/main.ts --bundle --outfile=src/inkflow/bundles/render.js",
   "pnpm exec esbuild src/ts/fit/main.ts --bundle --outfile=src/inkflow/bundles/fit.js",
-  "pnpm exec esbuild src/ts/guest/boot.ts --bundle --outfile=src/inkflow/online/guest/_guest/boot.js",
-  "pnpm exec esbuild src/ts/guest/sw.ts --bundle --outfile=src/inkflow/online/guest/_guest/sw.js",
-  "pnpm exec esbuild relay/cloudflare/src/worker.ts --bundle --format=esm --external:cloudflare:workers --outfile=src/inkflow/online/cloudflare/worker.js",
+  "pnpm exec esbuild inkflow-editor/src/ts/guest/boot.ts --bundle --outfile=inkflow-editor/src/inkflow_editor/online/guest/_guest/boot.js",
+  "pnpm exec esbuild inkflow-editor/src/ts/guest/sw.ts --bundle --outfile=inkflow-editor/src/inkflow_editor/online/guest/_guest/sw.js",
+  "pnpm exec esbuild inkflow-editor/relay/cloudflare/src/worker.ts --bundle --format=esm --external:cloudflare:workers --outfile=inkflow-editor/src/inkflow_editor/online/cloudflare/worker.js",
 ]
 
 [tasks.docs]
@@ -76,4 +91,4 @@ depends = ["install-js"]
 run = ["uv run ruff check --fix", "uv run ruff format", "pnpm exec biome check --write ."]
 
 [tasks.check]
-depends = ["lint-py", "fmt-py", "typecheck-py", "lint-deps", "lint-lock", "test", "lint-js", "typecheck-js", "test-js"]
+depends = ["lint-py", "fmt-py", "typecheck-py", "lint-deps", "lint-deps-editor", "lint-lock", "test", "test-editor", "test-core", "lint-js", "typecheck-js", "test-js"]

@@ -39,7 +39,7 @@ disappear. Give the picture a **background**: `"paper"` paints white behind
 it, with a small margin and rounded corners, whatever the deck's mode:
 
 ```python
-zones={"media": Image("figures/plot.pdf", background="paper")}
+zones = {"media": Image("figures/plot.pdf", background="paper")}
 ```
 
 In a slide's SVG it is `inkflow:background="paper"` on the `<image>` (the

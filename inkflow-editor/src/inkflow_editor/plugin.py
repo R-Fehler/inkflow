@@ -57,6 +57,12 @@ class EditorPlugin(Plugin):
         return spec.read_text(encoding="utf-8")
 
     @override
+    def requirement(self) -> str | None:
+        from inkflow.init import compatible_requirement
+
+        return compatible_requirement("inkflow-editor")
+
+    @override
     def current_slide(self, project_dir: Path) -> int | None:
         from inkflow_editor.agent.context import current_slide
 

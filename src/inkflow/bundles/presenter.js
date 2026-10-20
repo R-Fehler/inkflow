@@ -5219,6 +5219,35 @@
     return sock;
   }
 
+  // src/ts/presenter/toeditor.ts
+  var editorPath = null;
+  function backToEditor() {
+    if (editorPath === null) return;
+    const hash = `#slide=${state.slideIndex + 1}`;
+    const opener = window.opener;
+    try {
+      if (opener && !opener.closed && opener.location.origin === location.origin && opener.location.pathname.startsWith(editorPath)) {
+        opener.location.hash = hash;
+        opener.focus();
+        window.close();
+        if (window.closed) return;
+      }
+    } catch {
+    }
+    location.href = `${editorPath}${hash}`;
+  }
+  function setEditor(path) {
+    editorPath = path?.startsWith("/") ? path : null;
+    const button3 = document.getElementById("btn-to-editor");
+    if (button3) button3.style.display = editorPath === null ? "none" : "";
+  }
+  function initToEditor() {
+    const button3 = document.getElementById("btn-to-editor");
+    if (!button3) return;
+    button3.style.display = "none";
+    button3.addEventListener("click", backToEditor);
+  }
+
   // src/ts/presenter/websocket.ts
   var wsDot = document.getElementById("ws-dot");
   var overviewEl2 = document.getElementById("overview");
@@ -5251,11 +5280,12 @@
   var role = "owner";
   function welcome(msg) {
     role = String(msg.role ?? "owner");
+    setEditor(
+      role !== "viewer" && typeof msg.editor === "string" ? msg.editor : null
+    );
     if (role !== "viewer") return;
-    for (const id of ["btn-to-editor", "btn-edit"]) {
-      const el = document.getElementById(id);
-      if (el) el.style.display = "none";
-    }
+    const edit = document.getElementById("btn-edit");
+    if (edit) edit.style.display = "none";
     if (!storedSyncMode() && state.syncMode !== "follow") {
       state.syncMode = "follow";
       requestSync();
@@ -5511,34 +5541,6 @@
         () => setSyncMode(row.dataset.mode)
       );
     renderSyncButton();
-  }
-
-  // src/ts/presenter/toeditor.ts
-  var served = false;
-  function backToEditor() {
-    if (!served) return;
-    const hash = `#slide=${state.slideIndex + 1}`;
-    const opener = window.opener;
-    try {
-      if (opener && !opener.closed && opener.location.origin === location.origin && opener.location.pathname.startsWith("/edit")) {
-        opener.location.hash = hash;
-        opener.focus();
-        window.close();
-        if (window.closed) return;
-      }
-    } catch {
-    }
-    location.href = `/edit${hash}`;
-  }
-  function initToEditor(wsPort) {
-    const button3 = document.getElementById("btn-to-editor");
-    served = wsPort != null;
-    if (!button3) return;
-    if (!served) {
-      button3.style.display = "none";
-      return;
-    }
-    button3.addEventListener("click", backToEditor);
   }
 
   // src/ts/presenter/windowsync.ts
@@ -6403,7 +6405,7 @@
   initSyncMenu();
   initWindowSync(WS_PORT);
   initEditMenu(EDIT_COMMANDS, WS_PORT);
-  initToEditor(WS_PORT);
+  initToEditor();
   initInk(WS_PORT, sendInk);
   initFit();
   var deepLinked = readURL();

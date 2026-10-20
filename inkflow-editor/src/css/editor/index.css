@@ -1,6 +1,6 @@
-@import "../shared/theme-vars.css";
-@import "../shared/animations.css";
-@import "../shared/ink.css";
+@import "../../../../src/css/shared/theme-vars.css";
+@import "../../../../src/css/shared/animations.css";
+@import "../../../../src/css/shared/ink.css";
 @import "./compare.css";
 @import "./collab.css";
 @import "./master.css";

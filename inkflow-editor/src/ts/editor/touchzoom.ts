@@ -15,7 +15,7 @@
 // tool with "fingers draw" on), where latency matters: that stroke starts at
 // once and is dropped if a second finger turns the touch into a pinch.
 
-import { GesturePad } from "../shared/gesturepad";
+import { GesturePad } from "@inkflow/shared/gesturepad";
 import { hooks, pick, setZoom, zoomAbout, zoomEnded } from "./canvas";
 import { cancelStroke, fingersDraw } from "./ink";
 import { ed } from "./state";

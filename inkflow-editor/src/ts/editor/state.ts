@@ -1,4 +1,4 @@
-import type { SlideData } from "../shared/types";
+import type { SlideData } from "@inkflow/shared/types";
 import type { PlaceholderList } from "./placeholdertext";
 import type { EditorModel, Selected, SlideModel, SourceInfo } from "./types";
 

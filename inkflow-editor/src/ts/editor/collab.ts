@@ -3,7 +3,12 @@
 // name this browser goes by, and what this page tells the others. Relayed by
 // the server as "presence"; nothing of it is stored.
 
-import { clientKey, initials, saveName, storedName } from "../shared/identity";
+import {
+    clientKey,
+    initials,
+    saveName,
+    storedName,
+} from "@inkflow/shared/identity";
 import { drawOverlay, hooks, outlineOf, slideRoot } from "./canvas";
 import { closeDialog, openDialog } from "./dialog";
 import { clear, h, svgEl } from "./dom";

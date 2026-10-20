@@ -2,11 +2,16 @@
 // plus the pushes every page gets (update, error) and the editor-only ones
 // (editor-model, editor-command).
 
-import { applyDeckStyles } from "../shared/deck-styles";
-import { applyPatch, isWhole, type Keyed, type Patch } from "../shared/patch";
-import type { SlideData } from "../shared/types";
-import { setDeckCanvas } from "../shared/viewbox";
-import { openSocket, SENT_AWAY } from "../shared/wsurl";
+import { applyDeckStyles } from "@inkflow/shared/deck-styles";
+import {
+    applyPatch,
+    isWhole,
+    type Keyed,
+    type Patch,
+} from "@inkflow/shared/patch";
+import type { SlideData } from "@inkflow/shared/types";
+import { setDeckCanvas } from "@inkflow/shared/viewbox";
+import { openSocket, SENT_AWAY } from "@inkflow/shared/wsurl";
 import type { Person } from "./collab";
 import { presenceConnected, setPeople, welcome } from "./collab";
 import { toast } from "./dom";

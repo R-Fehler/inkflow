@@ -5,8 +5,8 @@
 // delete slides. Every change is a structured edit of the Deck(slides=[...])
 // list in deck.py.
 
-import { scheduleFit } from "../shared/fit";
-import { parseViewBox } from "../shared/viewbox";
+import { scheduleFit } from "@inkflow/shared/fit";
+import { parseViewBox } from "@inkflow/shared/viewbox";
 import {
     copySlides,
     cutSlides,

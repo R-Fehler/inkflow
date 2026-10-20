@@ -160,6 +160,17 @@ describe("moving the deck to a server", () => {
         expect(steps[3].commands).toEqual(["inkflow edit --no-open --ssh"]);
     });
 
+    it("installs the plugins the deck runs with beside inkflow", () => {
+        const steps = moveSteps(
+            info({ pinned: false, plugins: ["inkflow-editor~=0.1.0"] }),
+            "tim@box",
+            7777,
+        );
+        expect(steps[2].commands).toContain(
+            "uv tool install 'inkflow~=0.9.0' --with 'inkflow-editor~=0.1.0'",
+        );
+    });
+
     it("writes every step for an example", () => {
         const steps = moveSteps(
             info({ folder: "my talks" }),

@@ -10,8 +10,10 @@
         "includes": [
             "**",
             "!src/inkflow/bundles",
-            "!src/inkflow/online/guest/_guest/*.js",
-            "!src/inkflow/online/cloudflare/*.js",
+            "!inkflow-editor/src/inkflow_editor/bundles",
+            "!inkflow-editor/src/inkflow_editor/online/guest/_guest/*.js",
+            "!inkflow-editor/src/inkflow_editor/online/cloudflare/*.js",
+            "!inkflow-editor/tests/data/*.json",
             "!**/*.svg"
         ]
     },

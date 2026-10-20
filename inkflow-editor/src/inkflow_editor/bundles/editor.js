@@ -638,7 +638,7 @@
     rootStep.set(root2, step2);
   }
 
-  // src/ts/editor/connectors.ts
+  // inkflow-editor/src/ts/editor/connectors.ts
   var SIDES = ["top", "right", "bottom", "left"];
   var MAX_SITES = 9;
   function siteName(side, t2) {
@@ -855,7 +855,7 @@
     return { id: value.slice(0, i2), site };
   }
 
-  // src/ts/editor/dom.ts
+  // inkflow-editor/src/ts/editor/dom.ts
   function h(tag, attrs2 = {}, ...children2) {
     const el2 = document.createElement(tag);
     for (const [k2, v2] of Object.entries(attrs2)) {
@@ -951,7 +951,7 @@
     );
   }
 
-  // src/ts/editor/drawioshapes.ts
+  // inkflow-editor/src/ts/editor/drawioshapes.ts
   function diagramShapes(svg) {
     const shapes2 = [];
     for (const g2 of svg.querySelectorAll("g[data-cell-id]")) {
@@ -1053,7 +1053,7 @@
     return boxIn(cellShape(cell), root2);
   }
 
-  // src/ts/editor/geom.ts
+  // inkflow-editor/src/ts/editor/geom.ts
   var IDENTITY = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
   function mat(m2) {
     return { a: m2.a, b: m2.b, c: m2.c, d: m2.d, e: m2.e, f: m2.f };
@@ -1530,7 +1530,7 @@
     return (words[0] ?? "?").slice(0, 2).toUpperCase();
   }
 
-  // src/ts/editor/dialog.ts
+  // inkflow-editor/src/ts/editor/dialog.ts
   var host = document.getElementById("dialog");
   var onClose = null;
   function openDialog(title3, body3, opts2 = {}) {
@@ -1598,7 +1598,7 @@
     });
   }
 
-  // src/ts/editor/pathtext.ts
+  // inkflow-editor/src/ts/editor/pathtext.ts
   function sepOf(path) {
     return path.includes("\\") && !path.includes("/") ? "\\" : "/";
   }
@@ -1675,7 +1675,7 @@
     return path.slice(root2.length + 1);
   }
 
-  // src/ts/editor/pdfpages.ts
+  // inkflow-editor/src/ts/editor/pdfpages.ts
   var THUMBS = 24;
   function sourceRef(image) {
     return image.getAttribute("data-inkflow-pdf") ?? assetRef(
@@ -1807,7 +1807,7 @@
     });
   }
 
-  // src/ts/editor/state.ts
+  // inkflow-editor/src/ts/editor/state.ts
   var CONNECTOR_TOOLS = {
     line: "straight",
     arrow: "straight",
@@ -1888,12 +1888,12 @@
     return currentSlide()?.sources?.[key] ?? null;
   }
 
-  // src/ts/editor/types.ts
+  // inkflow-editor/src/ts/editor/types.ts
   function refBase(src) {
     return src.copyTo ?? src.path;
   }
 
-  // src/ts/editor/folderpicker.ts
+  // inkflow-editor/src/ts/editor/folderpicker.ts
   function megabytes(bytes) {
     if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
     if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
@@ -2224,7 +2224,7 @@
     return { el: el2, current: () => folder, focus: () => path.focus() };
   }
 
-  // src/ts/editor/openwith.ts
+  // inkflow-editor/src/ts/editor/openwith.ts
   var menu = document.getElementById("context-menu");
   function fileName2(path) {
     return path.split(/[\\/]/).pop() ?? path;
@@ -2280,7 +2280,7 @@
     );
   }
 
-  // src/ts/editor/videocheck.ts
+  // inkflow-editor/src/ts/editor/videocheck.ts
   var LONG = 10 * 60;
   async function mediaInfo(path) {
     const res = await request({ action: "media-info", path });
@@ -2724,7 +2724,7 @@
     });
   }
 
-  // src/ts/editor/insert.ts
+  // inkflow-editor/src/ts/editor/insert.ts
   var overlay = document.getElementById("overlay");
   var afterRender = {
     ids: [],
@@ -3489,7 +3489,7 @@
     });
   }
 
-  // src/ts/editor/clipboard.ts
+  // inkflow-editor/src/ts/editor/clipboard.ts
   var PREFIX = "inkflow-clipboard:";
   var lastCopied = null;
   async function put(payload) {
@@ -3632,7 +3632,7 @@
     await pasteText(text);
   }
 
-  // src/ts/editor/commentstext.ts
+  // inkflow-editor/src/ts/editor/commentstext.ts
   function slideThreads(threads2, slideId2) {
     return threads2.filter((t2) => slideId2 != null && t2.slide === slideId2).sort(
       (a2, b2) => Number(a2.resolved) - Number(b2.resolved) || a2.created - b2.created
@@ -3670,7 +3670,7 @@
 ${lines.join("\n")}`;
   }
 
-  // src/ts/editor/keystext.ts
+  // inkflow-editor/src/ts/editor/keystext.ts
   var GROUPS = [
     "Tools",
     "Insert",
@@ -4032,7 +4032,7 @@ ${lines.join("\n")}`;
     );
   }
 
-  // src/ts/editor/keys.ts
+  // inkflow-editor/src/ts/editor/keys.ts
   var KEY = "inkflow-editor-keys";
   var DOCS = "https://ll-nick.github.io/inkflow/editor/";
   var overrides = {};
@@ -4292,7 +4292,7 @@ ${lines.join("\n")}`;
     });
   }
 
-  // src/ts/editor/comments.ts
+  // inkflow-editor/src/ts/editor/comments.ts
   var canvasEl = document.getElementById("canvas");
   var dialogBody = null;
   var dialogSlide = null;
@@ -4664,7 +4664,7 @@ ${lines.join("\n")}`;
     );
   }
 
-  // src/ts/editor/deletetext.ts
+  // inkflow-editor/src/ts/editor/deletetext.ts
   function plural(n3, word) {
     return `${n3} ${word}${n3 === 1 ? "" : "s"}`;
   }
@@ -4770,7 +4770,7 @@ ${lines.join("\n")}`;
     return `Also deletes ${plural(n3, "file")} no other slide uses:`;
   }
 
-  // src/ts/editor/deletedlg.ts
+  // inkflow-editor/src/ts/editor/deletedlg.ts
   function planOf(result) {
     if (!result.ok) return null;
     return {
@@ -4934,7 +4934,7 @@ ${lines.join("\n")}`;
     });
   }
 
-  // src/ts/editor/gallery.ts
+  // inkflow-editor/src/ts/editor/gallery.ts
   var LABELS = {
     numbered: ["Blank", "Background and slide number"],
     title: ["Title only", "A title; draw the rest"],
@@ -5153,7 +5153,7 @@ ${lines.join("\n")}`;
     );
   }
 
-  // src/ts/editor/mastertree.ts
+  // inkflow-editor/src/ts/editor/mastertree.ts
   var ORDER = [
     "numbered",
     "title",
@@ -5256,7 +5256,7 @@ ${lines.join("\n")}`;
     return l2.label || labels[l2.name] || l2.name;
   }
 
-  // src/ts/editor/placeholdertext.ts
+  // inkflow-editor/src/ts/editor/placeholdertext.ts
   var MEDIA = /media|image|img|picture|photo|figure|video|logo/;
   var RESERVED = /* @__PURE__ */ new Set(["notes", "slide", "slide-number", "slide-total"]);
   function slugName(name2) {
@@ -5300,7 +5300,7 @@ ${lines.join("\n")}`;
     return `Renames the zone on ${n3} slide${n3 === 1 ? "" : "s"} (${plan2.slideNames.join(", ")})`;
   }
 
-  // src/ts/editor/placeholders.ts
+  // inkflow-editor/src/ts/editor/placeholders.ts
   async function loadPlaceholders(kind, path) {
     const result = await request({ action: "master-placeholders", kind, path });
     if (!result.ok) return null;
@@ -5726,7 +5726,7 @@ ${lines.join("\n")}`;
     openDialog("Remove placeholder", body3);
   }
 
-  // src/ts/editor/master.ts
+  // inkflow-editor/src/ts/editor/master.ts
   var aside = document.getElementById("master");
   var button = document.getElementById("btn-layout");
   var menu2 = document.getElementById("context-menu");
@@ -6496,7 +6496,7 @@ ${lines.join("\n")}`;
     });
   }
 
-  // src/ts/editor/problemstext.ts
+  // inkflow-editor/src/ts/editor/problemstext.ts
   function worst(problems2) {
     if (!problems2?.length) return null;
     if (problems2.some((p2) => p2.level === "error")) return "error";
@@ -6529,7 +6529,7 @@ ${lines.join("\n")}`;
     return state.contrast ? "Layout and contrast are checked after every change." : "The layout is checked after every change (contrast is not).";
   }
 
-  // src/ts/editor/problems.ts
+  // inkflow-editor/src/ts/editor/problems.ts
   var button2 = document.getElementById("btn-problems");
   var CONTRAST_KEY = "inkflow-editor-check-contrast";
   var HINTS_KEY = "inkflow-editor-problem-hints";
@@ -6739,7 +6739,7 @@ ${lines.join("\n")}`;
     on("model", renderButton);
   }
 
-  // src/ts/editor/rename.ts
+  // inkflow-editor/src/ts/editor/rename.ts
   function relOf(path) {
     if (!path) return null;
     const rel = projectRel(
@@ -7215,7 +7215,7 @@ ${lines.join("\n")}`;
     });
   }
 
-  // src/ts/editor/sections.ts
+  // inkflow-editor/src/ts/editor/sections.ts
   function sectionOf(sections2, i2) {
     for (let k2 = 0; k2 < sections2.length; k2++) {
       const s2 = sections2[k2];
@@ -7293,7 +7293,7 @@ ${lines.join("\n")}`;
     });
   }
 
-  // src/ts/editor/sectionui.ts
+  // inkflow-editor/src/ts/editor/sectionui.ts
   function sections() {
     return ed.model?.sections ?? [];
   }
@@ -7592,7 +7592,7 @@ ${lines.join("\n")}`;
     return head;
   }
 
-  // src/ts/editor/comparelib.ts
+  // inkflow-editor/src/ts/editor/comparelib.ts
   function isChange(p2) {
     return p2.status !== "same" || p2.moved;
   }
@@ -7821,7 +7821,7 @@ ${lines.join("\n")}`;
     ];
   }
 
-  // src/ts/editor/gitnotice.ts
+  // inkflow-editor/src/ts/editor/gitnotice.ts
   var NOTICE_KEY = "inkflow-git-undo-notice";
   var noticeShown = false;
   function undoNoticeDue() {
@@ -7840,7 +7840,7 @@ ${lines.join("\n")}`;
   }
   var UNDO_NOTICE = "Note: git changes the deck's files on disk, so the editor's undo and redo history is cleared afterwards (Ctrl+Z cannot go back past this point). You are told this once per session.";
 
-  // src/ts/editor/compare.ts
+  // inkflow-editor/src/ts/editor/compare.ts
   var view = document.getElementById("compare-view");
   var model = null;
   var viewId = 0;
@@ -8905,7 +8905,7 @@ ${UNDO_NOTICE}` : question)) {
     }
   }
 
-  // src/ts/editor/packtext.ts
+  // inkflow-editor/src/ts/editor/packtext.ts
   function missingLines(summary2) {
     return summary2.items.filter((i2) => i2.fixable).map((i2) => i2.message);
   }
@@ -8940,7 +8940,7 @@ ${UNDO_NOTICE}` : question)) {
     return [.../* @__PURE__ */ new Set([...ticked, ...packed])];
   }
 
-  // src/ts/editor/pack.ts
+  // inkflow-editor/src/ts/editor/pack.ts
   var PACK_HELP = "Make the deck self-contained: fonts, outside files, lock file, git rules \u2014 so it looks the same on every machine";
   async function packCheck() {
     const res = await request({ action: "pack", op: "check" });
@@ -9177,7 +9177,7 @@ ${UNDO_NOTICE}` : question)) {
     );
   }
 
-  // src/ts/editor/publishtext.ts
+  // inkflow-editor/src/ts/editor/publishtext.ts
   function defaultHost(info4) {
     return info4.configured?.host ?? info4.suggested ?? "github";
   }
@@ -9203,7 +9203,7 @@ ${UNDO_NOTICE}` : question)) {
     return parts;
   }
 
-  // src/ts/editor/publish.ts
+  // inkflow-editor/src/ts/editor/publish.ts
   var HOST_NAMES = {
     github: "GitHub Pages",
     gitlab: "GitLab Pages"
@@ -9450,7 +9450,7 @@ ${UNDO_NOTICE}` : question)) {
     );
   }
 
-  // src/ts/editor/worktreetext.ts
+  // inkflow-editor/src/ts/editor/worktreetext.ts
   function branchName(wt) {
     return wt.branch ?? `@${wt.head}`;
   }
@@ -9482,7 +9482,7 @@ ${UNDO_NOTICE}` : question)) {
     return `cd ${shellQuote(wt.deck ? deckDir(wt.deck) : wt.path)} && claude`;
   }
 
-  // src/ts/editor/git.ts
+  // inkflow-editor/src/ts/editor/git.ts
   var menu3 = document.getElementById("context-menu");
   var button3 = document.getElementById("btn-git");
   var label = button3.querySelector(".git-label");
@@ -10534,7 +10534,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     });
   }
 
-  // src/ts/editor/slidegittext.ts
+  // inkflow-editor/src/ts/editor/slidegittext.ts
   function letter(state) {
     if (state === "new") return "U";
     if (state === "modified") return "M";
@@ -10647,7 +10647,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return "";
   }
 
-  // src/ts/editor/slidegit.ts
+  // inkflow-editor/src/ts/editor/slidegit.ts
   var changes = null;
   function setSlideChanges(next) {
     const value = next && typeof next === "object" && Array.isArray(next.slides) ? next : null;
@@ -11246,7 +11246,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return changedAmong(changes, ed.model?.slides.keys() ?? []).length;
   }
 
-  // src/ts/editor/starstext.ts
+  // inkflow-editor/src/ts/editor/starstext.ts
   function starTargets(focus2, picked, current3) {
     if (focus2 === "sorter" && picked.size) {
       return [...picked].sort((a2, b2) => a2 - b2);
@@ -11266,7 +11266,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return indices.filter(isStarred2);
   }
 
-  // src/ts/editor/stars.ts
+  // inkflow-editor/src/ts/editor/stars.ts
   function starred() {
     return new Set(ed.model?.stars ?? []);
   }
@@ -11328,7 +11328,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     onMessage("stars", (msg) => setStars(msg.stars));
   }
 
-  // src/ts/editor/sorter.ts
+  // inkflow-editor/src/ts/editor/sorter.ts
   var list2 = document.getElementById("sorter-list");
   var addBtn = document.getElementById("sorter-add");
   var menu4 = document.getElementById("context-menu");
@@ -11913,7 +11913,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     });
   }
 
-  // src/ts/editor/collab.ts
+  // inkflow-editor/src/ts/editor/collab.ts
   var collab = {
     me: null,
     people: []
@@ -12118,7 +12118,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     on("sorter", paintDots);
   }
 
-  // src/ts/editor/net.ts
+  // inkflow-editor/src/ts/editor/net.ts
   var ws = null;
   var nextId = 1;
   var pending2 = /* @__PURE__ */ new Map();
@@ -12411,7 +12411,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       ws.send(JSON.stringify(payload));
   }
 
-  // src/ts/editor/snap.ts
+  // inkflow-editor/src/ts/editor/snap.ts
   function targetsFor(slide, others2) {
     const xs = [slide.x, slide.x + slide.width / 2, slide.x + slide.width];
     const ys = [slide.y, slide.y + slide.height / 2, slide.y + slide.height];
@@ -12478,7 +12478,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return out;
   }
 
-  // src/ts/editor/canvas.ts
+  // inkflow-editor/src/ts/editor/canvas.ts
   var canvas = document.getElementById("canvas");
   var paper = document.getElementById("paper");
   var host3 = document.getElementById("slide-host");
@@ -14394,7 +14394,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     emit("zoom");
   }
 
-  // src/ts/editor/chartgrid.ts
+  // inkflow-editor/src/ts/editor/chartgrid.ts
   var CHART_KINDS = [
     { value: "bar", label: "Bar" },
     { value: "line", label: "Line" },
@@ -14607,7 +14607,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     };
   }
 
-  // src/ts/editor/chart.ts
+  // inkflow-editor/src/ts/editor/chart.ts
   function chartSettings(value) {
     const f2 = value.fields ?? {};
     const s2 = defaultSettings();
@@ -15175,7 +15175,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     focusCell2(0, 0);
   }
 
-  // src/ts/editor/crop.ts
+  // inkflow-editor/src/ts/editor/crop.ts
   function pictureOf(el2) {
     if (el2.localName === "image") return el2;
     if (el2.localName !== "svg" || !el2.getAttribute("viewBox")) return null;
@@ -15227,7 +15227,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     );
   }
 
-  // src/ts/editor/drawio.ts
+  // inkflow-editor/src/ts/editor/drawio.ts
   function diagramOf(el2) {
     const drawn2 = drawnDiagram(el2);
     if (drawn2) return drawn2;
@@ -15812,7 +15812,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return new TextDecoder().decode(bytes);
   }
 
-  // src/ts/editor/objects.ts
+  // inkflow-editor/src/ts/editor/objects.ts
   var host4 = document.getElementById("objects");
   var body = document.getElementById("props-body");
   var tabs = document.getElementById("panel-tabs");
@@ -16085,7 +16085,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     on("selection", renderObjects);
   }
 
-  // src/ts/editor/stepcycle.ts
+  // inkflow-editor/src/ts/editor/stepcycle.ts
   function nextStep(step2, max, back = false) {
     if (max <= 0) return null;
     if (step2 == null) return back ? max : 0;
@@ -16109,7 +16109,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return `Previewing ${where}; editing is paused. ${how}; after the last step it shows every object again.`;
   }
 
-  // src/ts/editor/stepbutton.ts
+  // inkflow-editor/src/ts/editor/stepbutton.ts
   var flash = 0;
   function button4() {
     return document.getElementById("btn-step");
@@ -16164,7 +16164,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     });
   }
 
-  // src/ts/editor/animsteps.ts
+  // inkflow-editor/src/ts/editor/animsteps.ts
   function cueSteps(cues, svg) {
     const seen = /* @__PURE__ */ new Map();
     return cues.map((cue) => {
@@ -16189,7 +16189,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     });
   }
 
-  // src/ts/editor/animpreview.ts
+  // inkflow-editor/src/ts/editor/animpreview.ts
   var current2 = null;
   function previewPlaying() {
     return current2 !== null;
@@ -16283,7 +16283,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     emit("preview");
   }
 
-  // src/ts/editor/videopreview.ts
+  // inkflow-editor/src/ts/editor/videopreview.ts
   function videoOf(el2) {
     if (!el2) return null;
     return el2.localName === "video" ? el2 : el2.querySelector("video");
@@ -16328,7 +16328,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return btn;
   }
 
-  // src/ts/editor/props.ts
+  // inkflow-editor/src/ts/editor/props.ts
   var panel = document.getElementById("props-body");
   function section2(title3, ...body3) {
     return h(
@@ -18890,7 +18890,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     });
   }
 
-  // src/ts/editor/stylecopy.ts
+  // inkflow-editor/src/ts/editor/stylecopy.ts
   var PAINT_CLASS = /^inkflow-(fill|stroke)-[\w-]+$/;
   var COMMON = ["opacity", "filter"];
   var PAINT = [
@@ -19011,7 +19011,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     );
   }
 
-  // src/ts/editor/find.ts
+  // inkflow-editor/src/ts/editor/find.ts
   var panel2 = document.getElementById("find-panel");
   var hits = [];
   var active = -1;
@@ -19316,7 +19316,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return best2;
   }
 
-  // src/ts/editor/grid.ts
+  // inkflow-editor/src/ts/editor/grid.ts
   var view2 = document.getElementById("grid-view");
   var list3 = document.getElementById("grid-list");
   var sizeInput = document.getElementById("grid-size");
@@ -19694,7 +19694,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     on("sections", renderGrid);
   }
 
-  // src/ts/editor/panelstext.ts
+  // inkflow-editor/src/ts/editor/panelstext.ts
   var PANELS = ["left", "bottom", "right"];
   var ALL_SHOWN = { left: true, bottom: true, right: true };
   var PANEL_KEYS = {
@@ -19729,7 +19729,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     return key ? `${what} (${key})` : what;
   }
 
-  // src/ts/editor/panels.ts
+  // inkflow-editor/src/ts/editor/panels.ts
   var KEY2 = "inkflow-editor-panels";
   var shown2 = parseShown(null);
   function button6(panel4) {
@@ -19778,7 +19778,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     apply2();
   }
 
-  // src/ts/editor/conflict.ts
+  // inkflow-editor/src/ts/editor/conflict.ts
   function showConflict(why, mine, useMine) {
     const area2 = h("textarea", {
       readonly: true,
@@ -19840,7 +19840,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
     openDialog("Changed by someone else", body3, { wide: true });
   }
 
-  // src/ts/editor/richtext.ts
+  // inkflow-editor/src/ts/editor/richtext.ts
   var Unsupported = class extends Error {
   };
   var COLOR_CLASS = /^inkflow-color-[\w-]+$/;
@@ -20104,7 +20104,7 @@ $$`;
     return normalizeMarkdown(a2) === normalizeMarkdown(b2);
   }
 
-  // src/ts/editor/textedit.ts
+  // inkflow-editor/src/ts/editor/textedit.ts
   var layer = document.getElementById("text-layer");
   var dock = document.getElementById("zone-dock");
   function closeDock() {
@@ -21233,7 +21233,7 @@ ${area2.value.slice(pos)}`;
     );
   }
 
-  // src/ts/editor/toolbar.ts
+  // inkflow-editor/src/ts/editor/toolbar.ts
   var $ = (id) => document.getElementById(id);
   async function undo() {
     await edit({ action: "undo" });
@@ -21551,7 +21551,7 @@ ${area2.value.slice(pos)}`;
     updateTools();
   }
 
-  // src/ts/editor/canvasmenu.ts
+  // inkflow-editor/src/ts/editor/canvasmenu.ts
   var menu5 = document.getElementById("context-menu");
   var at = { x: 0, y: 0 };
   function sep() {
@@ -21788,7 +21788,7 @@ ${area2.value.slice(pos)}`;
     document.getElementById("canvas")?.addEventListener("contextmenu", onContextMenu);
   }
 
-  // src/ts/editor/context.ts
+  // inkflow-editor/src/ts/editor/context.ts
   var timer4 = 0;
   function snapshot2() {
     const slide = currentSlide();
@@ -21859,7 +21859,7 @@ ${area2.value.slice(pos)}`;
     });
   }
 
-  // src/ts/editor/decks.ts
+  // inkflow-editor/src/ts/editor/decks.ts
   var menu6 = document.getElementById("context-menu");
   var button7 = document.getElementById("btn-deck");
   function lookThumb(look) {
@@ -22370,7 +22370,7 @@ Ctrl+click: open in a new tab`;
     renderButton2();
   }
 
-  // src/ts/editor/exportdlg.ts
+  // inkflow-editor/src/ts/editor/exportdlg.ts
   var FORMATS = [
     {
       format: "single",
@@ -23481,7 +23481,7 @@ Ctrl+click: open in a new tab`;
     }
   }
 
-  // src/ts/editor/ink.ts
+  // inkflow-editor/src/ts/editor/ink.ts
   var SETTINGS_KEY = "inkflow-ink-editor";
   var SVG_NS4 = "http://www.w3.org/2000/svg";
   var settings = loadSettings(SETTINGS_KEY, true);
@@ -23609,7 +23609,7 @@ Ctrl+click: open in a new tab`;
     on("render", showPending);
   }
 
-  // src/ts/editor/notestext.ts
+  // inkflow-editor/src/ts/editor/notestext.ts
   var NOTES_DEFAULT = 150;
   var NOTES_MIN = 72;
   var CANVAS_MIN = 160;
@@ -23623,7 +23623,7 @@ Ctrl+click: open in a new tab`;
     return Number.isFinite(n3) && n3 > 0 ? n3 : null;
   }
 
-  // src/ts/editor/notes.ts
+  // inkflow-editor/src/ts/editor/notes.ts
   var area = document.getElementById("notes-input");
   var preview = document.getElementById("notes-preview");
   var label3 = document.getElementById("notes-file");
@@ -23816,7 +23816,7 @@ Ctrl+click: open in a new tab`;
     on("model", load2);
   }
 
-  // src/ts/editor/palettetext.ts
+  // inkflow-editor/src/ts/editor/palettetext.ts
   function score(query2, text) {
     const q = query2.toLowerCase().replace(/\s+/g, " ").trim();
     if (!q) return 0;
@@ -23869,7 +23869,7 @@ Ctrl+click: open in a new tab`;
     return { label: title3.split("\n")[0].trim() };
   }
 
-  // src/ts/editor/theme.ts
+  // inkflow-editor/src/ts/editor/theme.ts
   var SEMANTIC = [
     ["bg", "Background"],
     ["surface", "Surface (cards)"],
@@ -24230,7 +24230,7 @@ Ctrl+click: open in a new tab`;
     });
   }
 
-  // src/ts/editor/palette.ts
+  // inkflow-editor/src/ts/editor/palette.ts
   var box = null;
   function slideCommands() {
     const slides = ed.model?.slides ?? [];
@@ -26182,7 +26182,7 @@ Ctrl+click: open in a new tab`;
   var qrcode_default = qrcode;
   var stringToBytes = qrcode.stringToBytes;
 
-  // src/ts/editor/sharetext.ts
+  // inkflow-editor/src/ts/editor/sharetext.ts
   var GUIDE_URL = "https://ll-nick.github.io/inkflow/editor/share-online/";
   function onlineSummary(o2) {
     const host5 = o2.relay ? o2.relay.replace(/^https?:\/\//, "") : "";
@@ -26216,7 +26216,7 @@ Ctrl+click: open in a new tab`;
     }
   }
 
-  // src/ts/editor/sshtext.ts
+  // inkflow-editor/src/ts/editor/sshtext.ts
   var DEFAULT_PORT = 7777;
   var LOGIN_PLACEHOLDER = "you@server";
   var USER_PLACEHOLDER = "<your-user>";
@@ -26364,7 +26364,7 @@ Ctrl+click: open in a new tab`;
     ].join("\n").trimEnd();
   }
 
-  // src/ts/editor/sshdialog.ts
+  // inkflow-editor/src/ts/editor/sshdialog.ts
   var LOGIN_KEY = "inkflow-ssh-login";
   var SERVER_KEY = "inkflow-ssh-server";
   function stored(key) {
@@ -26691,7 +26691,7 @@ Ctrl+click: open in a new tab`;
     return status3.ssh ? inviteView(status3, opts2) : moveView(status3, opts2);
   }
 
-  // src/ts/editor/share.ts
+  // inkflow-editor/src/ts/editor/share.ts
   var status2 = null;
   var body2 = null;
   var ssh = null;
@@ -27426,7 +27426,7 @@ Ctrl+click: open in a new tab`;
     }
   };
 
-  // src/ts/editor/touchzoom.ts
+  // inkflow-editor/src/ts/editor/touchzoom.ts
   function initTouchZoom() {
     const canvas2 = document.getElementById("canvas");
     new GesturePad({
@@ -27443,7 +27443,7 @@ Ctrl+click: open in a new tab`;
     });
   }
 
-  // src/ts/editor/main.ts
+  // inkflow-editor/src/ts/editor/main.ts
   var INITIAL_MODEL = __MODEL_JSON__;
   var INITIAL_SLIDES = __SLIDES_JSON__;
   var WS_PORT = __WS_PORT__;

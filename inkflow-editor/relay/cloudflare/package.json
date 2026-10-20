@@ -1,7 +1,7 @@
 {
     "private": true,
     "name": "inkflow-relay-cloudflare",
-    "description": "inkflow's relay as a Cloudflare Worker (bundled into src/inkflow/online/cloudflare/worker.js by `mise run bundle`)",
+    "description": "inkflow's relay as a Cloudflare Worker (bundled into src/inkflow_editor/online/cloudflare/worker.js by `mise run bundle`)",
     "scripts": {
         "typecheck": "tsc --noEmit",
         "dev": "wrangler dev"

@@ -6,7 +6,7 @@
 // right-click has the slide menu, Ctrl+C / Ctrl+V / Delete act on the picked
 // slides; double-click or Enter opens a slide for editing.
 
-import { verticalNeighbor } from "../shared/sections";
+import { verticalNeighbor } from "@inkflow/shared/sections";
 import { commentBadge } from "./comments";
 import { clear, h } from "./dom";
 import { problemBadge } from "./problems";

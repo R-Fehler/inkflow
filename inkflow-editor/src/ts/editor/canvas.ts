@@ -7,10 +7,10 @@
 // attribute plan to the server, which writes it into that source file. The
 // rebuild that follows replaces the DOM with the authoritative render.
 
-import { fitSlide, onFontsLoaded } from "../shared/fit";
-import { scrollCorrection, ZoomAnchor } from "../shared/gestures";
-import { applyStepInstant } from "../shared/step";
-import { parseViewBox } from "../shared/viewbox";
+import { fitSlide, onFontsLoaded } from "@inkflow/shared/fit";
+import { scrollCorrection, ZoomAnchor } from "@inkflow/shared/gestures";
+import { applyStepInstant } from "@inkflow/shared/step";
+import { parseViewBox } from "@inkflow/shared/viewbox";
 import {
     type Bend,
     type ConnectorStyle,

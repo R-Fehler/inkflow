@@ -67,7 +67,7 @@ def login_user() -> str:
 
 def details(deck_path: Path | None, port: int) -> dict[str, object]:
     """Everything the dialog's commands are made of (JSON-ready)."""
-    from inkflow.init import inkflow_requirement
+    from inkflow.init import inkflow_requirement, plugin_requirements
     from inkflow.publish import layout, remote_url
 
     info: dict[str, object] = {
@@ -75,6 +75,7 @@ def details(deck_path: Path | None, port: int) -> dict[str, object]:
         "serverNames": server_names(),
         "user": login_user(),
         "requirement": inkflow_requirement(),
+        "plugins": plugin_requirements(),
         "inRepo": False,
         "remote": None,
         "folder": "",

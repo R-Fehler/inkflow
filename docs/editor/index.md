@@ -6,8 +6,17 @@ You click, drag and type on the real slide, the same rendering the presenter sho
 and every change is written straight back into the deck's own files.
 
 ```bash
-inkflow edit            # opens http://localhost:7777/edit
+pip install inkflow-editor   # once (or `uv add inkflow-editor` in the deck's folder)
+inkflow edit                 # opens http://localhost:7777/edit
 ```
+
+!!! note "A package of its own"
+    The editor is **inkflow-editor**, a plugin built on inkflow: installed next to
+    it, it adds `inkflow edit`, the `/edit` page of every deck's server and the
+    commands an agent uses ([Editing with Claude Code](claude-code.md)). inkflow
+    alone builds, presents, exports and checks decks without it. A deck created or
+    packed while it is installed pins it in its `pyproject.toml`, so `uv run
+    inkflow edit` works in a clone too.
 
 ![The inkflow editor: the slide list, a diagram slide with a selected box and the arrows attached to it, the properties panel with its animation, and the speaker notes](../assets/editor.png)
 

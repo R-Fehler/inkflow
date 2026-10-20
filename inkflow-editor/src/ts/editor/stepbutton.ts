@@ -3,7 +3,7 @@
 // comes round to every object again, with a short flash. Shift+click or a
 // right-click goes back. The cycle and its words are in stepcycle.ts.
 
-import { maxStep } from "../shared/step";
+import { maxStep } from "@inkflow/shared/step";
 import { render, slideRoot } from "./canvas";
 import { ed, emit } from "./state";
 import { nextStep, stepLabel, stepTitle, wrapped } from "./stepcycle";

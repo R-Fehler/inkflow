@@ -1,4 +1,4 @@
-// relay/cloudflare/src/worker.ts
+// inkflow-editor/relay/cloudflare/src/worker.ts
 import { DurableObject } from "cloudflare:workers";
 var PROTOCOL = 1;
 var MAX_FRAME = 512 * 1024;

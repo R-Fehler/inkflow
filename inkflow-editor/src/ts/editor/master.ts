@@ -12,8 +12,8 @@
 // under the theme's other layouts (editor/master.py). Templates are slides
 // saved as layouts ("Save as layout…").
 
-import { scheduleFit } from "../shared/fit";
-import type { SlideData } from "../shared/types";
+import { scheduleFit } from "@inkflow/shared/fit";
+import type { SlideData } from "@inkflow/shared/types";
 import { clearSelection, enterGroup, keyOf, render, slideRoot } from "./canvas";
 import { closeDialog, openDialog } from "./dialog";
 import { clear, h, toast } from "./dom";
