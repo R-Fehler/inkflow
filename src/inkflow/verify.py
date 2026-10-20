@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from inkflow import plugins
 from inkflow.animations import Animation, Frame, PlayVideo
 from inkflow.assets import AssetRoots, AssetSource
 from inkflow.clean import clean_inkscape_tree
@@ -14,7 +15,7 @@ from inkflow.layout import (
     resolve_default_zone,
 )
 from inkflow.loaders import load_md, resolve_content_src
-from inkflow.manifest import Inline, Media, Slide, Video
+from inkflow.manifest import Deck, Inline, Media, Slide, Video
 from inkflow.pipeline import resolve_overlay_chains, resolve_slide_src
 from inkflow.svg import (
     compose_overlays,
@@ -28,7 +29,7 @@ from inkflow.zones import build_slide_content, parse_markdown_zones
 if TYPE_CHECKING:
     from inkflow.themes import Theme
 
-Issue = tuple[str, str]  # (level, message) — level is "error" or "warn"
+Issue = plugins.Issue  # (level, message) — level is "error" or "warn"
 
 
 def composed_svg_ids(
@@ -289,4 +290,26 @@ def verify_slide(
         for zone_id in duplicate_zone_ids(root)
     ]
     issues += _check_sync(src, preview)
+    for plugin in plugins.loaded():
+        for check in plugin.slide_checks():
+            try:
+                issues += check(slide, project_dir, preview.deck)
+            except Exception as exc:
+                issues.append(("warn", f"{plugin.name}: check failed: {exc}"))
+    return issues
+
+
+# ── The deck as a whole ──
+
+
+def verify_deck(deck: Deck, project_dir: Path, deck_path: Path) -> list[Issue]:
+    """The plugins' checks of the deck as a whole (one ``deck`` line each in
+    ``inkflow verify``)."""
+    issues: list[Issue] = []
+    for plugin in plugins.loaded():
+        for check in plugin.deck_checks():
+            try:
+                issues += check(deck, project_dir, deck_path)
+            except Exception as exc:
+                issues.append(("warn", f"{plugin.name}: check failed: {exc}"))
     return issues

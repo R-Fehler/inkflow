@@ -99,7 +99,8 @@ src/
                                commands are grouped by area: project.py (init, setup-git,
                                completion), present.py (serve, build, export), authoring.py
                                (clean, label2id, add, parent group, sync, layouts), color.py (colorize,
-                               palette), verify.py. Submodules register on `main` by import.
+                               palette), verify.py. Submodules register on `main` by import,
+                               then each plugin's `register_cli` (cli/__init__.py)
     clean.py          SVG Inkscape metadata stripping (used by cli and pre-commit hook)
     label2id.py       `inkflow label2id`: promote each element's inkscape:label to its
                                SVG id (Inkscape convenience for Morph/animation targets).
@@ -140,7 +141,12 @@ src/
                                compose_with_ancestors, compose_overlays,
                                duplicate_zone_ids, is_full_canvas_fill)
     svgio.py          SVG parse/serialize primitives: one hardened parser, SvgElement alias
-    verify.py         slide authoring checks (inkflow verify)
+    verify.py         slide authoring checks (inkflow verify); plugins' `slide_checks`
+                               run after the core's, `verify_deck` their `deck_checks`
+    plugins.py        `Plugin` (entry-point group `inkflow.plugins`): `register_cli`,
+                               `slide_checks`/`deck_checks`, `completion_spec`;
+                               `loaded()` (found once; `INKFLOW_NO_PLUGINS=1` = none),
+                               `register`/`unregister` (tests, embedding)
     ns.py             XML namespace constants
     tui.py            terminal UI (Rich)
     presenter.html    shell template — inlined with CSS/JS at serve time

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from importlib.resources import files
@@ -8,7 +9,7 @@ from pathlib import Path
 
 import click
 
-from inkflow import git_setup, init, sync
+from inkflow import git_setup, init, plugins, sync
 from inkflow.cli._common import Project, main, resolve_dark_mode
 from inkflow.logging import console, logger, report
 
@@ -82,6 +83,31 @@ def init_cmd(directory: Path, no_git: bool, force: bool) -> None:
     console.print(f"\nrun:  {suffix}", markup=False)
 
 
+_COMMAND_BLOCK = re.compile(r"(?=^  - name: )", re.M)
+
+
+def carapace_spec() -> str:
+    """The carapace spec: the core's (``completions/inkflow.yaml``) with each
+    plugin's command blocks merged in (one named like a core command
+    replaces it: a group the plugin adds subcommands to)."""
+    text = files("inkflow").joinpath("completions/inkflow.yaml").read_text("utf-8")
+    head, _, body = text.partition("\ncommands:\n")
+    blocks: dict[str, str] = {}
+
+    def add(chunk: str) -> None:
+        for block in _COMMAND_BLOCK.split(chunk):
+            name = re.match(r"  - name: (\S+)", block)
+            if name is not None:
+                blocks[name.group(1)] = block.rstrip("\n") + "\n"
+
+    add(body)
+    for plugin in plugins.loaded():
+        extra = plugin.completion_spec()
+        if extra:
+            add(extra)
+    return head + "\ncommands:\n" + "\n".join(blocks.values())
+
+
 @main.command("completion")
 @click.argument("shell", type=click.Choice(["bash", "zsh", "fish", "carapace"]))
 def completion_cmd(shell: str) -> None:
@@ -95,8 +121,7 @@ def completion_cmd(shell: str) -> None:
     - carapace: `inkflow completion carapace > ~/.config/carapace/specs/inkflow.yaml`
     """
     if shell == "carapace":
-        spec = files("inkflow").joinpath("completions/inkflow.yaml")
-        click.echo(spec.read_text(encoding="utf-8"), nl=False)
+        click.echo(carapace_spec(), nl=False)
         return
 
     env = {**os.environ, "_INKFLOW_COMPLETE": f"{shell}_source"}
