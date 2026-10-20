@@ -1,3 +1,10 @@
+"""The presentation server: builds the deck on every change, serves the
+presenter and the deck's files, and relays positions between windows.
+
+Frontends plug in as server extensions (``inkflow.extensions``): they get the
+builds, messages of their own, pages of their own, and terminal keys.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -5,19 +12,22 @@ import base64
 import contextlib
 import errno
 import functools
+import hashlib
 import importlib.resources
 import importlib.util
+import ipaddress
 import json
 import os
 import sys
 import time
 import traceback
 import webbrowser
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, field
 from html import escape as escape_html
 from pathlib import Path
-from typing import Literal, TypedDict, cast
-from urllib.parse import unquote
+from typing import Literal, cast
+from urllib.parse import unquote, urlsplit
 
 from rich.console import Console
 from rich.live import Live
@@ -26,7 +36,9 @@ from watchfiles import awatch  # pyright: ignore[reportUnknownVariableType]
 from websockets.asyncio.server import ServerConnection
 from websockets.asyncio.server import serve as ws_serve
 
+from inkflow import plugins
 from inkflow.assets import MIME_TYPES, AssetRoots
+from inkflow.collab import ROLE_RANK, Client, People, Role
 from inkflow.edit import (
     NO_EDIT_COMMANDS,
     EditCommands,
@@ -35,6 +47,14 @@ from inkflow.edit import (
     resolve_edit_commands,
 )
 from inkflow.enums import ColorMode
+from inkflow.extensions import (
+    Build,
+    HttpRequest,
+    ResponseWriter,
+    ServeConfig,
+    ServerExtension,
+    State,
+)
 from inkflow.fonts import embed_fonts_css
 from inkflow.loaders import load_deck_scripts, load_deck_styles
 from inkflow.logging import Levels, collect_logs, logger, report
@@ -45,23 +65,6 @@ from inkflow.titles import resolve_deck_title
 from inkflow.tui import LiveUI
 
 # ── Shared mutable state ──────────────────────────────────────────────────────
-
-
-class State(TypedDict):
-    slides: list[SlideData]
-    transitions: list[dict[str, object]]
-    ws_clients: set[ServerConnection]
-    error: str | None
-    styles_css: str
-    scripts_js: str
-    mode: ColorMode
-    position: dict[str, int]
-    logs: list[dict[str, str]]
-    title: str
-    theme_dir: Path | None
-    """Active theme's asset directory, the second root an asset may live under.
-    ``None`` until a deck has loaded, which is exactly when nothing can reference
-    one yet."""
 
 
 _state: State = {
@@ -77,6 +80,37 @@ _state: State = {
     "title": "Inkflow",
     "theme_dir": None,
 }
+
+
+@dataclass
+class _Served:
+    """The deck being served and what the server keeps of it."""
+
+    deck_path: Path | None = None
+    deck: Deck | None = None
+    """The last deck that built."""
+    built_hash: str | None = None
+    """deck.py's hash in the last good build (``build-status``)."""
+    failed_hash: str | None = None
+    """Hash of the deck.py whose build failed last (None after a good build),
+    so a program waiting for its edit to build learns that it never will."""
+    extensions: list[ServerExtension] = field(default_factory=list)
+    """The server's extensions (``inkflow.extensions``)."""
+    people: People = field(default_factory=People)
+    edit_commands: EditCommands = NO_EDIT_COMMANDS
+    address: dict[str, object] = field(default_factory=dict)
+    shutdown: asyncio.Event | None = None
+    rebuild: Callable[[], Awaitable[None]] | None = None
+    """Build the served deck again (set while serving)."""
+
+
+_served = _Served()
+
+
+def file_hash(data: bytes) -> str:
+    """A short digest of a file's bytes: which version of deck.py a build ran
+    (``build-status``, ``Build.deck_hash``)."""
+    return hashlib.sha256(data).hexdigest()[:16]
 
 
 # ── Deck loader ───────────────────────────────────────────────────────────────
@@ -103,6 +137,18 @@ def load_deck(deck_path: Path) -> Deck:
 # ── Build pipeline ────────────────────────────────────────────────────────────
 
 
+async def _each_extension(
+    what: str, call: Callable[[ServerExtension], Awaitable[None]]
+) -> None:
+    """Run one hook of every extension; one that fails is logged and the
+    others still run."""
+    for ext in list(_served.extensions):
+        try:
+            await call(ext)
+        except Exception:
+            logger.exception(f"{ext.name}: {what} failed")
+
+
 async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
     ui.set_building()
 
@@ -113,13 +159,22 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
 
     spin = asyncio.create_task(_animate())
     t0 = time.monotonic()
+    deck_hash: str | None = None
+    extensions = list(_served.extensions)
+    build: Build | None = None
     try:
         # Collected, not printed, so records reach the TUI/browser without racing the
         # Live display. Floored at the lower surface level, then filtered per surface.
         with collect_logs(min(levels.console, levels.browser)) as entries:
+            for ext in extensions:
+                await asyncio.to_thread(ext.before_build)
+            deck_hash = file_hash(deck_path.read_bytes())
             deck = await asyncio.to_thread(load_deck, deck_path)
             project_dir = deck_path.parent
             slides = await asyncio.to_thread(process_deck, deck, project_dir, deck_path)
+            build = Build(deck, deck_path, deck_hash, slides, served=slides)
+            for ext in extensions:
+                await asyncio.to_thread(ext.build, build)
             transitions = resolve_transitions(deck)
             styles_css = await asyncio.to_thread(load_deck_styles, deck, project_dir)
             if deck.embed_fonts:
@@ -144,6 +199,7 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         _state["mode"] = deck.effective_mode
         _state["title"] = resolve_deck_title(deck, project_dir)
         _state["theme_dir"] = deck.theme.asset_dir()
+        _served.deck = deck
         _state["error"] = None
         _state["logs"] = browser_logs
         if slides:
@@ -169,13 +225,36 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         logger.exception("rebuild failed")
         tb = traceback.format_exc()
         _state["error"] = tb
+        _served.failed_hash = deck_hash
         ui.set_error(tb)
         await broadcast(json.dumps({"type": "error", "message": tb}))
+        await _each_extension(
+            "build_failed", lambda ext: ext.build_failed(deck_hash, tb)
+        )
+    else:
+        done = build
+        await _each_extension("built", lambda ext: ext.built(done))
+        # Said only now, once the extensions hold this build too: a program
+        # waiting for its edit to build (``build-status``) then finds every
+        # part of the server on it.
+        _served.built_hash = deck_hash
+        _served.failed_hash = None
     finally:
         spin.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await spin
         ui.refresh()
+
+
+def build_status() -> dict[str, object]:
+    """Which deck.py the server last built (or failed to): a program that
+    changed it waits for the build of its own edit."""
+    return {
+        "type": "build-status",
+        "deckHash": _served.built_hash,
+        "failedHash": _served.failed_hash,
+        "error": _state["error"],
+    }
 
 
 # ── WebSocket broadcast ───────────────────────────────────────────────────────
@@ -259,15 +338,86 @@ def _resolve_edit_request(
     return Path(path_str), template
 
 
+# ── Who is asking ────────────────────────────────────────────────────────────
+
+
+def is_loopback_name(host: str) -> bool:
+    """Whether a host name (no port) names this machine's loopback."""
+    host = host.strip("[]").rstrip(".").lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def role_for(peer: str | None, *, host: str | None, origin: str | None) -> Role:
+    """Who a request or connection is: the owner when it comes from this
+    machine (a loopback peer) through a loopback name (``Host``, and a
+    WebSocket's ``Origin`` when sent), so neither another site's page in the
+    owner's browser (``Origin``) nor a DNS-rebound name (``Host``) is the
+    owner. Anyone else is a viewer."""
+    if peer is None or not is_loopback_name(peer):
+        return "viewer"
+    for value in (host, origin):
+        if value is None:
+            continue
+        name = urlsplit(value if "//" in value else f"//{value}").hostname
+        if name is None or not is_loopback_name(name):
+            return "viewer"
+    return "owner"
+
+
+def _header(raw: bytes, name: str) -> str | None:
+    """One header of a request head (first match, case-insensitive)."""
+    prefix = name.lower().encode() + b":"
+    for line in raw.split(b"\r\n")[1:]:
+        if not line:
+            break
+        if line.lower().startswith(prefix):
+            return line[len(prefix) :].strip().decode("latin-1")
+    return None
+
+
+def _extension_for(kind: object) -> tuple[ServerExtension, Role] | None:
+    """The extension that handles message type ``kind``, and the least role
+    that may send it."""
+    if not isinstance(kind, str):
+        return None
+    for ext in _served.extensions:
+        role = ext.messages.get(kind)
+        if role is not None:
+            return ext, role
+    return None
+
+
+def _welcome(client: Client) -> dict[str, object]:
+    msg: dict[str, object] = {"type": "welcome", "id": client.id, "role": client.role}
+    for ext in _served.extensions:
+        try:
+            msg.update(ext.welcome(client))
+        except Exception:
+            logger.exception(f"{ext.name}: welcome failed")
+    return msg
+
+
 def make_ws_handler(
     ui: LiveUI, edit_commands: EditCommands
 ) -> Callable[[ServerConnection], Awaitable[None]]:
     async def handler(websocket: ServerConnection) -> None:
+        remote = cast("tuple[object, ...] | None", websocket.remote_address)
+        peer = str(remote[0]) if remote else None
+        headers = websocket.request.headers if websocket.request else None
+        origin = headers.get("Origin") if headers is not None else None
+        role = role_for(peer, host=None, origin=origin)
+        client = _served.people.join(websocket, role, peer)
         _state["ws_clients"].add(websocket)
         logger.debug(f"client connected ({len(_state['ws_clients'])} total)")
         ui.refresh()
         try:
             pos = _state["position"]
+            await websocket.send(json.dumps(_welcome(client)))
             await websocket.send(
                 json.dumps(
                     {
@@ -286,7 +436,27 @@ def make_ws_handler(
                     continue
                 msg = cast(dict[str, object], parsed)
                 msg_type = msg.get("type")
-                if msg_type == "sync-request":
+                handled = _extension_for(msg_type)
+                if handled is not None:
+                    ext, least = handled
+                    if ROLE_RANK[client.role] < ROLE_RANK[least]:
+                        continue
+                    try:
+                        await ext.message(websocket, client, msg)
+                    except Exception:
+                        logger.exception(f"{ext.name}: {msg_type} failed")
+                elif msg_type == "hello":
+                    # A page says what it is (``presenter``, ``editor``…).
+                    if not client.page and isinstance(msg.get("role"), str):
+                        client.page = str(msg.get("role"))
+                    for ext in list(_served.extensions):
+                        try:
+                            await ext.hello(websocket, client, msg, resync=False)
+                        except Exception:
+                            logger.exception(f"{ext.name}: hello failed")
+                elif msg_type == "build-status":
+                    await websocket.send(json.dumps(build_status()))
+                elif msg_type == "sync-request":
                     # A client that just switched into a receiving sync mode asks
                     # for the current position. Reply to it alone, not a broadcast.
                     cur = _state["position"]
@@ -325,6 +495,12 @@ def make_ws_handler(
                             await notify(websocket, error, style="red")
         finally:
             _state["ws_clients"].discard(websocket)
+            # Gone from the registry first: what an extension says about who
+            # is left must not list this one.
+            _ = _served.people.leave(websocket)
+            await _each_extension(
+                "disconnected", lambda ext: ext.disconnected(websocket, client)
+            )
             logger.debug(f"client disconnected ({len(_state['ws_clients'])} total)")
             ui.refresh()
 
@@ -402,6 +578,56 @@ def _resolve_asset(roots: AssetRoots, request_path: str) -> Path | None:
     return resolved
 
 
+async def _respond(
+    writer: ResponseWriter,
+    status: str,
+    body: bytes,
+    content_type: str,
+    extra: bytes = b"",
+) -> None:
+    header = (
+        f"HTTP/1.1 {status}\r\n".encode()
+        + f"Content-Type: {content_type}\r\n".encode()
+        + b"Cache-Control: no-store\r\n"
+        + b"Connection: close\r\n"
+        + extra
+        + b"Content-Length: "
+        + str(len(body)).encode()
+        + b"\r\n\r\n"
+    )
+    writer.write(header + body)
+    await writer.drain()
+
+
+async def _refuse(writer: ResponseWriter, status: str, title: str, text: str) -> None:
+    body = (
+        "<!doctype html><meta charset=utf-8>"
+        + f"<title>{escape_html(title)}</title>"
+        + f"<h1>{escape_html(title)}</h1><p>{escape_html(text)}</p>"
+    ).encode()
+    await _respond(writer, status, body, "text/html; charset=utf-8")
+
+
+def _http_request(
+    method: str, target: str, raw: bytes, role: Role, writer: ResponseWriter
+) -> HttpRequest:
+    """The request as an extension gets it, with the core's ways to answer."""
+
+    async def respond(
+        status: str, body: bytes, content_type: str, extra: bytes = b""
+    ) -> None:
+        await _respond(writer, status, body, content_type, extra)
+
+    async def send_file(path: Path) -> None:
+        mime = MIME_TYPES.get(path.suffix.lower(), "application/octet-stream")
+        await _respond(writer, "200 OK", path.read_bytes(), mime)
+
+    async def refuse(status: str, title: str, text: str) -> None:
+        await _refuse(writer, status, title, text)
+
+    return HttpRequest(method, target, raw, role, writer, respond, send_file, refuse)
+
+
 def make_http_handler(
     ws_port: int,
     project_dir: Path | None = None,
@@ -414,6 +640,7 @@ def make_http_handler(
             raw = await asyncio.wait_for(reader.read(4096), timeout=10)
             request_line = raw.split(b"\r\n", 1)[0].decode(errors="replace")
             parts = request_line.split(" ", 2)
+            method = parts[0] if parts else "GET"
             request_path = parts[1] if len(parts) >= 2 else "/"
 
             if project_dir is not None and request_path != "/":
@@ -434,6 +661,20 @@ def make_http_handler(
                     writer.write(header + body)
                     await writer.drain()
                     return
+
+            if _served.extensions:
+                peer = cast(
+                    "tuple[object, ...] | None", writer.get_extra_info("peername")
+                )
+                role = role_for(
+                    str(peer[0]) if peer else None,
+                    host=_header(raw, "Host"),
+                    origin=None,
+                )
+                request = _http_request(method, request_path, raw, role, writer)
+                for ext in list(_served.extensions):
+                    if await ext.http(request):
+                        return
 
             body = build_html(_state, ws_port, edit_commands)
             header = (
@@ -519,6 +760,11 @@ async def _read_keys(
     if not sys.stdin.isatty():
         return
 
+    extra = {
+        key: action
+        for ext in _served.extensions
+        for key, (_, action) in ext.keys().items()
+    }
     loop = asyncio.get_running_loop()
     async with raw_keypresses(loop) as queue:
         while True:
@@ -533,23 +779,153 @@ async def _read_keys(
                     await rebuild(deck_path, ui, levels)
             elif ch == "t":
                 ui.toggle_trace()
+            elif ch in extra:
+                try:
+                    extra[ch]()
+                except Exception:
+                    logger.exception(f"key {ch!r} failed")
+
+
+# ── Extensions ────────────────────────────────────────────────────────────────
+
+
+class _Context:
+    """The ``ServerContext`` extensions act through (``inkflow.extensions``)."""
+
+    @property
+    def state(self) -> State:
+        return _state
+
+    @property
+    def people(self) -> People:
+        return _served.people
+
+    @property
+    def deck_path(self) -> Path:
+        assert _served.deck_path is not None, "the server is not serving yet"
+        return _served.deck_path
+
+    @property
+    def last_deck(self) -> Deck | None:
+        return _served.deck
+
+    @property
+    def address(self) -> dict[str, object]:
+        return dict(_served.address)
+
+    @property
+    def edit_commands(self) -> EditCommands:
+        return _served.edit_commands
+
+    async def send(self, conn: ServerConnection, payload: dict[str, object]) -> None:
+        with contextlib.suppress(Exception):
+            await conn.send(json.dumps(payload))
+
+    async def broadcast(
+        self,
+        payload: dict[str, object],
+        sender: ServerConnection | None = None,
+    ) -> None:
+        await broadcast(json.dumps(payload), sender)
+
+    async def notify(
+        self, conn: ServerConnection | None, message: str, style: str = "green"
+    ) -> None:
+        await notify(conn, message, style=cast("NotifyStyle", style))
+
+    async def rebuild(self) -> None:
+        if _served.rebuild is not None:
+            await _served.rebuild()
+
+    def shutdown(self) -> None:
+        if _served.shutdown is not None:
+            _served.shutdown.set()
+
+
+context = _Context()
+"""The server as extensions see it (one per process, like the server)."""
+
+
+def extensions_for(config: ServeConfig) -> list[ServerExtension]:
+    """The installed plugins' extensions of a server about to start."""
+    found: list[ServerExtension] = []
+    for plugin in plugins.loaded():
+        try:
+            found += plugin.server_extensions(config)
+        except Exception:
+            logger.exception(f"{plugin.name}: its server extension failed to load")
+    return found
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
 
 async def serve(
+    deck_path: Path,
+    host: str,
+    http_port: int,
+    ws_port: int,
+    levels: Levels,
+    extensions: Sequence[ServerExtension] | None = None,
+) -> None:
+    """Serve ``deck_path`` until quit.
+
+    ``extensions`` add to the server (``inkflow.extensions``); by default the
+    installed plugins' (``extensions_for``).
+    """
+    if extensions is None:
+        extensions = extensions_for(ServeConfig(deck_path, host, http_port))
+    await start_extensions(
+        extensions, deck_path, {"host": host, "port": http_port, "wsPort": ws_port}
+    )
+    try:
+        await _serve(deck_path, host, http_port, ws_port, levels)
+    finally:
+        await stop_extensions()
+
+
+async def start_extensions(
+    extensions: Sequence[ServerExtension],
+    deck_path: Path,
+    address: dict[str, object],
+) -> None:
+    """Start ``extensions`` on the deck about to be served (``serve`` does;
+    so does a program embedding the server's handlers, such as a test)."""
+    _served.deck_path = deck_path
+    _served.address = address
+    _served.edit_commands = resolve_edit_commands()
+    started: list[ServerExtension] = []
+    for ext in extensions:
+        try:
+            await ext.start(context)
+            await ext.open(deck_path)
+            started.append(ext)
+        except Exception:
+            logger.exception(f"{ext.name}: start failed")
+    _served.extensions = started
+
+
+async def stop_extensions() -> None:
+    """Close the deck for the extensions and stop them."""
+    await _each_extension("close", lambda ext: ext.close(switching=False))
+    await _each_extension("stop", lambda ext: ext.stop())
+    _served.extensions = []
+    _served.deck_path = None
+
+
+async def _serve(
     deck_path: Path, host: str, http_port: int, ws_port: int, levels: Levels
 ) -> None:
     console = Console()
     rebuild_lock = asyncio.Lock()
     shutdown = asyncio.Event()
+    _served.shutdown = shutdown
 
     loop = asyncio.get_running_loop()
     uninstall_shutdown_handler = install_shutdown_handler(loop, shutdown)
 
     try:
-        edit_commands = resolve_edit_commands()
+        edit_commands = _served.edit_commands
         http_handler = make_http_handler(ws_port, deck_path.parent, edit_commands)
         # Bind before the Live UI so port conflicts fail fast with a clean message
         try:
@@ -572,6 +948,19 @@ async def serve(
                 deck_path.parent,
                 get_clients=lambda: len(_state["ws_clients"]),
             )
+            ui.set_keys(
+                [
+                    (key, label)
+                    for ext in _served.extensions
+                    for key, (label, _) in ext.keys().items()
+                ]
+            )
+
+            async def again() -> None:
+                async with rebuild_lock:
+                    await rebuild(deck_path, ui, levels)
+
+            _served.rebuild = again
             try:
                 async with (
                     http_server,
@@ -609,4 +998,6 @@ async def serve(
                 else:
                     raise
     finally:
+        _served.rebuild = None
+        _served.shutdown = None
         uninstall_shutdown_handler()

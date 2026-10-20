@@ -3,7 +3,8 @@
 inkflow reads a deck, builds it, presents it, exports and checks it. A
 **plugin** adds to that from outside: an installed Python package that adds
 commands, checks and completions, and that inkflow finds without knowing what
-it is (a word counter, a linter for a house style, commands for an agent).
+it is (a word counter, a linter for a house style, commands for an agent, a
+visual editor running in the deck's server).
 
 ## A plugin
 
@@ -62,12 +63,85 @@ What a plugin can add:
 |---|---|
 | `register_cli(main)` | Commands on `inkflow` (or subcommands on one of its groups) |
 | `slide_checks()` / `deck_checks()` | Lines of `inkflow verify`, per slide and once for the whole deck (`--no-deck-checks` skips those) |
+| `server_extensions(config)` | Pages, messages and build steps on the deck's server (below) |
+| `serve_options()` | Options of `inkflow serve`, read back as `config.options` |
 | `completion_spec()` | Its commands in `inkflow completion carapace` |
 
 A check that raises is reported as a warning line naming the plugin, not as
 a crash of `verify`; a plugin whose commands fail to load is logged and
 skipped. `INKFLOW_NO_PLUGINS=1` runs inkflow without any plugin.
 
+## A server extension
+
+The server `inkflow serve` runs builds the deck on every change, serves the
+presenter and the deck's files, and relays positions between windows over a
+WebSocket. A `ServerExtension` lives in it:
+
+```python
+import json
+
+from inkflow.extensions import Build, HttpRequest, ServerContext, ServerExtension
+
+
+class Outline(ServerExtension):
+    """`/outline.json`: each slide's title."""
+
+    name = "outline"
+
+    def __init__(self) -> None:
+        self.server: ServerContext | None = None
+        self.outline: list[str] = []
+
+    async def start(self, server: ServerContext) -> None:
+        self.server = server
+
+    def build(self, build: Build) -> None:  # in a worker thread, inside the build
+        self.outline = [s["title"] for s in build.slides]
+
+    async def http(self, request: HttpRequest) -> bool:
+        if request.path != "/outline.json":
+            return False
+        body = json.dumps(self.outline).encode()
+        await request.respond("200 OK", body, "application/json", b"")
+        return True
+```
+
+A plugin hands it to the server from `server_extensions(config)` (or a command
+of its own passes `extensions=[...]` to `inkflow.server.serve`). The hooks, in
+the order they happen:
+
+- `start(server)` once, with the `ServerContext` to act through: the served
+  state, who is connected, `send`/`broadcast`/`notify`, `rebuild`,
+  `shutdown`;
+- `open(deck_path)` / `close(switching=…)` for the deck served;
+- `before_build()` and `build(build)` in a worker thread, inside each build
+  (raising fails the build); `built(build)` once the pages have the new
+  slides; `build_failed(...)`;
+- `messages`: the WebSocket message types it handles, each with the least role
+  that may send it (`"owner"`, `"editor"`, `"viewer"`); `message(...)` gets
+  them, `hello(...)` tells it what each page is (`{"type": "hello", "role":
+  "editor"}`), `disconnected(...)` when it goes, `welcome(client)` adds fields
+  to the first message a page gets;
+- `http(request)` for every request the core does not answer itself (the
+  deck's files come first, the presenter last);
+- `keys()`: keys in the server's terminal, shown on its help line.
+
+The owner is this machine's own user: a page or program connecting over
+loopback through a loopback name (`Host`, and a WebSocket's `Origin` when it
+sends one). Another site's page open in the same browser, or a name that was
+DNS-rebound to this machine, is a viewer, so it never reaches an extension's
+owner-only messages. Every page also may ask `{"type": "build-status"}`:
+which deck.py the server built last (`deckHash`), so a program that edited it
+can wait for its own edit to build.
+
 ## API
 
 ::: inkflow.plugins.Plugin
+
+::: inkflow.extensions.ServerExtension
+
+::: inkflow.extensions.ServerContext
+
+::: inkflow.extensions.Build
+
+::: inkflow.extensions.HttpRequest

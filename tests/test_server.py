@@ -10,9 +10,9 @@ import pytest
 from inkflow.assets import AssetRoots
 from inkflow.edit import EditCommands
 from inkflow.enums import ColorMode
+from inkflow.extensions import State
 from inkflow.pipeline import EditableFile, SlideData
 from inkflow.server import (
-    State,
     _coerce_nav_position,  # pyright: ignore[reportPrivateUsage]
     _resolve_asset,  # pyright: ignore[reportPrivateUsage]
     _resolve_edit_request,  # pyright: ignore[reportPrivateUsage]

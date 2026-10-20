@@ -15,6 +15,9 @@ adds:
 - ``register_cli`` adds commands (or subcommands to an existing group) to the
   ``inkflow`` command line;
 - ``slide_checks`` / ``deck_checks`` add lines to ``inkflow verify``;
+- ``server_extensions`` adds pages, messages and build steps to the server
+  (``inkflow.extensions.ServerExtension``), ``serve_options`` options to
+  ``inkflow serve`` for them;
 - ``completion_spec`` adds its commands to the shell completion spec.
 
 Plugins are found once per process. ``INKFLOW_NO_PLUGINS=1`` turns them all
@@ -35,6 +38,7 @@ from inkflow.logging import logger
 if TYPE_CHECKING:
     import click
 
+    from inkflow.extensions import ServeConfig, ServerExtension
     from inkflow.manifest import Deck, Slide
 
 GROUP = "inkflow.plugins"
@@ -67,6 +71,17 @@ class Plugin:
 
     def deck_checks(self) -> Sequence[DeckCheck]:
         """Checks ``inkflow verify`` runs once on the whole deck."""
+        return ()
+
+    def serve_options(self) -> Sequence[click.Option]:
+        """Options this plugin adds to ``inkflow serve``; their values reach
+        ``server_extensions`` as ``config.options`` (by parameter name)."""
+        return ()
+
+    def server_extensions(self, config: ServeConfig) -> Sequence[ServerExtension]:
+        """Extensions of a server about to start (``inkflow serve``, or a
+        plugin's own command calling ``inkflow.server.serve``)."""
+        del config
         return ()
 
     def completion_spec(self) -> str | None:
