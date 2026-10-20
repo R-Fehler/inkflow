@@ -29,6 +29,8 @@ inkflow sync
 
 Bottom to top, a synced slide holds its ancestor chain, its own content, then the overlays.
 You can see how much room the footer needs and where the content zone actually sits.
+Zone shapes with no fill of their own (the placeholders content fills) are drawn
+as faint dashed outlines, so they do not paint black over the slide.
 
 These layers are authoring reference only.
 The pipeline strips them before serving, so they never reach the browser.

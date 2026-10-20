@@ -120,7 +120,16 @@ src/
                                synced ancestor does not read as stale forever.
                                `create_slide(canvas=)` (a blank slide at the deck's
                                size), `layout_canvas`, `layouts_for` (the built-in
-                               layouts drawn in the deck size's shape, every other one)
+                               layouts drawn in the deck size's shape, every other one),
+                               `theme_ref` (`builtin:x`/`theme:x` for a theme's file).
+                               The preview `<style>` also paints unstyled zone shapes as
+                               dashed outlines (`zone_placeholder_css`): unfilled, Inkscape
+                               would paint them black over the slide
+    catalog.py        the layouts and overlays a deck offers and which slides use
+                               each (`layout_entries`: the project's own winning, parent,
+                               `slides` on it directly, `reach` through it, `shadows`;
+                               `background_name`; `overlay_entries`; `slide_layouts`):
+                               `inkflow layouts`' counts and a slide-master view's list
     overlay.py        the `Overlay` DSL type (src only). Its own module because both
                                `themes` and `manifest` reference it, same as `Transition`
     markdown.py       markdown-it-py rendering only: code-fence highlighting, LaTeX math,
@@ -217,7 +226,7 @@ src/
                                shared options, and the Project/Target helpers;
                                commands are grouped by area: project.py (init, setup-git,
                                completion), present.py (serve, build, export), authoring.py
-                               (clean, label2id, add, parent group, sync, layouts), color.py (colorize,
+                               (clean, label2id, add, parent group, sync, layouts [--plain | --json]), color.py (colorize,
                                palette), verify.py. Submodules register on `main` by import,
                                then each plugin's `register_cli` (cli/__init__.py)
     clean.py          SVG Inkscape metadata stripping (used by cli and pre-commit hook)
@@ -301,7 +310,10 @@ src/
     bundles/          pre-built JS/CSS output (committed; no Node needed at install time)
       presenter.js    navigation, transitions, WebSocket, presenter panel
       presenter.css   all presenter styles including the sidebar panel
-    theme/            built-in theme: layouts/*.svg (the 16:9 ones, and poster-base/
+    theme/            built-in theme: layouts/*.svg (the 16:9 ones: cover, section, title,
+                               content, center, two-cols, three-cols, comparison, quad,
+                               three-cards, agenda, fact, quote, media-left/-right,
+                               title-media, full-media, end on base/numbered; and poster-base/
                                poster-landscape-base with poster-2col/-3col/
                                -landscape-3col/-4col on the A canvas: zones title,
                                authors, affiliations, logos, col-N, references,

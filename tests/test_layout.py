@@ -22,7 +22,10 @@ from inkflow.layout import (
     layout_zones,
     resolve_chain,
     resolve_parent_path,
+    theme_ref,
+    zone_placeholder_css,
 )
+from inkflow.svgio import parse_svg
 from inkflow.themes import Theme
 
 _SIMPLE_SVG = textwrap.dedent("""\
@@ -509,3 +512,39 @@ class TestDiscoverOverlays:
 
     def test_empty_without_overlays_dir(self, tmp_path: Path) -> None:
         assert discover_overlays(tmp_path, None) == []
+
+
+def test_unstyled_zone_shapes_preview_as_dashed_outlines(tmp_path: Path) -> None:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<rect id="zone-title" width="10" height="10"/>'
+        '<rect id="zone-text" class="inkflow-fill-surface" width="10" height="10"/>'
+        '<rect id="zone-media" style="fill: red" width="10" height="10"/>'
+        '<text id="zone-slide-number">1</text>'
+        "</svg>"
+    )
+    css = zone_placeholder_css(parse_svg(svg))
+    assert css.startswith("#zone-title {") and "stroke-dasharray" in css
+    assert "zone-text" not in css and "zone-media" not in css
+
+    path = tmp_path / "slide.svg"
+    path.write_text(svg, encoding="utf-8")
+    layers = PreviewLayers(preview_css=".inkflow-fill-bg { fill: #000; }")
+    assert inject_preview_layers(path, layers)
+    assert "#zone-title {" in path.read_text()
+    assert are_preview_layers_current(path, layers)
+    # Without theme colours there is no preview style at all.
+    bare = tmp_path / "bare.svg"
+    bare.write_text(svg, encoding="utf-8")
+    assert not inject_preview_layers(bare, PreviewLayers())
+    assert "zone-title {" not in bare.read_text()
+
+
+def test_theme_ref_names_a_theme_file(tmp_path: Path) -> None:
+    builtin = discover_layouts(None, None)
+    agenda = next(p for _, p in builtin if p.stem == "agenda")
+    assert theme_ref(agenda, None) == "builtin:agenda"
+    own = tmp_path / "layouts" / "agenda.svg"
+    own.parent.mkdir()
+    own.write_text(_SIMPLE_SVG, encoding="utf-8")
+    assert theme_ref(own, None) is None

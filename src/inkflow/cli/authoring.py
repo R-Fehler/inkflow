@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import click
 from lxml import etree as _etree
@@ -10,6 +12,7 @@ from rich import box as rich_box
 from rich.table import Table
 
 from inkflow import ns, sync
+from inkflow.catalog import layout_entries, overlay_entries
 from inkflow.clean import clean_inkscape_svg
 from inkflow.cli._common import (
     Project,
@@ -39,6 +42,7 @@ from inkflow.layout import (
     strip_parent,
 )
 from inkflow.logging import console, logger, report
+from inkflow.manifest import Deck
 from inkflow.pipeline import resolve_slide_src
 from inkflow.sizes import PageSize
 from inkflow.svg import with_namespaces
@@ -456,20 +460,35 @@ class _LayoutRow:
     zones: list[str]
     numbered: bool
     default_zone: str
+    slides: int | None = None
+    """Slides built directly on it (None: no deck to count)."""
+    note: str = ""
+    """A theme's layout the deck's own of the same name shadows."""
 
 
 def _asset_rows(
     kind: AssetKind,
     project_dir: Path | None,
     theme: Theme | None,
-    size: PageSize | None = None,
+    deck: Deck | None = None,
 ) -> dict[str, list[_LayoutRow]]:
     """Group discovered layouts or overlays by source, with their chains and
-    zones; with a deck ``size``, only the layouts offered to it (`layouts_for`)."""
+    zones; with a deck, only the layouts offered to its size (`layouts_for`)
+    and how many slides use each."""
     discover = discover_layouts if kind is AssetKind.LAYOUT else discover_overlays
     found = discover(project_dir, theme)
-    if size is not None and kind is AssetKind.LAYOUT:
-        found = layouts_for(found, size)
+    if deck is not None and kind is AssetKind.LAYOUT:
+        found = layouts_for(found, deck.effective_size)
+    uses: dict[Path, int] = {}
+    if deck is not None and project_dir is not None:
+        if kind is AssetKind.LAYOUT:
+            for entry in layout_entries(deck, project_dir).values():
+                uses[entry.path.resolve()] = len(entry.slides)
+        else:
+            for overlay in overlay_entries(deck, project_dir):
+                if overlay.path is not None:
+                    uses[overlay.path.resolve()] = len(overlay.slides)
+    local = {p.stem for label, p in found if label == "local"}
     groups: dict[str, list[_LayoutRow]] = {}
     for source_label, path in found:
         try:
@@ -478,6 +497,8 @@ def _asset_rows(
             raise click.ClickException(str(exc)) from exc
         parent_str = " → ".join(p.stem for p in chain) if chain else "—"
         info = layout_zones(path, project_dir, theme, kind)
+        shadowed = source_label != "local" and path.stem in local
+        known = (deck is not None and source_label == "local") or not shadowed
         groups.setdefault(source_label, []).append(
             _LayoutRow(
                 path.stem,
@@ -485,16 +506,68 @@ def _asset_rows(
                 info.zones,
                 info.numbered,
                 info.default_zone,
+                uses.get(path.resolve(), 0) if deck is not None and known else None,
+                "shadowed by the deck's" if shadowed else "",
             )
         )
     return groups
 
 
+def _rows_json(groups: dict[str, list[_LayoutRow]]) -> list[dict[str, object]]:
+    return [
+        {
+            "name": row.name,
+            "source": source,
+            "parents": [] if row.parent == "—" else row.parent.split(" → "),
+            "zones": row.zones,
+            "defaultZone": row.default_zone or None,
+            "numbered": row.numbered,
+            "slides": row.slides,
+            "note": row.note or None,
+        }
+        for source, _, _ in _SOURCE_STYLES
+        for row in groups.get(source, [])
+    ]
+
+
+def _plain_rows(groups: dict[str, list[_LayoutRow]]) -> list[str]:
+    """One line per layout, nothing drawn around it: name, where it is from,
+    its parents (nearest last), its zones (the default one starred), then
+    what else there is to say."""
+    lines: list[str] = []
+    for entry in _rows_json(groups):
+        zones = [
+            f"{zone}*" if zone == entry["defaultZone"] else zone
+            for zone in cast("list[str]", entry["zones"])
+        ]
+        parts = [
+            str(entry["name"]),
+            f"[{entry['source']}]",
+            "parents: " + (" > ".join(cast("list[str]", entry["parents"])) or "-"),
+            "zones: " + (", ".join(zones) or "-"),
+        ]
+        if entry["numbered"]:
+            parts.append("numbered")
+        if entry["slides"] is not None:
+            parts.append(f"slides: {entry['slides']}")
+        if entry["note"]:
+            parts.append(f"note: {entry['note']}")
+        lines.append("  ".join(parts))
+    return lines
+
+
 @main.command("layouts")
 @deck_option
 @no_deck_option
-def layouts_cmd(deck_path: Path, no_deck: bool) -> None:
-    """List available layouts and overlays with their zones and parent chain.
+@click.option(
+    "--plain",
+    is_flag=True,
+    help="One line per layout on stdout, no table: for a narrow terminal or a"
+    + " program reading it.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Print the list as JSON.")
+def layouts_cmd(deck_path: Path, no_deck: bool, plain: bool, as_json: bool) -> None:
+    """List available layouts and overlays with their zones, parent chain and use.
 
     Discovers both from three sources — built-in, theme, then project-local — and
     prints a table per source with each entry's parent chain and zone names. The
@@ -504,17 +577,39 @@ def layouts_cmd(deck_path: Path, no_deck: bool) -> None:
     is omitted when no overlays exist. Pass `--no-deck` to list only the built-ins.
 
     With a deck, the built-in layouts listed are those drawn in its size's
-    shape (`Deck(size="a0")`: the poster layouts; a 16:9 deck: the 16:9 ones).
+    shape (`Deck(size="a0")`: the poster layouts; a 16:9 deck: the 16:9 ones),
+    SLIDES counts the slides built directly on each, and NOTE marks a theme's
+    layout the deck's own of the same name shadows.
+
+    `--plain` prints the same as one line per layout (`name  [source]
+    parents: …  zones: …`, the default zone starred), and `--json` as
+    `{"layouts": [...], "overlays": [...]}`; both go to stdout.
     """
 
     project = load_project_or_none(deck_path, no_deck)
     project_dir = project.dir if project else None
     theme = project.theme if project else None
-    size = project.deck.effective_size if project else None
 
-    _print_asset_tables(_asset_rows(AssetKind.LAYOUT, project_dir, theme, size))
+    deck = project.deck if project else None
+    layout_groups = _asset_rows(AssetKind.LAYOUT, project_dir, theme, deck)
+    overlay_groups = _asset_rows(AssetKind.OVERLAY, project_dir, theme, deck)
+    if as_json:
+        data = {
+            "layouts": _rows_json(layout_groups),
+            "overlays": _rows_json(overlay_groups),
+        }
+        indent = 1 if sys.stdout.isatty() else None
+        click.echo(json.dumps(data, indent=indent, ensure_ascii=False))
+        return
+    if plain:
+        lines = _plain_rows(layout_groups)
+        if overlay_groups:
+            lines += ["", "overlays (composited on top):"]
+            lines += _plain_rows(overlay_groups)
+        click.echo("\n".join(lines))
+        return
+    _print_asset_tables(layout_groups)
 
-    overlay_groups = _asset_rows(AssetKind.OVERLAY, project_dir, theme)
     if overlay_groups:
         console.print()
         console.print("[bold]OVERLAYS[/bold] [dim](composited on top)[/dim]")
@@ -550,6 +645,12 @@ def _print_asset_tables(groups: dict[str, list[_LayoutRow]]) -> None:
         table.add_column("PARENT", style="dim", min_width=14)
         table.add_column("ZONES", min_width=20)
         table.add_column("#", justify="center", min_width=1)
+        counted = any(row.slides is not None for row in rows)
+        noted = any(row.note for row in rows)
+        if counted:
+            table.add_column("SLIDES", justify="right")
+        if noted:
+            table.add_column("NOTE", style="dim")
 
         for row in rows:
             zone_parts = [
@@ -559,11 +660,16 @@ def _print_asset_tables(groups: dict[str, list[_LayoutRow]]) -> None:
                 for z in row.zones
             ]
             zones_cell = ", ".join(zone_parts) if zone_parts else "[dim]—[/dim]"
-            table.add_row(
+            cells = [
                 row.name,
                 row.parent,
                 zones_cell,
                 f"[{color}]✓[/{color}]" if row.numbered else "",
-            )
+            ]
+            if counted:
+                cells.append("" if row.slides is None else str(row.slides))
+            if noted:
+                cells.append(row.note)
+            table.add_row(*cells)
 
         console.print(table)
