@@ -60,4 +60,8 @@ presence, Share via SSH): it is a plugin over the API of part A.
   `send_owners`, `share_*`, `serve_connection`/`serve_request` (PR 4),
   `open_deck`, `serves_without_deck`, `home` (PR 6), `resync` and patches
   (PR 5), `HttpRequest.token`/ranged `send_file` (PR 4).
-- Next: PR 3 (source locators).
+- PR 3 (source locators): `claude/upstream-03-source-locators`,
+  R-Fehler/inkflow#5. Not yet in it: `inkflow:hint` prompts and
+  `show-shape` zones (slide master), the `ink` path in `SlideEditInfo`
+  (PR 15).
+- Next: PR 4 (one port and the door).
