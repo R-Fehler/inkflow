@@ -4,38 +4,25 @@ and packing the rest (``inkflow pack``): files from outside the deck, the
 pinned project and lock, git rules, committed PDF pages, a zip, and the checks
 ``verify`` and a commit make from it."""
 
-# fontTools ships no type stubs: its builder calls report unknown member types.
-# pyright: reportUnknownMemberType=false
-
 from __future__ import annotations
 
-import asyncio
-import json
 import os
 import subprocess
 import textwrap
-import threading
 import zipfile
-from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
 import pytest
 from click.testing import CliRunner
 
-from inkflow import fontreport, instances, lfs, pack, pdf, server
+from inkflow import fontreport, instances, lfs, pack, pdf
 from inkflow.cli import main
-from inkflow.editor.filerename import plan_copy_in
-from inkflow.editor.session import EditError, EditorSession
 from inkflow.fontreport import Face, Where, font_report, plan_bundle, token_value
-from inkflow.logging import resolve_levels
 from inkflow.manifest import Deck, Slide
 from inkflow.pipeline import SlideData
 from inkflow.server import load_deck
 from inkflow.themes import Theme
-from inkflow.tui import LiveUI
-
-# ── Fonts on disk ─────────────────────────────────────────────────────────────
 
 
 def make_font(
@@ -121,9 +108,6 @@ def _styles(project: Path, **tokens: str) -> None:
     (project / "styles.css").write_text(f":root {{\n{decls}}}\n", encoding="utf-8")
 
 
-# ── The report ────────────────────────────────────────────────────────────────
-
-
 def test_each_family_is_classified_by_where_it_comes_from(
     tmp_path: Path, machine: Path
 ) -> None:
@@ -201,9 +185,6 @@ def test_body_faces_follow_the_text(tmp_path: Path, machine: Path) -> None:
     assert cast("fontreport.FamilyReport", plain.by_family("Hereface")).faces == [
         Face(400)
     ]
-
-
-# ── Bundling ──────────────────────────────────────────────────────────────────
 
 
 def _machine_family(machine: Path, family: str = "Hereface") -> None:
@@ -298,8 +279,6 @@ def test_a_generic_first_family_is_refused() -> None:
         token_value("title", "Inter")
 
 
-# ── Through the editor session and the CLI ────────────────────────────────────
-
 DECK_PY = textwrap.dedent("""\
     from inkflow import Deck, Slide
 
@@ -307,6 +286,7 @@ DECK_PY = textwrap.dedent("""\
     def main() -> Deck:
         return Deck(slides=[Slide("one")])
 """)
+
 
 SLIDE = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">'
@@ -329,205 +309,6 @@ def _no_server(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr(instances, "serving", serving)
-
-
-def _session(project: Path) -> tuple[EditorSession, Deck]:
-    return EditorSession(project / "deck.py"), load_deck(project / "deck.py")
-
-
-def test_fonts_set_writes_the_theme_block_and_bundles_the_family(
-    project: Path, machine: Path
-) -> None:
-    _machine_family(machine)
-    session, deck = _session(project)
-    result = session.apply(
-        {
-            "action": "fonts",
-            "op": "set",
-            "role": "body",
-            "family": "Hereface",
-            "_local": True,
-        },
-        deck,
-    )
-    css = (project / "styles.css").read_text(encoding="utf-8")
-    assert "/* inkflow:theme" in css
-    assert "--inkflow-body-font: Hereface, sans-serif;" in css
-    assert (project / "fonts" / "hereface" / "Hereface-Regular.ttf").is_file()
-    assert (project / "fonts" / "hereface" / "OFL.txt").is_file()
-    assert result["label"] == "Font: body = Hereface, sans-serif"
-    created = {c["path"] for c in cast("list[dict[str, str]]", result["changes"])}
-    assert "fonts/hereface/Hereface-Regular.ttf" in created
-    # One step: undo takes the token and the copied fonts back.
-    session.apply({"action": "undo"}, deck)
-    assert not (project / "styles.css").exists()
-    assert not (project / "fonts" / "hereface" / "Hereface-Regular.ttf").exists()
-    session.apply({"action": "redo"}, deck)
-    assert (project / "fonts" / "hereface" / "Hereface-Regular.ttf").is_file()
-    with pytest.raises(EditError, match="generic family"):
-        session.apply(
-            {"action": "fonts", "op": "set", "role": "body", "family": "serif"}, deck
-        )
-
-
-def test_a_remote_editor_sets_the_font_but_does_not_copy_this_machines_files(
-    project: Path, machine: Path
-) -> None:
-    _machine_family(machine)
-    session, deck = _session(project)
-    result = session.apply(
-        {"action": "fonts", "op": "set", "role": "body", "family": "Hereface"}, deck
-    )
-    assert "server's computer" in str(result["note"])
-    assert not (project / "fonts").exists()
-    with pytest.raises(EditError, match="only an editor on this machine"):
-        session.apply(
-            {"action": "fonts", "op": "bundle"}, load_deck(project / "deck.py")
-        )
-
-
-def _cli(project: Path, *args: str) -> str:
-    result = CliRunner().invoke(main, [*args, "--deck", str(project / "deck.py")])
-    assert result.exit_code == 0, result.output
-    return result.output
-
-
-def _families(out: str) -> dict[str, dict[str, object]]:
-    report = cast("dict[str, list[dict[str, object]]]", json.loads(out))
-    return {str(f["family"]): f for f in report["families"]}
-
-
-def test_cli_report_bundle_and_set_offline(project: Path, machine: Path) -> None:
-    _machine_family(machine)
-    _machine_family(machine, "Codeface")
-    _styles(project, body="Hereface, sans-serif")
-    by_family = _families(_cli(project, "fonts", "--json"))
-    assert by_family["Hereface"]["where"] == "machine"
-    licence = cast("dict[str, str]", by_family["Hereface"]["licence"])
-    assert licence["status"] == "open"
-    out = _cli(project, "fonts")
-    assert "machine" in out and "Hereface" in out
-    dry = _cli(project, "fonts", "bundle", "--dry-run")
-    assert "Would copy" in dry and not (project / "fonts").exists()
-    out = _cli(project, "fonts", "bundle")
-    assert "Created" in out
-    assert (project / "fonts" / "hereface" / "Hereface-Regular.ttf").is_file()
-    assert _families(_cli(project, "fonts", "--json"))["Hereface"]["where"] == (
-        "project"
-    )
-    out = _cli(project, "fonts", "set", "mono", "Codeface")
-    assert "Bundled" in out
-    assert (project / "fonts" / "codeface" / "Codeface-Regular.ttf").is_file()
-    refused = CliRunner().invoke(
-        main, ["fonts", "set", "body", "monospace", "--deck", str(project / "deck.py")]
-    )
-    assert refused.exit_code == 1
-    assert "generic family" in refused.output
-
-
-# ── Packing ───────────────────────────────────────────────────────────────────
-
-MEDIA_DECK = textwrap.dedent("""\
-    from inkflow import Deck, Image, Slide
-
-
-    def main() -> Deck:
-        return Deck(
-            slides=[
-                Slide(
-                    "content", md="text", zones={"media": Image("../outside/pic.png")}
-                ),
-                Slide("one"),
-            ]
-        )
-""")
-
-
-@pytest.fixture
-def scattered(project: Path) -> Path:
-    """A deck naming a picture outside its folder (deck.py), another from its
-    Markdown, and a third through a symlinked folder (its SVG)."""
-    outside = project.parent / "outside"
-    shared = project.parent / "shared"
-    outside.mkdir()
-    shared.mkdir()
-    (outside / "pic.png").write_bytes(b"PNG-pic")
-    (outside / "b.png").write_bytes(b"PNG-b")
-    (shared / "logo.png").write_bytes(b"PNG-logo")
-    (project / "linked").symlink_to(shared, target_is_directory=True)
-    (project / "deck.py").write_text(MEDIA_DECK, encoding="utf-8")
-    (project / "slides" / "text.md").write_text(
-        "::content::\n\n![b](../../outside/b.png)\n", encoding="utf-8"
-    )
-    (project / "slides" / "one.svg").write_text(
-        SLIDE.replace(
-            "<text",
-            '<image href="../linked/logo.png" width="9" height="9"/>'
-            + '<image href="https://example.com/x.png" width="9" height="9"/><text',
-        ),
-        encoding="utf-8",
-    )
-    return project
-
-
-def test_copy_in_rewrites_each_reference_where_it_is_written(scattered: Path) -> None:
-    deck = load_deck(scattered / "deck.py")
-    plan = plan_copy_in(scattered, scattered / "deck.py", deck)
-    targets = sorted(dst.relative_to(scattered).as_posix() for _, dst in plan.copies)
-    assert targets == ["assets/b.png", "assets/logo.png", "assets/pic.png"]
-    edits = {(e.file, e.old, e.new) for e in plan.edits}
-    assert edits == {
-        ("deck.py", "../outside/pic.png", "assets/pic.png"),
-        ("slides/text.md", "../../outside/b.png", "../assets/b.png"),
-        ("slides/one.svg", "../linked/logo.png", "../assets/logo.png"),
-    }
-    assert [r.raw for r in plan.remote] == ["https://example.com/x.png"]
-
-
-def test_pack_through_the_session_is_one_undoable_step(
-    scattered: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    def lock(project_dir: Path, timeout: float = 0) -> tuple[bool, str]:
-        del timeout
-        (project_dir / "uv.lock").write_text("version = 1\n", encoding="utf-8")
-        return True, "uv.lock written"
-
-    monkeypatch.setattr("inkflow.pack.run_uv_lock", lock)
-    session, deck = _session(scattered)
-    check = session.apply({"action": "pack", "op": "check"}, deck)
-    summary = cast("dict[str, object]", check["pack"])
-    assert summary["needed"] is True
-    keys = {
-        cast("dict[str, str]", i)["key"] for i in cast("list[object]", summary["items"])
-    }
-    assert {"asset", "pyproject", "lock", "eol", "lfs", "remote"} <= keys
-    with pytest.raises(EditError, match="only an editor on this machine"):
-        session.apply({"action": "pack", "op": "apply"}, deck)
-    result = session.apply({"action": "pack", "op": "apply", "_local": True}, deck)
-    assert (scattered / "assets" / "pic.png").read_bytes() == b"PNG-pic"
-    assert 'Image("assets/pic.png")' in (scattered / "deck.py").read_text()
-    assert "../assets/b.png" in (scattered / "slides" / "text.md").read_text()
-    assert (scattered / "uv.lock").is_file()
-    assert "inkflow" in (scattered / "pyproject.toml").read_text()
-    attributes = (scattered / ".gitattributes").read_text()
-    assert "*.svg text eol=lf" in attributes
-    assert "*.ttf filter=lfs" in attributes
-    assert result["lock"] == "uv.lock written"
-    remaining = cast("list[dict[str, str]]", result["remaining"])
-    assert "remote" in [r["key"] for r in remaining]
-    assert "asset" not in [r["key"] for r in remaining]
-    assert len(session.history.done) == 1
-    # Packed: nothing left that packing would change.
-    again = session.apply(
-        {"action": "pack", "op": "check"}, load_deck(scattered / "deck.py")
-    )
-    assert cast("dict[str, object]", again["pack"])["needed"] is False
-    # One step: undo takes all of it back, the lock file included.
-    session.apply({"action": "undo"}, load_deck(scattered / "deck.py"))
-    assert not (scattered / "assets").exists()
-    assert not (scattered / "uv.lock").exists()
-    assert not (scattered / ".gitattributes").exists()
-    assert (scattered / "deck.py").read_text() == MEDIA_DECK
 
 
 def test_gitattributes_are_merged_once_and_respect_the_lfs_opt_out(
@@ -600,47 +381,6 @@ def test_the_zip_follows_git_in_a_repository(project: Path) -> None:
     assert "deck/slides/one.svg" in names
 
 
-def test_cli_pack_dry_run_then_pack_and_zip(scattered: Path) -> None:
-    dry = _cli(scattered, "pack", "--dry-run")
-    assert "Would" in dry and "assets/pic.png" in dry
-    assert not (scattered / "assets").exists()
-    out = CliRunner().invoke(
-        main,
-        [
-            "pack",
-            "--deck",
-            str(scattered / "deck.py"),
-            "--zip",
-            str(scattered.parent / "out.zip"),
-        ],
-    )
-    assert out.exit_code == 0, out.output
-    assert "Still machine-dependent" in out.output
-    assert "https://example.com/x.png" in out.output
-    assert "uv lock skipped in tests" in out.output
-    with zipfile.ZipFile(scattered.parent / "out.zip") as archive:
-        assert "deck/assets/pic.png" in archive.namelist()
-
-
-def test_verify_names_what_ties_the_deck_to_this_machine(
-    scattered: Path, machine: Path
-) -> None:
-    _machine_family(machine)
-    _styles(scattered, body="Hereface, sans-serif")
-    out = CliRunner().invoke(main, ["verify", "--deck", str(scattered / "deck.py")])
-    text = " ".join(out.output.split())
-    assert 'font "Hereface" comes from this machine' in text
-    assert "inkflow fonts bundle" in text
-    assert "3 file(s) outside the deck or behind a symlink" in text
-    assert "picture(s) read from the web" in text
-    assert "no uv.lock" in text
-    assert "no line-ending rules" in text
-    quiet = CliRunner().invoke(
-        main, ["verify", "--no-portable", "--deck", str(scattered / "deck.py")]
-    )
-    assert "comes from this machine" not in quiet.output
-
-
 def test_a_committed_pdf_page_stands_in_while_the_pdf_is_unchanged(
     tmp_path: Path,
 ) -> None:
@@ -663,9 +403,6 @@ def test_a_committed_pdf_page_stands_in_while_the_pdf_is_unchanged(
     assert pdf.committed_page(figure, 1) is None
 
 
-# ── New decks ─────────────────────────────────────────────────────────────────
-
-
 def test_init_writes_line_endings_and_tries_the_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -685,110 +422,6 @@ def test_init_writes_line_endings_and_tries_the_lock(
     assert "*.md text eol=lf" in attrs and pack.DIFF_LINE in attrs
     assert calls == [target.resolve()]
     assert "offline?" in " ".join(out.output.split())
-
-
-def test_a_new_deck_in_the_current_look_brings_its_machine_fonts(
-    project: Path, machine: Path, tmp_path: Path
-) -> None:
-    from inkflow.editor import projects
-
-    _machine_family(machine)
-    _styles(project, body="Hereface, sans-serif")
-    created = projects.create_deck(
-        tmp_path / "new-talk",
-        title="New",
-        theme="current",
-        git=False,
-        current=project / "deck.py",
-    )
-    folder = created.parent
-    assert (folder / "fonts" / "hereface" / "Hereface-Regular.ttf").is_file()
-    assert "*.svg text eol=lf" in (folder / ".gitattributes").read_text()
-
-
-# ── Through the server that has the deck open ─────────────────────────────────
-
-
-class _UI:
-    def refresh(self) -> None:
-        pass
-
-    def set_building(self) -> None:
-        pass
-
-    def set_ok(self, *_args: object, **_kwargs: object) -> None:
-        pass
-
-    def set_error(self, _trace: str) -> None:
-        pass
-
-
-@pytest.fixture
-def served(project: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[EditorSession]:
-    deck_path = project / "deck.py"
-    session = EditorSession(deck_path)
-    ui = cast("LiveUI", cast("object", _UI()))
-    levels = resolve_levels()
-    started = threading.Event()
-    port: list[int] = []
-    loop = asyncio.new_event_loop()
-    stop = asyncio.Event()
-
-    async def run() -> None:
-        server._editor["session"] = session  # pyright: ignore[reportPrivateUsage]
-        await server.rebuild(deck_path, ui, levels)
-        async with server.listening(ui, session) as bound:
-            port.append(bound)
-            watch = asyncio.create_task(
-                server._watch(deck_path, ui, asyncio.Lock(), levels)  # pyright: ignore[reportPrivateUsage]
-            )
-            await asyncio.sleep(0.3)
-            started.set()
-            await stop.wait()
-            watch.cancel()
-
-    thread = threading.Thread(target=lambda: loop.run_until_complete(run()))
-    thread.start()
-    assert started.wait(20)
-    record = instances.Instance(
-        os.getpid(), "127.0.0.1", port[0], port[0], str(deck_path)
-    )
-
-    def serving(_deck: Path, _exclude_pid: int | None = None) -> instances.Instance:
-        return record
-
-    monkeypatch.setattr(instances, "serving", serving)
-    try:
-        yield session
-    finally:
-        loop.call_soon_threadsafe(stop.set)
-        thread.join(10)
-        loop.close()
-        server._editor.update(  # pyright: ignore[reportPrivateUsage]
-            {"session": None, "deck": None, "model": None, "failed_hash": None}
-        )
-        server._editor["clients"].clear()  # pyright: ignore[reportPrivateUsage]
-        server._state["ws_clients"].clear()  # pyright: ignore[reportPrivateUsage]
-        server._state["error"] = None  # pyright: ignore[reportPrivateUsage]
-
-
-def test_bundle_and_pack_through_the_server_are_agent_steps(
-    project: Path, machine: Path, served: EditorSession
-) -> None:
-    _machine_family(machine)
-    _styles(project, body="Hereface, sans-serif")
-    out = _cli(project, "fonts", "bundle")
-    assert "Ctrl+Z in the editor" in out
-    assert (project / "fonts" / "hereface" / "Hereface-Regular.ttf").is_file()
-    out = _cli(project, "pack")
-    assert "Ctrl+Z in the editor" in out
-    assert [s.label for s in served.history.done] == [
-        "Agent: Bundle fonts into the deck",
-        "Agent: Pack the deck",
-    ]
-    served.apply({"action": "undo"}, load_deck(project / "deck.py"))
-    served.apply({"action": "undo"}, load_deck(project / "deck.py"))
-    assert not (project / "fonts" / "hereface").exists()
 
 
 def test_the_report_resolves_fonts_as_the_build_does(

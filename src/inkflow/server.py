@@ -1,3 +1,12 @@
+"""The server ``inkflow serve`` runs: one port for the presenter's pages, the
+deck's assets and fonts, and the WebSocket (``/_inkflow/ws``) that pushes
+every rebuild and relays positions and ink between windows.
+
+Frontends plug in as extensions (``inkflow.extensions``): they get the
+builds, their own WebSocket messages and pages, and a ``ServerContext`` to
+act through. The core never knows what they are.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +16,6 @@ import errno
 import functools
 import importlib.resources
 import importlib.util
-import io
 import json
 import os
 import re
@@ -17,7 +25,6 @@ import sys
 import time
 import traceback
 import webbrowser
-import zipfile
 from collections.abc import (
     AsyncGenerator,
     Awaitable,
@@ -25,10 +32,10 @@ from collections.abc import (
     Collection,
     Sequence,
 )
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from html import escape as escape_html
 from pathlib import Path
-from typing import Literal, Protocol, TypedDict, cast
+from typing import Literal, cast
 from urllib.parse import unquote
 
 from rich.console import Console
@@ -38,14 +45,14 @@ from typing_extensions import override
 from watchfiles import (
     Change,
     DefaultFilter,
-    awatch,  # pyright: ignore[reportUnknownVariableType]
+    awatch,
 )
 from websockets.asyncio.server import ServerConnection
 from websockets.asyncio.server import serve as ws_serve
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response as WsResponse
 
-from inkflow import instances, sshshare
+from inkflow import ink, instances, plugins, sshshare
 from inkflow.access import (
     TOKEN_PARAM,
     WS_PATH,
@@ -63,6 +70,7 @@ from inkflow.access import (
 from inkflow.access import Request as AccessRequest
 from inkflow.assets import MIME_TYPES, AssetRoots, is_local_ref, rewrite_references
 from inkflow.collab import Client, People
+from inkflow.deps import file_hash
 from inkflow.edit import (
     NO_EDIT_COMMANDS,
     EditCommands,
@@ -71,15 +79,16 @@ from inkflow.edit import (
     open_in_editor,
     resolve_edit_commands,
 )
-from inkflow.editor import projects
-from inkflow.editor.comparehub import CompareHub, side_build_from
-from inkflow.editor.comparesrc import CompareError
-from inkflow.editor.context import write_context
-from inkflow.editor.model import ModelCache, build_model, starred_ids
-from inkflow.editor.problems import Problems
-from inkflow.editor.session import EditError, EditorSession, Exporters
-from inkflow.editor.svgops import file_hash
 from inkflow.enums import ColorMode
+from inkflow.extensions import (
+    Build,
+    HttpRequest,
+    ResponseWriter,
+    ServeConfig,
+    ServerExtension,
+    State,
+    VirtualConnection,
+)
 from inkflow.fonts import (
     embed_fonts_css,
     font_mime,
@@ -90,13 +99,17 @@ from inkflow.fonts import (
 from inkflow.handout import handout_page
 from inkflow.incremental import SlideCache, as_patch, keys_of, set_keys
 from inkflow.loaders import load_deck_scripts, load_deck_styles
-from inkflow.logging import Levels, collect_logs, logger, report
+from inkflow.logging import Levels, collect_logs, logger, report, resolve_levels
 from inkflow.manifest import Deck
-from inkflow.online import config as relay_config
-from inkflow.online import crypto as online_crypto
-from inkflow.online.host import Hooks, OnlineHost, VirtualConnection
 from inkflow.os_compat import install_shutdown_handler, raw_keypresses
-from inkflow.pipeline import SlideData, process_deck, resolve_transitions
+from inkflow.pipeline import (
+    SlideData,
+    process_deck,
+    resolve_slide_src,
+    resolve_transitions,
+    slide_ids,
+)
+from inkflow.svgio import parse_svg_file
 from inkflow.titles import resolve_deck_title
 from inkflow.tui import LiveUI
 from inkflow.wsbridge import Bridge
@@ -113,24 +126,6 @@ class Kept:
 
     deck_path: Path
     slides: SlideCache
-    model: ModelCache
-
-
-class State(TypedDict):
-    slides: list[SlideData]
-    transitions: list[dict[str, object]]
-    ws_clients: set[ServerConnection]
-    error: str | None
-    styles_css: str
-    scripts_js: str
-    mode: ColorMode
-    position: dict[str, int]
-    logs: list[dict[str, str]]
-    title: str
-    theme_dir: Path | None
-    """Active theme's asset directory, the second root an asset may live under.
-    ``None`` until a deck has loaded, which is exactly when nothing can reference
-    one yet."""
 
 
 _state: State = {
@@ -148,51 +143,34 @@ _state: State = {
 }
 
 
-class EditorState(TypedDict):
-    deck: Deck | None
-    """The last deck that built, which editor requests are validated against."""
-    model: dict[str, object] | None
-    """The visual editor's model for the last build (see ``editor.model``)."""
-    clients: set[ServerConnection]
-    """Connections that identified as an editor page."""
-    session: EditorSession | None
-    """Undo history and file writes for the editor (one per open deck)."""
-    switch: asyncio.Event | None
-    """Set when the editor asked to open another deck (see ``serve``)."""
-    shutdown: asyncio.Event | None
-    """Set to stop the server (the editor's "Quit Inkflow", or idle)."""
-    failed_hash: str | None
+@dataclass
+class _Served:
+    """The deck being served and what the server keeps of it."""
+
+    deck_path: Path | None = None
+    deck: Deck | None = None
+    """The last deck that built."""
+    built_hash: str | None = None
+    """deck.py's hash in the last good build (``build-status``)."""
+    failed_hash: str | None = None
     """Hash of the deck.py whose build failed last (None after a good build),
     so an agent waiting for its edit to build learns that it never will."""
-    compare: CompareHub | None
-    """The compare views of the open editor pages (editor/comparehub.py)."""
-    model_patch: dict[str, object] | None
-    """The model as sent to a page that holds the build before it: the
-    slides' entries that build already had are named by key."""
-    kept: Kept | None
+    kept: Kept | None = None
     """What is kept from one build of the served deck to the next."""
-    problems: Problems | None
-    """Each slide's problems for the editor's marks (editor/problems.py)."""
-    edit_slides: list[SlideData] | None
-    """The last editor build's slides (what the layout check measures)."""
-    deck_hash: str | None
+    extensions: list[ServerExtension] = field(default_factory=list)
+    """The server's extensions (``inkflow.extensions``)."""
+    edit_commands: EditCommands = NO_EDIT_COMMANDS
+    address: dict[str, object] = field(default_factory=dict)
+    """Where this machine's own pages and programs reach the server."""
+    switch_to: Path | None = None
+    """The deck an extension asked to serve next (``open_deck``)."""
+    switch: asyncio.Event | None = None
+    shutdown: asyncio.Event | None = None
+    rebuild: Callable[[bool], Awaitable[None]] | None = None
+    """Build the served deck again (set while serving)."""
 
 
-_editor: EditorState = {
-    "deck": None,
-    "model": None,
-    "clients": set(),
-    "session": None,
-    "switch": None,
-    "shutdown": None,
-    "failed_hash": None,
-    "compare": None,
-    "model_patch": None,
-    "kept": None,
-    "problems": None,
-    "edit_slides": None,
-    "deck_hash": None,
-}
+_served = _Served()
 
 
 class _Share:
@@ -207,13 +185,12 @@ class _Share:
     ssh_info: dict[str, object] | None
     """What "Share via SSH" writes its commands from (``sshshare.details``),
     gathered when the owner opens the Share dialog."""
-    online: OnlineHost | None
-    """The room on a relay while sharing online (``online.host``)."""
     route: Route | None
-    """How the one port answers a request: online guests' requests too."""
+    """How the one port answers a request: requests that came another way
+    (``ServerContext.serve_request``) too."""
     ws_handler: Callable[[ServerConnection], Awaitable[None]] | None
-    """The WebSocket handler of the deck being served: online guests'
-    page connections run through it too."""
+    """The WebSocket handler of the deck being served: connections that came
+    another way (``ServerContext.serve_connection``) run through it too."""
     on_change: Callable[[], None] | None
     """Refresh the terminal's share lines (set while serving)."""
 
@@ -222,7 +199,6 @@ class _Share:
         self.people = People()
         self.rebind = None
         self.ssh_info = None
-        self.online = None
         self.route = None
         self.ws_handler = None
         self.on_change = None
@@ -297,14 +273,15 @@ def _load_deck(deck_path: Path, module: str = "_inkflow_deck") -> Deck:
 # ── Build pipeline ────────────────────────────────────────────────────────────
 
 
-def _kept_for(deck_path: Path, full: bool) -> Kept:
-    """The served deck's kept builds; none of them after ``full`` (or for
-    another deck than the last)."""
-    kept = _editor["kept"]
+def _kept_for(deck_path: Path, full: bool) -> tuple[Kept, bool]:
+    """The served deck's kept builds, and whether they start empty (after
+    ``full``, for another deck than the last, or the first build)."""
+    kept = _served.kept
     if kept is None or kept.deck_path != deck_path or full:
-        kept = Kept(deck_path, SlideCache(), ModelCache())
-        _editor["kept"] = kept
-    return kept
+        kept = Kept(deck_path, SlideCache())
+        _served.kept = kept
+        return kept, True
+    return kept, False
 
 
 def _update_message(
@@ -319,6 +296,18 @@ def _update_message(
             **(changed or {}),
         }
     )
+
+
+async def _each_extension(
+    what: str, call: Callable[[ServerExtension], Awaitable[None]]
+) -> None:
+    """Run one hook of every extension; one that fails is logged and the
+    others still run."""
+    for ext in list(_served.extensions):
+        try:
+            await call(ext)
+        except Exception:
+            logger.exception(f"{ext.name}: {what} failed")
 
 
 async def rebuild(
@@ -338,39 +327,36 @@ async def rebuild(
     spin = asyncio.create_task(_animate())
     t0 = time.monotonic()
     deck_hash: str | None = None
+    extensions = list(_served.extensions)
     try:
         # Collected, not printed, so records reach the TUI/browser without racing the
         # Live display. Floored at the lower surface level, then filtered per surface.
         with collect_logs(min(levels.console, levels.browser)) as entries:
-            # The files as this build reads them: a page's write to one that
-            # changed since its build is refused (several people editing).
-            session = _editor["session"]
-            build_id = (
-                await asyncio.to_thread(session.snapshot) if session is not None else 0
-            )
+            for ext in extensions:
+                await asyncio.to_thread(ext.before_build)
             deck_hash = file_hash(deck_path.read_bytes())
             deck = await asyncio.to_thread(load_deck, deck_path)
             project_dir = deck_path.parent
-            kept = _kept_for(deck_path, full)
-            # The editor build stamps source locators on every element; the
-            # presenter ignores them, so one build serves both pages.
-            edit_slides = await asyncio.to_thread(
-                functools.partial(process_deck, editor=True, cache=kept.slides),
+            kept, fresh = _kept_for(deck_path, full)
+            # An extension may ask for source locators on every element; the
+            # presenter ignores them, so one build serves every page.
+            built = await asyncio.to_thread(
+                functools.partial(
+                    process_deck,
+                    editor=any(ext.provenance for ext in extensions),
+                    cache=kept.slides,
+                ),
                 deck,
                 project_dir,
                 deck_path,
             )
-            model = await asyncio.to_thread(
-                functools.partial(build_model, cache=kept.model),
-                deck,
-                deck_path,
-                edit_slides,
-            )
-            model["build"] = build_id
+            build = Build(deck, deck_path, deck_hash, built, fresh=fresh)
+            for ext in extensions:
+                await asyncio.to_thread(ext.build, build)
             roots = AssetRoots(project_dir, deck.theme.asset_dir())
-            slides = [_versioned(_without_edit(s), roots) for s in edit_slides]
+            slides = [_versioned(_without_edit(s), roots) for s in built]
             set_keys(slides)
-            set_keys(cast("list[dict[str, object]]", model["slides"]))
+            build.served = slides
             transitions = resolve_transitions(deck)
             styles_css = await asyncio.to_thread(load_deck_styles, deck, project_dir)
             if deck.embed_fonts:
@@ -404,10 +390,6 @@ async def rebuild(
             changed["mode"] = "" if deck.effective_mode == ColorMode.DARK else "light"
         # What a page that saw the last build holds: named, not sent again.
         held = keys_of(_state["slides"])
-        old_model = _editor["model"]
-        held_entries = keys_of(
-            cast("list[dict[str, object]]", old_model["slides"]) if old_model else []
-        )
         _state["slides"] = slides
         _state["transitions"] = transitions
         _state["styles_css"] = styles_css
@@ -415,18 +397,7 @@ async def rebuild(
         _state["mode"] = deck.effective_mode
         _state["title"] = resolve_deck_title(deck, project_dir)
         _state["theme_dir"] = deck.theme.asset_dir()
-        _editor["deck"] = deck
-        _editor["model"] = model
-        _editor["model_patch"] = {
-            **model,
-            "slides": as_patch(
-                cast("list[dict[str, object]]", model["slides"]), held_entries
-            ),
-        }
-        if _editor["session"] is not None:
-            _editor["session"].built_hash = deck_hash
-            _editor["session"].live = (edit_slides, model)
-        _editor["failed_hash"] = None
+        _served.deck = deck
         _state["error"] = None
         _state["logs"] = browser_logs
         if slides:
@@ -452,26 +423,26 @@ async def rebuild(
         if _state["ws_clients"] - patching:
             # A page of an older inkflow (a tab left open across an update).
             await broadcast(_update_message(slides, changed), skip=patching)
-        await _send_editors(_model_message)
-        _editor["edit_slides"] = edit_slides
-        _editor["deck_hash"] = deck_hash
-        _check_problems()
-        hub = _editor["compare"]
-        if hub is not None:
-            await hub.live_built(
-                await asyncio.to_thread(
-                    side_build_from, deck, deck_path, edit_slides, model
-                )
-            )
     except Exception:
         # Outside collect_logs, so a fatal error reaches only the file sink. The overlay
         # and TUI error phase show it instead, never the banner.
         logger.exception("rebuild failed")
         tb = traceback.format_exc()
         _state["error"] = tb
-        _editor["failed_hash"] = deck_hash
+        _served.failed_hash = deck_hash
         ui.set_error(tb)
         await broadcast(json.dumps({"type": "error", "message": tb}))
+        await _each_extension(
+            "build_failed", lambda ext: ext.build_failed(deck_hash, tb)
+        )
+    else:
+        await _each_extension("built", lambda ext: ext.built(build))
+        # Said only now, once the extensions hold this build too: a program
+        # waiting for its edit to build (``build-status``) then finds every
+        # part of the server on it (an editor session checks requests
+        # against the deck.py it last built).
+        _served.built_hash = deck_hash
+        _served.failed_hash = None
     finally:
         spin.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -479,141 +450,25 @@ async def rebuild(
         ui.refresh()
 
 
-def _history_state(client: Client | None) -> dict[str, object]:
-    """Undo/Redo for one person: their own steps (see ``History``)."""
-    session = _editor["session"]
-    if session is None:
-        return {"canUndo": False, "canRedo": False}
-    return session.history_state(client.author if client else "owner")
-
-
-def _model_message(
-    client: Client | None = None, *, whole: bool = False
-) -> dict[str, object]:
-    """The editor's model for one person's page: as what changed since the
-    last build when the page takes patches, unless ``whole`` (a page just
-    connected, or one that asked again)."""
-    patch = _editor["model_patch"]
-    takes = client is not None and client.patches
-    return {
-        "type": "editor-model",
-        "model": patch
-        if takes and patch is not None and not whole
-        else _editor["model"],
-        "history": _history_state(client),
-    }
-
-
-def _stars() -> list[str]:
-    """The starred slides as the editor's model lists them, read anew (a
-    star changes no build), and put into the model a page gets on hello."""
-    session, model = _editor["session"], _editor["model"]
-    if session is None or model is None:
-        return []
-    entries = cast("list[dict[str, object]]", model["slides"])
-    starred = starred_ids(session.project_dir, entries)
-    for held in (model, _editor["model_patch"]):
-        if held is not None:
-            held["stars"] = starred
-    return starred
-
-
-def _build_status() -> dict[str, object]:
-    """Which deck.py the server last built (or failed to): an agent's command
-    (``inkflow slide``) waits for the build of its own edit with this."""
-    session = _editor["session"]
+def build_status() -> dict[str, object]:
+    """Which deck.py the server last built (or failed to): a program that
+    changed it (an agent's command) waits for the build of its own edit."""
     return {
         "type": "build-status",
-        "deckHash": session.built_hash if session else None,
-        "failedHash": _editor["failed_hash"],
+        "deckHash": _served.built_hash,
+        "failedHash": _served.failed_hash,
         "error": _state["error"],
     }
 
 
 def _without_edit(slide: SlideData) -> SlideData:
-    """The presenter's copy of a slide: the editor facts travel in its model."""
+    """The presenter's copy of a slide: the editor facts stay with extensions."""
     data = slide.copy()
     data.pop("edit", None)
     return data
 
 
 # ── WebSocket broadcast ───────────────────────────────────────────────────────
-
-
-_problems_lock = asyncio.Lock()
-_background: set[asyncio.Task[None]] = set()
-
-
-def _check_problems() -> None:
-    """Check the slides' problems again in the background (after a build,
-    or when an editor asks for the layout check)."""
-    task = asyncio.get_running_loop().create_task(_refresh_problems())
-    _background.add(task)
-    task.add_done_callback(_background.discard)
-
-
-def _problems_message() -> dict[str, object] | None:
-    problems, model = _editor["problems"], _editor["model"]
-    slides = _editor["edit_slides"]
-    if problems is None or model is None or slides is None:
-        return None
-    return problems.json(model, slides)
-
-
-async def _refresh_problems() -> None:
-    """verify's checks for the slides whose entry changed, then (when on)
-    the layout check for the slides whose SVG changed; editors are told
-    after each. One at a time, each on the latest build."""
-    async with _problems_lock:
-        problems, deck, model = _editor["problems"], _editor["deck"], _editor["model"]
-        slides, session = _editor["edit_slides"], _editor["session"]
-        if None in (problems, deck, model, slides, session):
-            return
-        assert problems is not None and deck is not None and model is not None
-        assert slides is not None and session is not None
-        try:
-            await asyncio.to_thread(
-                problems.verify,
-                deck,
-                session.project_dir,
-                model,
-                _editor["deck_hash"] or "",
-            )
-        except Exception:
-            logger.exception("checking the slides failed")
-            return
-        if (msg := _problems_message()) is not None:
-            await _send_editors(msg)
-        if not problems.layout_on:
-            return
-        problems.running = True
-        if (msg := _problems_message()) is not None:
-            await _send_editors(msg)
-        check = session.exporters.layout if session.exporters else None
-        try:
-            if check is None:
-                problems.error = "the layout check is not available here"
-            else:
-                await asyncio.to_thread(
-                    problems.measure, deck, session.project_dir, slides, check
-                )
-        finally:
-            problems.running = False
-        if (msg := _problems_message()) is not None:
-            await _send_editors(msg)
-
-
-async def _send_editors(
-    payload: dict[str, object] | Callable[[Client | None], dict[str, object]],
-) -> None:
-    """To every editor page: one message, or one per person (a callable
-    given each one's client, for what differs: their undo history)."""
-    for ws in list(_editor["clients"]):
-        msg = payload(_share.people.get(ws)) if callable(payload) else payload
-        try:
-            await ws.send(json.dumps(msg))
-        except Exception:
-            _editor["clients"].discard(ws)
 
 
 async def broadcast(
@@ -633,21 +488,20 @@ async def broadcast(
     _state["ws_clients"] -= dead
 
 
-async def _send_owners(payload: dict[str, object]) -> None:
-    """To the owner's editor pages (the Share dialog)."""
+async def send_owners(payload: dict[str, object]) -> None:
+    """To the owner's pages (the Share dialog, among others)."""
     msg = json.dumps(payload)
-    for ws in list(_editor["clients"]):
-        client = _share.people.get(ws)
-        if client is not None and client.role == "owner":
+    for conn, client in _share.people.items():
+        if client.role == "owner":
             with contextlib.suppress(Exception):
-                await ws.send(msg)
+                await cast("ServerConnection", conn).send(msg)
 
 
-async def _broadcast_presence() -> None:
+async def broadcast_presence() -> None:
     """Everyone's page, slide and selection, to everyone with a page open."""
     people = _share.people.listing()
     await broadcast(json.dumps({"type": "presence", "people": people}))
-    await _send_owners(_share_status())
+    await send_owners(share_status())
 
 
 NotifyStyle = Literal["green", "yellow", "red"]
@@ -679,10 +533,10 @@ def _link_addresses(access: Access) -> list[str]:
     return ["localhost"] if access.ssh else lan_addresses()
 
 
-def _share_status() -> dict[str, object]:
-    """What the owner's Share dialog shows."""
+def share_status() -> dict[str, object]:
+    """What the owner's Share dialog shows (extensions add their part)."""
     access = _share.access
-    return {
+    status: dict[str, object] = {
         "type": "share-status",
         "sharing": access.sharing,
         "links": access.links(_link_addresses(access)) if access.sharing else [],
@@ -695,13 +549,17 @@ def _share_status() -> dict[str, object]:
         "ssh": access.ssh,
         "sshInfo": _share.ssh_info,
         "people": _share.people.listing(),
-        "online": _online_status(),
     }
+    for ext in _served.extensions:
+        try:
+            status.update(ext.share_status())
+        except Exception:
+            logger.exception(f"{ext.name}: share status failed")
+    return status
 
 
 async def _gather_ssh_info() -> None:
-    session = _editor["session"]
-    deck = session.deck_path if session is not None and session.has_deck else None
+    deck = _served.deck_path
     try:
         _share.ssh_info = await asyncio.to_thread(
             sshshare.details, deck, _share.access.port
@@ -726,10 +584,12 @@ async def _disconnect(
 
 
 async def _handle_share(websocket: ServerConnection, msg: dict[str, object]) -> None:
-    """The owner's Share dialog: status, on/off, new links, disconnect."""
+    """The owner's Share dialog: status, on/off, new links, disconnect, and
+    whatever an extension adds (``share_op``)."""
     op = msg.get("op")
     access = _share.access
     error: str | None = None
+    changed = op in ("on", "off", "rotate")
     try:
         if op == "status":
             await _gather_ssh_info()
@@ -751,130 +611,45 @@ async def _handle_share(websocket: ServerConnection, msg: dict[str, object]) -> 
         elif op == "kick":
             target = str(msg.get("id") or "")
             _ = await _disconnect(lambda c: c.id == target, "disconnected by the owner")
-        elif isinstance(op, str) and op.startswith(("online-", "relay-")):
-            error = await _online_op(op, msg)
+        elif isinstance(op, str):
+            for ext in _served.extensions:
+                answer = await ext.share_op(op, msg)
+                if answer is not False:
+                    error = answer if isinstance(answer, str) else None
+                    changed = True
+                    break
     except OSError as exc:
         access.sharing = False
         error = f"cannot listen on the network: {exc}"
         if _share.rebind is not None:
             with contextlib.suppress(OSError):
                 await _share.rebind(False)
-    reply = _share_status()
+    reply = share_status()
     if error:
         reply["error"] = error
     await websocket.send(json.dumps(reply))
-    if op in ("on", "off", "rotate") or (
-        isinstance(op, str) and op.startswith(("online-", "relay-"))
-    ):
-        await _send_owners(_share_status())
+    if changed:
+        await send_owners(share_status())
 
 
-# ── Sharing online (through a relay, see inkflow/online) ──────────────────────
-
-
-def _online_status() -> dict[str, object]:
-    """The Share dialog's Online section."""
-    configured = relay_config.load()
-    host = _share.online
-    status: dict[str, object] = {
-        "available": online_crypto.available(),
-        "installHint": online_crypto.INSTALL_HINT,
-        "relay": configured.url if configured else None,
-        "sharing": host is not None,
-    }
-    if host is not None:
-        status.update(host.status())
-    return status
-
-
-async def _online_connect(conn: VirtualConnection, role: Role) -> None:
-    """An online guest's page: a connection like any other, of its role."""
-    handler = _share.ws_handler
-    if handler is None:
-        await conn.close(1013, "the server is starting")
-        return
-    client = _share.people.join(conn, role, None, "online")
-    client.online = True
-    await handler(cast("ServerConnection", cast("object", conn)))
-
-
-async def _online_fetch(
-    path: str, range_: str | None, role: Role, writer: ResponseWriter
-) -> None:
-    """An online guest's GET (a page, picture, font, download), answered as
-    this server answers one from the network, for that role."""
-    route = _share.route
-    head = f"GET {path} HTTP/1.1\r\nHost: online\r\n"
-    if range_:
-        head += f"Range: {range_}\r\n"
-    raw = (head + "\r\n").encode("latin-1", "replace")
-    request = parse_request(raw)
-    if route is None or request is None:
-        await _respond(writer, "503 Service Unavailable", b"", "text/plain")
-        return
-    await route(request, raw, role, None, writer)
-
-
-async def _online_changed() -> None:
+def _share_changed() -> None:
+    """An extension's part of sharing changed: the terminal and the owner's
+    Share dialog say so."""
     if _share.on_change is not None:
         _share.on_change()
-    await _send_owners(_share_status())
+    _spawn(send_owners(share_status()))
 
 
-def _online_hooks() -> Hooks:
-    return Hooks(connect=_online_connect, fetch=_online_fetch, changed=_online_changed)
+_background: set[asyncio.Task[None]] = set()
 
 
-async def start_online(url: str | None = None, token: str | None = None) -> str | None:
-    """Share online through the configured relay (or ``url``); an error
-    message when it cannot start."""
-    if _share.online is not None:
-        return None
-    if not online_crypto.available():
-        return online_crypto.INSTALL_HINT
-    configured = relay_config.load()
-    if url is None and configured is None:
-        return "no relay set: see Share online in the docs, or `inkflow relay set URL`"
-    relay = url or (configured.url if configured else "")
-    try:
-        host = OnlineHost(
-            relay, token or (configured.token if configured else None), _online_hooks()
-        )
-    except ValueError as exc:
-        return str(exc)
-    _share.online = host
-    host.start()
-    logger.info(f"sharing online through {host.relay}")
-    return None
+def _spawn(work: Awaitable[None]) -> None:
+    async def run() -> None:
+        await work
 
-
-async def stop_online(reason: str = "sharing stopped") -> None:
-    host, _share.online = _share.online, None
-    if host is not None:
-        await host.stop(reason)
-        logger.info("sharing online off")
-
-
-async def _online_op(op: str, msg: dict[str, object]) -> str | None:
-    """The Share dialog's Online section: on/off, new links, the relay."""
-    if op == "online-on":
-        return await start_online()
-    if op == "online-off":
-        await stop_online()
-    elif op == "online-rotate" and _share.online is not None:
-        await _share.online.rotate()
-        logger.info("new online links")
-    elif op == "relay-set":
-        url = msg.get("url")
-        token = msg.get("token")
-        if not isinstance(url, str) or not url.strip():
-            relay_config.forget()
-            return None
-        try:
-            relay_config.save(url, token if isinstance(token, str) else None)
-        except (ValueError, OSError) as exc:
-            return f"cannot use that relay address: {exc}"
-    return None
+    task = asyncio.get_running_loop().create_task(run())
+    _background.add(task)
+    task.add_done_callback(_background.discard)
 
 
 # ── WebSocket handler ─────────────────────────────────────────────────────────
@@ -923,117 +698,65 @@ def _resolve_edit_request(
     return Path(path_str), template
 
 
-def _is_loopback(websocket: ServerConnection) -> bool:
-    """Whether a connection is the owner's (see ``access.Access.is_owner``)."""
-    client = _share.people.get(websocket)
-    return client is not None and client.role == "owner"
-
-
-async def _handle_edit_op(
-    websocket: ServerConnection, msg: dict[str, object], session: EditorSession
-) -> None:
-    """Apply one editor request and answer the sender with its result."""
-    request_id = msg.get("id")
-    client = _share.people.get(websocket)
-    # Who asks is decided here, from the connection, never by the page: keys
-    # starting with "_" are the server's (whether a program may open on this
-    # machine's screen, whose undo history the step joins).
-    for key in [k for k in msg if k.startswith("_")]:
-        del msg[key]
-    role: Role = client.role if client is not None else "viewer"
-    msg["_local"] = role == "owner"
-    msg["_role"] = role
-    msg["_author"] = client.author if client is not None else "owner"
-    msg["_name"] = client.name if client is not None else ""
-    hub = _editor["compare"]
-    try:
-        if role not in ("owner", "editor"):
-            raise EditError("this link is view-only")
-        if msg.get("action") == "compare-take":
-            if hub is None:
-                raise EditError("no comparison is open")
-            try:
-                msg["_take"] = await asyncio.to_thread(hub.take_request, websocket, msg)
-            except CompareError as exc:
-                raise EditError(str(exc)) from exc
-        result = await asyncio.to_thread(session.apply, msg, _editor["deck"])
-    except EditError as exc:
-        result = {"ok": False, "error": str(exc), **exc.extra}
-    except Exception as exc:
-        logger.exception("editor request failed")
-        result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-    await websocket.send(
-        json.dumps({"type": "edit-result", "id": request_id, **result})
+def _ink_file(
+    deck: Deck, project_dir: Path, slide_id: str
+) -> tuple[Path, tuple[float, float, float, float]]:
+    """Slide ``slide_id``'s ink file and its canvas (what a new file takes)."""
+    visible = [s for s in deck.slides if s.visible]
+    slide = next(
+        (s for s, i in zip(visible, slide_ids(visible), strict=True) if i == slide_id),
+        None,
     )
-    if result.get("ok") and msg.get("action") == "star":
-        # No file of the deck changed and nothing rebuilds: every editor
-        # page is told which slides are starred now.
-        await _send_editors({"type": "stars", "stars": _stars()})
-    if result.get("ok") and msg.get("action") == "comment":
-        # Likewise every editor page is told the review comments now.
-        threads = result.get("comments")
-        for held in (_editor["model"], _editor["model_patch"]):
-            if held is not None:
-                held["comments"] = threads
-        await _send_editors({"type": "comments", "comments": threads})
-    if result.get("ok") and (
-        result.get("changes") or msg.get("action") in ("undo", "redo")
-    ):
-        # Everyone's Undo/Redo may have changed (a step of theirs is now
-        # blocked, or free again); an agent's edit (``inkflow slide``) also
-        # says so, with an undo of that very step for the owner's pages.
-        agent = bool(msg.get("agent")) and bool(result.get("changes"))
-        author = msg["_author"]
-
-        def per_person(c: Client | None) -> dict[str, object]:
-            return {
-                "type": "agent-edit" if agent else "history",
-                "label": result.get("label"),
-                "step": result.get("step"),
-                "mine": (c.author if c is not None else "owner") == author,
-                **_history_state(c),
-            }
-
-        await _send_editors(per_person)
-    if session.switch_to is not None and _editor["switch"] is not None:
-        _editor["switch"].set()
-    if session.quit_requested and _editor["shutdown"] is not None:
-        _editor["shutdown"].set()
-
-
-async def _handle_compare(websocket: ServerConnection, msg: dict[str, object]) -> None:
-    """The compare view's messages (see editor/comparehub.py)."""
-    hub = _editor["compare"]
-    kind = msg.get("type")
-    if kind == "compare-close":
-        if hub is not None:
-            hub.close(websocket)
-        return
+    if slide is None:
+        raise ink.InkError(f"no slide {slide_id!r}")
     try:
-        if hub is None:
-            raise CompareError("open a deck first")
-        if kind == "compare-sources":
-            reply = await asyncio.to_thread(hub.sources)
-        else:
-            reply = await hub.open(websocket, msg, local=_is_loopback(websocket))
-    except Exception as exc:
-        if not isinstance(exc, CompareError):
-            logger.exception("compare failed")
-        reply = {
-            "type": "compare-error",
-            "view": msg.get("view"),
-            "for": kind,
-            "message": str(exc) or type(exc).__name__,
-        }
+        src = resolve_slide_src(slide.src, project_dir, deck.theme)
+        box = ink.view_box(parse_svg_file(src))
+    except (OSError, ValueError):
+        box = None
+    canvas = box or (0.0, 0.0, *deck.effective_size.canvas)
+    return ink.ink_path(slide, slide_id, project_dir), canvas
+
+
+async def _save_ink(websocket: ServerConnection, msg: dict[str, object]) -> None:
+    """An ``edit-op`` when no extension edits the deck: only the presenter's
+    "Keep" (``action: "ink"``) is answered, writing the ink file directly."""
+    reply: dict[str, object] = {"type": "edit-result", "id": msg.get("id")}
+    deck = _served.deck
+    slide_id = msg.get("slideId")
+    try:
+        if msg.get("action") != "ink":
+            raise ink.InkError("nothing on this server edits the deck")
+        if deck is None or _served.deck_path is None:
+            raise ink.InkError("the deck has not built")
+        if not isinstance(slide_id, str):
+            raise ink.InkError("which slide?")
+        project_dir = _served.deck_path.parent
+        path, canvas = _ink_file(deck, project_dir, slide_id)
+        await asyncio.to_thread(ink.save_ink, path, msg, canvas)
+        reply.update(ok=True, ink=path.relative_to(project_dir).as_posix())
+    except (ink.InkError, OSError) as exc:
+        reply.update(ok=False, error=str(exc))
     await websocket.send(json.dumps(reply))
 
 
-_OWNER_ONLY = frozenset({"edit", "editor-context", "editor-command", "share"})
+_ROLE_RANK: dict[str, int] = {"viewer": 0, "editor": 1, "owner": 2}
+
+_OWNER_ONLY = frozenset({"edit", "share"})
 """Messages only the owner's pages and programs send: opening a program on
-this machine, the agents' context file and commands, and sharing itself."""
-_EDITORS = frozenset(
-    {"edit-op", "compare-open", "compare-close", "compare-sources", "problems-check"}
-)
+this machine, and sharing itself."""
+
+
+def _extension_for(kind: object) -> tuple[ServerExtension, Role] | None:
+    """The extension that handles message type ``kind``, and the least role
+    that may send it."""
+    if not isinstance(kind, str):
+        return None
+    for ext in _served.extensions:
+        role = ext.messages.get(kind)
+        if role is not None:
+            return ext, role
+    return None
 
 
 def allowed(role: Role, msg: dict[str, object]) -> bool:
@@ -1041,7 +764,13 @@ def allowed(role: Role, msg: dict[str, object]) -> bool:
     kind = msg.get("type")
     if kind in _OWNER_ONLY:
         return role == "owner"
-    if kind in _EDITORS or (kind == "hello" and msg.get("role") == "editor"):
+    handled = _extension_for(kind)
+    if handled is not None:
+        return _ROLE_RANK[role] >= _ROLE_RANK[handled[1]]
+    if kind == "edit-op":
+        # The presenter's "Keep" with no editor: the ink file, written directly.
+        return role in ("owner", "editor")
+    if kind == "hello" and msg.get("role") == "editor":
         return role in ("owner", "editor")
     if role == "viewer":
         # A viewer follows: it moves no one else's slide and draws on no one
@@ -1053,10 +782,25 @@ def allowed(role: Role, msg: dict[str, object]) -> bool:
     return True
 
 
+def _welcome(client: Client) -> dict[str, object]:
+    msg: dict[str, object] = {
+        "type": "welcome",
+        "id": client.id,
+        "role": client.role,
+        "color": client.color,
+        "name": client.name,
+    }
+    for ext in _served.extensions:
+        try:
+            msg.update(ext.welcome(client))
+        except Exception:
+            logger.exception(f"{ext.name}: welcome failed")
+    return msg
+
+
 def make_ws_handler(
     ui: LiveUI,
     edit_commands: EditCommands,
-    session: EditorSession | None = None,
 ) -> Callable[[ServerConnection], Awaitable[None]]:
     async def handler(websocket: ServerConnection) -> None:
         client = _share.people.get(websocket)
@@ -1069,17 +813,7 @@ def make_ws_handler(
         ui.refresh()
         try:
             pos = _state["position"]
-            await websocket.send(
-                json.dumps(
-                    {
-                        "type": "welcome",
-                        "id": client.id,
-                        "role": client.role,
-                        "color": client.color,
-                        "name": client.name,
-                    }
-                )
-            )
+            await websocket.send(json.dumps(_welcome(client)))
             await websocket.send(
                 json.dumps(
                     {
@@ -1111,7 +845,13 @@ def make_ws_handler(
                             )
                         )
                     continue
-                if msg_type == "sync-request":
+                handled = _extension_for(msg_type)
+                if handled is not None:
+                    try:
+                        await handled[0].message(websocket, client, msg)
+                    except Exception:
+                        logger.exception(f"{handled[0].name}: {msg_type} failed")
+                elif msg_type == "sync-request":
                     # A client that just switched into a receiving sync mode asks
                     # for the current position. Reply to it alone, not a broadcast.
                     cur = _state["position"]
@@ -1143,11 +883,11 @@ def make_ws_handler(
                 elif msg_type == "ink":
                     # Ink drawn without "Keep" is relayed like a position: the
                     # server holds none of it, every other window draws it.
-                    # Saving goes through the session (edit-op "ink") instead.
+                    # Saving is an ``edit-op`` (the editor's, else _save_ink).
                     await broadcast(json.dumps(msg), sender=websocket)
                 elif msg_type == "presence":
                     if _share.people.update(websocket, msg):
-                        await _broadcast_presence()
+                        await broadcast_presence()
                 elif msg_type in ("hello", "resync"):
                     # A page says which rebuilds it takes (``patch``: what
                     # changed), and is told which slides the deck has now:
@@ -1155,9 +895,6 @@ def make_ws_handler(
                     # with), whole when it found it does not (``resync``).
                     if msg_type == "hello":
                         client.patches = bool(msg.get("patch"))
-                    editor = msg.get("role") == "editor"
-                    if msg_type == "hello" and editor:
-                        _editor["clients"].add(websocket)
                     if client.patches and _state["error"] is None:
                         whole = msg_type == "resync"
                         slides = _state["slides"]
@@ -1166,51 +903,19 @@ def make_ws_handler(
                                 slides if whole else as_patch(slides, keys_of(slides))
                             )
                         )
-                    if websocket not in _editor["clients"]:
-                        continue
-                    if _editor["model"] is not None:
-                        await websocket.send(
-                            json.dumps(_model_message(client, whole=True))
-                        )
-                    if msg_type == "resync":
-                        continue
-                    if (problems_msg := _problems_message()) is not None:
-                        await websocket.send(json.dumps(problems_msg))
-                    await websocket.send(
-                        json.dumps(
-                            {"type": "presence", "people": _share.people.listing()}
-                        )
-                    )
-                elif msg_type == "edit-op" and session is not None:
-                    await _handle_edit_op(websocket, msg, session)
-                elif msg_type == "problems-check":
-                    # The Problems list's layout check (and its contrast
-                    # setting), for everyone editing this deck.
-                    problems = _editor["problems"]
-                    if problems is not None:
-                        problems.layout_on = msg.get("on") is not False
-                        problems.contrast = msg.get("contrast") is True
-                        _check_problems()
+                    for ext in list(_served.extensions):
+                        try:
+                            await ext.hello(
+                                websocket, client, msg, resync=msg_type == "resync"
+                            )
+                        except Exception:
+                            logger.exception(f"{ext.name}: {msg_type} failed")
+                elif msg_type == "edit-op":
+                    await _save_ink(websocket, msg)
                 elif msg_type == "build-status":
-                    await websocket.send(json.dumps(_build_status()))
-                elif msg_type in ("compare-open", "compare-close", "compare-sources"):
-                    await _handle_compare(websocket, msg)
+                    await websocket.send(json.dumps(build_status()))
                 elif msg_type == "share":
                     await _handle_share(websocket, msg)
-                elif msg_type == "editor-context" and session is not None:
-                    raw_context: object = msg.get("context")
-                    context: object = raw_context
-                    if isinstance(raw_context, dict):
-                        # Which server this editor talks to: `inkflow goto`
-                        # and `select` find it here when several are running.
-                        context = {
-                            **cast("dict[str, object]", raw_context),
-                            "server": session.server,
-                        }
-                    await asyncio.to_thread(write_context, session.project_dir, context)
-                elif msg_type == "editor-command":
-                    # From `inkflow goto/select`: steer every open editor.
-                    await _send_editors(msg)
                 elif msg_type == "edit":
                     request = _resolve_edit_request(
                         msg, _state["slides"], edit_commands
@@ -1221,12 +926,12 @@ def make_ws_handler(
                             await notify(websocket, error, style="red")
         finally:
             _state["ws_clients"].discard(websocket)
-            _editor["clients"].discard(websocket)
-            if _editor["compare"] is not None:
-                _editor["compare"].close(websocket)
+            await _each_extension(
+                "disconnected", lambda ext: ext.disconnected(websocket, client)
+            )
             left = _share.people.leave(websocket)
             if left is not None and left.page:
-                await _broadcast_presence()
+                await broadcast_presence()
             logger.debug(f"client disconnected ({len(_state['ws_clients'])} total)")
             ui.refresh()
 
@@ -1236,15 +941,6 @@ def make_ws_handler(
 # ── HTTP handler ──────────────────────────────────────────────────────────────
 
 _StreamHandler = Callable[[asyncio.StreamReader, asyncio.StreamWriter], Awaitable[None]]
-
-
-class ResponseWriter(Protocol):
-    """Where a response is written: a socket's ``asyncio.StreamWriter``, or
-    an online guest's (``online.host._Capture``)."""
-
-    def write(self, data: bytes) -> None: ...
-
-    async def drain(self) -> None: ...
 
 
 Route = Callable[
@@ -1263,7 +959,7 @@ def favicon_data_uri() -> str:
 
 
 @functools.cache
-def _served_ui_fonts() -> str:
+def served_ui_fonts() -> str:
     return ui_fonts_css()
 
 
@@ -1279,7 +975,7 @@ def build_html(
     pkg = importlib.resources.files("inkflow")
     template = pkg.joinpath("presenter.html").read_text(encoding="utf-8")
     css = pkg.joinpath("bundles", "presenter.css").read_text(encoding="utf-8")
-    css = (_served_ui_fonts() if ui_fonts is None else ui_fonts) + "\n" + css
+    css = (served_ui_fonts() if ui_fonts is None else ui_fonts) + "\n" + css
     js = pkg.joinpath("bundles", "presenter.js").read_text(encoding="utf-8")
     data_theme = "" if state["mode"] == ColorMode.DARK else "light"
     ws_port_js = "null" if ws_port is None else str(ws_port)
@@ -1308,29 +1004,6 @@ def build_html(
     return html.encode("utf-8")
 
 
-def build_editor_html(state: State, editor: EditorState, ws_port: int) -> bytes:
-    """The visual editor page: its own shell and bundle, the deck's styles."""
-    pkg = importlib.resources.files("inkflow")
-    template = pkg.joinpath("editor.html").read_text(encoding="utf-8")
-    css = pkg.joinpath("bundles", "editor.css").read_text(encoding="utf-8")
-    css = _served_ui_fonts() + "\n" + css
-    js = pkg.joinpath("bundles", "editor.js").read_text(encoding="utf-8")
-    data_theme = "" if state["mode"] == ColorMode.DARK else "light"
-    html = (
-        template.replace("/* __CSS__ */", css)
-        .replace("/* __JS__ */", js)
-        .replace("/* __STYLES__ */", state["styles_css"])
-        .replace("__DATA_THEME__", data_theme)
-        .replace("__SLIDES_JSON__", json.dumps(state["slides"]))
-        .replace("__MODEL_JSON__", json.dumps(editor["model"]))
-        .replace("__WS_PORT__", str(ws_port))
-        .replace("__ERROR_JSON__", json.dumps(state["error"]))
-        .replace("__FAVICON__", favicon_data_uri())
-        .replace("__TITLE__", escape_html(f"Edit · {state['title']}"))
-    )
-    return html.encode("utf-8")
-
-
 def build_handout_html(state: State, request_path: str) -> bytes:
     """The handout view (handout.py): the served slides with their notes,
     ``?layout=notes|compact&paper=a4|letter``."""
@@ -1339,7 +1012,7 @@ def build_handout_html(state: State, request_path: str) -> bytes:
     query = parse_qs(urlsplit(request_path).query)
     page = handout_page(
         state["slides"],
-        _served_ui_fonts() + "\n" + state["styles_css"],
+        served_ui_fonts() + "\n" + state["styles_css"],
         title=state["title"],
         data_theme="" if state["mode"] == ColorMode.DARK else "light",
         layout=(query.get("layout") or ["notes"])[0],
@@ -1347,11 +1020,6 @@ def build_handout_html(state: State, request_path: str) -> bytes:
         bar=True,
     )
     return page.encode("utf-8")
-
-
-def _is_editor_path(request_path: str) -> bool:
-    path = request_path.split("?", 1)[0].split("#", 1)[0]
-    return path == "/edit" or path.startswith("/edit/")
 
 
 _SERVED_SUFFIXES = set(MIME_TYPES)
@@ -1486,38 +1154,6 @@ async def _send_file(
             left -= len(chunk)
 
 
-def _read_export(path: Path) -> tuple[str, str, bytes]:
-    """An exported file, or an exported folder as a zip, for download."""
-    if path.is_dir():
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for f in sorted(path.rglob("*")):
-                if f.is_file():
-                    zf.write(f, f"{path.name}/{f.relative_to(path).as_posix()}")
-        return f"{path.name}.zip", "application/zip", buf.getvalue()
-    mime = {".pdf": "application/pdf", ".html": "text/html; charset=utf-8"}.get(
-        path.suffix.lower(), "application/octet-stream"
-    )
-    return path.name, mime, path.read_bytes()
-
-
-def _export_download(
-    request_path: str,
-) -> tuple[Callable[[Path], tuple[str, str, bytes]], Path] | None:
-    """``/_export/<token>/<name>``: a file the editor exported in this session.
-
-    Only paths the session recorded under a random token are served, so this
-    route cannot reach any other file."""
-    parts = request_path.split("?", 1)[0].split("/")
-    if len(parts) < 3 or parts[1] != "_export":
-        return None
-    session = _editor["session"]
-    path = session.exports.get(parts[2]) if session is not None else None
-    if path is None or not path.exists():
-        return None
-    return _read_export, path
-
-
 _HTML_HEADERS = (
     b"Cache-Control: no-store\r\n"
     # Never inside another site's frame (a click on the editor that its user
@@ -1566,15 +1202,33 @@ _VIEW_ONLY = (
 
 
 def _probe_body() -> bytes:
-    session = _editor["session"]
+    deck = _served.deck_path
     return json.dumps(
-        {
-            "pid": os.getpid(),
-            "deck": str(session.deck_path)
-            if session is not None and session.has_deck
-            else None,
-        }
+        {"pid": os.getpid(), "deck": str(deck) if deck is not None else None}
     ).encode()
+
+
+def _http_request(
+    request: AccessRequest,
+    raw: bytes,
+    role: Role,
+    token: str | None,
+    writer: ResponseWriter,
+) -> HttpRequest:
+    """The request as an extension gets it, with the core's ways to answer."""
+
+    async def respond(
+        status: str, body: bytes, content_type: str, extra: bytes = b""
+    ) -> None:
+        await _respond(writer, status, body, content_type, extra)
+
+    async def send_file(path: Path) -> None:
+        await _send_file(writer, path, _range_header(raw))
+
+    async def refuse(status: str, title: str, text: str) -> None:
+        await _refuse(writer, status, title, text)
+
+    return HttpRequest(request, raw, role, token, writer, respond, send_file, refuse)
 
 
 def make_http_route(
@@ -1584,8 +1238,9 @@ def make_http_route(
 ) -> Route:
     """Everything the one port answers once it knows who asks (``role``,
     and the share ``token`` that admitted them): pages, pictures, fonts,
-    downloads. A guest online gets its requests answered by this too
-    (``online.host``), so what each role may fetch is decided here once."""
+    and whatever the extensions answer. A request that came another way
+    (``ServerContext.serve_request``) is answered by this too, so what each
+    role may fetch is decided here once."""
 
     async def route(
         request: AccessRequest,
@@ -1609,15 +1264,6 @@ def make_http_route(
                 enter_page(request.without_token()),
                 extra=f"Set-Cookie: {cookie}\r\n".encode(),
             )
-            return
-        editor_only = (
-            _is_editor_path(request_path)
-            or path.startswith(("/_export/", "/_cmp/"))
-            # The handout shows the speaker notes.
-            or path == "/handout"
-        )
-        if editor_only and role == "viewer":
-            await _refuse(writer, "403 Forbidden", "View-only link", _VIEW_ONLY)
             return
 
         if path == instances.PROBE_PATH:
@@ -1646,28 +1292,6 @@ def make_http_route(
             await writer.drain()
             return
 
-        download = _export_download(request_path)
-        if download is not None:
-            name, mime, body = await asyncio.to_thread(*download)
-            await _respond(
-                writer,
-                "200 OK",
-                body,
-                mime,
-                f'Content-Disposition: attachment; filename="{name}"\r\n'.encode(),
-            )
-            return
-
-        hub = _editor["compare"]
-        if hub is not None and request_path.startswith("/_cmp/"):
-            # A compared deck's picture, inside that deck's own roots.
-            compared = hub.asset(request_path)
-            if compared is None:
-                await _respond(writer, "404 Not Found", b"")
-            else:
-                await _send_file(writer, compared, _range_header(raw))
-            return
-
         if project_dir is not None and request_path != "/":
             roots = AssetRoots(project_dir, _state["theme_dir"])
             asset_path = _resolve_asset(roots, request_path)
@@ -1675,18 +1299,22 @@ def make_http_route(
                 await _send_file(writer, asset_path, _range_header(raw))
                 return
 
-        session = _editor["session"]
-        starting = session is not None and not session.has_deck
-        # The start page (no deck yet) is the editor's, at any path.
-        if starting and role != "owner":
+        extension_request = _http_request(request, raw, role, token, writer)
+        for ext in _served.extensions:
+            if await ext.http(extension_request):
+                return
+
+        if _served.deck_path is None:
             await _refuse(
                 writer, "404 Not Found", "No deck open", "Nothing is shared yet."
             )
             return
-        if path == "/handout" and not starting:
+        if path == "/handout":
+            # The handout shows the speaker notes.
+            if role == "viewer":
+                await _refuse(writer, "403 Forbidden", "View-only link", _VIEW_ONLY)
+                return
             body = build_handout_html(_state, request_path)
-        elif _is_editor_path(request_path) or starting:
-            body = build_editor_html(_state, _editor, ws_port)
         else:
             # Opening a source file in a program is the owner's alone.
             body = build_html(
@@ -1871,6 +1499,11 @@ async def _read_keys(
     if not sys.stdin.isatty():
         return
 
+    extra = {
+        key: action
+        for ext in _served.extensions
+        for key, (_, action) in ext.keys().items()
+    }
     loop = asyncio.get_running_loop()
     async with raw_keypresses(loop) as queue:
         while True:
@@ -1880,15 +1513,17 @@ async def _read_keys(
                 return
             elif ch == "o":
                 _open_browser(f"{base}:{http_port}{_share.access.owner_path('/')}")
-            elif ch == "e":
-                path = _share.access.owner_path("/edit")
-                _open_browser(f"{base}:{http_port}{path}")
             elif ch == "r" and deck_path is not None:
                 # Asked for by hand: every slide again, whatever is kept.
                 async with lock:
                     await rebuild(deck_path, ui, levels, full=True)
             elif ch == "t":
                 ui.toggle_trace()
+            elif ch in extra:
+                try:
+                    extra[ch]()
+                except Exception:
+                    logger.exception(f"key {ch!r} failed")
 
 
 # ── Ports ─────────────────────────────────────────────────────────────────────
@@ -1941,7 +1576,7 @@ def pick_port(host: str, port: int | None) -> int:
 
 @dataclass(frozen=True)
 class Sharing:
-    """How a server is shared (``inkflow edit --share``)."""
+    """How a server is shared (``--share``)."""
 
     share: bool = False
     """Share links work from the start (and the server listens on the LAN,
@@ -1953,9 +1588,6 @@ class Sharing:
     """More names to answer to: a reverse proxy's, a tailnet name."""
     tls: tuple[Path, Path] | None = None
     """Certificate and key: HTTPS and WSS on the one port."""
-    online: bool = False
-    """Share online from the start, through the relay set with ``inkflow
-    relay set`` (``--share-online``)."""
 
 
 def _local_host(host: str) -> str:
@@ -2004,28 +1636,23 @@ def owner_lines(access: Access, port: int) -> list[str]:
     ]
 
 
-def online_lines() -> list[str]:
-    """What the terminal says about sharing online: the two links, or why
-    there are none yet."""
-    host = _share.online
-    if host is None:
-        return []
-    if host.state == "open":
-        return [
-            f"edit  {host.link('editor')}  (online)",
-            f"view  {host.link('viewer')}  (online)",
-        ]
-    why = f": {host.error}" if host.error else ""
-    return [f"online  {host.state} ({host.relay}){why}"]
+def _extension_lines() -> list[str]:
+    lines: list[str] = []
+    for ext in _served.extensions:
+        try:
+            lines += ext.share_lines()
+        except Exception:
+            logger.exception(f"{ext.name}: share lines failed")
+    return lines
 
 
 def share_lines(access: Access, port: int) -> list[str]:
     """What the terminal says about sharing: the two links per address, the
-    mDNS name, and how to reach the server through SSH instead; the online
-    links when sharing online. In SSH mode the links name ``localhost``, for
-    each guest's own tunnel."""
+    mDNS name, and how to reach the server through SSH instead; then what
+    the extensions add (an online relay's links). In SSH mode the links name
+    ``localhost``, for each guest's own tunnel."""
     if not access.sharing:
-        return online_lines()
+        return _extension_lines()
     lines: list[str] = []
     links = access.links(_link_addresses(access))
     for link in links:
@@ -2035,7 +1662,7 @@ def share_lines(access: Access, port: int) -> list[str]:
             f"guests: ssh -N -L {port}:localhost:{port} <their login>@<this "
             + "server>, then their link (Share → Share via SSH writes it out)"
         )
-        return lines + online_lines()
+        return lines + _extension_lines()
     names = {n for n in access.names if n.endswith(".local")} | access.allow_hosts
     for name in sorted(names):
         lines.append(f"also  {access.scheme}://{name}:{port} (same ?k= links)")
@@ -2043,9 +1670,114 @@ def share_lines(access: Access, port: int) -> list[str]:
         lines.append("no network address found: use --host <address>")
     lines.append(
         f"ssh   ssh -L {port}:localhost:{port} <you>@<this machine>, "
-        + f"then http://localhost:{port}/edit (as the owner)"
+        + f"then http://localhost:{port}/ (as the owner)"
     )
-    return lines + online_lines()
+    return lines + _extension_lines()
+
+
+class _Context:
+    """The ``ServerContext`` extensions act through (``inkflow.extensions``)."""
+
+    @property
+    def state(self) -> State:
+        return _state
+
+    @property
+    def people(self) -> People:
+        return _share.people
+
+    @property
+    def access(self) -> Access:
+        return _share.access
+
+    @property
+    def deck_path(self) -> Path | None:
+        return _served.deck_path
+
+    @property
+    def last_deck(self) -> Deck | None:
+        return _served.deck
+
+    @property
+    def address(self) -> dict[str, object]:
+        return dict(_served.address)
+
+    @property
+    def edit_commands(self) -> EditCommands:
+        return _served.edit_commands
+
+    async def send(self, conn: ServerConnection, payload: dict[str, object]) -> None:
+        with contextlib.suppress(Exception):
+            await conn.send(json.dumps(payload))
+
+    async def broadcast(
+        self,
+        payload: dict[str, object],
+        sender: ServerConnection | None = None,
+    ) -> None:
+        await broadcast(json.dumps(payload), sender)
+
+    async def send_owners(self, payload: dict[str, object]) -> None:
+        await send_owners(payload)
+
+    async def notify(
+        self, conn: ServerConnection | None, message: str, style: str = "green"
+    ) -> None:
+        await notify(conn, message, style=cast("NotifyStyle", style))
+
+    async def rebuild(self, *, full: bool = False) -> None:
+        if _served.rebuild is not None:
+            await _served.rebuild(full)
+
+    def open_deck(self, deck_path: Path) -> None:
+        _served.switch_to = deck_path
+        if _served.switch is not None:
+            _served.switch.set()
+
+    def shutdown(self) -> None:
+        if _served.shutdown is not None:
+            _served.shutdown.set()
+
+    def share_changed(self) -> None:
+        _share_changed()
+
+    async def serve_connection(self, conn: VirtualConnection, role: Role) -> None:
+        handler = _share.ws_handler
+        if handler is None:
+            await conn.close(1013, "the server is starting")
+            return
+        client = _share.people.join(conn, role, None, "online")
+        client.online = True
+        await handler(cast("ServerConnection", cast("object", conn)))
+
+    async def serve_request(
+        self, path: str, range_: str | None, role: Role, writer: ResponseWriter
+    ) -> None:
+        route = _share.route
+        head = f"GET {path} HTTP/1.1\r\nHost: online\r\n"
+        if range_:
+            head += f"Range: {range_}\r\n"
+        raw = (head + "\r\n").encode("latin-1", "replace")
+        request = parse_request(raw)
+        if route is None or request is None:
+            await _respond(writer, "503 Service Unavailable", b"", "text/plain")
+            return
+        await route(request, raw, role, None, writer)
+
+
+context = _Context()
+"""The server as extensions see it (one per process, like the server)."""
+
+
+def extensions_for(config: ServeConfig) -> list[ServerExtension]:
+    """The installed plugins' extensions of a server about to start."""
+    found: list[ServerExtension] = []
+    for plugin in plugins.loaded():
+        try:
+            found += plugin.server_extensions(config)
+        except Exception:
+            logger.exception(f"{plugin.name}: its server extension failed to load")
+    return found
 
 
 async def serve(
@@ -2055,17 +1787,19 @@ async def serve(
     ws_port: int | None,
     levels: Levels,
     open_path: str | None = None,
-    exporters: Exporters | None = None,
     quit_when_idle: float | None = None,
     auto_ports: bool = False,
     sharing: Sharing | None = None,
+    extensions: Sequence[ServerExtension] | None = None,
 ) -> None:
-    """Run the server until quit. ``open_path`` (e.g. ``"/edit"``) opens a
-    browser on that page once the first build is done; ``exporters`` enable
-    the editor's Export dialog. Without a deck (``None``) the editor shows its
-    start page: a new deck, another one, or a recent one. With
+    """Run the server until quit. ``open_path`` (e.g. ``"/"``) opens a
+    browser on that page once the first build is done. With
     ``quit_when_idle`` (seconds) it stops once no page has been connected for
     that long (a server started without a terminal to stop it from).
+
+    ``extensions`` add to the server (``inkflow.extensions``); by default the
+    installed plugins' (``extensions_for``). Without a deck (``None``) only
+    an extension that ``serves_without_deck`` can answer the pages.
 
     One port carries everything: pages, pictures and the WebSocket
     (``/_inkflow/ws``). ``ws_port`` additionally opens the old separate
@@ -2078,8 +1812,9 @@ async def serve(
     ``sharing``: share links (``--share``); a non-loopback ``host`` shares
     too, since other machines can reach it.
 
-    When the editor opens another deck (or creates one), the server closes and
-    starts again on the same port for that deck; open pages reconnect to it."""
+    When an extension opens another deck (``ServerContext.open_deck``), the
+    server closes and starts again on the same port for that deck; open pages
+    reconnect to it."""
     sharing = sharing or Sharing()
     _share.access = Access(
         http_port,
@@ -2088,10 +1823,15 @@ async def serve(
         sharing=sharing.share or _shares(host),
         ssh=sharing.ssh,
     )
-    if sharing.online:
-        problem = await start_online()
-        if problem is not None:
-            report("Error", f"cannot share online: {problem}", style="red")
+    if extensions is None:
+        extensions = extensions_for(ServeConfig(deck_path, host, http_port))
+    _served.extensions = list(extensions)
+    if deck_path is None and not any(e.serves_without_deck for e in extensions):
+        report("Error", "no deck to serve", style="red")
+        return
+    _served.address = _address(_local_host(host), http_port, ws_port, sharing.tls)
+    for ext in _served.extensions:
+        await ext.start(context)
     try:
         await _serve_decks(
             deck_path,
@@ -2100,13 +1840,25 @@ async def serve(
             ws_port,
             levels,
             open_path,
-            exporters,
             quit_when_idle,
             auto_ports,
             sharing,
         )
     finally:
-        await stop_online("the server stopped")
+        await _each_extension("stop", lambda ext: ext.stop())
+        _served.extensions = []
+
+
+def _address(
+    host: str, port: int, ws_port: int | None, tls: object | None
+) -> dict[str, object]:
+    return {
+        "host": host,
+        "port": port,
+        "wsPath": WS_PATH,
+        "wsPort": ws_port if ws_port is not None else port,
+        "tls": tls is not None,
+    }
 
 
 async def _serve_decks(
@@ -2116,12 +1868,11 @@ async def _serve_decks(
     ws_port: int | None,
     levels: Levels,
     open_path: str | None,
-    exporters: Exporters | None,
     quit_when_idle: float | None,
     auto_ports: bool,
     sharing: Sharing,
 ) -> None:
-    """``serve``'s loop: one deck after another, as the editor opens them."""
+    """``serve``'s loop: one deck after another, as extensions open them."""
     retries = 5 if auto_ports else 0
     while True:
         try:
@@ -2132,7 +1883,6 @@ async def _serve_decks(
                 ws_port,
                 levels,
                 open_path,
-                exporters,
                 quit_when_idle,
                 sharing.tls,
             )
@@ -2143,6 +1893,9 @@ async def _serve_decks(
             retries -= 1
             http_port = pick_port(host, None)
             _share.access.port = http_port
+            _served.address = _address(
+                _local_host(host), http_port, ws_port, sharing.tls
+            )
             continue
         if next_deck is None:
             return
@@ -2151,9 +1904,9 @@ async def _serve_decks(
         _state["slides"] = []
         _state["position"] = {"slideIndex": 0, "step": 0}
         _state["error"] = None
-        _editor["deck"] = None
-        _editor["model"] = None
-        _editor["failed_hash"] = None
+        _served.deck = None
+        _served.built_hash = None
+        _served.failed_hash = None
 
 
 class _PortBusy(Exception):
@@ -2183,22 +1936,19 @@ async def _quit_when_idle(shutdown: asyncio.Event, delay: float) -> None:
 @contextlib.asynccontextmanager
 async def listening(
     ui: LiveUI,
-    session: EditorSession | None,
+    deck_path: Path | None = None,
+    extensions: Sequence[ServerExtension] = (),
     host: str = "127.0.0.1",
     port: int = 0,
     edit_commands: EditCommands = NO_EDIT_COMMANDS,
 ) -> AsyncGenerator[int]:
     """The one port as ``serve`` opens it (pages, files, the WebSocket at
-    ``/_inkflow/ws``), without the terminal UI, watcher or keyboard: for
+    ``/_inkflow/ws``), without the terminal UI, watcher or keyboard, serving
+    ``deck_path`` with ``extensions`` (started and opened; nothing built yet): for
     tests and for embedding. Yields the port it listens on."""
-    project_dir = (
-        session.project_dir if session is not None and session.has_deck else None
-    )
-    bridge = Bridge(
-        make_ws_handler(ui, edit_commands, session),
-        max_size=80 * 1024 * 1024,
-        forget=_share.people.leave,
-    )
+    project_dir = deck_path.parent if deck_path is not None else None
+    handler = make_ws_handler(ui, edit_commands)
+    bridge = Bridge(handler, max_size=80 * 1024 * 1024, forget=_share.people.leave)
     handlers: list[_StreamHandler] = []
 
     async def http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -2207,15 +1957,39 @@ async def listening(
     listener = await asyncio.start_server(http, host, port)
     actual = cast("tuple[str, int]", listener.sockets[0].getsockname())[1]
     handlers.append(make_http_handler(actual, project_dir, edit_commands, bridge))
-    _share.ws_handler = make_ws_handler(ui, edit_commands, session)
+    _share.ws_handler = handler
     _share.route = make_http_route(actual, project_dir, edit_commands)
+    _served.extensions = list(extensions)
+    _served.deck_path = deck_path
+    _served.edit_commands = edit_commands
+    _served.address = _address("127.0.0.1", actual, None, None)
+    lock = asyncio.Lock()
+
+    async def again(full: bool) -> None:
+        if deck_path is not None:
+            async with lock:
+                await rebuild(deck_path, ui, resolve_levels(), full=full)
+
+    _served.rebuild = again
     try:
+        for ext in _served.extensions:
+            await ext.start(context)
+            await ext.open(deck_path)
         yield actual
     finally:
         listener.close()
         await bridge.shutdown()
+        await _each_extension("close", lambda ext: ext.close(switching=False))
+        await _each_extension("stop", lambda ext: ext.stop())
         _share.ws_handler = None
         _share.route = None
+        _served.extensions = []
+        _served.deck_path = None
+        _served.rebuild = None
+        _served.deck = None
+        _served.built_hash = None
+        _served.failed_hash = None
+        _served.kept = None
 
 
 class Listener:
@@ -2299,19 +2073,20 @@ async def _serve_deck(
     ws_port: int | None,
     levels: Levels,
     open_path: str | None,
-    exporters: Exporters | None,
     quit_when_idle: float | None = None,
     tls: tuple[Path, Path] | None = None,
 ) -> Path | None:
-    """Serve one deck until quit (None) or until the editor opens another
-    (its deck.py). Without a deck, only the editor's start page is served:
+    """Serve one deck until quit (None) or until an extension opens another
+    (its deck.py). Without a deck, only the extensions' pages are served:
     nothing is built or watched, and no files are served."""
     console = Console()
     rebuild_lock = asyncio.Lock()
     shutdown = asyncio.Event()
     switch = asyncio.Event()
-    _editor["switch"] = switch
-    _editor["shutdown"] = shutdown
+    _served.switch = switch
+    _served.shutdown = shutdown
+    _served.switch_to = None
+    _served.deck_path = deck_path
     access = _share.access
     scheme = access.scheme
     local_host = _local_host(host)
@@ -2322,36 +2097,23 @@ async def _serve_deck(
     uninstall_shutdown_handler = install_shutdown_handler(loop, shutdown)
     bridge: Bridge | None = None
     listener: Listener | None = None
+    opened: list[ServerExtension] = []
 
     try:
         edit_commands = resolve_edit_commands()
-        session = EditorSession(deck_path, exporters)
-        session.edit_commands = edit_commands
-        session.server = {
-            "host": browse_host,
-            "port": http_port,
-            "wsPath": WS_PATH,
-            "wsPort": ws_port if ws_port is not None else http_port,
-            "tls": tls is not None,
-        }
-        _editor["session"] = session
-        _editor["compare"] = CompareHub(deck_path, load_deck) if deck_path else None
-        _editor["problems"] = Problems() if deck_path else None
-        _editor["edit_slides"] = None
+        _served.edit_commands = edit_commands
         project_dir = deck_path.parent if deck_path else None
-        if deck_path is not None:
-            projects.remember(deck_path)
-        else:
+        if deck_path is None:
             _state["title"] = "Inkflow"
         ui_ref: list[LiveUI] = []
 
         def handler_for_ws() -> Callable[[ServerConnection], Awaitable[None]]:
-            return make_ws_handler(ui_ref[0], edit_commands, session)
+            return make_ws_handler(ui_ref[0], edit_commands)
 
         async def ws_entry(connection: ServerConnection) -> None:
             await handler_for_ws()(connection)
 
-        # Image uploads from the editor arrive as base64 frames.
+        # Pictures pasted into an editor page may arrive as base64 frames.
         bridge = Bridge(ws_entry, max_size=80 * 1024 * 1024, forget=_share.people.leave)
         http_handler = make_http_handler(http_port, project_dir, edit_commands, bridge)
         _share.ws_handler = ws_entry
@@ -2378,6 +2140,9 @@ async def _serve_deck(
 
         _share.rebind = rebind
         _share.ssh_info = None
+        for ext in _served.extensions:
+            await ext.open(deck_path)
+            opened.append(ext)
         # Other inkflow processes find this server (and its deck) here; in
         # SSH mode with the owner token, which only this user can read.
         instances.register(
@@ -2416,14 +2181,28 @@ async def _serve_deck(
             )
             ui.set_owner(owner)
             ui.set_share(share_lines(access, http_port))
+            ui.set_keys(
+                [
+                    (key, label)
+                    for ext in _served.extensions
+                    for key, (label, _) in ext.keys().items()
+                ]
+            )
             ui_ref.append(ui)
             _share.on_change = lambda: ui.set_share(share_lines(access, http_port))
+
+            async def again(full: bool) -> None:
+                if deck_path is not None:
+                    async with rebuild_lock:
+                        await rebuild(deck_path, ui, levels, full=full)
+
+            _served.rebuild = again
             try:
                 async with contextlib.AsyncExitStack() as stack:
                     if ws_port is not None:
                         _ = await stack.enter_async_context(
                             ws_serve(
-                                make_ws_handler(ui, edit_commands, session),
+                                make_ws_handler(ui, edit_commands),
                                 local_host,
                                 ws_port,
                                 process_request=_ws_check(http_port),
@@ -2495,15 +2274,16 @@ async def _serve_deck(
         _share.on_change = None
         _share.ws_handler = None
         _share.route = None
-        if _share.online is not None:
-            # Online guests' pages reconnect, to the next deck if one opens.
-            await _share.online.drop_pages()
-        if _editor["compare"] is not None:
-            _editor["compare"].close_all()
-            _editor["compare"] = None
-        _editor["switch"] = None
-        _editor["shutdown"] = None
+        _served.rebuild = None
+        switching = switch.is_set() and not shutdown.is_set()
+        for ext in opened:
+            try:
+                await ext.close(switching=switching)
+            except Exception:
+                logger.exception(f"{ext.name}: close failed")
+        _served.switch = None
+        _served.shutdown = None
         instances.unregister(os.getpid())
     if switch.is_set() and not shutdown.is_set():
-        return _editor["session"].switch_to if _editor["session"] else None
+        return _served.switch_to
     return None

@@ -25,7 +25,6 @@ from inkflow.content import (
 )
 from inkflow.deps import note
 from inkflow.drawio_inline import inline_diagrams
-from inkflow.editor.provenance import INK, stamper
 from inkflow.enums import AnimationKind, ColorMode, Direction, Trigger
 from inkflow.ink import compose_ink, ink_path
 from inkflow.layout import (
@@ -52,6 +51,7 @@ from inkflow.manifest import (
 from inkflow.ns import INKFLOW_HINT
 from inkflow.overlay import Overlay
 from inkflow.pdf import PdfPages
+from inkflow.provenance import INK, stamper
 from inkflow.sizes import physical_length_pt, print_min_text
 from inkflow.steps import StepResolver
 from inkflow.svg import (

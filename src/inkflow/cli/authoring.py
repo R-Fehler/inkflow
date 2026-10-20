@@ -12,6 +12,7 @@ from rich import box as rich_box
 from rich.table import Table
 
 from inkflow import drawio, ns, sync
+from inkflow.catalog import layout_entries, overlay_entries
 from inkflow.clean import clean_inkscape_svg
 from inkflow.cli._common import (
     Project,
@@ -24,7 +25,6 @@ from inkflow.cli._common import (
     resolve_targets,
     targets_or_deck_slides,
 )
-from inkflow.editor.master import layout_entries, overlay_entries
 from inkflow.label2id import promote_labels_to_ids
 from inkflow.layout import (
     AssetKind,

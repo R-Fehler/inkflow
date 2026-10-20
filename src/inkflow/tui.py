@@ -50,6 +50,7 @@ class LiveUI:
         self._logs: list[LogEntry] = []
         self._error_trace: str | None = None
         self._show_trace: bool = False
+        self._keys: list[tuple[str, str]] = []
 
     def _header(self) -> RenderableType:
         clients = self._get_clients()
@@ -78,17 +79,17 @@ class LiveUI:
             *(Text(line, style="dim", overflow="fold") for line in self._share),
             Text(""),
             Text.assemble(
-                ("o", "bold"),
-                ("  open", "dim"),
-                ("  ·  ", "dim"),
-                ("e", "bold"),
-                ("  edit", "dim"),
-                ("  ·  ", "dim"),
-                ("r", "bold"),
-                ("  rebuild", "dim"),
-                ("  ·  ", "dim"),
-                ("q", "bold"),
-                ("  quit", "dim"),
+                *(
+                    part
+                    for i, (key, label) in enumerate(
+                        [("o", "open"), *self._keys, ("r", "rebuild"), ("q", "quit")]
+                    )
+                    for part in (
+                        *((("  ·  ", "dim"),) if i else ()),
+                        (key, "bold"),
+                        (f"  {label}", "dim"),
+                    )
+                )
             ),
         )
         return Panel(
@@ -134,6 +135,10 @@ class LiveUI:
                 parts.append(Text("[t] show trace", style="dim"))
 
         return Group(*parts)
+
+    def set_keys(self, keys: list[tuple[str, str]]) -> None:
+        """The keys extensions add to the help line (``e  edit``)."""
+        self._keys = keys
 
     def refresh(self) -> None:
         self._live.update(self._renderable())

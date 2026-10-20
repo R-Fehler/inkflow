@@ -21,7 +21,6 @@ dependencies = [
   "click>=8.0",
   "fonttools>=4.63.0",
   "latex2mathml>=3.81.0",
-  "libcst>=1.9.0",
   "lxml>=5.0",
   "markdown-it-py>=3.0",
   "mdit-py-plugins>=0.6.1",
@@ -37,10 +36,6 @@ dependencies = [
 # PDF figures without system tools. PyMuPDF is AGPL-3.0 (or commercial, by
 # Artifex): optional, so inkflow itself stays MIT (see inkflow/pdf.py).
 pdf = ["pymupdf>=1.24"]
-# Sharing online (inkflow/online): AES-GCM for the end-to-end encryption.
-# Optional: only the host sharing online needs it (and `inkflow relay`, which
-# never decrypts anything, does not).
-online = ["cryptography>=42"]
 
 [project.urls]
 Homepage = "https://ll-nick.github.io/inkflow"
@@ -50,13 +45,19 @@ Repository = "https://github.com/ll-nick/inkflow"
 inkflow = "inkflow.cli:main"
 
 [dependency-groups]
+# The core's tests: `mise run test-core` runs them where inkflow-editor is
+# not installed, so the core cannot come to depend on it.
+test = [
+  "pytest>=9.0.3",
+  "pyyaml>=6.0",
+]
 dev = [
+  { include-group = "test" },
+  "inkflow-editor",
   "basedpyright>=1.39.5",
   "cryptography>=42",
   "deptry>=0.25.1",
   "lxml-stubs>=0.5",
-  "pytest>=9.0.3",
-  "pyyaml>=6.0",
   "ruff>=0.15.13",
 ]
 docs = [
@@ -64,6 +65,13 @@ docs = [
   "mkdocs-material>=9.0",
   "mkdocstrings[python]>=1.0.4",
 ]
+
+[tool.uv.workspace]
+# inkflow-editor builds on the core as a plugin; developed side by side here.
+members = ["inkflow-editor"]
+
+[tool.uv.sources]
+inkflow-editor = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -76,9 +84,9 @@ fonttools = "fontTools"
 [tool.deptry.per_rule_ignores]
 # brotli is never imported directly; fontTools' WOFF2 encoder picks it up at runtime.
 # pymupdf (the optional `pdf` extra) is imported by name in inkflow/pdf.py, so the
-# type checker works without it installed. cryptography (the optional `online`
-# extra) is imported the same way in inkflow/online/crypto.py.
-DEP002 = ["brotli", "cryptography", "pymupdf"]
+# type checker works without it installed. inkflow-editor is a plugin: found
+# through its entry point, never imported.
+DEP002 = ["brotli", "inkflow-editor", "pymupdf"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/inkflow"]
@@ -88,6 +96,16 @@ exclude = ["src/inkflow/theme/**/__pycache__/**"]
 [tool.pyright]
 reportUnusedCallResult = "none"
 reportMissingTypeStubs = "none"
+# Each package's tests import their own `tests` package (helpers, fixtures).
+executionEnvironments = [{ root = "inkflow-editor" }, { root = "." }]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["inkflow", "inkflow_editor"]
+
+[tool.pytest.ini_options]
+# The core's own tests; inkflow-editor's run from its folder (its own session:
+# both suites are a package named `tests`).
+testpaths = ["tests"]

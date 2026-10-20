@@ -7,6 +7,12 @@ resolution-markers = [
     "python_full_version < '3.13'",
 ]
 
+[manifest]
+members = [
+    "inkflow",
+    "inkflow-editor",
+]
+
 [[package]]
 name = "anyio"
 version = "4.14.2"
@@ -528,7 +534,6 @@ dependencies = [
     { name = "click" },
     { name = "fonttools" },
     { name = "latex2mathml" },
-    { name = "libcst" },
     { name = "lxml" },
     { name = "markdown-it-py" },
     { name = "mdit-py-plugins" },
@@ -541,9 +546,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-online = [
-    { name = "cryptography" },
-]
 pdf = [
     { name = "pymupdf" },
 ]
@@ -553,6 +555,7 @@ dev = [
     { name = "basedpyright" },
     { name = "cryptography" },
     { name = "deptry" },
+    { name = "inkflow-editor" },
     { name = "lxml-stubs" },
     { name = "pytest" },
     { name = "pyyaml" },
@@ -563,15 +566,17 @@ docs = [
     { name = "mkdocs-material" },
     { name = "mkdocstrings", extra = ["python"] },
 ]
+test = [
+    { name = "pytest" },
+    { name = "pyyaml" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "brotli", specifier = ">=1.2.0" },
     { name = "click", specifier = ">=8.0" },
-    { name = "cryptography", marker = "extra == 'online'", specifier = ">=42" },
     { name = "fonttools", specifier = ">=4.63.0" },
     { name = "latex2mathml", specifier = ">=3.81.0" },
-    { name = "libcst", specifier = ">=1.9.0" },
     { name = "lxml", specifier = ">=5.0" },
     { name = "markdown-it-py", specifier = ">=3.0" },
     { name = "mdit-py-plugins", specifier = ">=0.6.1" },
@@ -583,13 +588,14 @@ requires-dist = [
     { name = "watchfiles", specifier = ">=0.21" },
     { name = "websockets", specifier = ">=12.0" },
 ]
-provides-extras = ["pdf", "online"]
+provides-extras = ["pdf"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "basedpyright", specifier = ">=1.39.5" },
     { name = "cryptography", specifier = ">=42" },
     { name = "deptry", specifier = ">=0.25.1" },
+    { name = "inkflow-editor", editable = "inkflow-editor" },
     { name = "lxml-stubs", specifier = ">=0.5" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -600,6 +606,46 @@ docs = [
     { name = "mkdocs-material", specifier = ">=9.0" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.4" },
 ]
+test = [
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pyyaml", specifier = ">=6.0" },
+]
+
+[[package]]
+name = "inkflow-editor"
+version = "0.1.0"
+source = { editable = "inkflow-editor" }
+dependencies = [
+    { name = "click" },
+    { name = "fonttools" },
+    { name = "inkflow" },
+    { name = "libcst" },
+    { name = "lxml" },
+    { name = "platformdirs" },
+    { name = "typing-extensions" },
+    { name = "watchfiles" },
+    { name = "websockets" },
+]
+
+[package.optional-dependencies]
+online = [
+    { name = "cryptography" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.0" },
+    { name = "cryptography", marker = "extra == 'online'", specifier = ">=42" },
+    { name = "fonttools", specifier = ">=4.63.0" },
+    { name = "inkflow", editable = "." },
+    { name = "libcst", specifier = ">=1.9.0" },
+    { name = "lxml", specifier = ">=5.0" },
+    { name = "platformdirs", specifier = ">=4.0" },
+    { name = "typing-extensions", specifier = ">=4.15.0" },
+    { name = "watchfiles", specifier = ">=0.21" },
+    { name = "websockets", specifier = ">=12.0" },
+]
+provides-extras = ["online"]
 
 [[package]]
 name = "jinja2"

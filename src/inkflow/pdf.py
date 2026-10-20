@@ -44,9 +44,9 @@ from urllib.parse import unquote
 from inkflow import ns
 from inkflow.assets import PDF_CACHE, AssetRoots
 from inkflow.deps import note, retry
-from inkflow.editor.context import context_dir
 from inkflow.logging import logger
 from inkflow.svgio import SvgElement
+from inkflow.workdir import work_dir
 
 SOURCE_ATTR = "data-inkflow-pdf"
 """On a picture showing a converted page: the PDF reference it was written with."""
@@ -285,7 +285,7 @@ def convert(pdf: Path, page: int, project_dir: Path, tool: str | None = None) ->
     target = cache / cache_name(pdf, page, tool)
     if target.is_file():
         return target
-    _ = context_dir(project_dir)  # ignoring itself before anything lands in it
+    _ = work_dir(project_dir)  # ignoring itself before anything lands in it
     cache.mkdir(parents=True, exist_ok=True)
     # Into a file of its own first: a build and the editor may convert at once.
     partial = cache / f".{secrets.token_hex(6)}.svg"

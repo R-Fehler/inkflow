@@ -10,7 +10,7 @@ from inkflow.enums import ColorMode
 from inkflow.logging import console
 from inkflow.manifest import Deck
 from inkflow.pipeline import resolve_slide_src, slide_ids
-from inkflow.verify import verify_portable, verify_slide
+from inkflow.verify import verify_deck, verify_slide
 
 
 @main.command("verify")
@@ -21,10 +21,12 @@ from inkflow.verify import verify_portable, verify_slide
     "--strict", is_flag=True, help="Treat warnings as errors (exit 1 if any warn)."
 )
 @click.option(
+    "--no-deck-checks",
     "--no-portable",
     "no_portable",
     is_flag=True,
-    help="Skip the deck-wide checks of what ties it to this machine.",
+    help="Skip the deck-wide checks (plugins': with inkflow-editor, what ties "
+    + "the deck to this machine).",
 )
 def verify_cmd(
     files: tuple[Path, ...],
@@ -45,11 +47,10 @@ def verify_cmd(
     hide the slide. Warnings: animation steps are not contiguous from 1, a zone id is
     declared twice after composition, or layout layers are stale (run `inkflow sync`).
 
-    Then, for the whole deck (not with FILES or `--no-portable`), what ties it
-    to this machine, one warning each: a font found only among this computer's
-    fonts, missing, or a stack starting with a generic family; files outside
-    the deck or behind a symlink; pictures from the web; no pinned inkflow, no
-    uv.lock, no LF line-ending rules (`inkflow pack` fixes what it can).
+    Plugins add their own checks (per slide, and for the whole deck unless
+    FILES or `--no-deck-checks`): inkflow-editor warns about arrows whose
+    shapes moved, and about what ties the deck to this machine (fonts, files
+    outside the deck, no pinned inkflow or uv.lock; `inkflow pack`).
 
     Exits 1 on any error, or on any warning when `--strict` is set. Hidden slides
     (`visible=False`) are skipped unless `--all` is passed.
@@ -85,7 +86,7 @@ def verify_cmd(
 
     if not files and not no_portable:
         deck_file = resolve_deck_path(deck_path)
-        deck_issues = verify_portable(deck_obj, project_dir, deck_file)
+        deck_issues = verify_deck(deck_obj, project_dir, deck_file)
         if deck_issues:
             warnings += len(deck_issues)
             _print_slide_issues("deck", deck_issues)

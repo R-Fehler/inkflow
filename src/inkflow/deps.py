@@ -20,6 +20,7 @@ opened (an audit hook), and compares incremental builds with full ones.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 import time
@@ -148,3 +149,9 @@ class Stamps:
 
     def unchanged(self, deps: dict[str, Stamp]) -> bool:
         return all(self.of(path) == was for path, was in deps.items())
+
+
+def file_hash(data: bytes) -> str:
+    """A short digest of a file's bytes: which version of it a build or an
+    edit was made from (deck.py's names the build in ``build-status``)."""
+    return hashlib.sha256(data).hexdigest()[:16]

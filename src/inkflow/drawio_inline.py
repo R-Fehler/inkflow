@@ -35,8 +35,8 @@ from inkflow import ns
 from inkflow.assets import AssetRoots, AssetSource
 from inkflow.colors import parse_style, serialize_style
 from inkflow.drawio import DrawioError, cells, is_drawio_path, size
-from inkflow.editor.provenance import INK, INK_TAG, is_element
 from inkflow.logging import logger
+from inkflow.provenance import INK, INK_TAG, is_element
 from inkflow.svgio import SvgElement, parse_svg_file
 
 

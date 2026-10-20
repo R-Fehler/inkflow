@@ -32,9 +32,9 @@ from pathlib import Path
 
 from inkflow import ns
 from inkflow.clean import clean_inkscape_tree
-from inkflow.editor.context import CONTEXT_DIR
 from inkflow.logging import logger
 from inkflow.svgio import SvgElement
+from inkflow.workdir import WORK_DIR
 
 THEME_PREFIX = "_theme/"
 """Canonical-ref namespace for assets that live in the theme rather than the project."""
@@ -42,7 +42,7 @@ THEME_PREFIX = "_theme/"
 PDF_PREFIX = "_pdf/"
 """Canonical-ref namespace for PDF pages converted to SVG (see inkflow/pdf.py)."""
 
-PDF_CACHE = Path(CONTEXT_DIR, "cache", "pdf")
+PDF_CACHE = Path(WORK_DIR, "cache", "pdf")
 """Where converted PDF pages live, relative to the project."""
 
 # HTML <img>/<video> (markdown- and Media-injected) and SVG <image>. Both the

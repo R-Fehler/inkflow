@@ -7,7 +7,6 @@ import pytest
 from inkflow import Image
 from inkflow.backgrounds import PAPER, background_paint, picture_backgrounds
 from inkflow.content import substitute_content
-from inkflow.editor.codegen import Code
 from inkflow.svgio import parse_svg, serialize_svg
 
 
@@ -86,10 +85,3 @@ def test_a_zone_picture_gets_it_as_css() -> None:
         )
     )
     assert "background" not in plain
-
-
-def test_deck_source() -> None:
-    assert (
-        Code().call(Image("figures/plot.pdf", background="paper"))
-        == 'Image("figures/plot.pdf", background="paper")'
-    )

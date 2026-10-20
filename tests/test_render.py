@@ -217,7 +217,7 @@ def _run(
     findings: list[Finding],
 ) -> tuple[_Spy, int, str]:
     spy = _Spy(findings)
-    monkeypatch.setattr("inkflow.cli.agent.render_slides", spy)
+    monkeypatch.setattr("inkflow.cli.render.render_slides", spy)
     result = CliRunner().invoke(
         main, ["render", "--deck", str(tiny / "deck.py"), *args]
     )

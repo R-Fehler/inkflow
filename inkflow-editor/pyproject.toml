@@ -1,0 +1,58 @@
+[project]
+name = "inkflow-editor"
+version = "0.1.0"
+description = "A visual editor and agent commands for inkflow decks: click, drag and type on your slides."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+keywords = ["editor", "inkflow", "presentation", "slides", "svg"]
+classifiers = [
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Graphics :: Presentation",
+]
+dependencies = [
+  "inkflow",
+  "click>=8.0",
+  "fonttools>=4.63.0",
+  "libcst>=1.9.0",
+  "lxml>=5.0",
+  "platformdirs>=4.0",
+  "typing-extensions>=4.15.0",
+  "watchfiles>=0.21",
+  "websockets>=12.0",
+]
+
+[project.optional-dependencies]
+# Sharing online (inkflow_editor/online): AES-GCM for the end-to-end encryption.
+# Optional: only the host sharing online needs it (and `inkflow relay`, which
+# never decrypts anything, does not).
+online = ["cryptography>=42"]
+
+# The core finds the editor here: its commands, its verify checks and its
+# server extension (`/edit`, the editing session).
+[project.entry-points."inkflow.plugins"]
+editor = "inkflow_editor.plugin:plugin"
+
+[tool.uv.sources]
+inkflow = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/inkflow_editor"]
+exclude = ["src/inkflow_editor/**/__pycache__/**"]
+
+[tool.deptry.package_module_name_map]
+fonttools = "fontTools"
+
+[tool.deptry.per_rule_ignores]
+# cryptography (the optional `online` extra) is imported by name in
+# inkflow_editor/online/crypto.py, so the type checker works without it.
+DEP002 = ["cryptography"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

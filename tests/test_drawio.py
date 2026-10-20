@@ -13,9 +13,7 @@ from click.testing import CliRunner
 
 from inkflow import drawio
 from inkflow.cli import main
-from inkflow.edit import App, EditCommands, open_choices
-from inkflow.editor.session import EditError, EditorSession
-from inkflow.editor.svgops import SvgFile, file_hash
+from inkflow.edit import EditCommands, open_choices
 
 MODEL = (
     '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>'
@@ -81,54 +79,6 @@ def project(tmp_path: Path) -> Path:
     return deck
 
 
-def test_load_and_save_through_the_session(
-    project: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    session = EditorSession(project / "deck.py")
-    fresh = session.apply({"action": "drawio-load"}, None)
-    assert fresh["xml"] == "" and fresh["url"] == drawio.DEFAULT_URL
-    monkeypatch.setenv("INKFLOW_DRAWIO_URL", "http://localhost:8080/")
-    # A new diagram gets its file on the first save.
-    made = session.apply({"action": "drawio-save", "svg": COMPRESSED}, object())  # pyright: ignore[reportArgumentType]
-    assert made["rel"] == "diagrams/diagram-1.drawio.svg"
-    assert (made["width"], made["height"]) == (200.0, 100.0)
-    (project / "diagrams" / "flow.drawio.svg").write_text(COMPRESSED, encoding="utf-8")
-    loaded = session.apply(
-        {"action": "drawio-load", "path": "diagrams/flow.drawio.svg"}, None
-    )
-    assert 'value="Client"' in str(loaded["xml"])
-    assert loaded["url"] == "http://localhost:8080/" and loaded["name"] == "flow"
-    # Saved again, taller: the slide's picture keeps its width, new height.
-    slide = project / "slides" / "s.svg"
-    loc = "0:" + "0"
-    taller = _svg(
-        f'<mxfile><diagram id="p" name="Page-1">{MODEL}</diagram></mxfile>', 200, 200
-    )
-    session.apply(
-        {
-            "action": "drawio-save",
-            "path": "diagrams/flow.drawio.svg",
-            "svg": taller,
-            "image": {
-                "file": str(slide),
-                "hash": file_hash(slide.read_bytes()),
-                "loc": loc,
-            },
-        },
-        object(),  # pyright: ignore[reportArgumentType]
-    )
-    image = SvgFile.from_bytes(slide, slide.read_bytes()).root[0]
-    assert (image.get("width"), image.get("height")) == ("400", "400")
-    assert 'height="200px"' in (project / "diagrams" / "flow.drawio.svg").read_text()
-    # One undo step puts both back.
-    session.apply({"action": "undo"}, None)
-    assert SvgFile.from_bytes(slide, slide.read_bytes()).root[0].get("height") == "200"
-    with pytest.raises(EditError, match="outside"):
-        session.apply({"action": "drawio-load", "path": "../x.drawio.svg"}, None)
-    with pytest.raises(EditError, match=r"not a draw\.io"):
-        session.apply({"action": "drawio-load", "path": "slides/s.svg"}, None)
-
-
 def test_clean_leaves_diagrams_alone_and_diffs_show_the_source(
     project: Path,
 ) -> None:
@@ -149,39 +99,3 @@ def test_open_with_offers_draw_io(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("inkflow.edit.shutil.which", which)
     choices = open_choices(Path("flow.drawio.svg"), EditCommands(None, None))
     assert [c.id for c in choices][:2] == ["drawio", "inkscape"]
-
-
-def test_a_new_diagram_for_draw_io_desktop(
-    project: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    session = EditorSession(project / "deck.py")
-    made = session.apply({"action": "drawio-new"}, object())  # pyright: ignore[reportArgumentType]
-    assert made["rel"] == "diagrams/diagram-1.drawio.svg"
-    assert (made["width"], made["height"]) == drawio.BLANK_SIZE
-    data = (project / "diagrams" / "diagram-1.drawio.svg").read_bytes()
-    assert drawio.is_drawio_svg(data) and b"New diagram" in data  # placeholder
-    assert "<mxCell" in drawio.source(data)
-    # Opening it in draw.io desktop leaves the file exactly as it is (no
-    # Inkscape preview layers, unlike a slide SVG).
-    launched: list[str] = []
-
-    def which(name: str) -> str | None:
-        return f"/usr/bin/{name}" if name == "drawio" else None
-
-    monkeypatch.setattr("inkflow.edit.shutil.which", which)
-
-    def open_with(path: Path, app: App) -> None:
-        launched.append(f"{app.id}:{path.name}")
-
-    monkeypatch.setattr("inkflow.editor.session.open_with", open_with)
-    session.apply(
-        {
-            "action": "open-file",
-            "path": "diagrams/diagram-1.drawio.svg",
-            "app": "drawio",
-            "_local": True,
-        },
-        object(),  # pyright: ignore[reportArgumentType]
-    )
-    assert launched == ["drawio:diagram-1.drawio.svg"]
-    assert (project / "diagrams" / "diagram-1.drawio.svg").read_bytes() == data

@@ -11,9 +11,6 @@ from click.testing import CliRunner
 
 from inkflow.charts import FENCE_FONT, fence_font
 from inkflow.cli import main
-from inkflow.editor import projects
-from inkflow.editor.model import build_model
-from inkflow.editor.previews import layout_previews
 from inkflow.export import find_chromium
 from inkflow.init import poster_layout, scaffold_poster
 from inkflow.layout import discover_layouts, layout_canvas, layouts_for
@@ -77,9 +74,6 @@ def test_project_layouts_are_offered_whatever_their_shape(tmp_path: Path) -> Non
     assert "mine" in names
 
 
-# ── The poster template ───────────────────────────────────────────────────────
-
-
 @pytest.fixture
 def poster(tmp_path: Path) -> Path:
     scaffold_poster(tmp_path / "poster")
@@ -123,40 +117,6 @@ def test_init_poster_cli(tmp_path: Path) -> None:
     assert bad.exit_code != 0 and "paper size" in bad.output
 
 
-def test_new_deck_poster_look(tmp_path: Path) -> None:
-    info = projects.new_deck_info(None, None)
-    assert any(t["id"] == "poster" for t in projects.THEMES)
-    sizes = info["posterSizes"]
-    assert (
-        isinstance(sizes, list)
-        and {"id": "a0", "label": "A0 portrait (841 x 1189 mm)"} in sizes
-    )
-    deck_py = projects.create_deck(
-        tmp_path / "conf", title="Our poster", theme="poster", git=False, size="a1"
-    )
-    text = deck_py.read_text()
-    assert 'size="a1"' in text and 'title="Our poster"' in text
-    with pytest.raises(projects.ProjectError, match="paper size"):
-        projects.create_deck(
-            tmp_path / "bad", title="", theme="poster", git=False, size="9:16"
-        )
-
-
-def test_editor_model_and_gallery_for_a_poster(poster: Path) -> None:
-    deck = load_deck(poster / "deck.py")
-    slides = process_deck(deck, poster, poster / "deck.py", editor=True)
-    model = build_model(deck, poster / "deck.py", slides)
-    layouts = cast("list[dict[str, str]]", model["layouts"])
-    names = [entry["name"] for entry in layouts]
-    assert names == ["poster-2col", "poster-3col"]
-    previews = layout_previews(deck, poster / "deck.py")
-    assert [p["name"] for p in previews] == ["poster-3col", "poster-2col"]
-    assert "Section" in str(previews[0]["svg"])
-
-
-# ── Type scale ────────────────────────────────────────────────────────────────
-
-
 def _font_sizes(svg: str, zone: str) -> list[float]:
     """The font-size of every text of one chart zone."""
     start = svg.index(f'id="zone-{zone}"')
@@ -195,9 +155,6 @@ def test_chart_text_follows_the_print_type_scale(tmp_path: Path) -> None:
     assert fence_font(40, 1.0) == pytest.approx(FENCE_FONT * 40 / 36 / 0.6)
 
 
-# ── Rendered ──────────────────────────────────────────────────────────────────
-
-
 @pytest.mark.skipif(find_chromium() is None, reason="chromium not available")
 @pytest.mark.parametrize("layout", sorted(POSTER_LAYOUTS))
 def test_poster_layouts_render_without_problems(poster: Path, layout: str) -> None:
@@ -213,9 +170,6 @@ def test_poster_layouts_render_without_problems(poster: Path, layout: str) -> No
     # The template's text is all large enough to read on paper, too.
     hints = [f.message() for f in result.findings]
     assert hints == []
-
-
-# ── Print checks ──────────────────────────────────────────────────────────────
 
 
 def test_print_check_thresholds_follow_the_sheet() -> None:

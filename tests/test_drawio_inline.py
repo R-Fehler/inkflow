@@ -15,7 +15,6 @@ from inkflow.logging import collect_logs
 from inkflow.pipeline import process_deck
 from inkflow.svgio import SvgElement, parse_svg, serialize_svg
 
-# The source inside: two shapes, an arrow between them and its label.
 MXFILE = (
     '&lt;mxfile compressed="false"&gt;&lt;diagram id="p"&gt;'
     + "&lt;mxGraphModel&gt;&lt;root&gt;"
@@ -28,8 +27,7 @@ MXFILE = (
     + "&lt;/root&gt;&lt;/mxGraphModel&gt;&lt;/diagram&gt;&lt;/mxfile&gt;"
 )
 
-# Shaped like draw.io's own export: cells as <g data-cell-id>, an HTML label
-# with an SVG <text> fallback, light-dark() colours, a root-id style rule.
+
 DIAGRAM = (
     '<svg xmlns="http://www.w3.org/2000/svg" style="color-scheme: light dark;"'
     + ' width="442px" height="202px" viewBox="0 0 442 202" id="ge-svg-x"'
@@ -192,64 +190,3 @@ def test_cell_kinds_from_the_source() -> None:
         "e1": "edge",
         "e1-label": "label",
     }
-
-
-def test_renaming_a_diagram_keeps_its_shapes_arrows_and_animations(
-    tmp_path: Path,
-) -> None:
-    from inkflow.editor.provenance import child_path
-    from inkflow.editor.session import EditorSession
-    from inkflow.editor.svgops import SvgFile, file_hash
-
-    project = _project(tmp_path)
-    (project / "slides").mkdir()
-    slide = project / "slides" / "s.svg"
-    slide.write_text(
-        '<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkflow="urn:inkflow"'
-        + ' viewBox="0 0 1920 1080"><image id="flow" inkflow:drawio="inline"'
-        + ' href="../diagrams/flow.drawio.svg" width="442" height="202"/>'
-        + '<path id="a" d="M0 0L1 1" inkflow:connector="straight"'
-        + ' inkflow:connect-start="flow:left" inkflow:connect-end="flow-client:top"/>'
-        + "</svg>",
-        encoding="utf-8",
-    )
-    (project / "deck.py").write_text(
-        "from inkflow import Deck, Slide, animations\n\n\n"
-        + "def main() -> Deck:\n"
-        + "    return Deck(\n"
-        + "        slides=[\n"
-        + "            Slide(\n"
-        + '                "slides/s.svg",\n'
-        + '                animations=[animations.FadeIn("flow-client")],\n'
-        + "            ),\n"
-        + "        ],\n"
-        + "    )\n",
-        encoding="utf-8",
-    )
-    session = EditorSession(project / "deck.py")
-    svg = SvgFile.from_bytes(slide, slide.read_bytes())
-    image = svg.root.find(".//*[@id='flow']")
-    assert image is not None
-    from inkflow.server import load_deck
-
-    result = session.apply(
-        {
-            "action": "svg",
-            "file": str(slide),
-            "hash": file_hash(slide.read_bytes()),
-            "ops": [
-                {
-                    "kind": "id",
-                    "loc": f"0:{child_path(image)}",
-                    "id": "chart",
-                    "from": "flow",
-                }
-            ],
-        },
-        load_deck(project / "deck.py"),
-    )
-    assert result["ok"]
-    text = slide.read_text()
-    assert 'inkflow:connect-start="chart:left"' in text
-    assert 'inkflow:connect-end="chart-client:top"' in text
-    assert 'FadeIn("chart-client")' in (project / "deck.py").read_text()

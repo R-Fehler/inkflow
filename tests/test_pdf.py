@@ -7,21 +7,16 @@ import logging
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
 
 import pytest
 
 from inkflow import Deck, Image, Slide, pdf
 from inkflow.assets import AssetRoots
-from inkflow.editor.session import EditError, EditorSession
-from inkflow.editor.svgops import file_hash
-from inkflow.editor.transfer import export_assets, retarget_fragment
 from inkflow.export import build_static_html
 from inkflow.logging import collect_logs
 from inkflow.pipeline import process_deck
 from inkflow.server import (
     _resolve_asset,  # pyright: ignore[reportPrivateUsage]
-    load_deck,
 )
 from inkflow.svgio import parse_svg
 from inkflow.verify import verify_slide
@@ -30,7 +25,10 @@ needs_pdftocairo = pytest.mark.skipif(
     shutil.which("pdftocairo") is None, reason="pdftocairo (poppler) not installed"
 )
 
+
 _SVG = "http://www.w3.org/2000/svg"
+
+
 _XHTML = "http://www.w3.org/1999/xhtml"
 
 
@@ -65,7 +63,6 @@ def make_pdf(pages: list[tuple[float, float, str]]) -> bytes:
     return out + b"startxref\n%d\n%%%%EOF\n" % xref
 
 
-# A plot (a filled bar, a line, a label) and a small square on page 2.
 FIGURE = make_pdf(
     [
         (
@@ -140,9 +137,6 @@ def _images(svg: str) -> list[dict[str, str]]:
     ]
 
 
-# ── References ──
-
-
 @pytest.mark.parametrize(
     ("ref", "page"),
     [
@@ -196,9 +190,6 @@ def test_page_count_without_tools(
     path = tmp_path / "plot.pdf"
     path.write_bytes(FIGURE)
     assert pdf.page_count(path) == 2
-
-
-# ── Converting ──
 
 
 @pytest.fixture
@@ -364,9 +355,6 @@ def test_pdftocairo_converts_a_page_to_vector_svg(tmp_path: Path) -> None:
         _ = pdf.convert(project / "figures" / "plot.pdf", 3, project, "pdftocairo")
 
 
-# ── Slides ──
-
-
 @needs_pdftocairo
 @pytest.mark.parametrize("editor", [False, True])
 def test_pipeline_points_every_kind_of_picture_at_its_page(
@@ -457,9 +445,6 @@ def test_a_missing_pdf_or_page_is_a_placeholder(tmp_path: Path) -> None:
     assert all(i["href"].startswith("data:") for i in _images(slides[0]["svg"]))
 
 
-# ── Build ──
-
-
 @needs_pdftocairo
 @pytest.mark.parametrize("inline", [False, True])
 def test_build_carries_the_converted_page(tmp_path: Path, inline: bool) -> None:
@@ -482,126 +467,6 @@ def test_build_carries_the_converted_page(tmp_path: Path, inline: bool) -> None:
         assert page.relative_to(out).parts[0] == "_pdf"
         assert f"_pdf/{page.name}" in html
     assert not list(out.rglob("*.pdf"))  # the source PDF stays home
-
-
-# ── Editor ──
-
-
-DECK_PY = """\
-from inkflow import Deck, Image, Slide
-
-
-def main() -> Deck:
-    return Deck(
-        slides=[Slide("slides/s.svg", zones={"media": Image("figures/plot.pdf")})],
-        embed_fonts=False,
-    )
-"""
-
-
-@needs_pdftocairo
-def test_editor_writes_back_the_pdf_reference(tmp_path: Path) -> None:
-    from inkflow.editor.provenance import INK
-
-    project = _project(tmp_path)
-    _slide_svg(
-        project,
-        '<image id="fig" href="../figures/plot.pdf#page=2" x="0" y="0"'
-        + ' width="400" height="400"/>',
-    )
-    (project / "deck.py").write_text(DECK_PY, encoding="utf-8")
-    deck = load_deck(project / "deck.py")
-    slides = process_deck(deck, project, project / "deck.py", editor=True)
-    image = next(i for i in _images(slides[0]["svg"]) if i.get("id") == "fig")
-    session = EditorSession(project / "deck.py")
-    svg = project / "slides" / "s.svg"
-    # Moving it (what the canvas sends), then cropping it.
-    for ops in (
-        [{"kind": "attrs", "loc": image[INK], "set": {"x": "50"}}],
-        [{"kind": "crop-frame", "loc": image[INK]}],
-    ):
-        result = session.apply(
-            {
-                "action": "svg",
-                "file": str(svg),
-                "hash": file_hash(svg.read_bytes()),
-                "ops": ops,
-            },
-            deck,
-        )
-        assert result["ok"]
-    text = svg.read_text()
-    assert "_pdf" not in text and "data-inkflow-pdf" not in text
-    written = parse_svg(text).find(f".//{{{_SVG}}}image")
-    assert written is not None and written.get("href") == "../figures/plot.pdf#page=2"
-    frame = written.getparent()
-    assert frame is not None and frame.tag == f"{{{_SVG}}}svg"  # cropped
-
-    # The zone's page, picked in its panel.
-    session.apply(
-        {
-            "action": "zone-media",
-            "slide": 0,
-            "zone": "media",
-            "src": str(project / "figures" / "plot.pdf"),
-            "page": 2,
-        },
-        deck,
-    )
-    assert 'Image("figures/plot.pdf#page=2")' in (project / "deck.py").read_text()
-
-
-@needs_pdftocairo
-def test_page_picker_actions(tmp_path: Path) -> None:
-    project = _project(tmp_path)
-    (project / "deck.py").write_text(DECK_PY, encoding="utf-8")
-    session = EditorSession(project / "deck.py")
-    info = session.apply({"action": "pdf-pages", "path": "figures/plot.pdf"}, None)
-    assert info["pages"] == 2 and info["converter"] == pdf.converter()
-    assert info["ignored"] is False
-    page = session.apply(
-        {"action": "pdf-page", "path": "figures/plot.pdf#page=2", "page": 2}, None
-    )
-    url = cast("str", page["url"])
-    assert url.startswith("_pdf/plot-p2-")
-    assert AssetRoots(project).locate(url) is not None
-    for bad in ("../x.pdf", "deck.py", "figures/none.pdf"):
-        with pytest.raises(EditError):
-            session.apply({"action": "pdf-pages", "path": bad}, None)
-    with pytest.raises(EditError, match="could not convert page 9"):
-        session.apply(
-            {"action": "pdf-page", "path": "figures/plot.pdf", "page": 9}, None
-        )
-
-
-def test_pdfs_upload_and_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from inkflow.edit import open_choices, resolve_edit_commands
-    from inkflow.editor import media
-
-    project = _project(tmp_path)
-    staged = project / "upload.part"
-    staged.write_bytes(FIGURE)
-    assert media.settle(project, staged, "Figure 3.pdf") == project / "assets" / (
-        "figure-3.pdf"
-    )
-    monkeypatch.setattr(
-        "inkflow.edit.shutil.which",
-        _installed("okular", "inkscape"),
-    )
-    apps = open_choices(project / "figures" / "plot.pdf", resolve_edit_commands())
-    assert [a.id for a in apps] == ["okular", "inkscape", "system"]
-
-
-def test_copied_objects_bring_the_pdf_and_keep_the_page(tmp_path: Path) -> None:
-    project = _project(tmp_path)
-    files = export_assets(project, ["figures/plot.pdf#page=2"])
-    assert list(files) == ["figures/plot.pdf"]
-    xml = '<image href="figures/plot.pdf#page=2"/>'
-    moved = retarget_fragment(xml, "slides/s.svg", {"figures/plot.pdf": "a/p.pdf"})
-    assert moved == '<image href="../a/p.pdf#page=2"/>'
-
-
-# ── Verify ──
 
 
 def test_verify_reports_pages_and_a_missing_converter(

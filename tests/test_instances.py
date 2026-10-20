@@ -19,7 +19,6 @@ from typing_extensions import override
 from websockets.asyncio.server import ServerConnection
 
 from inkflow import instances, server
-from inkflow.editor.session import EditError, EditorSession
 
 
 @pytest.fixture(autouse=True)
@@ -82,26 +81,6 @@ def test_stale_records_are_dropped(tmp_path: Path) -> None:
     (tmp_path / "servers" / "junk.json").write_text("{", encoding="utf-8")
     assert instances.running() == []
     assert list((tmp_path / "servers").iterdir()) == []
-
-
-def test_opening_a_deck_another_server_has_goes_there(
-    other_server: tuple[instances.Instance, Path],
-) -> None:
-    record, deck = other_server
-    session = EditorSession(None)
-    result = session.apply(
-        {"action": "open-deck", "path": str(deck.parent), "_local": True}, None
-    )
-    assert result["redirect"] == record.url("/edit")
-    assert result["opening"] is False and session.switch_to is None
-
-
-def test_quit_is_local_only() -> None:
-    session = EditorSession(None)
-    with pytest.raises(EditError, match="this machine"):
-        session.apply({"action": "quit"}, None)
-    assert session.apply({"action": "quit", "_local": True}, None) == {"ok": True}
-    assert session.quit_requested
 
 
 def test_an_idle_server_stops_and_a_watched_one_does_not() -> None:

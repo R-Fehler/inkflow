@@ -10,11 +10,11 @@ from lxml import etree
 from inkflow import ns
 from inkflow.backgrounds import MARGIN, background_paint
 from inkflow.charts import ZONE_TEXT_SCALE, ResolvedChart, render
-from inkflow.editor.provenance import copy_provenance
 from inkflow.enums import Muted
 from inkflow.logging import logger
 from inkflow.manifest import Image, Media, TextBox, Video
 from inkflow.markdown import html_fragment_to_xml
+from inkflow.provenance import copy_provenance
 from inkflow.svg import ensure_defs
 from inkflow.svgio import SvgElement
 

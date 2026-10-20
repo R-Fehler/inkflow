@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import textwrap
-from importlib.resources import files
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -12,6 +11,7 @@ import yaml
 from click.testing import CliRunner
 
 from inkflow.cli import main
+from inkflow.cli.project import carapace_spec
 from inkflow.cli.verify import verify_summary
 
 ROOT = "<root>"
@@ -728,12 +728,7 @@ class TestCarapaceSpec:
         return found
 
     def test_spec_matches_the_click_command_tree(self) -> None:
-        spec = cast(
-            SpecNode,
-            yaml.safe_load(
-                files("inkflow").joinpath("completions/inkflow.yaml").read_text()
-            ),
-        )
+        spec = cast(SpecNode, yaml.safe_load(carapace_spec()))
         assert self._spec_flags(spec) == self._click_flags(main)
 
 

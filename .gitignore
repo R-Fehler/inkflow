@@ -10,3 +10,4 @@ docs/demo/index.html
 docs/demo/assets/
 docs/built-in-theme/presentation/
 site/
+.venv-core/

@@ -88,8 +88,6 @@ def test_render_json_carries_boxes_and_messages() -> None:
     assert '"findings": []' in text
 
 
-# ── the command ───────────────────────────────────────────────────────────────
-
 _DECK = textwrap.dedent("""\
     from inkflow import Deck, Slide
 
@@ -108,6 +106,8 @@ _DECK = textwrap.dedent("""\
             ],
         )
 """)
+
+
 _SVG = textwrap.dedent("""\
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">
       <rect width="1920" height="1080" fill="#fff"/>
@@ -139,7 +139,7 @@ def test_boxes_alone_write_no_images(
         box = ElementBox("logo", "rect", Rect(1800, 900, 100, 100))
         return RenderResult(slides=[1], boxes=[SlideBoxes(1, "s", 1920, 1080, [box])])
 
-    monkeypatch.setattr("inkflow.cli.agent.render_slides", spy)
+    monkeypatch.setattr("inkflow.cli.render.render_slides", spy)
     result = CliRunner().invoke(main, ["render", "--deck", str(deck), "--boxes"])
     assert result.exit_code == 0, result.output
     assert calls[0]["output"] is None
@@ -182,15 +182,3 @@ def test_boxes_measure_the_rendered_slide(deck: Path) -> None:
     # Too much text: negative free space.
     side = boxes["zone-side"]
     assert side.free is not None and side.free < 0
-
-
-@needs_chromium
-def test_outline_adds_boxes(deck: Path) -> None:
-    result = CliRunner().invoke(
-        main, ["outline", "--deck", str(deck), "-s", "1", "--boxes"]
-    )
-    assert result.exit_code == 0, result.output
-    assert "boxes (as rendered, slide units):" in result.output
-    assert "logo  1800,900 100x100  rect" in result.output
-    result = CliRunner().invoke(main, ["outline", "--deck", str(deck), "--boxes"])
-    assert result.exit_code == 2

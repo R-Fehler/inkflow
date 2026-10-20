@@ -8,14 +8,9 @@ from pathlib import Path
 import pytest
 
 from inkflow import PageSize
-from inkflow.editor.model import build_model
-from inkflow.editor.outline import build_outline, format_outline
-from inkflow.editor.session import EditorSession
 from inkflow.enums import ColorMode
 from inkflow.layout import create_slide, discover_layouts, layouts_for
 from inkflow.manifest import Deck, Slide
-from inkflow.pipeline import process_deck
-from inkflow.server import load_deck
 from inkflow.sizes import parse_view_box, physical_length_pt, same_aspect
 from inkflow.svgio import parse_svg_file
 from inkflow.sync import PreviewContext
@@ -178,8 +173,6 @@ class TestDeckSize:
         assert Deck(size="9:16").effective_mode == ColorMode.DARK
 
 
-# ── Where the size is used ────────────────────────────────────────────────────
-
 POSTER_DECK = textwrap.dedent("""\
     from inkflow import Deck, Slide
 
@@ -187,6 +180,7 @@ POSTER_DECK = textwrap.dedent("""\
     def main() -> Deck:
         return Deck(size="a0", slides=[Slide("poster.svg")])
 """)
+
 
 POSTER_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 3179 4494">'
@@ -213,17 +207,6 @@ def test_blank_slide_takes_the_canvas(tmp_path: Path) -> None:
     assert parse_svg_file(default).get("viewBox") == "0 0 1920 1080"
 
 
-def test_editor_new_slide_is_poster_sized(poster: Path) -> None:
-    session = EditorSession(poster / "deck.py")
-    session.apply(
-        {"action": "slide", "op": "new", "after": 0}, load_deck(poster / "deck.py")
-    )
-    deck = load_deck(poster / "deck.py")
-    assert len(deck.slides) == 2
-    new = parse_svg_file(poster / "slides" / deck.slides[1].src)
-    assert new.get("viewBox") == "0 0 3179 4494"
-
-
 def test_cli_add_uses_the_deck_size(poster: Path) -> None:
     from click.testing import CliRunner
 
@@ -236,25 +219,6 @@ def test_cli_add_uses_the_deck_size(poster: Path) -> None:
     assert result.exit_code == 0, result.output
     root = parse_svg_file(poster / "slides" / "new.svg")
     assert root.get("viewBox") == "0 0 3179 4494"
-
-
-def test_model_and_outline_report_the_size(poster: Path) -> None:
-    deck = load_deck(poster / "deck.py")
-    slides = process_deck(deck, poster, poster / "deck.py", editor=True)
-    model = build_model(deck, poster / "deck.py", slides)
-    size = model["deckSize"]
-    assert size == {
-        "name": "a0",
-        "label": "A0 portrait (841 x 1189 mm)",
-        "canvas": [3179, 4494],
-        "page": [2383.94, 3370.39],
-        "print": True,
-        "fontSize": 40,
-    }
-    text = format_outline(build_outline(deck, poster / "deck.py", slides))
-    head = text.splitlines()[0]
-    assert "size a0: A0 portrait (841 x 1189 mm), canvas 3179x4494" in head
-    assert "mode light" in head
 
 
 def test_project_layouts_are_offered_whatever_their_shape(tmp_path: Path) -> None:

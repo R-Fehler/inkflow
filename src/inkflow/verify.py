@@ -4,12 +4,11 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from inkflow import ns, pdf
+from inkflow import ns, pdf, plugins
 from inkflow.animations import Animation, PlayVideo
 from inkflow.assets import AssetRoots, AssetSource
 from inkflow.charts import ResolvedChart, render
 from inkflow.clean import clean_inkscape_tree
-from inkflow.editor.scene import Scene
 from inkflow.layout import (
     are_preview_layers_current,
     discover_layouts,
@@ -18,7 +17,7 @@ from inkflow.layout import (
 )
 from inkflow.loaders import load_md, resolve_content_src
 from inkflow.manifest import Chart, Deck, Inline, Media, Slide, TextBox, Video
-from inkflow.pipeline import resolve_overlay_chains, resolve_slide_src, slide_ids
+from inkflow.pipeline import resolve_overlay_chains, resolve_slide_src
 from inkflow.sizes import same_aspect
 from inkflow.svg import (
     canvas_size,
@@ -35,7 +34,7 @@ if TYPE_CHECKING:
     from inkflow.svgio import SvgElement
     from inkflow.themes import Theme
 
-Issue = tuple[str, str]  # (level, message) — level is "error" or "warn"
+Issue = plugins.Issue  # (level, message) — level is "error" or "warn"
 
 
 def composed_svg_ids(
@@ -315,37 +314,6 @@ def _check_sync(src: Path, preview: PreviewContext) -> list[Issue]:
     return []
 
 
-def _check_connectors(
-    slide: Slide, project_dir: Path, deck: Deck | None
-) -> list[Issue]:
-    """Arrows attached to shapes whose drawn ends no longer meet them (the
-    shapes moved in Inkscape, draw.io or by hand since the arrow was routed):
-    the editor's stale-arrow rule, which ``inkflow shape reroute`` fixes."""
-    if deck is None:
-        return []
-    visible = [s for s in deck.slides if s.visible]
-    shown = [i for i, s in enumerate(visible) if s is slide]
-    slide_id = slide_ids(visible)[shown[0]] if shown else slide_ids([slide])[0]
-    try:
-        scene = Scene.compose(project_dir, deck, slide, slide_id)
-    except (ValueError, OSError):
-        return []  # reported by the composition checks
-    issues: list[Issue] = []
-    for conn in scene.attached():
-        shapes = scene.stale_ends(conn)
-        if shapes:
-            name = f"#{conn.get('id')}" if conn.get("id") else "without an id"
-            issues.append(
-                (
-                    "warn",
-                    f"arrow {name} no longer meets {' and '.join(shapes)} "
-                    + "(moved since it was routed): run `inkflow shape reroute "
-                    + f"-s {slide_id}`",
-                )
-            )
-    return issues
-
-
 def _unresolved_src_issue(src: str, project_dir: Path, theme: Theme | None) -> Issue:
     """Author-facing issue for an unresolvable ``Slide.src``.
 
@@ -431,60 +399,24 @@ def verify_slide(
     ]
     issues += check_size(root, preview.deck)
     issues += _check_sync(src, preview)
-    issues += _check_connectors(slide, project_dir, preview.deck)
+    for plugin in plugins.loaded():
+        for check in plugin.slide_checks():
+            issues += check(slide, project_dir, preview.deck)
     return issues
 
 
-# ── The deck as a whole: does it look the same on another machine? ──
+# ── The deck as a whole ──
 
 
-def verify_portable(deck: Deck, project_dir: Path, deck_path: Path) -> list[Issue]:
-    """What ties the deck to this machine (``inkflow pack``'s checks), one
-    warning line each: fonts from this machine, missing or generic first,
-    files outside the deck or behind a symlink, pictures from the web, no
-    pinned inkflow, no uv.lock, no LF line-ending rules. (Git LFS has the
-    editor's git menu; emoji and math fonts are ``inkflow pack``'s report.)"""
-    from inkflow.pack import plan_pack
-
-    try:
-        plan = plan_pack(deck, project_dir, deck_path)
-    except Exception as exc:
-        return [("warn", f"could not check portability: {exc}")]
+def verify_deck(deck: Deck, project_dir: Path, deck_path: Path) -> list[Issue]:
+    """The plugins' checks of the deck as a whole (one ``deck`` line each in
+    ``inkflow verify``), such as whether it looks the same on another
+    machine."""
     issues: list[Issue] = []
-    by_key: dict[str, list[str]] = {}
-    for item in plan.items:
-        by_key.setdefault(item.key, []).append(item.message)
-    for key in ("font", "missing-font", "generic-font"):
-        issues += [("warn", message) for message in by_key.get(key, [])]
-    outside = [src for src, _ in plan.copy_in.copies] + [
-        dst for dst in plan.copy_in.writes if not dst.exists()
-    ]
-    if outside:
-        names = ", ".join(p.name for p in outside[:3]) + (
-            " …" if len(outside) > 3 else ""
-        )
-        issues.append(
-            (
-                "warn",
-                f"{len(outside)} file(s) outside the deck or behind a symlink "
-                + f"({names}): a clone will not have them; inkflow pack copies them in",
-            )
-        )
-    remote = plan.copy_in.remote
-    if remote:
-        issues.append(
-            (
-                "warn",
-                f"{len(remote)} picture(s) read from the web ({remote[0].raw}"
-                + (" …" if len(remote) > 1 else "")
-                + "): they need internet access",
-            )
-        )
-    for key, hint in (
-        ("pyproject", "inkflow pack"),
-        ("lock", "inkflow pack (or uv lock)"),
-        ("eol", "inkflow pack adds them"),
-    ):
-        for message in by_key.get(key, []):
-            issues.append(("warn", f"{message}: {hint}"))
+    for plugin in plugins.loaded():
+        for check in plugin.deck_checks():
+            try:
+                issues += check(deck, project_dir, deck_path)
+            except Exception as exc:
+                issues.append(("warn", f"{plugin.name}: check failed: {exc}"))
     return issues

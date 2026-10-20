@@ -30,8 +30,8 @@ from lxml import etree
 
 from inkflow import ns
 from inkflow.colors import SVG_TOKENS
-from inkflow.editor.provenance import is_element
 from inkflow.manifest import Slide
+from inkflow.provenance import is_element
 from inkflow.svgio import SvgElement, parse_svg
 
 INK_DIR = "ink"
@@ -254,3 +254,40 @@ def erase_strokes(data: bytes, ids: set[str]) -> bytes | None:
     if not any(is_element(el) for el in root):
         return None
     return serialize_ink(root)
+
+
+def save_ink(
+    path: Path, msg: dict[str, object], box: tuple[float, float, float, float]
+) -> None:
+    """Apply one ink request (``op`` add / erase / clear, as the presenter's
+    "Keep" sends it) to the ink file ``path``, written directly; ``box`` is
+    the slide's canvas, which a new ink file takes.
+
+    The server does this when nothing else handles edits (no editor that
+    would make it an undoable step); the file is what the pipeline paints.
+    """
+    data = path.read_bytes() if path.is_file() else None
+    op = msg.get("op")
+    out: bytes | None
+    if op == "add":
+        raw = msg.get("strokes")
+        if not isinstance(raw, list) or not raw:
+            raise InkError("no strokes to save")
+        strokes = [Stroke.from_json(r) for r in cast("list[object]", raw)]
+        out = add_strokes(data, strokes, box)
+    elif op == "erase":
+        raw_ids = msg.get("ids")
+        if not isinstance(raw_ids, list):
+            raise InkError("no strokes to erase")
+        if data is None:
+            return
+        out = erase_strokes(data, {str(i) for i in cast("list[object]", raw_ids)})
+    elif op == "clear":
+        out = None
+    else:
+        raise InkError(f"unknown ink operation {op!r}")
+    if out is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(out)

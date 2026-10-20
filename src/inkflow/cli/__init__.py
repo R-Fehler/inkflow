@@ -1,37 +1,36 @@
 """The ``inkflow`` command-line interface.
 
 The command group lives in ``_common`` alongside the shared options and helpers;
-the per-area submodules register their commands on it by import side effect. This
-module wires them together and re-exports ``main`` as the console-script entry
-point (``inkflow.cli:main``).
+the per-area submodules register their commands on it by import side effect.
+Then every installed plugin (``inkflow.plugins``) adds its own. This module
+wires them together and re-exports ``main`` as the console-script entry point
+(``inkflow.cli:main``).
 """
 
 from __future__ import annotations
 
 from importlib import import_module
 
+from inkflow import plugins
 from inkflow.cli._common import main
+from inkflow.logging import logger
 
 # Import each submodule for its side effect: registering commands on ``main``.
 for _submodule in (
-    "agent",
-    "anim",
     "authoring",
-    "comments",
-    "compare",
     "color",
-    "files",
     "fonts",
-    "master",
     "present",
     "project",
-    "relay",
-    "shapes",
-    "slides",
-    "text",
+    "render",
     "verify",
-    "worktree",
 ):
     import_module(f"inkflow.cli.{_submodule}")
+
+for _plugin in plugins.loaded():
+    try:
+        _plugin.register_cli(main)
+    except Exception:
+        logger.exception(f"plugin {_plugin.name!r}: its commands failed to load")
 
 __all__ = ["main"]

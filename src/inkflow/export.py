@@ -29,13 +29,14 @@ from inkflow.assets import (
 )
 from inkflow.cdp import chromium_said
 from inkflow.enums import ColorMode
+from inkflow.extensions import State
 from inkflow.fonts import embed_fonts_css_subsetted, ui_fonts_css
 from inkflow.loaders import load_deck_scripts, load_deck_styles
 from inkflow.logging import logger
 from inkflow.manifest import Deck
 from inkflow.pdfboxes import PageBoxes, set_page_boxes
 from inkflow.pipeline import SlideData, process_deck, resolve_transitions
-from inkflow.server import State, build_html, load_deck
+from inkflow.server import build_html, load_deck
 from inkflow.sizes import PageSize, parse_view_box, physical_length_pt
 from inkflow.svg import canvas_size
 from inkflow.svgio import SvgElement, parse_svg, serialize_svg

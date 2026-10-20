@@ -1,6 +1,5 @@
 """PDF export at print sizes: page sizes, mixed pages, bleed and crop marks."""
 
-# pyright: reportPrivateUsage=none
 from __future__ import annotations
 
 import re
@@ -144,9 +143,6 @@ class TestBleed:
         assert rects[2].get("width") == "100"  # scaled: not the canvas
 
 
-# ── Page boxes ────────────────────────────────────────────────────────────────
-
-
 def _pdf(boxes: list[str]) -> bytes:
     """A minimal PDF laid out as Chromium writes one: a classic xref table."""
     objs = [b"<</Type /Catalog /Pages 2 0 R>>"]
@@ -220,8 +216,6 @@ class TestPageBoxes:
         assert not set_page_boxes(two, [PageBoxes(10, 10)])  # page count differs
 
 
-# ── Through Chromium ──────────────────────────────────────────────────────────
-
 needs_chromium = pytest.mark.skipif(
     find_chromium() is None, reason="chromium not available"
 )
@@ -252,6 +246,7 @@ _POSTER_SVG = textwrap.dedent("""\
       <image href="photo.png" x="200" y="600" width="800" height="800"/>
     </svg>
 """)
+
 
 _MM_SVG = textwrap.dedent("""\
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 841 1189"
@@ -341,35 +336,3 @@ def test_cli_size_accepts_names_and_px(poster: Path) -> None:
         main, ["export", "--deck", str(deck), "--bleed", "huge", "--chromium", "/no"]
     )
     assert result.exit_code != 0 and "bleed" in result.output
-
-
-def test_editor_export_passes_print_marks(poster: Path) -> None:
-    from inkflow.editor.session import EditorSession, Exporters
-
-    calls: list[dict[str, object]] = []
-
-    def html(deck_path: Path, out_dir: Path, inline_assets: bool = True) -> None:
-        del deck_path, out_dir, inline_assets
-        raise AssertionError("not asked for")
-
-    def pdf(
-        deck_path: Path,
-        output: Path,
-        chromium: str | None = None,
-        no_sandbox: bool = False,
-        size: PageSize | str | tuple[float, float] | None = None,
-        bleed: str | float | None = None,
-        crop_marks: bool = False,
-    ) -> None:
-        del deck_path, chromium, no_sandbox, size
-        calls.append({"bleed": bleed, "marks": crop_marks})
-        output.write_bytes(b"%PDF")
-
-    deck = _deck(poster, "a0", "poster.svg")
-    session = EditorSession(deck, Exporters(html=html, pdf=pdf))
-    session.apply({"action": "export", "format": "pdf"}, None)
-    session.apply({"action": "export", "format": "pdf", "printMarks": True}, None)
-    assert calls == [
-        {"bleed": None, "marks": False},
-        {"bleed": "3mm", "marks": True},
-    ]
