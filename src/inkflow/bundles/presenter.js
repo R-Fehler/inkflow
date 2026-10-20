@@ -1602,6 +1602,42 @@
     pvResizeHandle.addEventListener("pointerup", _onPvResizeUp);
   });
 
+  // src/ts/shared/deck-styles.ts
+  function applyDeckStyles(msg) {
+    if (msg.styles !== void 0) {
+      const el = document.getElementById("deck-styles");
+      if (el) el.textContent = msg.styles;
+    }
+    if (msg.mode !== void 0)
+      document.documentElement.dataset.theme = msg.mode;
+  }
+
+  // src/ts/shared/patch.ts
+  function isWhole(sent) {
+    return !sent.some((item) => typeof item === "string");
+  }
+  function applyPatch(held, sent) {
+    if (isWhole(sent)) return sent;
+    const byKey = /* @__PURE__ */ new Map();
+    for (const item of held) {
+      if (item.key != null) byKey.set(item.key, item);
+    }
+    const out = [];
+    for (const item of sent) {
+      if (typeof item !== "string") {
+        out.push(item);
+        continue;
+      }
+      const mine = byKey.get(item);
+      if (!mine) return null;
+      out.push(mine);
+    }
+    return out;
+  }
+  function sameItems(a, b) {
+    return a.length === b.length && a.every((item, i) => item === b[i]);
+  }
+
   // src/ts/shared/wsurl.ts
   var WS_PATH = "/_inkflow/ws";
   function socketUrl(loc) {
@@ -3304,7 +3340,9 @@
       const assert = authoritative && sends();
       firstPositionPending = assert;
       if (assert && role !== "viewer") sendNav();
-      state.ws?.send(JSON.stringify({ type: "hello", role: "presenter" }));
+      state.ws?.send(
+        JSON.stringify({ type: "hello", role: "presenter", patch: true })
+      );
     };
     state.ws.onmessage = (ev) => {
       let msg;
@@ -3314,10 +3352,20 @@
         return;
       }
       if (msg.type === "update") {
-        state.slides = msg.slides;
+        const slides = applyPatch(state.slides, msg.slides);
+        if (!slides) {
+          state.ws?.send(JSON.stringify({ type: "resync" }));
+          return;
+        }
+        const restyled = msg.styles !== void 0 || msg.mode !== void 0;
+        const shown = restyled ? null : state.slides[state.slideIndex];
+        const unchanged = !restyled && sameItems(slides, state.slides);
+        applyDeckStyles(msg);
+        state.slides = slides;
         state.transitions = msg.transitions;
         hideError();
         showLogs(msg.logs ?? []);
+        if (unchanged) return;
         if (overviewEl.classList.contains("visible")) {
           overviewEl.classList.remove("visible");
           overviewGridEl.innerHTML = "";
@@ -3327,7 +3375,8 @@
           Math.max(0, state.slides.length - 1)
         );
         state.step = Math.min(state.step, maxStep2());
-        loadSlide(null, CUT);
+        if (state.slides[state.slideIndex] !== shown) loadSlide(null, CUT);
+        else updateStatus();
         renderPv();
       } else if (msg.type === "error") {
         showError(msg.message);

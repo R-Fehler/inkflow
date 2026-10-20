@@ -23,10 +23,11 @@ Every hook has a do-nothing default. In the order they happen:
   every page gets) and each slide's ``edit`` facts (``SlideData.edit``,
   which stay with the extensions: the pages' copies drop them);
 - per page: ``welcome`` adds fields to the first message a page gets;
-  ``hello`` when a page said what it is (``{"type": "hello", "role": ...}``);
-  ``message`` for each message type the extension lists in ``messages``
-  (with the least role that may send it: anything else from a lesser role is
-  dropped at the door); ``disconnected`` when it goes;
+  ``hello`` when a page said what it is (``{"type": "hello", "role": ...}``)
+  or asked for everything again (``resync``: it missed a build); ``message``
+  for each message type the extension lists in ``messages`` (with the least
+  role that may send it: anything else from a lesser role is dropped at the
+  door); ``disconnected`` when it goes;
 - ``http(request)`` for every request the core does not answer itself (the
   deck's assets come first, the presenter last);
 - ``keys()``: keys in the server's terminal;
@@ -100,16 +101,17 @@ class Build:
     deck: Deck
     deck_path: Path
     deck_hash: str
-    """deck.py's content hash (``file_hash``): which version of it this build
-    ran, so a program that edited it can wait for its own edit's build."""
+    """deck.py's ``deps.file_hash``: which version of it this build ran, so a
+    program that edited it can wait for its own edit's build."""
     slides: list[SlideData]
     """The slides as built: with source locators and ``edit`` facts when an
     extension asked for ``provenance``."""
     served: list[SlideData] = field(default_factory=list)
-    """The pages' copies (set once the build is done): no ``edit`` facts."""
-    fresh: bool = True
-    """Nothing was kept from earlier builds: an extension's own caches should
-    start over too."""
+    """The pages' copies (set once the build is done): no ``edit`` facts,
+    each asset stamped with its version (``?v=``), a ``key`` each."""
+    fresh: bool = False
+    """Nothing was kept from earlier builds (the first, or ``r`` in the
+    terminal): an extension's own caches should start over too."""
 
     @property
     def project_dir(self) -> Path:
@@ -222,8 +224,8 @@ class ServerContext(Protocol):
         """A transient note on one page (or all)."""
         ...
 
-    async def rebuild(self) -> None:
-        """Build the deck again now."""
+    async def rebuild(self, *, full: bool = False) -> None:
+        """Build the deck again now (``full``: keep nothing from earlier)."""
         ...
 
     def shutdown(self) -> None:

@@ -113,7 +113,8 @@ the order they happen:
 
 - `start(server)` once, with the `ServerContext` to act through: the served
   state, who is connected and the door (`access`), `send`/`broadcast`/
-  `send_owners`/`notify`, `rebuild`, `shutdown`, and
+  `send_owners`/`notify`, `rebuild` (`full=True`: keep nothing from earlier
+  builds), `shutdown`, and
   `serve_connection`/`serve_request` for a page that reached it another way
   (through a relay, say), run exactly as one from the network, for its role;
 - `open(deck_path)` / `close(switching=…)` for the deck served;
@@ -124,11 +125,16 @@ the order they happen:
   `edit` facts (the files it is drawn from, its empty zones, where each
   zone's content is written; `inkflow.provenance.locate` finds an element in
   its file again): what an editor needs to write a change back. The pages get
-  the same slides without the `edit` facts;
+  the same slides without the `edit` facts (`build.served`, each with a
+  `key`, a digest of its content). A served deck processes only the slides a
+  change touched and keeps the others from the last build; `build.fresh`
+  says nothing was kept (the first build, or <kbd>r</kbd> in the terminal),
+  so an extension's own caches should start over too;
 - `messages`: the WebSocket message types it handles, each with the least role
   that may send it (`"owner"`, `"editor"`, `"viewer"`); `message(...)` gets
   them, `hello(...)` tells it what each page is (`{"type": "hello", "role":
-  "editor"}`), `disconnected(...)` when it goes, `welcome(client)` adds fields
+  "editor"}`), and again with `resync=True` when a page that missed a build
+  asks for everything (`{"type": "resync"}`), `disconnected(...)` when it goes, `welcome(client)` adds fields
   to the first message a page gets;
 - `http(request)` for every request the core does not answer itself (the
   deck's files come first, the presenter last);
@@ -149,6 +155,15 @@ from a lesser role than an extension's `messages` names never reaches it, and
 links only when an extension takes a message from editors. Every page also may
 ask `{"type": "build-status"}`: which deck.py the server built last
 (`deckHash`), so a program that edited it can wait for its own edit to build.
+
+A page that says `{"type": "hello", "patch": true}` is sent each rebuild as
+what changed: in an `update`'s `slides`, a slide the page already holds is its
+`key` (a string) instead of the slide, and the deck's stylesheet (`styles`)
+and colour mode (`mode`) come only when they changed. On `hello` it gets the
+current slides by key; a key it does not hold means it missed a build, and it
+sends `{"type": "resync"}` to get every slide whole. `src/ts/shared/patch.ts`
+(`applyPatch`) puts the list together. A page that never says so is sent
+whole lists.
 
 ## API
 

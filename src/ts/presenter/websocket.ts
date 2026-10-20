@@ -1,3 +1,5 @@
+import { applyDeckStyles } from "../shared/deck-styles";
+import { applyPatch, sameItems } from "../shared/patch";
 import type {
     NavMessage,
     SyncMode,
@@ -13,6 +15,7 @@ import {
     applyCurrentStepInstant,
     maxStep,
     snapStepRun,
+    updateStatus,
 } from "./status";
 import { CUT, loadSlide, snapInflight } from "./transitions";
 import { hideError, showError, showLogs, showNotify } from "./ui";
@@ -210,8 +213,11 @@ export function connectWS(wsPort: number | null, authoritative: boolean): void {
         const assert = authoritative && sends();
         firstPositionPending = assert;
         if (assert && role !== "viewer") sendNav();
-        // What this page is, for the server's list of who is connected.
-        state.ws?.send(JSON.stringify({ type: "hello", role: "presenter" }));
+        // What this page is, for the server's list of who is connected;
+        // rebuilds as what changed: the slides this page holds come by key.
+        state.ws?.send(
+            JSON.stringify({ type: "hello", role: "presenter", patch: true }),
+        );
     };
 
     state.ws.onmessage = (ev) => {
@@ -222,10 +228,26 @@ export function connectWS(wsPort: number | null, authoritative: boolean): void {
             return;
         }
         if (msg.type === "update") {
-            state.slides = msg.slides;
+            const slides = applyPatch(state.slides, msg.slides);
+            if (!slides) {
+                // A build this page missed: everything again.
+                state.ws?.send(JSON.stringify({ type: "resync" }));
+                return;
+            }
+            // A new stylesheet or colour mode restyles every slide: the one
+            // on screen is loaded again.
+            const restyled = msg.styles !== undefined || msg.mode !== undefined;
+            const shown = restyled ? null : state.slides[state.slideIndex];
+            const unchanged = !restyled && sameItems(slides, state.slides);
+            applyDeckStyles(msg);
+            state.slides = slides;
             state.transitions = msg.transitions;
             hideError();
             showLogs(msg.logs ?? []);
+            // No slide changed (the list a page is sent on connecting, a
+            // build of a file no slide shows): the slide stays as it is,
+            // mid-step and all.
+            if (unchanged) return;
             if (overviewEl.classList.contains("visible")) {
                 overviewEl.classList.remove("visible");
                 overviewGridEl.innerHTML = "";
@@ -235,7 +257,9 @@ export function connectWS(wsPort: number | null, authoritative: boolean): void {
                 Math.max(0, state.slides.length - 1),
             );
             state.step = Math.min(state.step, maxStep());
-            loadSlide(null, CUT);
+            // Another slide's change leaves the one on screen alone too.
+            if (state.slides[state.slideIndex] !== shown) loadSlide(null, CUT);
+            else updateStatus(); // the slide count may have changed
             renderPv();
         } else if (msg.type === "error") {
             showError(msg.message);

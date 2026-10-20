@@ -66,7 +66,29 @@ src/
                                stays `str` and `trigger` stays positional
     transitions.py    concrete transition types (Cut, Crossfade, Morph, Push, Cover,
                                Zoom, Fade, Wipe) subclassing manifest.Transition
-    pipeline.py       animation annotation + layout inlining
+    pipeline.py       animation annotation + layout inlining; `build_slide` (one slide
+                               from its files) and `slide_notes` (its notes file as HTML)
+                               are what `process_deck` runs per slide, or asks its `cache`
+                               for (a `SlideStore`: incremental.py)
+    deps.py           which files a piece of the build read: `note(path)` at every
+                               read or lookup of the slide pipeline (svgio, layout,
+                               loaders, the slide's own file), collected by
+                               `recording()` as path -> `Stamp` (mtime, ctime, size,
+                               inode; None = not there; a file changed within
+                               `RACY_NS`, or `COARSE_NS` on a whole-second file
+                               system, is never trusted), `Stamps` (one stat per file
+                               per build), `note_code` (a class looked up by name:
+                               deck.py) / `note_class` (its module's file), `retry`
+                               (a failure that may pass: built again next time),
+                               `file_hash` (deck.py's version in `build-status`)
+    incremental.py    a served deck's builds, slide by slide (see "A served deck
+                               rebuilds what a change touched" below): `SlideCache`
+                               / `Build` (`slide`, `notes`, `finish`), `frozen`
+                               (deck values compared by value and type), the
+                               stand-in slide number and count (`_Template`,
+                               `_plain`), warnings said again for kept slides; and
+                               what the pages are sent: `set_keys` (each slide's
+                               content digest), `keys_of`, `as_patch`
     content.py        TextBox / Image / Video injection into zone rects, with alignment
                                support; Video emits data-* playback attrs (driven by video.ts)
     layout.py         parent inject/set/strip: layout chain resolution and Inkscape layer
@@ -94,10 +116,12 @@ src/
                                messages, then each extension's `messages` by least role),
                                sharing on/off (`Listener.move`), `share_status` (+ each
                                extension's `share_status`/`share_op`/`share_lines`),
-                               `send_owners`; runs the server extensions
+                               `send_owners`; `Kept` (a `SlideCache` per served deck),
+                               `rebuild(full=)`, `_versioned` (asset stamps), patches
+                               to pages (`Client.patches`); runs the server extensions
                                (`serve(extensions=)`, default `extensions_for` the installed
                                plugins); `context` = the `ServerContext` (send, broadcast,
-                               rebuild, shutdown, `serve_connection`/`serve_request` for
+                               rebuild(full=), shutdown, `serve_connection`/`serve_request` for
                                connections that came another way); `listening(ui, deck,
                                extensions)` (the one port without TUI/watcher: tests,
                                embedding); `pick_port`, `auto_ports` (`_PortBusy`)
@@ -190,7 +214,8 @@ src/
                                `welcome`/`hello`/`message`/`disconnected`, `http`, `keys`,
                                `share_status`/`share_op`/`share_lines`),
                                `ServerContext` (server.`context`: `access`, `send_owners`,
-                               `share_changed`, `serve_connection`/`serve_request`), `Build`,
+                               `share_changed`, `serve_connection`/`serve_request`), `Build`
+                               (deck, slides as built, `served` = the pages' copies, `fresh`),
                                `HttpRequest` (the parsed `request`, `role`, `token`,
                                ranged `send_file`), `VirtualConnection`, `State`, `ServeConfig`
     provenance.py     source locators on the composed SVG (`data-ink="<source>:<child
@@ -235,7 +260,11 @@ src/
                       keyframes.ts (reads @keyframes + per-cue var substitution),
                       step-ring SVG builder, cubic-bezier easing; wsurl.ts
                       (`socketUrl(location)`: the WebSocket on the page's own
-                      host and port, `SENT_AWAY` = 4001)
+                      host and port, `SENT_AWAY` = 4001); patch.ts (a rebuild
+                      as what changed: `applyPatch` puts a list together from
+                      the items a page holds, named by `key`; null = a key it
+                      lacks, the page sends `resync`; tested); deck-styles.ts
+                      (`applyDeckStyles`: an `update`'s `styles`/`mode`)
     presenter/        main presenter modules — navigation, transitions (progress-driven
                       via progress-driver.ts), overview, picker, websocket, status bar,
                       keyboard, syncmenu.ts (sync-mode status-bar control),
@@ -266,8 +295,12 @@ No GUI window flashes, instant processing.
 
 **Live reload pushes slides over WebSocket, not `location.reload()`.**
 When files change the server sends `{"type":"update","slides":[...],"transitions":[...],"logs":[{"level","message"},...]}` and the presenter swaps content in place, preserving the current slide index.
+A page that said `{"type":"hello","patch":true}` (the presenter does, with `role: "presenter"`) gets `slides` as a patch: every served slide carries a `key` (a digest of its content, `incremental.set_keys`), and a slide the last build already had is its key string instead of the slide (`as_patch`). `shared/patch.ts` puts the list together from what the page holds, keeping held items' identity (the presenter reloads the slide on screen only when that slide changed). On `hello` such a page is sent the current slides all by key (its HTML came with them); a key it does not hold means it missed a build, and it sends `{"type":"resync"}` for everything whole (an extension's `hello` hears that too, `resync=True`). A page that never said so (an older inkflow's tab left open) is sent whole lists, as before. The deck stylesheet and colour mode ride on `update` only when they changed (`styles`/`mode` keys, `shared/deck-styles.ts`), so a theme edit restyles open pages without a reload.
 Non-fatal records collected during the rebuild (`inkflow.logging.collect_logs`, filtered to the browser sink's level) ride along on the `update` message and show as a dismissible `#warning-banner`, each entry styled by level via a `log-<level>` class (dismissal sticks across rebuilds until the log set changes, keyed on a signature in `ui.ts`); a fatal build error is sent separately as `{"type":"error","message":"..."}` and displayed as the full-screen overlay (also logged to the file sink). Static `build` sends no logs to the page (they go to the CLI instead).
 The HTTP response includes `Cache-Control: no-store` so hard refreshes always get fresh content.
+
+**A served deck rebuilds what a change touched (`incremental.py`).**
+The watcher still rebuilds on every change of any project file, and `server.rebuild` still runs deck.py and walks every slide, but `process_deck(cache=)` takes a slide from the last build unless one of its inputs changed (`server.Kept`: a `SlideCache` per served deck; `build`, `export`, `verify` pass none and are untouched). A slide's inputs and how each is watched: the files it read or looked for, recorded by `deps.note` while it is processed and compared by stamp at the next build, "not there" included (so its layout chain and overlays, its Markdown and style file, each candidate of a name search: a `slides/x.svg` that now shadows the layout `x` is a change); what deck.py says of it and of the deck, compared by value (`frozen`: types count, `Inline("a")` is not the path `"a"`; a class deck.py defines is a new class on every load, so slides using one are always processed; a Markdown reveal's `type=Name` makes the slide depend on deck.py, whether the name was found or not); its id. **Not** its number or the slide count: they reach the output only as the root's `inkflow-slide-N` id (and the `@scope` naming it) and the text of `zone-slide-number`/`-total`, so the cache processes a slide with stand-in numbers and puts the real ones into the result (`_Template`), and inserting or moving a slide processes no other slide (a slide whose result shows a stand-in anywhere else is kept by its numbers instead, `_plain`). The notes file is a cache entry of its own, so typing a note processes no slide. What is deliberately outside the cache and done for every slide on every build: the asset time stamps (`server._versioned`, which is how a changed picture reaches the pages), the keys, the deck stylesheet, fonts, transitions. A slide whose build fell short for a reason that may pass is not kept (`deps.retry`). Warnings logged while a slide (or its notes) was processed are logged again when it is kept. Whoever adds a file read to the slide pipeline must `note` it: tests/test_incremental.py compares every incremental build with a full one and holds each slide's recorded files to what an audit hook saw Python open. `r` in the terminal (`rebuild(full=True)`) forgets what is kept; the TUI says how many slides a rebuild processed (`(N changed)`).
 
 **Position sync is a dumb relay with client-side authority + modes.**
 Clients send `{"type":"nav","slideIndex","step"}` (validated + clamped server-side by `_coerce_nav_position`; a view link's are dropped, and its page starts in `follow`); the server stores the last position and rebroadcasts it as `{"type":"position",...}` to the *other* clients, and pushes it once to each newly connected client. A window that booted from a deep link (a slide named in the URL, captured by `readURL()` before `syncURL()` rewrites the bar) or reconnected asserts its own position and ignores that first push; a bare window adopts it. Each client also has a per-tab **sync mode** (`two-way`/`present`/`follow`/`solo`, `shared/types.ts`) deciding locally whether it broadcasts nav (`sends()`) and applies incoming positions (`receives()`) — the server knows nothing about modes. `s` cycles the mode; `syncmenu.ts` owns the status-bar widget, `websocket.ts` the network/state. Switching into a receiving mode sends `{"type":"sync-request"}` to catch up. Persisted in `sessionStorage`.
@@ -397,7 +430,11 @@ Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop +
 ## Server
 
 - HTTP on port 7777 (asyncio streams, custom handler); assets are streamed in
-  chunks with byte-range support (`_send_file`, 206/416), which Safari needs for video
+  chunks with byte-range support (`_send_file`, 206/416), which Safari needs for video.
+  Served slides stamp each local asset reference with its file's mtime
+  (`_versioned`: `assets/x.png?v=…`; `_resolve_asset` drops the query), because a
+  page keeps pictures it loaded by URL: a picture changed on disk is then a
+  changed slide at a new URL. build/export never stamp
 - anything else an extension's `http` answers, then the presenter at any path
 - WebSocket on the same port at `/_inkflow/ws` (`access.WS_PATH`): the HTTP
   handler reads the request head, checks it, and hands an upgrade to
@@ -442,7 +479,11 @@ Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop +
   when 7777 was taken; `serve(auto_ports=True)` picks again if the port is lost
   to a server starting at the same moment (`_PortBusy`). One server per deck:
   `instances.serving` finds the deck's server first
-- File watcher: `watchfiles.awatch` (async generator)
+- File watcher: `watchfiles.awatch` (async generator); `_WatchFilter(root)` skips
+  `.inkflow/` and `build/` *below the deck's folder* only, so a deck living under
+  some `.inkflow/` folder is watched normally. Every batch of changes is one
+  `rebuild`, which processes only the slides the change touched (incremental.py)
+  and sends each page what changed (`Client.patches`)
 - The listener, the watcher and the keyboard run as tasks of `_serve_deck`
 
 ## Animation pipeline

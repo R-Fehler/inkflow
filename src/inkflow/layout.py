@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import hashlib
 import importlib.resources
 from collections.abc import Sequence
@@ -17,6 +18,7 @@ from inkflow.clean import (
     is_preview_layer,
     strip_preview_layers,
 )
+from inkflow.deps import note, settled, stamp
 from inkflow.ns import (
     INKFLOW_DEFAULT_ZONE,
     INKFLOW_LAYOUT_HASH,
@@ -60,6 +62,7 @@ class AssetKind(StrEnum):
 # ── Built-in theme ───────────────────────────────────────────────────────────
 
 
+@functools.cache
 def builtin_theme_dir() -> Path:
     return Path(str(importlib.resources.files("inkflow").joinpath("theme")))
 
@@ -67,8 +70,27 @@ def builtin_theme_dir() -> Path:
 # ── Parent attribute ──────────────────────────────────────────────────────────
 
 
+_ROOT_CACHE: dict[str, tuple[object, dict[str, str]]] = {}
+
+
+def _root_attributes(path: Path) -> dict[str, str]:
+    """The attributes of an SVG file's root, remembered while the file is the
+    same: a chain is resolved for every slide of every build, and parsing a
+    slide to read one attribute off its root was a third of a warm build."""
+    note(path)
+    key = str(path)
+    now = stamp(key)
+    cached = _ROOT_CACHE.get(key)
+    if cached is not None and cached[0] == now:
+        return cached[1]
+    attributes = {str(k): str(v) for k, v in parse_svg_file(path).attrib.items()}
+    if settled(now):
+        _ROOT_CACHE[key] = (now, attributes)
+    return attributes
+
+
 def _read_parent_attr(svg_path: Path) -> str | None:
-    return parse_svg_file(svg_path).get(INKFLOW_PARENT)
+    return _root_attributes(svg_path).get(INKFLOW_PARENT)
 
 
 # ── Path resolution ───────────────────────────────────────────────────────────
@@ -115,6 +137,7 @@ def resolve_parent_path(
                 + "Use --deck to point to a project."
             )
         resolved = _with_svg(project_root / kind / name)
+        note(resolved)
         if not resolved.exists():
             raise ValueError(f"local:{name} not found at {resolved}")
         return resolved
@@ -124,6 +147,7 @@ def resolve_parent_path(
         if theme is None:
             raise ValueError(f"theme:{name} requires Deck(theme=...) to be set.")
         resolved = _with_svg(theme.asset_dir() / kind / name)
+        note(resolved)
         if not resolved.exists():
             raise ValueError(f"theme:{name} not found at {resolved}")
         return resolved
@@ -131,6 +155,7 @@ def resolve_parent_path(
     if parent_str.startswith("builtin:"):
         name = parent_str[len("builtin:") :]
         resolved = _with_svg(builtin_theme_dir() / kind / name)
+        note(resolved)
         if not resolved.exists():
             raise ValueError(
                 f"builtin:{name} not found — no built-in {kind.singular} named '{name}'"
@@ -138,6 +163,8 @@ def resolve_parent_path(
         return resolved
 
     if parent_str.startswith(("./", "../")):
+        # As written too: a link on the way that is pointed elsewhere.
+        note(_with_svg(base_dir / parent_str))
         return _with_svg((base_dir / parent_str).resolve())
 
     if Path(parent_str).is_absolute():
@@ -145,6 +172,7 @@ def resolve_parent_path(
 
     # Multi-part relative path (has /) — relative to base_dir
     if "/" in parent_str:
+        note(_with_svg(base_dir / parent_str))
         return _with_svg((base_dir / parent_str).resolve())
 
     # Bare single-part name — three-level search; levels skipped when context is absent
@@ -157,6 +185,9 @@ def resolve_parent_path(
     candidates.append(_with_svg(builtin_theme_dir() / kind / name))
 
     for candidate in candidates:
+        # Each one looked at is a dependency: a file that appears earlier in
+        # the search later (a project layout of the theme's name) wins then.
+        note(candidate)
         if candidate.exists():
             return candidate
 

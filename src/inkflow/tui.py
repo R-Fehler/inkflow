@@ -44,6 +44,7 @@ class LiveUI:
         self._get_clients: Callable[[], int] = get_clients
         self._phase: str = "idle"
         self._slides: int = 0
+        self._processed: int | None = None
         self._elapsed: float = 0.0
         self._built_at: str = ""
         self._logs: list[LogEntry] = []
@@ -112,6 +113,9 @@ class LiveUI:
 
             slide_word = "slide" if self._slides == 1 else "slides"
             summary = f" ✓  built {self._slides} {slide_word} in {self._elapsed:.2f}s"
+            # A rebuild processes the slides a change touched and keeps the rest.
+            if self._processed is not None and self._processed < self._slides:
+                summary += f" ({self._processed} changed)"
             parts.append(
                 Text.assemble(
                     (summary, "bold green"),
@@ -157,10 +161,15 @@ class LiveUI:
         self.refresh()
 
     def set_ok(
-        self, slides: int, elapsed: float, logs: list[LogEntry] | None = None
+        self,
+        slides: int,
+        elapsed: float,
+        logs: list[LogEntry] | None = None,
+        processed: int | None = None,
     ) -> None:
         self._phase = "ok"
         self._slides = slides
+        self._processed = processed
         self._elapsed = elapsed
         self._built_at = datetime.now().strftime("%H:%M:%S")
         self._logs = logs or []
