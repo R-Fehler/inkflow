@@ -32,7 +32,7 @@ src/
                                Cue, Transition, Align, VAlign, Direction, Easing,
                                AnimationKind, Trigger, Inline, Content, ZoneContent,
                                ColorMode, MediaFit,
-                               MediaAlign, Muted, Overlay
+                               MediaAlign, Muted, Overlay, PageSize
                                and the `animations` and `transitions` namespaces
                                (`Animation` is NOT top-level — it lives in `animations`)
     manifest.py       dataclasses for the deck DSL; Cue/Transition base.
@@ -44,9 +44,26 @@ src/
                                muted, loop, poster, start, end). `Slugged` mixin (kebab slug
                                from class name) is shared by Animation + Transition
                                Deck params: slides, transition, overlays, theme,
-                               mode: ColorMode, style, font_size, embed_fonts
+                               mode: ColorMode, style, font_size, embed_fonts,
+                               size (a PageSize; None = each slide its own, new
+                               slides 16:9). `effective_size`, `is_print`; a print
+                               deck defaults to light mode (unless the theme set a
+                               mode) and `effective_font_size` = `base_font`.
                                Slide params: src, id, md, zones, animations, transition,
                                overlays, extra_style, title, notes, visible, font_size
+    sizes.py          `PageSize`: a str value object naming a deck size ("16:9", "4:3",
+                               "9:16"/phone, "a0".."a5" [-landscape], letter/legal/
+                               tabloid, WxH mm/cm/in/pt or px; constructors .mm/.cm/
+                               .inches/.px) with `canvas` (user units), `page_pt`/
+                               `page_css` (the printed page), `is_print`, `base_font`
+                               (screens: theme size x short/1080; paper:
+                               `print_body_pt` = short side / 80, >= 10 pt) and
+                               `chart_text_scale` (0.6 screen, 1.0 paper). Screens
+                               keep 1080 units on the short side; the A sizes share
+                               A0's canvas (3179x4494 at 1 unit = 1 CSS px) so a
+                               poster prints at any A size; other sheets are 1 unit
+                               = 1 CSS px. `same_aspect` (1%), `parse_view_box`,
+                               `physical_length_pt` (an SVG root's 841mm)
     enums.py          shared enums (Direction, Align, VAlign, MediaFit, MediaAlign,
                                ColorMode, Muted, Trigger, AnimationKind, FrameTarget);
                                `_KebabStrEnum`
@@ -100,7 +117,10 @@ src/
                                `PreviewLayer(path, ref)` — refs come from the caller since
                                a backdrop or an overlay is not named by an inkflow:parent.
                                Layer digests are canonical (c14n, whitespace-stripped), so a
-                               synced ancestor does not read as stale forever
+                               synced ancestor does not read as stale forever.
+                               `create_slide(canvas=)` (a blank slide at the deck's
+                               size), `layout_canvas`, `layouts_for` (the built-in
+                               layouts drawn in the deck size's shape, every other one)
     overlay.py        the `Overlay` DSL type (src only). Its own module because both
                                `themes` and `manifest` reference it, same as `Transition`
     markdown.py       markdown-it-py rendering only: code-fence highlighting, LaTeX math,
@@ -171,7 +191,20 @@ src/
                                a record only when `/_inkflow/instance` answers with its
                                pid (stale ones are deleted). `inkflow serve` opens no second
                                server for a deck (`cli.present.already_served`)
-    export.py         static HTML export (inkflow build) and PDF export (inkflow export)
+    export.py         static HTML export (inkflow build) and PDF export (inkflow export);
+                               `pdf_pages`: each slide's page (the --size override,
+                               else the deck's size, else the slide's own: physical
+                               width/height, else viewBox px), every distinct size a
+                               named `@page` the slide's box selects (`page:`), so
+                               mixed sizes print each on its own sheet; `--bleed`
+                               (`extend_backgrounds`: canvas-covering rects/images
+                               grown into it) and `--crop-marks`; `find_chromium`
+    pdfboxes.py       `set_page_boxes`: Chromium writes page sizes on a ~1/75 in grid, so
+                               each page's MediaBox is rewritten to the exact size
+                               (aligned with the content hung from the top-left),
+                               plus TrimBox/BleedBox with bleed; the file is
+                               re-assembled from its xref table (left alone when
+                               it is not a classic-xref PDF)
     assets.py         asset reference resolution. `AssetRoots` holds the allowed roots
                                (project dir, theme asset dir) and converts between an
                                absolute path and a canonical ref both ways; `AssetSource`
@@ -200,7 +233,9 @@ src/
                                slides/ + notes/, writes a 3-slide deck.py and a bare
                                pyproject.toml pinning inkflow (`~=` compatible release);
                                command refuses a non-empty target (dotfiles ignored)
-                               unless --force
+                               unless --force. `scaffold_poster` (init --poster
+                               [--size]): templates/poster/ (poster.md, figures/) on
+                               poster-3col (poster-landscape-3col for a landscape sheet)
     loaders.py        deck style / script loading helpers. `load_deck_styles` emits the
                                CSS cascade: contract.css → active theme tokens → the
                                *built-in* theme's styles.css (always, since any theme may
@@ -225,7 +260,7 @@ src/
                                level instead of stdlib's lastResort stderr
     svg.py            SVG tree utilities (ensure_defs, with_namespaces,
                                compose_with_ancestors, compose_overlays,
-                               duplicate_zone_ids, is_full_canvas_fill)
+                               duplicate_zone_ids, is_full_canvas_fill, canvas_size)
     svgio.py          SVG parse/serialize primitives: one hardened parser, SvgElement alias
     extensions.py     `ServerExtension` (build hooks, `messages` with the least `Role`,
                                `welcome`/`hello`/`message`/`disconnected`, `http`, `keys`,
@@ -251,7 +286,9 @@ src/
                                page = what `hello` said it is, online); `listing()` =
                                the pages open; `Role` (owner/editor/viewer) is access.py's
     verify.py         slide authoring checks (inkflow verify); plugins' `slide_checks`
-                               run after the core's, `verify_deck` their `deck_checks`
+                               run after the core's, `verify_deck` their `deck_checks`;
+                               `check_size` (a slide of another shape than the deck's
+                               size is letterboxed)
     plugins.py        `Plugin` (entry-point group `inkflow.plugins`): `register_cli`,
                                `slide_checks`/`deck_checks`, `server_extensions` +
                                `serve_options`, `completion_spec`;
@@ -264,11 +301,16 @@ src/
     bundles/          pre-built JS/CSS output (committed; no Node needed at install time)
       presenter.js    navigation, transitions, WebSocket, presenter panel
       presenter.css   all presenter styles including the sidebar panel
-    theme/            built-in theme: layouts/*.svg, icon.svg, showcase/, and
+    theme/            built-in theme: layouts/*.svg (the 16:9 ones, and poster-base/
+                               poster-landscape-base with poster-2col/-3col/
+                               -landscape-3col/-4col on the A canvas: zones title,
+                               authors, affiliations, logos, col-N, references,
+                               contact), icon.svg, showcase/, and
                                styles.css (per-layout zone styling for those layouts,
                                loaded for every deck — keep its rules `.layout-*`-scoped)
     templates/        inkflow init starter files (title.svg, diagram.svg, guide.md,
-                               diagram.md, notes/*.md) copied verbatim into new projects
+                               diagram.md, notes/*.md) copied verbatim into new projects;
+                               poster/ is `init --poster`'s
   ts/                 TypeScript source
     globals.d.ts      ambient declarations for Python-injected globals (__SLIDES_JSON__ etc.)
     shared/           types, step engine (step.ts: WAAPI cue driver + elementActions),
@@ -283,7 +325,9 @@ src/
                       as what changed: `applyPatch` puts a list together from
                       the items a page holds, named by `key`; null = a key it
                       lacks, the page sends `resync`; tested); deck-styles.ts
-                      (`applyDeckStyles`: an `update`'s `styles`/`mode`)
+                      (`applyDeckStyles`: an `update`'s `styles`/`mode`);
+                      viewbox.ts (a missing viewBox falls back to the deck
+                      canvas, which a frontend sets with `setDeckCanvas`)
     presenter/        main presenter modules — navigation, transitions (progress-driven
                       via progress-driver.ts), overview, picker, websocket, status bar,
                       keyboard, syncmenu.ts (sync-mode status-bar control),
@@ -384,6 +428,9 @@ An asset must live under an allowed root: the project dir (canonical prefix `""`
 `build`/`export` copy every referenced local file into the output dir, mirroring the source tree; a canonical ref is relative and `..`-free by construction, so `out_dir / ref` always lands inside and needs no rewriting. `_slide_refs` scans the *emitted* SVG and notes rather than walking the deck, so a pruned zone takes its asset with it. A reference that resolves to nothing is a `logger.warning`, not a silent skip. `serve` streams the same refs on demand instead of copying.
 
 `build --inline-assets` swaps the copy for `_inline_assets`, which rewrites each reference to a `data:` URI through `assets.rewrite_references` — the same `REFERENCE_PATTERNS` the scan uses, so both halves learn a new reference kind at once. It runs *after* `embed_fonts_css_subsetted`, because the subsetter scans these very slide strings for used characters and base64 would pin the whole font. `assets.MIME_TYPES` is the shared table naming what `serve` sends and what the data URI claims; a suffix missing from it is copied out and warned about rather than dropped, so the build can fall short of one file but never loses an asset. Each reference is inlined where it stands, so a shared asset is carried once per use — the reason this is a flag and not the default.
+
+**A deck's size is a canvas plus a page, and the A sizes share one canvas.**
+`Deck(size=)` (`sizes.PageSize`) names both: the user units new slides get and the sheet a PDF page is. A slide's own size stays its `viewBox`; the deck size only decides what is created (blank slides from `inkflow add`, the built-in layouts `inkflow layouts` lists, and for a frontend its inserts and thumbnails' shape: `layouts_for`, shared/viewbox.ts `setDeckCanvas`) and what is printed (`export.pdf_pages` fits each viewBox onto the page, letterboxing another shape, which `verify` warns about). All A sizes share A0's canvas so one poster design and the `poster-*` layouts serve every A sheet, and text scales with the sheet (`base_font`: 1/80 of the short side, 30 pt on A0). A print deck is light unless its theme or `mode=` says otherwise. `None` keeps the pre-size behaviour exactly (per-slide pages, 16:9 new slides, theme mode and font).
 
 **Markdown content injection (`md=`) uses `<foreignObject>`.**
 Markdown is rendered to HTML via `markdown-it-py`.

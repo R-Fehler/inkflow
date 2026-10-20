@@ -31,6 +31,11 @@ You can also write a full path, or point anywhere else.
 That is a complete slide.
 The SVG is loaded, stripped of editor metadata, and served.
 
+A slide's size is its SVG's `viewBox`. The deck's own size,
+`Deck(size="4:3")`, `"9:16"`, `"a0"` for a poster, is the canvas new slides are
+drawn on and the page the PDF prints at; without one, new slides are 16:9
+(1920 x 1080). See [Posters and page sizes](posters.md).
+
 ## Element IDs
 
 The one convention a slide must follow:

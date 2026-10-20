@@ -85,7 +85,7 @@ def frozen(value: object, depth: int = 0) -> object:
     if isinstance(value, enum.Enum):
         return (kind, value.name)
     for base in (str, int, float):
-        # A str or number subclass (Inline, Easing, Trigger).
+        # A str or number subclass (Inline, Easing, Trigger, PageSize).
         if isinstance(value, base):
             own = cast("dict[str, object]", getattr(value, "__dict__", {}))
             return (kind, base(value), frozen(dict(own), depth + 1))

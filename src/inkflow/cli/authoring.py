@@ -33,12 +33,14 @@ from inkflow.layout import (
     discover_overlays,
     inject_preview_layers,
     layout_zones,
+    layouts_for,
     resolve_chain,
     resolve_parent_path,
     strip_parent,
 )
 from inkflow.logging import console, logger, report
 from inkflow.pipeline import resolve_slide_src
+from inkflow.sizes import PageSize
 from inkflow.svg import with_namespaces
 from inkflow.svgio import parse_svg_file
 from inkflow.themes import Theme
@@ -318,15 +320,19 @@ def add_slide(output: Path, parent: str | None, deck_path: Path, no_deck: bool) 
 
     OUTPUT is the path for the new SVG file. With `-p`/`--parent`, the slide is
     wired to that layout (bare name, 'local:foo', 'theme:foo', 'builtin:foo', or a
-    relative path) and given preview layers. Without it, a blank slide is created.
+    relative path) and given preview layers. Without it, a blank slide is created
+    at the deck's size (`Deck(size=...)`, 16:9 without one or without a deck).
     """
+    project_dir: Path | None = None
+    theme = None
+    canvas = PageSize.WIDESCREEN.canvas
     if parent is not None and not no_deck:
         project = Project.load(deck_path)
-        project_dir: Path | None = project.dir
+        project_dir = project.dir
         theme = project.theme
-    else:
-        project_dir = None
-        theme = None
+        canvas = project.deck.effective_size.canvas
+    elif not no_deck and deck_path.exists():
+        canvas = Project.load(deck_path).deck.effective_size.canvas
 
     output_path = output.resolve()
     if output_path.exists():
@@ -334,7 +340,7 @@ def add_slide(output: Path, parent: str | None, deck_path: Path, no_deck: bool) 
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        create_slide(parent, output_path, project_dir, theme)
+        create_slide(parent, output_path, project_dir, theme, canvas)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -456,11 +462,16 @@ def _asset_rows(
     kind: AssetKind,
     project_dir: Path | None,
     theme: Theme | None,
+    size: PageSize | None = None,
 ) -> dict[str, list[_LayoutRow]]:
-    """Group discovered layouts or overlays by source, with their chains and zones."""
+    """Group discovered layouts or overlays by source, with their chains and
+    zones; with a deck ``size``, only the layouts offered to it (`layouts_for`)."""
     discover = discover_layouts if kind is AssetKind.LAYOUT else discover_overlays
+    found = discover(project_dir, theme)
+    if size is not None and kind is AssetKind.LAYOUT:
+        found = layouts_for(found, size)
     groups: dict[str, list[_LayoutRow]] = {}
-    for source_label, path in discover(project_dir, theme):
+    for source_label, path in found:
         try:
             chain = resolve_chain(path, project_dir, theme, kind)
         except ValueError as exc:
@@ -491,13 +502,17 @@ def layouts_cmd(deck_path: Path, no_deck: bool) -> None:
     (a `zone-slide-number` or `zone-slide-total`). Layouts compose behind a slide,
     overlays on top of it, and the two are separate namespaces. The overlay section
     is omitted when no overlays exist. Pass `--no-deck` to list only the built-ins.
+
+    With a deck, the built-in layouts listed are those drawn in its size's
+    shape (`Deck(size="a0")`: the poster layouts; a 16:9 deck: the 16:9 ones).
     """
 
     project = load_project_or_none(deck_path, no_deck)
     project_dir = project.dir if project else None
     theme = project.theme if project else None
+    size = project.deck.effective_size if project else None
 
-    _print_asset_tables(_asset_rows(AssetKind.LAYOUT, project_dir, theme))
+    _print_asset_tables(_asset_rows(AssetKind.LAYOUT, project_dir, theme, size))
 
     overlay_groups = _asset_rows(AssetKind.OVERLAY, project_dir, theme)
     if overlay_groups:
