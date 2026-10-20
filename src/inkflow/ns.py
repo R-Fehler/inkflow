@@ -9,6 +9,9 @@ INKSCAPE_LABEL = f"{{{INKSCAPE}}}label"
 
 INKFLOW_PARENT = f"{{{INKFLOW}}}parent"
 INKFLOW_DEFAULT_ZONE = f"{{{INKFLOW}}}default-zone"
+INKFLOW_LOCKED = f"{{{INKFLOW}}}locked"
+"""On an object or layer a visual editor must not select (``"true"``); unlike
+``sodipodi:insensitive`` it survives ``inkflow clean``."""
 INKFLOW_LAYOUT_SRC = f"{{{INKFLOW}}}layout-src"
 INKFLOW_LAYOUT_HASH = f"{{{INKFLOW}}}layout-hash"
 INKFLOW_OVERLAY_SRC = f"{{{INKFLOW}}}overlay-src"

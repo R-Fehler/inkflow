@@ -171,10 +171,21 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
             deck_hash = file_hash(deck_path.read_bytes())
             deck = await asyncio.to_thread(load_deck, deck_path)
             project_dir = deck_path.parent
-            slides = await asyncio.to_thread(process_deck, deck, project_dir, deck_path)
-            build = Build(deck, deck_path, deck_hash, slides, served=slides)
+            # An extension may ask for source locators on every element; the
+            # presenter ignores them, so one build serves every page.
+            built = await asyncio.to_thread(
+                functools.partial(
+                    process_deck, editor=any(ext.provenance for ext in extensions)
+                ),
+                deck,
+                project_dir,
+                deck_path,
+            )
+            build = Build(deck, deck_path, deck_hash, built)
             for ext in extensions:
                 await asyncio.to_thread(ext.build, build)
+            slides = [_without_edit(s) for s in built]
+            build.served = slides
             transitions = resolve_transitions(deck)
             styles_css = await asyncio.to_thread(load_deck_styles, deck, project_dir)
             if deck.embed_fonts:
@@ -244,6 +255,15 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         with contextlib.suppress(asyncio.CancelledError):
             await spin
         ui.refresh()
+
+
+def _without_edit(slide: SlideData) -> SlideData:
+    """The pages' copy of a slide: the editor facts stay with the extensions."""
+    if "edit" not in slide:
+        return slide
+    data = slide.copy()
+    del data["edit"]
+    return data
 
 
 def build_status() -> dict[str, object]:

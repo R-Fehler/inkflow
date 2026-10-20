@@ -74,6 +74,7 @@ class Recorder(ServerExtension):
     ``secret``."""
 
     name: str = "recorder"
+    provenance: bool = True
     messages: Mapping[str, Role] = {"ping": "viewer", "secret": "owner"}
 
     def __init__(self) -> None:
@@ -240,6 +241,13 @@ def test_an_extension_follows_the_server_and_its_builds(
         "built 2",
     ]
     build = recorder.builds[0]
+    # It asked for provenance: every element carries its source locator, and
+    # each slide its edit facts, which stay with the extensions (the pages get
+    # the slides without them; the locators, inert attributes, stay).
+    assert 'data-ink="' in build.slides[0]["svg"]
+    assert "edit" in build.slides[0]
+    assert all("edit" not in s for s in build.served)
+    assert 'data-ink="' in build.served[0]["svg"]
     assert build.fresh and build.deck_hash
     assert build.project_dir == build.deck_path.parent
     assert recorder.server is not None

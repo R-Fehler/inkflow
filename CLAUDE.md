@@ -147,6 +147,16 @@ src/
                                `welcome`/`hello`/`message`/`disconnected`, `http`, `keys`),
                                `ServerContext` (server.`context`), `Build`, `HttpRequest`,
                                `State`, `ServeConfig`
+    provenance.py     source locators on the composed SVG (`data-ink="<source>:<child
+                               path>"`, counted on the tree as parsed from disk:
+                               `clean_inkscape_tree(before_clean=)`) and `locate`, their
+                               inverse; `INK_TOP` (a selectable object), `INK_LAYER`,
+                               `INK_LOCKED` (`inkflow:locked`), `INK_TAG` (a filled zone's
+                               shape); stamped by `process_deck(editor=True)`
+                               (`SourceTable`), which also gives each slide `edit`
+                               (`SlideEditInfo`: sources, `emptyZones`, `zoneOrigins`);
+                               the server builds so when an extension has `provenance`,
+                               and the pages' copies drop `edit` (`_without_edit`)
     collab.py         `Client` (id, role, page from `hello`) / `People` per connection;
                                `Role` owner/editor/viewer (server.`role_for`: owner = loopback
                                peer through a loopback Host/Origin)

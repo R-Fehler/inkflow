@@ -116,7 +116,12 @@ the order they happen:
 - `open(deck_path)` / `close(switching=…)` for the deck served;
 - `before_build()` and `build(build)` in a worker thread, inside each build
   (raising fails the build); `built(build)` once the pages have the new
-  slides; `build_failed(...)`;
+  slides; `build_failed(...)`. With `provenance = True` every element is
+  stamped with `data-ink="<source>:<child path>"` and each slide carries its
+  `edit` facts (the files it is drawn from, its empty zones, where each
+  zone's content is written; `inkflow.provenance.locate` finds an element in
+  its file again): what an editor needs to write a change back. The pages get
+  the same slides without the `edit` facts;
 - `messages`: the WebSocket message types it handles, each with the least role
   that may send it (`"owner"`, `"editor"`, `"viewer"`); `message(...)` gets
   them, `hello(...)` tells it what each page is (`{"type": "hello", "role":
@@ -145,3 +150,5 @@ can wait for its own edit to build.
 ::: inkflow.extensions.Build
 
 ::: inkflow.extensions.HttpRequest
+
+::: inkflow.provenance
