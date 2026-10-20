@@ -102,6 +102,13 @@ class Corporate(Theme):
 
 A deck opts out with `Deck(overlays=[])`, a slide with `Slide(overlays=[])`.
 
+## Changing a theme's overlay
+
+A theme's overlay is changed like a theme's layout: copy its file into the
+project's `overlays/` under the same name and mark the copy
+`inkflow:copy-of="theme:logo"`. The copy is worn wherever the theme's file
+would be ([the deck's own copy](layouts.md#changing-a-themes-layout-the-decks-own-copy)).
+
 ## Drawing one
 
 An overlay file previews differently from a slide,
