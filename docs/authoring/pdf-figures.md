@@ -32,6 +32,21 @@ A path resolves against the file it is written in, as for
 The page shows at its own box (the crop box, what a PDF viewer shows),
 so a LaTeX `standalone` figure or a cropped plot needs no trimming.
 
+Most PDF figures have no background of their own: the slide shows through,
+as it does with a transparent PNG. On a dark deck, black axes and labels
+disappear. Give the picture a **background**: `"paper"` paints white behind
+it, with a small margin and rounded corners, whatever the deck's mode:
+
+```python
+zones = {"media": Image("figures/plot.pdf", background="paper")}
+```
+
+In a slide's SVG it is `inkflow:background="paper"` on the `<image>`
+(`inkflow:background-padding` sets the margin in user units; by default it is
+4 % of the picture's shorter side). `"surface"` uses the theme's surface
+colour instead, and a theme colour name (`"blue"`) or `#rrggbb` any other.
+It works for any picture: an SVG or a transparent PNG, too.
+
 ## Installing a converter
 
 Browsers do not show a PDF inside a slide, so Inkflow converts each page to SVG.

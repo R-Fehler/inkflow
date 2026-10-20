@@ -13,6 +13,7 @@ from typing import NamedTuple, NotRequired, Protocol, TypedDict, cast
 from inkflow import ns
 from inkflow.animations import Animation, Cue, Frame, PlayVideo, TimedCue
 from inkflow.assets import AssetRoots, AssetSource, read_resolved_svg
+from inkflow.backgrounds import picture_backgrounds
 from inkflow.charts import ZONE_TEXT_SCALE, fence_font
 from inkflow.content import (
     empty_zone_shapes,
@@ -23,6 +24,7 @@ from inkflow.content import (
     zone_box,
 )
 from inkflow.deps import note
+from inkflow.drawio_inline import inline_diagrams
 from inkflow.enums import AnimationKind, ColorMode, Direction, FrameTarget, Trigger
 from inkflow.layout import (
     AssetKind,
@@ -599,6 +601,13 @@ class SlideSvg:
                 ],
             )
 
+    def picture_backgrounds(self) -> None:
+        self.root = picture_backgrounds(self.root)
+
+    def inline_diagrams(self, roots: AssetRoots) -> None:
+        register = self.sources.key if self.sources is not None else None
+        self.root = inline_diagrams(self.root, roots, register)
+
     def pop_hints(self) -> dict[str, str]:
         """The layouts' placeholder prompts (``<inkflow:hint zone=…>``), by
         zone name, taken out of the slide: they are for an editor only. The
@@ -774,6 +783,9 @@ def process_slide(
     doc.compose_ancestors(chain, ctx.assets)
     doc.compose_overlays(overlay_chains, ctx.assets)
     hints = doc.pop_hints()
+    # Before annotation, so animations can target a diagram's shapes.
+    doc.inline_diagrams(ctx.assets)
+    doc.picture_backgrounds()
     for zone_id in doc.duplicate_zone_ids():
         logger.warning(
             f"{slide_id}: {zone_id} is declared more than once after composition — "

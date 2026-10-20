@@ -216,3 +216,8 @@ To clean files committed before the hook was in place:
 ```bash
 inkflow clean slides/*.svg
 ```
+
+draw.io diagrams (`*.drawio.svg`, or any SVG carrying a draw.io source) are
+left alone by `inkflow clean` and the hook: the file is draw.io's own. Through
+the diff driver, `git diff` shows such a file as its draw.io source, one shape
+a line, compressed in the file or not. See [draw.io diagrams](diagrams.md).

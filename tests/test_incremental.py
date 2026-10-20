@@ -542,6 +542,30 @@ def test_a_page_committed_beside_its_pdf_rebuilds_the_slide(
     assert "plot.pdf.p1.svg" not in _by_id(project.full())["drawing"]["svg"]
 
 
+DIAGRAM = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="40px" height="20px"'
+    + ' viewBox="0 0 40 20" content="&lt;mxfile/&gt;">'
+    + '<g data-cell-id="a"><rect width="10" height="10" fill="#dae8fc"/></g></svg>'
+)
+
+
+def test_a_drawn_in_diagram_rebuilds_the_slide_drawing_it(project: Project) -> None:
+    """A diagram drawn into its slide is read by the build (a picture is only
+    an address): the slide follows the diagram's file."""
+    _ = project.write("diagrams/flow.drawio.svg", DIAGRAM)
+    project.edit(
+        "slides/drawing.svg",
+        "<text",
+        '<image xmlns:inkflow="urn:inkflow" id="flow" inkflow:drawio="inline"'
+        + ' href="../diagrams/flow.drawio.svg" width="40" height="20"/><text',
+    )
+    assert project.rebuilt() == ["drawing"]
+    assert 'id="flow-a"' in _by_id(project.full())["drawing"]["svg"]
+    project.edit("diagrams/flow.drawio.svg", 'width="10"', 'width="30"')
+    assert project.rebuilt() == ["drawing"]
+    assert project.rebuilt() == []
+
+
 def test_a_page_that_could_not_be_converted_is_tried_again(
     project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
