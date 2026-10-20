@@ -32,11 +32,15 @@ on a held-out set against the same baseline.
 
 ## Results
 
-| Model | Accuracy (%) | Baseline (%) |
-|---|---:|---:|
-| Small | 71 | 64 |
-| Medium | 82 | 66 |
-| Large | 89 | 67 |
+```chart
+data: ../data/results.csv
+kind: bar
+title: Accuracy (%)
+y-min: 0
+y-max: 100
+labels: true
+aspect: 4:3
+```
 
 Every variant beats the baseline; the large one by 22 points.
 

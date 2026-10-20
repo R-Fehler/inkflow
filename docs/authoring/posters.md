@@ -32,8 +32,8 @@ def main() -> Deck:
     )
 ```
 
-with its sections in `slides/poster.md` (a results table among them), a
-method figure and a logo placeholder in `figures/`.
+with its sections in `slides/poster.md`, a chart plotted from
+`data/results.csv`, a method figure and a logo placeholder in `figures/`.
 
 ## Sizes
 
@@ -133,8 +133,11 @@ Text follows the sheet, so an A1 poster is the A0 one scaled down: read from a
 little closer. `Deck(font_size=...)` still sets the body size in units
 (`font_size=44` on A0 is 33 pt).
 
-## Figures
+## Figures and charts
 
+- **Charts** ([`Chart`](charts.md) or a ```` ```chart ```` fence) draw their
+  text at the body size on paper (0.6 of it on a screen): axis labels 24 pt on
+  A0. They are vector, so they print sharp at any size.
 - **Drawings**: an SVG stays vector and prints sharp at any size. Prefer it to
   a screenshot.
 - **Photos** need pixels: at least 150 dpi at their printed size (a picture

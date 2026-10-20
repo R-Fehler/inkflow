@@ -36,6 +36,7 @@ LAYOUT = textwrap.dedent("""\
       <rect width="1920" height="1080" class="inkflow-fill-bg"/>
       <rect id="zone-title" x="80" y="60" width="1760" height="100"/>
       <rect id="zone-content" x="80" y="200" width="1760" height="780"/>
+      <rect id="zone-chart" x="80" y="200" width="800" height="600"/>
       <text id="zone-slide-number" x="1800" y="1040">99</text>
       <text id="zone-slide-total" x="1840" y="1040">99</text>
     </svg>
@@ -67,7 +68,7 @@ FOOTER = textwrap.dedent("""\
 
 
 DECK = textwrap.dedent("""\
-    from inkflow import Deck, Overlay, Slide
+    from inkflow import Chart, Deck, Overlay, Slide
 
 
     def main() -> Deck:
@@ -79,7 +80,7 @@ DECK = textwrap.dedent("""\
                 Slide("child", md="two.md", notes="notes/two.md"),
                 Slide(
                     "two",
-                    zones={"title": "Sales", "content": "Revenue grew."},
+                    zones={"title": "Sales", "chart": Chart("data/sales.csv")},
                 ),
                 Slide("two", md="five.md", extra_style="slides/five.css"),
             ],
@@ -157,6 +158,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Project:
     _ = p.write("slides/five.css", "#zone-title { fill: red; }\n")
     _ = p.write("notes/drawing.md", "Speak.\n")
     _ = p.write("notes/two.md", "Second *note*.\n")
+    _ = p.write("data/sales.csv", "year,revenue\n2023,10\n2024,14\n")
     _ = p.write("styles.css", ":root { --x: 1; }\n")
     _ = p.write("deck.py", DECK)
     assert p.rebuilt() == IDS
@@ -194,6 +196,16 @@ def test_a_note_rebuilds_no_slide(project: Project) -> None:
 def test_a_slides_style_file_rebuilds_that_slide(project: Project) -> None:
     project.edit("slides/five.css", "red", "blue")
     assert project.rebuilt() == ["five"]
+
+
+def test_chart_data_rebuilds_the_slide_drawing_it(project: Project) -> None:
+    project.edit("data/sales.csv", "2024,14", "2024,31")
+    assert project.rebuilt() == ["two-2"]
+    # Gone, the chart's place says so; back, it is drawn again.
+    (project.root / "data" / "sales.csv").unlink()
+    assert project.rebuilt() == ["two-2"]
+    _ = project.write("data/sales.csv", "year,revenue\n2023,1\n")
+    assert project.rebuilt() == ["two-2"]
 
 
 def test_a_layout_rebuilds_the_slides_built_on_it(project: Project) -> None:

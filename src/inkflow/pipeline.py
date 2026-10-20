@@ -13,6 +13,7 @@ from typing import NamedTuple, NotRequired, Protocol, TypedDict, cast
 from inkflow import ns
 from inkflow.animations import Animation, Cue, Frame, PlayVideo, TimedCue
 from inkflow.assets import AssetRoots, AssetSource, read_resolved_svg
+from inkflow.charts import ZONE_TEXT_SCALE, fence_font
 from inkflow.content import (
     empty_zone_shapes,
     inject_style,
@@ -35,9 +36,7 @@ from inkflow.logging import logger
 from inkflow.manifest import (
     Deck,
     Inline,
-    Media,
     Slide,
-    TextBox,
     Video,
 )
 from inkflow.ns import INKFLOW_HINT
@@ -49,7 +48,12 @@ from inkflow.svgio import SvgElement, serialize_svg
 from inkflow.themes import Theme
 from inkflow.titles import humanize
 from inkflow.transitions import Transition
-from inkflow.zones import ParsedMarkdown, build_slide_content, parse_markdown_zones
+from inkflow.zones import (
+    ParsedMarkdown,
+    ZoneFill,
+    build_slide_content,
+    parse_markdown_zones,
+)
 
 # ── Slide wire format ────────────────────────────────────────────────────────
 
@@ -645,9 +649,15 @@ class SlideSvg:
         return duplicate_zone_ids(self.root)
 
     def inject_content(
-        self, content: dict[str, TextBox | Media], font_size: int, dark_mode: bool
+        self,
+        content: dict[str, ZoneFill],
+        font_size: int,
+        dark_mode: bool,
+        chart_scale: float = ZONE_TEXT_SCALE,
     ) -> None:
-        self.root = substitute_content(self.root, content, font_size, dark_mode)
+        self.root = substitute_content(
+            self.root, content, font_size, dark_mode, chart_scale
+        )
 
     def annotate(self, cues: list[tuple[Cue, int]]) -> None:
         self.root = annotate_svg(self.root, cues)
@@ -677,13 +687,15 @@ class DeckContext:
     overlays: Sequence[Overlay]  # deck default, already resolved against the theme
     mode: ColorMode
     total_slides: int
+    chart_scale: float = ZONE_TEXT_SCALE
+    """A chart's text size relative to the body text (`PageSize.chart_text_scale`)."""
     editor: bool = False
     """Stamp source locators and collect ``SlideEditInfo`` (the editor build)."""
 
 
 def _resolve_autoplay_conflicts(
-    content: dict[str, TextBox | Media], cues: list[Cue]
-) -> dict[str, TextBox | Media]:
+    content: dict[str, ZoneFill], cues: list[Cue]
+) -> dict[str, ZoneFill]:
     """Drop ``autoplay`` from a video that a ``PlayVideo`` cue also targets.
 
     Autoplay and a step cue are contradictory playback triggers; the cue wins.
@@ -770,6 +782,7 @@ def process_slide(
     if parsed is not None or slide.zones:
         zone_ids = doc.zone_ids()
         default_zone = resolve_default_zone(doc.root, zone_ids)
+        font_size = slide.font_size if slide.font_size is not None else ctx.font_size
         result = build_slide_content(
             parsed,
             slide.zones,
@@ -777,6 +790,7 @@ def process_slide(
             AssetSource.for_deck(ctx.assets),
             available_zones=zone_ids,
             default_zone=default_zone,
+            chart_font=fence_font(font_size, ctx.chart_scale),
         )
         md_notes = result.notes
         reveal_pairs = [(anim, step) for anim, step in result.animations]
@@ -787,11 +801,10 @@ def process_slide(
                 for name in (z.removeprefix("zone-") for z in result.content)
             }
         if result.content:
-            font_size = (
-                slide.font_size if slide.font_size is not None else ctx.font_size
-            )
             content = _resolve_autoplay_conflicts(result.content, slide.animations)
-            doc.inject_content(content, font_size, ctx.mode == ColorMode.DARK)
+            doc.inject_content(
+                content, font_size, ctx.mode == ColorMode.DARK, ctx.chart_scale
+            )
 
     # The deck animations=[...] list continues the timeline after the markdown
     # reveals (steps 1..reveal_max), so the two form one continuous count.
@@ -899,6 +912,7 @@ def deck_context(
         overlays=deck.effective_overlays,
         mode=deck.effective_mode,
         total_slides=total_slides,
+        chart_scale=deck.effective_size.chart_text_scale,
         editor=editor,
     )
 

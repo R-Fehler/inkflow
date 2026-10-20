@@ -79,6 +79,7 @@ nav:
     - Camera: authoring/camera.md
     - Transitions: authoring/transitions.md
     - Morph in depth: authoring/morph.md
+    - Charts: authoring/charts.md
     - Posters and page sizes: authoring/posters.md
     - Working in Inkscape: authoring/inkscape.md
   - Layouts and themes:

@@ -126,6 +126,7 @@ _POSTER_FILES = {
     "poster.md": "slides/poster.md",
     "figures/method.svg": "figures/method.svg",
     "figures/logo.svg": "figures/logo.svg",
+    "data/results.csv": "data/results.csv",
 }
 
 
@@ -138,8 +139,8 @@ def poster_layout(size: PageSize) -> str:
 
 def scaffold_poster(target: Path, size: str = "a0") -> PageSize:
     """Create a conference poster project in ``target``: one page on a
-    built-in poster layout, its sections in ``slides/poster.md``, and a figure
-    and a logo in ``figures/``.
+    built-in poster layout, its sections in ``slides/poster.md``, a chart
+    from ``data/results.csv`` and a figure and a logo in ``figures/``.
 
     Raises ValueError for a size that is not a paper size."""
     sheet = PageSize(size)

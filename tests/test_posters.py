@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
+from inkflow.charts import FENCE_FONT, fence_font
 from inkflow.cli import main
 from inkflow.init import poster_layout, scaffold_poster
 from inkflow.layout import discover_layouts, layout_canvas, layouts_for
@@ -80,7 +82,12 @@ def test_scaffold_poster(poster: Path) -> None:
     deck = load_deck(poster / "deck.py")
     assert deck.size == "a0"
     assert deck.slides[0].src == "poster-3col"
-    for rel in ("slides/poster.md", "figures/method.svg", "figures/logo.svg"):
+    for rel in (
+        "slides/poster.md",
+        "figures/method.svg",
+        "figures/logo.svg",
+        "data/results.csv",
+    ):
         assert (poster / rel).is_file()
     slides = process_deck(deck, poster, poster / "deck.py")
     svg = slides[0]["svg"]
@@ -88,7 +95,7 @@ def test_scaffold_poster(poster: Path) -> None:
     assert root.get("viewBox") == "0 0 3179 4494"
     for zone in ("title", "authors", "col-1", "col-2", "col-3", "references"):
         assert f'id="zone-{zone}"' in svg
-    assert "<table" in svg  # the results, a Markdown table
+    assert 'class="inkflow-chart"' in svg  # the Markdown chart was drawn
     assert "method.svg" in svg
 
 
@@ -111,3 +118,41 @@ def test_init_poster_cli(tmp_path: Path) -> None:
     assert 'size="a1"' in (target / "deck.py").read_text()
     bad = CliRunner().invoke(main, ["init", str(tmp_path / "x"), "--size", "4:3"])
     assert bad.exit_code != 0 and "paper size" in bad.output
+
+
+def _font_sizes(svg: str, zone: str) -> list[float]:
+    """The font-size of every text of one chart zone."""
+    start = svg.index(f'id="zone-{zone}"')
+    end = svg.index("</svg>", start)
+    found = re.finditer(r'font-size="([\d.]+)"', svg[start:end])
+    return [float(m.group(1)) for m in found]
+
+
+def test_chart_text_follows_the_print_type_scale(tmp_path: Path) -> None:
+    (tmp_path / "data.csv").write_text("x,y\na,1\nb,2\n")
+    zone = '<rect id="zone-plot" x="100" y="100" width="1000" height="800"/>'
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {}">{}</svg>'
+    (tmp_path / "chart.svg").write_text(svg.format("3179 4494", zone))
+    (tmp_path / "wide.svg").write_text(svg.format("1920 1080", zone))
+
+    def sizes(size: str | None, src: str) -> list[float]:
+        arg = f"size={size!r}, " if size else ""
+        (tmp_path / "deck.py").write_text(
+            "from inkflow import Chart, Deck, Slide\n\n\n"
+            + f"def main() -> Deck:\n    return Deck({arg}slides=[Slide("
+            + f'"./{src}", zones={{"plot": Chart("data.csv")}})])\n'
+        )
+        deck = load_deck(tmp_path / "deck.py")
+        return _font_sizes(
+            process_deck(deck, tmp_path, tmp_path / "deck.py")[0]["svg"], "plot"
+        )
+
+    screen = sizes(None, "wide.svg")
+    poster = sizes("a0", "chart.svg")
+    # Axis labels are 0.8 of the chart text: 0.6 of the 36 px body on a 16:9
+    # slide, on A0 the 40-unit body itself (24 pt).
+    assert max(screen) == pytest.approx(36 * 0.6 * 0.8, abs=0.01)
+    assert max(poster) == pytest.approx(40 * 1.0 * 0.8, abs=0.01)
+    # A Markdown chart likewise.
+    assert fence_font(36) == FENCE_FONT
+    assert fence_font(40, 1.0) == pytest.approx(FENCE_FONT * 40 / 36 / 0.6)

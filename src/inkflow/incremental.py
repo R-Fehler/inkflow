@@ -9,12 +9,14 @@ of the slide's inputs changed. One-shot commands (`build`, `export`,
 What a slide's result depends on, and how each part is watched:
 
 - **The files it read or looked for** (its SVG, layout chain, overlays,
-  Markdown, a style file, every candidate a name was searched at):
+  Markdown, chart data, a style file, every candidate a name was searched
+  at):
   recorded while it is processed (`inkflow.deps`) and compared by stamp
   (time, size, inode; "not there" included) at the next build. A layout or an
   overlay edited is thus every slide built on it, and nothing else.
 - **What deck.py says of it** (`Slide(...)`, every field) **and of the deck**
-  (theme, mode, font size, overlays, deck style): compared by value
+  (theme, mode, font size, overlays, deck style, the chart text scale its
+  size gives): compared by value
   (`_frozen`). A class deck.py defines itself (a custom animation) is new on
   every load, so slides using one are processed every time.
 - **Its id**: entries are kept by id, and the id is part of the key.
@@ -140,6 +142,7 @@ def _context_key(ctx: DeckContext, deck_path: Path) -> object:
         ctx.font_size,
         frozen(list(ctx.overlays)),
         ctx.mode,
+        ctx.chart_scale,
         ctx.editor,
     )
 
