@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Sequence
 from pathlib import Path
 
 import click
 
 from inkflow.cli._common import deck_option, main, resolve_deck_path
 from inkflow.export import build_pdf, build_static_html
+from inkflow.extensions import ServeConfig
 from inkflow.logging import Levels, report
+from inkflow.server import extensions_for
 from inkflow.server import serve as _serve
 
 
@@ -23,7 +26,14 @@ from inkflow.server import serve as _serve
 @click.option("--port", default=7777, show_default=True, help="HTTP port")
 @click.option("--ws-port", default=7778, show_default=True, help="WebSocket port")
 @click.pass_obj
-def serve(levels: Levels, deck_path: Path, host: str, port: int, ws_port: int) -> None:
+def serve(
+    levels: Levels,
+    deck_path: Path,
+    host: str,
+    port: int,
+    ws_port: int,
+    **plugin_options: object,
+) -> None:
     """Start the presentation server with live reload.
 
     Serves the deck at `http://{host}:{port}` and pushes slide updates over a
@@ -38,8 +48,15 @@ def serve(levels: Levels, deck_path: Path, host: str, port: int, ws_port: int) -
     - `q`: quit (Ctrl-D and Ctrl-C also work)
     """
     resolved = resolve_deck_path(deck_path)
+    extensions = extensions_for(ServeConfig(resolved, host, port, plugin_options))
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(_serve(resolved, host, port, ws_port, levels))
+        asyncio.run(_serve(resolved, host, port, ws_port, levels, extensions))
+
+
+def add_serve_options(options: Sequence[click.Option]) -> None:
+    """Options a plugin adds to ``inkflow serve`` (``Plugin.serve_options``):
+    their values go to the extensions as ``ServeConfig.options``."""
+    serve.params.extend(options)
 
 
 @main.command("build")

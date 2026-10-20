@@ -18,12 +18,13 @@ from inkflow.assets import (
     rewrite_references,
 )
 from inkflow.enums import ColorMode
+from inkflow.extensions import State
 from inkflow.fonts import embed_fonts_css_subsetted
 from inkflow.loaders import load_deck_scripts, load_deck_styles
 from inkflow.logging import logger
 from inkflow.manifest import Deck
 from inkflow.pipeline import SlideData, process_deck, resolve_transitions
-from inkflow.server import State, build_html, load_deck
+from inkflow.server import build_html, load_deck
 from inkflow.titles import resolve_deck_title
 
 # ── build ─────────────────────────────────────────────────────────────────────

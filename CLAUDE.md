@@ -87,7 +87,9 @@ src/
                                and zones.py (markdown reveals)
     zones.py          ::zone:: / ::step:: marker grammar, zone param extraction, and slide
                                assembly (parsed markdown -> per-zone TextBox/Media)
-    server.py         HTTP server, WebSocket server, file watcher, build pipeline
+    server.py         HTTP server, WebSocket server, file watcher, build pipeline;
+                               runs the server extensions (`serve(extensions=)`,
+                               default `extensions_for` the installed plugins)
     export.py         static HTML export (inkflow build) and PDF export (inkflow export)
     assets.py         asset reference resolution. `AssetRoots` holds the allowed roots
                                (project dir, theme asset dir) and converts between an
@@ -141,10 +143,18 @@ src/
                                compose_with_ancestors, compose_overlays,
                                duplicate_zone_ids, is_full_canvas_fill)
     svgio.py          SVG parse/serialize primitives: one hardened parser, SvgElement alias
+    extensions.py     `ServerExtension` (build hooks, `messages` with the least `Role`,
+                               `welcome`/`hello`/`message`/`disconnected`, `http`, `keys`),
+                               `ServerContext` (server.`context`), `Build`, `HttpRequest`,
+                               `State`, `ServeConfig`
+    collab.py         `Client` (id, role, page from `hello`) / `People` per connection;
+                               `Role` owner/editor/viewer (server.`role_for`: owner = loopback
+                               peer through a loopback Host/Origin)
     verify.py         slide authoring checks (inkflow verify); plugins' `slide_checks`
                                run after the core's, `verify_deck` their `deck_checks`
     plugins.py        `Plugin` (entry-point group `inkflow.plugins`): `register_cli`,
-                               `slide_checks`/`deck_checks`, `completion_spec`;
+                               `slide_checks`/`deck_checks`, `server_extensions` +
+                               `serve_options`, `completion_spec`;
                                `loaded()` (found once; `INKFLOW_NO_PLUGINS=1` = none),
                                `register`/`unregister` (tests, embedding)
     ns.py             XML namespace constants
