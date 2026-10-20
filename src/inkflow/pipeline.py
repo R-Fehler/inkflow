@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import NamedTuple, NotRequired, Protocol, TypedDict, cast
 
 from inkflow import ns
-from inkflow.animations import Animation, Cue, PlayVideo
+from inkflow.animations import Animation, Cue, Frame, PlayVideo, TimedCue
 from inkflow.assets import AssetRoots, AssetSource, read_resolved_svg
 from inkflow.backgrounds import picture_backgrounds
 from inkflow.charts import ZONE_TEXT_SCALE, fence_font
@@ -25,7 +25,7 @@ from inkflow.content import (
 )
 from inkflow.deps import note
 from inkflow.drawio_inline import inline_diagrams
-from inkflow.enums import AnimationKind, ColorMode, Direction, Trigger
+from inkflow.enums import AnimationKind, ColorMode, Direction, FrameTarget, Trigger
 from inkflow.ink import compose_ink, ink_path
 from inkflow.layout import (
     AssetKind,
@@ -279,16 +279,15 @@ def _resolve_run_offsets(pairs: list[tuple[Cue, int]]) -> list[PlacedCue]:
     The slot is chosen by ``trigger``: ``ON_CLICK`` or a ``Trigger.at`` pin starts a
     fresh group (offset 0); ``WITH_PREVIOUS`` shares its predecessor's slot; and
     ``AFTER_PREVIOUS`` starts when the predecessor finishes (its slot plus its full
-    ``delay + duration`` footprint). Non-``Animation`` cues (``PlayVideo``, no timing)
-    contribute a zero footprint and their offset is unused.
+    ``delay + duration`` footprint). Untimed cues (``PlayVideo``) contribute a zero
+    footprint and their offset is unused.
     """
     prev_offset = 0.0  # slot start of the previous cue within its run
     prev_span = 0.0  # the previous cue's delay + duration footprint
     result: list[PlacedCue] = []
     for cue, step in pairs:
-        # Only Animation cues carry timing; a PlayVideo contributes a zero footprint.
-        delay = cue.delay if isinstance(cue, Animation) else 0.0
-        duration = cue.duration if isinstance(cue, Animation) else 0.0
+        delay = cue.delay if isinstance(cue, TimedCue) else 0.0
+        duration = cue.duration if isinstance(cue, TimedCue) else 0.0
         if cue.trigger == Trigger.AFTER_PREVIOUS:
             offset = prev_offset + prev_span
         elif cue.trigger == Trigger.WITH_PREVIOUS:
@@ -412,17 +411,41 @@ def _annotate_play_video(root: SvgElement, cue: PlayVideo, step: int) -> None:
     video.set("data-play-on-step", str(step))
 
 
+def _camera_entry(cue: Frame, step: int, offset: float) -> dict[str, object]:
+    """Serialize one `Frame` cue to a `data-camera` entry. The full slide is a null
+    target, so the sentinel never reaches the presenter."""
+    return {
+        "step": step,
+        "offset": offset,
+        "target": None if cue.element == FrameTarget.FULL_SLIDE else cue.element,
+        "margin": cue.margin,
+        "opts": {"duration": cue.duration, "delay": cue.delay, "easing": cue.easing},
+    }
+
+
+def _annotate_camera(root: SvgElement, entries: list[dict[str, object]]) -> None:
+    for entry in entries:
+        target = entry["target"]
+        if target is not None and root.find(f'.//*[@id="{target}"]') is None:
+            logger.warning(f"frame target #{target} not found in SVG")
+    root.set("data-camera", json.dumps(entries, separators=(",", ":")))
+
+
 def annotate_svg(root: SvgElement, cues: list[tuple[Cue, int]]) -> SvgElement:
     """Annotate the SVG for the step engine: `PlayVideo` cues stamp
     `data-play-on-step`; animation cues are grouped per target element into one
-    `data-cues` JSON list (sorted by step).
+    `data-cues` JSON list (sorted by step); `Frame` cues form one `data-camera` JSON
+    list on the root (in timeline order, which is step then offset order).
 
     ``cues`` are in timeline order, so the per-cue run ``offset`` (which cue's slot
     begins where within its step's run) is resolved here before grouping."""
     entries_by_element: dict[str, list[dict[str, object]]] = {}
+    camera_entries: list[dict[str, object]] = []
     for cue, step, offset in _resolve_run_offsets(cues):
         if isinstance(cue, PlayVideo):
             _annotate_play_video(root, cue, step)
+        elif isinstance(cue, Frame):
+            camera_entries.append(_camera_entry(cue, step, offset))
         elif isinstance(cue, Animation):
             entries_by_element.setdefault(cue.element, []).append(
                 _cue_entry(cue, step, offset)
@@ -446,6 +469,9 @@ def annotate_svg(root: SvgElement, cues: list[tuple[Cue, int]]) -> SvgElement:
             _add_class(el, f"anim-{name}")
         if _starts_hidden(entries):
             _add_class(el, "anim-pending")
+    if camera_entries:
+        camera_entries.sort(key=lambda e: cast("int", e["step"]))
+        _annotate_camera(root, camera_entries)
     return root
 
 

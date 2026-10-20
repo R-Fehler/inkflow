@@ -5,10 +5,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from inkflow import ns, pdf, plugins
-from inkflow.animations import Animation, PlayVideo
+from inkflow.animations import Animation, Frame, PlayVideo
 from inkflow.assets import AssetRoots, AssetSource
 from inkflow.charts import ResolvedChart, render
 from inkflow.clean import clean_inkscape_tree
+from inkflow.enums import FrameTarget
 from inkflow.layout import (
     are_preview_layers_current,
     discover_layouts,
@@ -158,6 +159,11 @@ def _check_animations(slide: Slide, all_ids: set[str]) -> list[Issue]:
                     f"video in zone {cue.element}: autoplay overridden by PlayVideo cue"
                 )
                 issues.append(("warn", msg))
+        elif isinstance(cue, Frame):
+            if cue.element != FrameTarget.FULL_SLIDE and cue.element not in all_ids:
+                issues.append(
+                    ("error", f"frame target #{cue.element} not found in SVG")
+                )
         elif isinstance(cue, Animation) and cue.element not in all_ids:
             issues.append(
                 ("error", f"animation element #{cue.element} not found in SVG")

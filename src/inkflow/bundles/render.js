@@ -8,6 +8,10 @@
     const [x, y, w, h] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
     return { x, y, w, h };
   }
+  function formatViewBox(vb) {
+    const round = (n) => Math.round(n * 1e3) / 1e3;
+    return `${round(vb.x)} ${round(vb.y)} ${round(vb.w)} ${round(vb.h)}`;
+  }
 
   // src/ts/shared/fit.ts
   var MIN_TEXT_FRACTION = 1 / 80;
@@ -133,6 +137,281 @@
       const fo = wrapper.parentElement;
       if (fo) fitZone(fo, min);
     }
+  }
+
+  // src/ts/shared/easing.ts
+  var NAMED_CURVES = {
+    linear: [0, 0, 1, 1],
+    ease: [0.25, 0.1, 0.25, 1],
+    "ease-in": [0.42, 0, 1, 1],
+    "ease-out": [0, 0, 0.58, 1],
+    "ease-in-out": [0.42, 0, 0.58, 1]
+  };
+  var CUBIC_BEZIER_PATTERN = /^cubic-bezier\(\s*([\d.+-]+)\s*,\s*([\d.+-]+)\s*,\s*([\d.+-]+)\s*,\s*([\d.+-]+)\s*\)$/;
+  function parseControlPoints(spec) {
+    if (!spec) return null;
+    const trimmed = spec.trim();
+    if (trimmed in NAMED_CURVES) return NAMED_CURVES[trimmed];
+    const match = CUBIC_BEZIER_PATTERN.exec(trimmed);
+    if (!match) return null;
+    const points = [match[1], match[2], match[3], match[4]].map(Number);
+    return points.every(Number.isFinite) ? points : null;
+  }
+  var identity = (progress) => progress;
+  function makeCubicBezier(points) {
+    const [x1, y1, x2, y2] = points;
+    const cx = 3 * x1;
+    const bx = 3 * (x2 - x1) - cx;
+    const ax = 1 - cx - bx;
+    const cy = 3 * y1;
+    const by = 3 * (y2 - y1) - cy;
+    const ay = 1 - cy - by;
+    const sampleX = (t) => ((ax * t + bx) * t + cx) * t;
+    const sampleY = (t) => ((ay * t + by) * t + cy) * t;
+    const sampleSlopeX = (t) => (3 * ax * t + 2 * bx) * t + cx;
+    const solveForT = (x) => {
+      let t = x;
+      for (let iteration = 0; iteration < 8; iteration++) {
+        const error = sampleX(t) - x;
+        if (Math.abs(error) < 1e-6) return t;
+        const slope = sampleSlopeX(t);
+        if (Math.abs(slope) < 1e-6) break;
+        t -= error / slope;
+      }
+      let lower = 0;
+      let upper = 1;
+      t = x;
+      while (lower < upper) {
+        const value = sampleX(t);
+        if (Math.abs(value - x) < 1e-6) return t;
+        if (x > value) lower = t;
+        else upper = t;
+        t = (lower + upper) / 2;
+      }
+      return t;
+    };
+    return (progress) => {
+      if (progress <= 0) return 0;
+      if (progress >= 1) return 1;
+      return sampleY(solveForT(progress));
+    };
+  }
+  function cubicBezierEasing(spec) {
+    const points = parseControlPoints(spec);
+    if (!points) return identity;
+    const [x1, y1, x2, y2] = points;
+    if (x1 === 0 && y1 === 0 && x2 === 1 && y2 === 1) return identity;
+    return makeCubicBezier(points);
+  }
+
+  // src/ts/shared/zoom-camera.ts
+  function clamp(n, lo, hi) {
+    return Math.min(Math.max(n, lo), hi);
+  }
+  function clampToBounds(vb, base) {
+    const w = Math.min(vb.w, base.w);
+    const h = Math.min(vb.h, base.h);
+    const x = w >= base.w ? base.x + (base.w - w) / 2 : clamp(vb.x, base.x, base.x + base.w - w);
+    const y = h >= base.h ? base.y + (base.h - h) / 2 : clamp(vb.y, base.y, base.y + base.h - h);
+    return { x, y, w, h };
+  }
+
+  // src/ts/shared/camera.ts
+  function parseCameraCues(raw) {
+    if (!raw) return [];
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  function fitFrame(rect, margin, base) {
+    let w = rect.w + 2 * margin;
+    let h = rect.h + 2 * margin;
+    if (w <= 0 && h <= 0) return { ...base };
+    const aspect = base.w / base.h;
+    if (w / aspect > h) h = w / aspect;
+    else w = h * aspect;
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h / 2;
+    return clampToBounds({ x: cx - w / 2, y: cy - h / 2, w, h }, base);
+  }
+  var RHO = Math.SQRT2;
+  var RHO2 = 2;
+  var RHO4 = 4;
+  var EPSILON2 = 1e-12;
+  function zoomPath(from, to) {
+    const cx0 = from.x + from.w / 2;
+    const cy0 = from.y + from.h / 2;
+    const cx1 = to.x + to.w / 2;
+    const cy1 = to.y + to.h / 2;
+    const w0 = from.w;
+    const w1 = to.w;
+    const dx = cx1 - cx0;
+    const dy = cy1 - cy0;
+    const d2 = dx * dx + dy * dy;
+    const aspect0 = from.h / from.w;
+    const aspect1 = to.h / to.w;
+    const view = (t, cx, cy, w) => {
+      const h = w * (aspect0 + (aspect1 - aspect0) * t);
+      return { x: cx - w / 2, y: cy - h / 2, w, h };
+    };
+    let at;
+    if (d2 < EPSILON2) {
+      at = (t) => view(t, cx0 + dx * t, cy0 + dy * t, w0 * (w1 / w0) ** t);
+    } else {
+      const d1 = Math.sqrt(d2);
+      const b0 = (w1 * w1 - w0 * w0 + RHO4 * d2) / (2 * w0 * RHO2 * d1);
+      const b1 = (w1 * w1 - w0 * w0 - RHO4 * d2) / (2 * w1 * RHO2 * d1);
+      const r0 = Math.log(Math.sqrt(b0 * b0 + 1) - b0);
+      const r1 = Math.log(Math.sqrt(b1 * b1 + 1) - b1);
+      const length = (r1 - r0) / RHO;
+      at = (t) => {
+        const s = t * length;
+        const coshR0 = Math.cosh(r0);
+        const u = w0 / (RHO2 * d1) * (coshR0 * Math.tanh(RHO * s + r0) - Math.sinh(r0));
+        return view(
+          t,
+          cx0 + u * dx,
+          cy0 + u * dy,
+          w0 * coshR0 / Math.cosh(RHO * s + r0)
+        );
+      };
+    }
+    return (t) => t <= 0 ? { ...from } : t >= 1 ? { ...to } : at(t);
+  }
+  function cameraTimeline(cues, start, resolve) {
+    const segments = cues.map((cue) => ({
+      startMs: (Math.max(0, cue.offset) + Math.max(0, cue.opts.delay)) * 1e3,
+      durationMs: Math.max(0, cue.opts.duration) * 1e3,
+      ease: cubicBezierEasing(cue.opts.easing),
+      to: resolve(cue),
+      path: null
+    })).sort((a, b) => a.startMs - b.startMs);
+    const evaluate = (timeMs, upTo) => {
+      let current = null;
+      for (let i = 0; i < upTo; i++) {
+        if (segments[i].startMs <= timeMs) current = segments[i];
+      }
+      if (!current?.path) return { ...start };
+      const progress = current.durationMs > 0 ? Math.min(1, (timeMs - current.startMs) / current.durationMs) : 1;
+      return current.path(current.ease(progress));
+    };
+    segments.forEach((segment, i) => {
+      segment.path = zoomPath(evaluate(segment.startMs, i), segment.to);
+    });
+    return {
+      totalMs: segments.reduce(
+        (m, s) => Math.max(m, s.startMs + s.durationMs),
+        0
+      ),
+      at: (timeMs) => evaluate(timeMs, segments.length)
+    };
+  }
+  function restingCamera(cues, step, base, resolve) {
+    let view = { ...base };
+    const steps = [...new Set(cues.map((c) => c.step))].sort((a, b) => a - b);
+    for (const s of steps) {
+      if (s > Math.max(step, 0)) break;
+      const timeline = cameraTimeline(
+        cues.filter((c) => c.step === s),
+        view,
+        resolve
+      );
+      view = timeline.at(step < 0 ? 0 : Number.POSITIVE_INFINITY);
+    }
+    return view;
+  }
+
+  // src/ts/shared/svg-geometry.ts
+  function screenMatrix(element) {
+    const ctm = element.getScreenCTM();
+    return ctm ? DOMMatrix.fromMatrix(ctm) : null;
+  }
+  function boxFrame(screen, box) {
+    return screen.translate(box.x, box.y).scale(box.width, box.height);
+  }
+
+  // src/ts/shared/camera-dom.ts
+  var authoredViews = /* @__PURE__ */ new WeakMap();
+  function cameraSvg(root) {
+    const svg2 = root.matches("svg[data-camera]") ? root : root.querySelector("svg[data-camera]");
+    return svg2 instanceof SVGSVGElement ? svg2 : null;
+  }
+  function authoredView(svg2) {
+    let view = authoredViews.get(svg2);
+    if (!view) {
+      view = parseViewBox(svg2.getAttribute("viewBox"));
+      authoredViews.set(svg2, view);
+    }
+    return view;
+  }
+  function measureShown(svg2, el, measure) {
+    const lifted = [];
+    for (let node = el; node && node !== svg2; node = node.parentElement) {
+      if (node instanceof SVGElement && getComputedStyle(node).display === "none") {
+        lifted.push({
+          node,
+          value: node.style.getPropertyValue("display"),
+          priority: node.style.getPropertyPriority("display")
+        });
+        node.style.setProperty("display", "inline", "important");
+      }
+    }
+    try {
+      return measure();
+    } finally {
+      for (const { node, value, priority } of lifted.reverse()) {
+        if (value) node.style.setProperty("display", value, priority);
+        else node.style.removeProperty("display");
+      }
+    }
+  }
+  function targetRect(svg2, id) {
+    const el = svg2.querySelector(`[id="${CSS.escape(id)}"]`);
+    if (!(el instanceof SVGGraphicsElement)) return null;
+    return measureShown(svg2, el, () => {
+      const slideScreen = screenMatrix(svg2);
+      const elementScreen = screenMatrix(el);
+      if (!slideScreen || !elementScreen) return null;
+      const toSlide = slideScreen.inverse().multiply(boxFrame(elementScreen, el.getBBox()));
+      const corners = [
+        new DOMPoint(0, 0),
+        new DOMPoint(1, 0),
+        new DOMPoint(0, 1),
+        new DOMPoint(1, 1)
+      ].map((corner) => corner.matrixTransform(toSlide));
+      const xs = corners.map((corner) => corner.x);
+      const ys = corners.map((corner) => corner.y);
+      const rect = {
+        x: Math.min(...xs),
+        y: Math.min(...ys),
+        w: Math.max(...xs) - Math.min(...xs),
+        h: Math.max(...ys) - Math.min(...ys)
+      };
+      return Object.values(rect).every(Number.isFinite) ? rect : null;
+    });
+  }
+  function resolver(svg2) {
+    const base = authoredView(svg2);
+    return (cue) => {
+      const rect = cue.target === null ? null : targetRect(svg2, cue.target);
+      return rect ? fitFrame(rect, cue.margin, base) : { ...base };
+    };
+  }
+  function writeView(svg2, view) {
+    svg2.setAttribute("viewBox", formatViewBox(view));
+  }
+  function applyCameraInstant(root, step) {
+    const svg2 = cameraSvg(root);
+    if (!svg2) return;
+    const cues = parseCameraCues(svg2.getAttribute("data-camera"));
+    writeView(svg2, restingCamera(cues, step, authoredView(svg2), resolver(svg2)));
+  }
+  function maxCameraStep(root) {
+    const svg2 = root.matches("[data-camera]") ? root : root.querySelector("[data-camera]");
+    const cues = parseCameraCues(svg2?.getAttribute("data-camera") ?? null);
+    return cues.reduce((m, c) => Math.max(m, c.step), 0);
   }
 
   // src/ts/shared/keyframes.ts
@@ -287,7 +566,7 @@
     });
   }
   function maxStep(root) {
-    let m = 0;
+    let m = maxCameraStep(root);
     root.querySelectorAll("[data-cues]").forEach((el) => {
       for (const c of parseCues(el)) if (c.step > m) m = c.step;
     });
@@ -317,6 +596,7 @@
         else st.anim?.cancel();
       });
     });
+    applyCameraInstant(root, step);
     applyCodeHighlights(root, step);
     rootStep.set(root, step);
   }

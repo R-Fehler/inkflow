@@ -193,6 +193,17 @@ def _canvas(root: SvgElement) -> list[float] | None:
 def _max_step(root: SvgElement) -> int:
     """The slide's last step, as the presenter's ``maxStep`` reads the markup."""
     top = 0
+    try:
+        # Frame cues: one `data-camera` list on the root (pipeline._annotate_camera).
+        camera = cast(
+            "list[dict[str, object]]", json.loads(root.get("data-camera") or "[]")
+        )
+    except ValueError:
+        camera = []
+    for entry in camera:
+        step = entry.get("step")
+        if isinstance(step, int):
+            top = max(top, step)
     for el in root.iter():
         cues = el.get("data-cues")
         if cues:

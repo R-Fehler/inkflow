@@ -4,7 +4,8 @@ The base `Animation` (element + trigger from `Cue`, plus ``duration``/``easing``
 ``delay``) lives here alongside the three semantic bases `Enter`, `Exit`, and
 `Emphasis`, which fix the animation's `AnimationKind`. Concrete types are thin
 subclasses of those bases, adding only their own fields. This namespace also holds
-`PlayVideo`, the non-animating video cue that shares the same step timeline.
+`PlayVideo`, the non-animating video cue, and `Frame`, the camera cue, which share the
+same step timeline.
 
 How a type maps to CSS:
 
@@ -27,7 +28,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import ClassVar
 
-from inkflow.enums import AnimationKind, Direction, Easing, Slugged, Trigger
+from inkflow.enums import (
+    AnimationKind,
+    Direction,
+    Easing,
+    FrameTarget,
+    Slugged,
+    Trigger,
+)
 
 __all__ = [
     "Animation",
@@ -38,12 +46,14 @@ __all__ = [
     "Exit",
     "FadeIn",
     "FadeOut",
+    "Frame",
     "Highlight",
     "PlayVideo",
     "ScaleIn",
     "ScaleOut",
     "SlideIn",
     "SlideOut",
+    "TimedCue",
 ]
 
 
@@ -55,7 +65,6 @@ class Cue:
     """Base for anything on a slide's step timeline.
 
     Carries just the target ``element`` and the ``trigger`` that decides its step.
-    `Animation` adds timing on top; `PlayVideo` is a sibling that carries no timing.
     """
 
     element: str
@@ -64,16 +73,33 @@ class Cue:
     """When the cue fires. Defaults to `Trigger.ON_CLICK`."""
 
 
+@dataclass
+class TimedCue(Cue):
+    """Base for cues that play over time: `Animation` and `Frame`.
+
+    Adds the shared keyword-only timing params on top of `Cue`.
+    """
+
+    duration: float = field(default=0.4, kw_only=True)
+    """Duration in seconds."""
+    easing: Easing = field(default=Easing.EASE, kw_only=True)
+    """Easing curve — an ``Easing`` preset (e.g. ``Easing.EASE_IN_OUT``) or a
+    custom curve via ``Easing.cubic_bezier(...)``."""
+    delay: float = field(default=0.0, kw_only=True)
+    """Seconds to wait before the cue starts playing."""
+
+
 # ── Base + semantic bases ──────────────────────────────────────────────────────
 
 
 @dataclass
-class Animation(Cue, Slugged):
+class Animation(TimedCue, Slugged):
     """Base for every animation type.
 
     Concrete types subclass one of `Enter` / `Exit` / `Emphasis` (which fix the
     `AnimationKind`), adding their own fields. ``element``/``trigger`` come from `Cue`;
-    ``duration``, ``easing``, and ``delay`` are shared keyword-only timing params.
+    ``duration``, ``easing``, and ``delay`` are the shared keyword-only timing params
+    from `TimedCue`.
 
     **Custom animations.** Subclass a semantic base in ``deck.py`` — no changes to
     inkflow are needed. Write a matching ``@keyframes`` rule named after the kebab-cased
@@ -93,13 +119,6 @@ class Animation(Cue, Slugged):
     kind: ClassVar[AnimationKind] = AnimationKind.ENTER
     """The animation's lifecycle role. Overridden by the semantic base classes; a bare
     ``Animation`` subclass defaults to an enter."""
-    duration: float = field(default=0.4, kw_only=True)
-    """Duration in seconds."""
-    easing: Easing = field(default=Easing.EASE, kw_only=True)
-    """Easing curve — an ``Easing`` preset (e.g. ``Easing.EASE_IN_OUT``) or a
-    custom curve via ``Easing.cubic_bezier(...)``."""
-    delay: float = field(default=0.0, kw_only=True)
-    """Seconds to wait before the animation starts."""
     iterations: int = field(default=1, kw_only=True)
     """How many times the animation repeats. Mostly useful for an emphasis like
     `Highlight` (pulse ``iterations`` times); enters/exits normally leave it at 1."""
@@ -144,6 +163,43 @@ class PlayVideo(Cue):
 
     If the video also sets ``autoplay=True``, the cue wins and autoplay is dropped.
     """
+
+
+# ── Camera cue ─────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class Frame(TimedCue):
+    """Move the slide's camera to frame an element on a step.
+
+    ``element`` is the id of any SVG element with a bounding box, hidden ones
+    included. The view is grown to the slide's aspect ratio around the element, so
+    everything inside it stays visible. Framing `FrameTarget.FULL_SLIDE` (the
+    default) returns to the whole slide.
+
+    ```python
+    Slide(
+        "diagram.svg",
+        animations=[
+            animations.Frame("ingest", margin=40),
+            animations.Frame("storage"),
+            animations.Frame(),
+        ],
+    )
+    ```
+
+    A step-0 frame (``Trigger.WITH_PREVIOUS`` as the first cue) plays when the slide
+    arrives. With ``duration=0`` the slide arrives already framed instead.
+    """
+
+    element: str = FrameTarget.FULL_SLIDE
+    """Id of the element to frame, or `FrameTarget.FULL_SLIDE`."""
+    margin: float = 0.0
+    """Space kept around the element, in SVG user units."""
+    duration: float = field(default=0.8, kw_only=True)
+    """Duration in seconds."""
+    easing: Easing = field(default=Easing.EASE_IN_OUT, kw_only=True)
+    """Easing curve along the camera path."""
 
 
 # ── Enter animations ───────────────────────────────────────────────────────────

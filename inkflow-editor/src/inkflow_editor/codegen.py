@@ -131,6 +131,11 @@ class Code:
             # A chart's file reads like a picture's: ``Chart("data/sales.csv")``.
             positional = positional or (isinstance(obj, Chart) and f.name == "src")
             if f.name == "element" and positional:
+                if f.name in defaults and _same(defaults[f.name], value):
+                    # ``Frame()`` frames the full slide: no element to name,
+                    # so what follows must be keywords.
+                    keyword = True
+                    continue
                 args.append(self.literal(value))
                 continue
             if f.name in defaults and _same(defaults[f.name], value):

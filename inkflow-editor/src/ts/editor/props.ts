@@ -874,7 +874,7 @@ function animationList(
         const trigger = cue.fields.trigger ?? "on-click";
         const typeSelect = selectInput(
             model.animationTypes
-                .filter((t) => (t.kind === "video") === (cue.kind === "video"))
+                .filter((t) => cueFamily(t.kind) === cueFamily(cue.kind))
                 .map((t) => ({ value: t.type, label: t.type })),
             cue.type,
             (v) => {
@@ -1141,6 +1141,12 @@ function elementAnimations(sel: Selected): HTMLElement {
         );
     }
     return section("Animations", body);
+}
+
+// A cue's type can change only within its family: an animation into
+// another animation, never into a video's PlayVideo or a camera's Frame.
+function cueFamily(kind: string | undefined): string {
+    return kind === "video" || kind === "camera" ? kind : "animation";
 }
 
 function animationPicker(

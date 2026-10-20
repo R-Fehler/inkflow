@@ -77,6 +77,7 @@ nav:
     - PDF figures: authoring/pdf-figures.md
     - Steps: authoring/steps.md
     - Animations: authoring/animations.md
+    - Camera: authoring/camera.md
     - Transitions: authoring/transitions.md
     - Morph in depth: authoring/morph.md
     - Charts: authoring/charts.md

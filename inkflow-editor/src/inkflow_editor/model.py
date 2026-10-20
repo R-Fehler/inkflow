@@ -20,7 +20,7 @@ from typing import TypedDict, cast
 from inkflow import animations as animations_module
 from inkflow import drawio
 from inkflow import transitions as transitions_module
-from inkflow.animations import Animation, Cue, PlayVideo
+from inkflow.animations import Animation, Cue, Frame, PlayVideo
 from inkflow.colors import SVG_TOKENS
 from inkflow.deps import Stamp, Stamps, file_hash, note, recording, stamp
 from inkflow.incremental import frozen
@@ -69,6 +69,28 @@ def _rel(path: Path, project_dir: Path) -> str:
         return path.name
 
 
+def cue_slug(cls: type) -> str:
+    """A cue type's kebab name: an animation's slug, ``play-video``,
+    ``frame``."""
+    if issubclass(cls, Animation):
+        return cls.slug()
+    if issubclass(cls, PlayVideo):
+        return "play-video"
+    return re.sub(r"(?<!^)(?=[A-Z])", "-", cls.__name__).lower()
+
+
+def cue_kind(cls: type) -> str:
+    """What a cue does, as the editor groups them: an animation's kind
+    (enter/exit/emphasis), ``video`` (PlayVideo), ``camera`` (Frame)."""
+    if issubclass(cls, Animation):
+        return cast("Animation", cls).kind.value
+    if issubclass(cls, PlayVideo):
+        return "video"
+    if issubclass(cls, Frame):
+        return "camera"
+    return "cue"
+
+
 def _cue_json(cue: Cue, deck_module: str) -> dict[str, object]:
     cls = type(cue)
     fields = {
@@ -78,10 +100,10 @@ def _cue_json(cue: Cue, deck_module: str) -> dict[str, object]:
     }
     return {
         "type": cls.__name__,
-        "slug": cue.slug() if isinstance(cue, Animation) else "play-video",
-        "kind": cue.kind.value if isinstance(cue, Animation) else "video",
+        "slug": cue_slug(cls),
+        "kind": cue_kind(cls),
         "custom": cls.__module__ == deck_module,
-        "element": cue.element,
+        "element": str(cue.element),
         "fields": fields,
     }
 
@@ -122,14 +144,12 @@ def _type_catalog(
             "custom": cls.__module__ == deck_module,
             "fields": field_schema(cls),
         }
-        if issubclass(cls, Animation):
-            entry["slug"] = cls.slug()
-            entry["kind"] = cls.kind.value
-        elif issubclass(cls, Transition):
+        if issubclass(cls, Transition):
             entry["slug"] = cls.slug()
         else:
-            entry["slug"] = "play-video"
-            entry["kind"] = "video"
+            cue_type = cast("type", cls)
+            entry["slug"] = cue_slug(cue_type)
+            entry["kind"] = cue_kind(cue_type)
         out.append(entry)
     return out
 
@@ -435,7 +455,7 @@ def build_model(
             *[
                 t
                 for t in _type_catalog(Cue, animations_module, deck_module)
-                if t["type"] == PlayVideo.__name__
+                if t["type"] in (PlayVideo.__name__, Frame.__name__)
             ],
         ],
         "transitionTypes": _type_catalog(Transition, transitions_module, deck_module),

@@ -1203,6 +1203,10 @@ body.previewing #canvas::after {
     background: var(--blue);
 }
 
+.anim-kind.k-camera {
+    background: var(--accent);
+}
+
 .anim-target {
     background: none;
     border: none;

@@ -35,4 +35,19 @@ describe("cueSteps", () => {
             ),
         ).toEqual([1, 2, 3, 4, null]);
     });
+
+    it("reads a camera cue's step off the root's data-camera list", () => {
+        const host = document.createElement("div");
+        host.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg"
+            data-camera='[{"step":2,"target":"a"},{"step":3,"target":null}]'>
+            <rect id="a" data-cues='[{"step":1}]'/>
+        </svg>`;
+        const svg = host.querySelector("svg");
+        expect(
+            cueSteps(
+                [cue("a"), cue("a", "camera"), cue("@full-slide", "camera")],
+                svg,
+            ),
+        ).toEqual([1, 2, 3]);
+    });
 });

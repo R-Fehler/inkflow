@@ -23,18 +23,19 @@ from typing import cast
 import click
 
 from inkflow import animations as animations_module
-from inkflow.animations import Animation, Cue, PlayVideo
+from inkflow.animations import Cue, Frame, PlayVideo, TimedCue
 from inkflow.cli._common import DeckSlides as SlideRefs
 from inkflow.cli._common import deck_option, main
-from inkflow.enums import Trigger
+from inkflow.enums import FrameTarget, Trigger
 from inkflow.pipeline import process_deck, resolve_steps
 from inkflow.svgio import SvgElement, parse_svg
 from inkflow_editor.agent._edits import apply_edit as apply_step
 from inkflow_editor.codegen import to_json
+from inkflow_editor.model import cue_slug
 from inkflow_editor.session import DECK_MODULE
 
 _STEP_ID = "inkflow-step-"
-_BASES = {"Cue", "Animation", "Enter", "Exit", "Emphasis"}
+_BASES = {"Cue", "TimedCue", "Animation", "Enter", "Exit", "Emphasis"}
 _TIMING = ("element", "trigger", "duration", "delay", "easing", "iterations")
 
 
@@ -185,15 +186,23 @@ def _extra(cue: Cue) -> str:
     return " ".join(parts)
 
 
+def _target_word(cue: Cue) -> str:
+    if isinstance(cue, PlayVideo):
+        return cue.element
+    if cue.element == FrameTarget.FULL_SLIDE:
+        return "(full slide)"
+    return f"#{cue.element}"
+
+
 def _deck_steps(cues: list[Cue], base: int) -> list[Step]:
     out: list[Step] = []
     for i, (cue, step) in enumerate(resolve_steps(cues, base), start=1):
-        timed = isinstance(cue, Animation)
+        timed = isinstance(cue, TimedCue)
         out.append(
             Step(
                 click=step,
                 what=type(cue).__name__,
-                target=cue.element if isinstance(cue, PlayVideo) else f"#{cue.element}",
+                target=_target_word(cue),
                 trigger=_trigger_word(str(cue.trigger)),
                 source="deck.py",
                 index=i,
@@ -280,10 +289,7 @@ def _types() -> dict[str, type]:
 
 def _resolve_type(name: str) -> type:
     types = _types()
-    slugs = {
-        (c.slug() if issubclass(c, Animation) else "play-video"): n
-        for n, c in types.items()
-    }
+    slugs = {cue_slug(c): n for n, c in types.items()}
     key = slugs.get(name.lower(), name)
     if key in types:
         return types[key]
@@ -297,6 +303,8 @@ def _resolve_type(name: str) -> type:
 
 def _check_target(cls: type, target: str, tl: Timeline) -> str:
     target = target.removeprefix("#")
+    if issubclass(cls, Frame) and target.lstrip("@") in ("full-slide", "slide"):
+        return FrameTarget.FULL_SLIDE
     wanted = f"zone-{target}" if issubclass(cls, PlayVideo) else target
     if wanted in tl.ids:
         return target

@@ -11,8 +11,10 @@
 // Purely client-side, never synced (followers keep their own view). Holding Ctrl
 // also suppresses the laser draw, so the two never fight over a drag.
 //
-// Navigating while zoomed eases back to the full slide first (resetCameraThen),
-// then the transition runs — so nothing here needs to know the transition type.
+// The camera works inside the view the current step sets (the full slide, or the frame
+// of an authored `animations.Frame` cue). Navigating while zoomed eases back to that view
+// first (resetCameraThen), then the step or transition runs — so nothing here needs to
+// know the transition type.
 //
 // Not the `transitions.Zoom` slide transition; the only shared word is "zoom".
 
@@ -44,13 +46,21 @@ const RESET_ANIM_MS = 240;
 const NAV_RESET_MS = 150; // zoom-out before a slide change
 const EASE = cubicBezierEasing("cubic-bezier(0.22, 1, 0.36, 1)");
 
-// The authored viewBox of the current slide and the live camera. Both null when
-// the camera has never been engaged on this slide (so navigation is a no-op).
+// The current step's viewBox and the live camera. Both null when the camera has
+// not been engaged since the last step or slide change (so navigation is a no-op).
 let baseViewBox: ViewBox | null = null;
 let camera: ViewBox | null = null;
 
 // A slide load parked until the zoom-out ease finishes (see resetCameraThen).
 let navReset: (() => void) | null = null;
+
+// Runs before any manual camera gesture takes hold. The step runner registers a snap of
+// its in-flight run here, since importing it directly would be an import cycle.
+let beforeGesture: () => void = () => {};
+
+export function setBeforeCameraGesture(fn: () => void): void {
+    beforeGesture = fn;
+}
 
 // Drag state, captured once at pointerdown so the pan stays correct however many
 // pointermove events fire between paints.
@@ -148,9 +158,9 @@ function endDrag(): void {
     document.body.classList.remove("zoom-grabbing");
 }
 
-// Snap the outgoing <svg> back to its authored viewBox and drop the camera.
-// Called at the start of every slide load (transitions.ts) — by then the
-// zoom-out ease (resetCameraThen) has already run, so this just settles state.
+// Snap the <svg> back to the step's viewBox and drop the camera. Called at the
+// start of every slide load and step change — by then the zoom-out ease
+// (resetCameraThen) has already run, so this just settles state.
 export function resetCamera(): void {
     cancelAnim();
     const svg = currentSvg();
@@ -186,26 +196,33 @@ export function resetCameraThen(after: () => void): void {
     animateCameraTo({ ...baseViewBox }, NAV_RESET_MS, runNavReset);
 }
 
+// A slide load is parked behind the zoom-out ease and will land the current step itself.
+export function hasPendingNav(): boolean {
+    return navReset !== null;
+}
+
 // A non-deferred load supersedes a parked one without running it.
 export function cancelPendingNav(): void {
     navReset = null;
 }
 
-// The user touched the camera mid-navigation: commit the parked load now.
-function flushPendingNav(): void {
+// The user touched the camera: commit a parked load and land an in-flight step run, so
+// the gesture starts from a settled view.
+function takeCamera(): void {
     if (navReset) runNavReset();
+    beforeGesture();
 }
 
-// User-initiated reset (0 / Esc / double-click): ease back to the full slide.
+// User-initiated reset (0 / Esc / double-click): ease back to the step's view.
 export function smoothResetCamera(): void {
-    flushPendingNav();
+    takeCamera();
     if (!ensureBase() || !camera || !baseViewBox) return;
     if (!isZoomedIn(camera, baseViewBox)) return;
     animateCameraTo({ ...baseViewBox }, RESET_ANIM_MS);
 }
 
 export function keyZoom(direction: "in" | "out"): void {
-    flushPendingNav();
+    takeCamera();
     if (!ensureBase() || !camera || !baseViewBox) return;
     const factor = direction === "in" ? KEY_ZOOM_STEP : 1 / KEY_ZOOM_STEP;
     const target = zoomAt(
@@ -221,7 +238,7 @@ export function keyZoom(direction: "in" | "out"): void {
 // Zoom by `factor` about client point `from`, then pan so that the slide
 // point under `from` sits under `to` (a pinch's midpoint moving).
 function zoomAbout(factor: number, from: Pt, to: Pt): void {
-    flushPendingNav();
+    takeCamera();
     cancelAnim();
     if (!ensureBase() || !camera || !baseViewBox) return;
     const focus = clientToUser(from.x, from.y);
@@ -239,6 +256,7 @@ function zoomAbout(factor: number, from: Pt, to: Pt): void {
 // Pan by screen pixels (a trackpad's two-finger scroll while zoomed in).
 function panPixels(dx: number, dy: number): void {
     if (!camera || !baseViewBox) return;
+    takeCamera();
     const inv = currentSvg()?.getScreenCTM()?.inverse();
     if (!inv) return;
     const units = Math.hypot(inv.a, inv.b);
@@ -300,7 +318,7 @@ if (stageWrap) {
 
     wrap.addEventListener("pointerdown", (e) => {
         if (!isCameraGesture(e) || overGrid(e.target)) return;
-        flushPendingNav();
+        takeCamera();
         cancelAnim();
         if (!ensureBase() || !camera) return;
         const inverse = currentSvg()?.getScreenCTM()?.inverse();

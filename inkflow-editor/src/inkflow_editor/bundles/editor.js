@@ -11,6 +11,10 @@
     const [x2, y2, w2, h3] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
     return { x: x2, y: y2, w: w2, h: h3 };
   }
+  function formatViewBox(vb) {
+    const round2 = (n3) => Math.round(n3 * 1e3) / 1e3;
+    return `${round2(vb.x)} ${round2(vb.y)} ${round2(vb.w)} ${round2(vb.h)}`;
+  }
 
   // src/ts/shared/fit.ts
   var MIN_TEXT_FRACTION = 1 / 80;
@@ -417,6 +421,298 @@
     }
   };
 
+  // src/ts/shared/easing.ts
+  var NAMED_CURVES = {
+    linear: [0, 0, 1, 1],
+    ease: [0.25, 0.1, 0.25, 1],
+    "ease-in": [0.42, 0, 1, 1],
+    "ease-out": [0, 0, 0.58, 1],
+    "ease-in-out": [0.42, 0, 0.58, 1]
+  };
+  var CUBIC_BEZIER_PATTERN = /^cubic-bezier\(\s*([\d.+-]+)\s*,\s*([\d.+-]+)\s*,\s*([\d.+-]+)\s*,\s*([\d.+-]+)\s*\)$/;
+  function parseControlPoints(spec) {
+    if (!spec) return null;
+    const trimmed2 = spec.trim();
+    if (trimmed2 in NAMED_CURVES) return NAMED_CURVES[trimmed2];
+    const match = CUBIC_BEZIER_PATTERN.exec(trimmed2);
+    if (!match) return null;
+    const points = [match[1], match[2], match[3], match[4]].map(Number);
+    return points.every(Number.isFinite) ? points : null;
+  }
+  var identity = (progress) => progress;
+  function makeCubicBezier(points) {
+    const [x1, y1, x2, y2] = points;
+    const cx = 3 * x1;
+    const bx = 3 * (x2 - x1) - cx;
+    const ax = 1 - cx - bx;
+    const cy = 3 * y1;
+    const by = 3 * (y2 - y1) - cy;
+    const ay = 1 - cy - by;
+    const sampleX = (t2) => ((ax * t2 + bx) * t2 + cx) * t2;
+    const sampleY = (t2) => ((ay * t2 + by) * t2 + cy) * t2;
+    const sampleSlopeX = (t2) => (3 * ax * t2 + 2 * bx) * t2 + cx;
+    const solveForT = (x3) => {
+      let t2 = x3;
+      for (let iteration = 0; iteration < 8; iteration++) {
+        const error2 = sampleX(t2) - x3;
+        if (Math.abs(error2) < 1e-6) return t2;
+        const slope = sampleSlopeX(t2);
+        if (Math.abs(slope) < 1e-6) break;
+        t2 -= error2 / slope;
+      }
+      let lower = 0;
+      let upper = 1;
+      t2 = x3;
+      while (lower < upper) {
+        const value = sampleX(t2);
+        if (Math.abs(value - x3) < 1e-6) return t2;
+        if (x3 > value) lower = t2;
+        else upper = t2;
+        t2 = (lower + upper) / 2;
+      }
+      return t2;
+    };
+    return (progress) => {
+      if (progress <= 0) return 0;
+      if (progress >= 1) return 1;
+      return sampleY(solveForT(progress));
+    };
+  }
+  function cubicBezierEasing(spec) {
+    const points = parseControlPoints(spec);
+    if (!points) return identity;
+    const [x1, y1, x2, y2] = points;
+    if (x1 === 0 && y1 === 0 && x2 === 1 && y2 === 1) return identity;
+    return makeCubicBezier(points);
+  }
+
+  // src/ts/shared/zoom-camera.ts
+  function clamp(n3, lo, hi) {
+    return Math.min(Math.max(n3, lo), hi);
+  }
+  function clampToBounds(vb, base2) {
+    const w2 = Math.min(vb.w, base2.w);
+    const h3 = Math.min(vb.h, base2.h);
+    const x2 = w2 >= base2.w ? base2.x + (base2.w - w2) / 2 : clamp(vb.x, base2.x, base2.x + base2.w - w2);
+    const y2 = h3 >= base2.h ? base2.y + (base2.h - h3) / 2 : clamp(vb.y, base2.y, base2.y + base2.h - h3);
+    return { x: x2, y: y2, w: w2, h: h3 };
+  }
+
+  // src/ts/shared/camera.ts
+  function parseCameraCues(raw) {
+    if (!raw) return [];
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  function fitFrame(rect, margin, base2) {
+    let w2 = rect.w + 2 * margin;
+    let h3 = rect.h + 2 * margin;
+    if (w2 <= 0 && h3 <= 0) return { ...base2 };
+    const aspect = base2.w / base2.h;
+    if (w2 / aspect > h3) h3 = w2 / aspect;
+    else w2 = h3 * aspect;
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h / 2;
+    return clampToBounds({ x: cx - w2 / 2, y: cy - h3 / 2, w: w2, h: h3 }, base2);
+  }
+  var RHO = Math.SQRT2;
+  var RHO2 = 2;
+  var RHO4 = 4;
+  var EPSILON2 = 1e-12;
+  function zoomPath(from, to) {
+    const cx0 = from.x + from.w / 2;
+    const cy0 = from.y + from.h / 2;
+    const cx1 = to.x + to.w / 2;
+    const cy1 = to.y + to.h / 2;
+    const w0 = from.w;
+    const w1 = to.w;
+    const dx = cx1 - cx0;
+    const dy = cy1 - cy0;
+    const d2 = dx * dx + dy * dy;
+    const aspect0 = from.h / from.w;
+    const aspect1 = to.h / to.w;
+    const view3 = (t2, cx, cy, w2) => {
+      const h3 = w2 * (aspect0 + (aspect1 - aspect0) * t2);
+      return { x: cx - w2 / 2, y: cy - h3 / 2, w: w2, h: h3 };
+    };
+    let at3;
+    if (d2 < EPSILON2) {
+      at3 = (t2) => view3(t2, cx0 + dx * t2, cy0 + dy * t2, w0 * (w1 / w0) ** t2);
+    } else {
+      const d1 = Math.sqrt(d2);
+      const b0 = (w1 * w1 - w0 * w0 + RHO4 * d2) / (2 * w0 * RHO2 * d1);
+      const b1 = (w1 * w1 - w0 * w0 - RHO4 * d2) / (2 * w1 * RHO2 * d1);
+      const r0 = Math.log(Math.sqrt(b0 * b0 + 1) - b0);
+      const r1 = Math.log(Math.sqrt(b1 * b1 + 1) - b1);
+      const length = (r1 - r0) / RHO;
+      at3 = (t2) => {
+        const s2 = t2 * length;
+        const coshR0 = Math.cosh(r0);
+        const u2 = w0 / (RHO2 * d1) * (coshR0 * Math.tanh(RHO * s2 + r0) - Math.sinh(r0));
+        return view3(
+          t2,
+          cx0 + u2 * dx,
+          cy0 + u2 * dy,
+          w0 * coshR0 / Math.cosh(RHO * s2 + r0)
+        );
+      };
+    }
+    return (t2) => t2 <= 0 ? { ...from } : t2 >= 1 ? { ...to } : at3(t2);
+  }
+  function cameraTimeline(cues, start, resolve) {
+    const segments = cues.map((cue) => ({
+      startMs: (Math.max(0, cue.offset) + Math.max(0, cue.opts.delay)) * 1e3,
+      durationMs: Math.max(0, cue.opts.duration) * 1e3,
+      ease: cubicBezierEasing(cue.opts.easing),
+      to: resolve(cue),
+      path: null
+    })).sort((a2, b2) => a2.startMs - b2.startMs);
+    const evaluate = (timeMs, upTo) => {
+      let current3 = null;
+      for (let i2 = 0; i2 < upTo; i2++) {
+        if (segments[i2].startMs <= timeMs) current3 = segments[i2];
+      }
+      if (!current3?.path) return { ...start };
+      const progress = current3.durationMs > 0 ? Math.min(1, (timeMs - current3.startMs) / current3.durationMs) : 1;
+      return current3.path(current3.ease(progress));
+    };
+    segments.forEach((segment, i2) => {
+      segment.path = zoomPath(evaluate(segment.startMs, i2), segment.to);
+    });
+    return {
+      totalMs: segments.reduce(
+        (m2, s2) => Math.max(m2, s2.startMs + s2.durationMs),
+        0
+      ),
+      at: (timeMs) => evaluate(timeMs, segments.length)
+    };
+  }
+  function stepStartView(cues, step2, base2, resolve) {
+    return step2 <= 0 ? { ...base2 } : restingCamera(cues, step2 - 1, base2, resolve);
+  }
+  function restingCamera(cues, step2, base2, resolve) {
+    let view3 = { ...base2 };
+    const steps = [...new Set(cues.map((c2) => c2.step))].sort((a2, b2) => a2 - b2);
+    for (const s2 of steps) {
+      if (s2 > Math.max(step2, 0)) break;
+      const timeline = cameraTimeline(
+        cues.filter((c2) => c2.step === s2),
+        view3,
+        resolve
+      );
+      view3 = timeline.at(step2 < 0 ? 0 : Number.POSITIVE_INFINITY);
+    }
+    return view3;
+  }
+
+  // src/ts/shared/svg-geometry.ts
+  function screenMatrix(element) {
+    const ctm = element.getScreenCTM();
+    return ctm ? DOMMatrix.fromMatrix(ctm) : null;
+  }
+  function boxFrame(screen, box2) {
+    return screen.translate(box2.x, box2.y).scale(box2.width, box2.height);
+  }
+
+  // src/ts/shared/camera-dom.ts
+  var authoredViews = /* @__PURE__ */ new WeakMap();
+  function cameraSvg(root2) {
+    const svg = root2.matches("svg[data-camera]") ? root2 : root2.querySelector("svg[data-camera]");
+    return svg instanceof SVGSVGElement ? svg : null;
+  }
+  function authoredView(svg) {
+    let view3 = authoredViews.get(svg);
+    if (!view3) {
+      view3 = parseViewBox(svg.getAttribute("viewBox"));
+      authoredViews.set(svg, view3);
+    }
+    return view3;
+  }
+  function measureShown(svg, el2, measure2) {
+    const lifted = [];
+    for (let node = el2; node && node !== svg; node = node.parentElement) {
+      if (node instanceof SVGElement && getComputedStyle(node).display === "none") {
+        lifted.push({
+          node,
+          value: node.style.getPropertyValue("display"),
+          priority: node.style.getPropertyPriority("display")
+        });
+        node.style.setProperty("display", "inline", "important");
+      }
+    }
+    try {
+      return measure2();
+    } finally {
+      for (const { node, value, priority } of lifted.reverse()) {
+        if (value) node.style.setProperty("display", value, priority);
+        else node.style.removeProperty("display");
+      }
+    }
+  }
+  function targetRect(svg, id) {
+    const el2 = svg.querySelector(`[id="${CSS.escape(id)}"]`);
+    if (!(el2 instanceof SVGGraphicsElement)) return null;
+    return measureShown(svg, el2, () => {
+      const slideScreen = screenMatrix(svg);
+      const elementScreen = screenMatrix(el2);
+      if (!slideScreen || !elementScreen) return null;
+      const toSlide = slideScreen.inverse().multiply(boxFrame(elementScreen, el2.getBBox()));
+      const corners = [
+        new DOMPoint(0, 0),
+        new DOMPoint(1, 0),
+        new DOMPoint(0, 1),
+        new DOMPoint(1, 1)
+      ].map((corner) => corner.matrixTransform(toSlide));
+      const xs = corners.map((corner) => corner.x);
+      const ys = corners.map((corner) => corner.y);
+      const rect = {
+        x: Math.min(...xs),
+        y: Math.min(...ys),
+        w: Math.max(...xs) - Math.min(...xs),
+        h: Math.max(...ys) - Math.min(...ys)
+      };
+      return Object.values(rect).every(Number.isFinite) ? rect : null;
+    });
+  }
+  function resolver(svg) {
+    const base2 = authoredView(svg);
+    return (cue) => {
+      const rect = cue.target === null ? null : targetRect(svg, cue.target);
+      return rect ? fitFrame(rect, cue.margin, base2) : { ...base2 };
+    };
+  }
+  function writeView(svg, view3) {
+    svg.setAttribute("viewBox", formatViewBox(view3));
+  }
+  function applyCameraInstant(root2, step2) {
+    const svg = cameraSvg(root2);
+    if (!svg) return;
+    const cues = parseCameraCues(svg.getAttribute("data-camera"));
+    writeView(svg, restingCamera(cues, step2, authoredView(svg), resolver(svg)));
+  }
+  function cameraRun(root2, step2) {
+    const svg = cameraSvg(root2);
+    if (!svg) return null;
+    const cues = parseCameraCues(svg.getAttribute("data-camera"));
+    const stepCues = cues.filter((c2) => c2.step === step2);
+    if (stepCues.length === 0) return null;
+    const resolve = resolver(svg);
+    const timeline = cameraTimeline(
+      stepCues,
+      stepStartView(cues, step2, authoredView(svg), resolve),
+      resolve
+    );
+    return { timeline, seek: (timeMs) => writeView(svg, timeline.at(timeMs)) };
+  }
+  function maxCameraStep(root2) {
+    const svg = root2.matches("[data-camera]") ? root2 : root2.querySelector("[data-camera]");
+    const cues = parseCameraCues(svg?.getAttribute("data-camera") ?? null);
+    return cues.reduce((m2, c2) => Math.max(m2, c2.step), 0);
+  }
+
   // src/ts/shared/keyframes.ts
   var templates = /* @__PURE__ */ new Map();
   function parseOffsets(keyText) {
@@ -565,12 +861,22 @@
         const anim = ensureAnim(el2, st);
         anim.pause();
         items2.push({
-          anim,
+          seek: (timeMs) => {
+            anim.currentTime = timeMs;
+          },
           offsetMs: Math.max(0, st.cue.offset) * 1e3,
           spanMs: effectEndMs(st.cue)
         });
       }
     });
+    const camera = cameraRun(root2, runStep);
+    if (camera) {
+      items2.push({
+        seek: camera.seek,
+        offsetMs: 0,
+        spanMs: camera.timeline.totalMs
+      });
+    }
     const totalMs = items2.reduce(
       (m2, it) => Math.max(m2, it.offsetMs + it.spanMs),
       0
@@ -580,10 +886,7 @@
   function seekStepRun(run, value) {
     const runTimeMs = value * run.totalMs;
     for (const it of run.items) {
-      it.anim.currentTime = Math.min(
-        Math.max(runTimeMs - it.offsetMs, 0),
-        it.spanMs
-      );
+      it.seek(Math.min(Math.max(runTimeMs - it.offsetMs, 0), it.spanMs));
     }
   }
   function applyCodeHighlights(root2, step2) {
@@ -604,7 +907,7 @@
     });
   }
   function maxStep(root2) {
-    let m2 = 0;
+    let m2 = maxCameraStep(root2);
     root2.querySelectorAll("[data-cues]").forEach((el2) => {
       for (const c2 of parseCues(el2)) if (c2.step > m2) m2 = c2.step;
     });
@@ -634,6 +937,7 @@
         else st.anim?.cancel();
       });
     });
+    applyCameraInstant(root2, step2);
     applyCodeHighlights(root2, step2);
     rootStep.set(root2, step2);
   }
@@ -9890,7 +10194,7 @@ Continue?`)) return null;
       type: "email",
       placeholder: "you@example.com"
     });
-    const identity = status.identity ? null : h(
+    const identity2 = status.identity ? null : h(
       "div",
       { class: "git-identity" },
       h(
@@ -9904,7 +10208,7 @@ Continue?`)) return null;
       const res = await git("commit", {
         message: message.value,
         paths,
-        ...identity ? { name: name2.value, email: email.value } : {}
+        ...identity2 ? { name: name2.value, email: email.value } : {}
       });
       if (!res) return;
       closeDialog();
@@ -9978,7 +10282,7 @@ Continue?`)) return null;
           )
         ),
         lfsNote,
-        identity,
+        identity2,
         h(
           "div",
           { class: "btn-row end" },
@@ -11127,7 +11431,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       type: "email",
       placeholder: "you@example.com"
     });
-    const identity = status3.identity ? null : h(
+    const identity2 = status3.identity ? null : h(
       "div",
       { class: "git-identity" },
       h(
@@ -11144,7 +11448,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
         message: message.value,
         removed: withRemoved,
         paths: current3.offered.map((o2) => o2.path).filter((p2) => ticked.has(p2)),
-        ...identity ? { name: name2.value, email: email.value } : {}
+        ...identity2 ? { name: name2.value, email: email.value } : {}
       });
       if (!res) return;
       closeDialog();
@@ -11204,7 +11508,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
             `Also commit the removal of ${removed.length} slide${removed.length === 1 ? "" : "s"} (${removed.map(removedName).join(", ")})`
           )
         ) : null,
-        identity,
+        identity2,
         h(
           "div",
           { class: "btn-row end" },
@@ -16167,8 +16471,20 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
   // inkflow-editor/src/ts/editor/animsteps.ts
   function cueSteps(cues, svg) {
     const seen = /* @__PURE__ */ new Map();
+    let frames = 0;
     return cues.map((cue) => {
       if (!svg) return null;
+      if (cue.kind === "camera") {
+        try {
+          const list4 = JSON.parse(
+            svg.getAttribute("data-camera") ?? "[]"
+          );
+          const steps = list4.map((c2) => c2.step).sort((a2, b2) => a2 - b2);
+          return steps[frames++] ?? null;
+        } catch {
+          return null;
+        }
+      }
       const byId2 = (id) => svg.querySelector(`[id="${CSS.escape(id)}"]`);
       if (cue.kind === "video") {
         const zone = byId2(`zone-${cue.element}`) ?? byId2(cue.element);
@@ -16982,7 +17298,7 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       const info4 = typeInfo(model2.animationTypes, cue.type);
       const trigger = cue.fields.trigger ?? "on-click";
       const typeSelect = selectInput(
-        model2.animationTypes.filter((t2) => t2.kind === "video" === (cue.kind === "video")).map((t2) => ({ value: t2.type, label: t2.type })),
+        model2.animationTypes.filter((t2) => cueFamily(t2.kind) === cueFamily(cue.kind)).map((t2) => ({ value: t2.type, label: t2.type })),
         cue.type,
         (v2) => {
           const names2 = new Set(
@@ -17220,6 +17536,9 @@ Remove it anyway? Its uncommitted changes and unmerged commits are lost.`
       );
     }
     return section2("Animations", body3);
+  }
+  function cueFamily(kind) {
+    return kind === "video" || kind === "camera" ? kind : "animation";
   }
   function animationPicker(all, video, prompt) {
     const groups = {};
@@ -26301,8 +26620,14 @@ Ctrl+click: open in a new tab`;
     });
     const install = ["curl -LsSf https://astral.sh/uv/install.sh | sh"];
     install.push("source $HOME/.local/bin/env");
-    if (!info4.pinned)
-      install.push(`uv tool install ${shellQuote2(info4.requirement)}`);
+    if (!info4.pinned) {
+      const plugins = (info4.plugins ?? []).map(
+        (p2) => ` --with ${shellQuote2(p2)}`
+      );
+      install.push(
+        `uv tool install ${shellQuote2(info4.requirement)}${plugins.join("")}`
+      );
+    }
     install.push(`git clone ${remote} ${folder}`, `cd ${folder}`);
     steps.push({
       title: "On the server, once: install inkflow and get the deck",

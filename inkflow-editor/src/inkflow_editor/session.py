@@ -33,7 +33,7 @@ from inkflow import animations as animations_module
 from inkflow import drawio, instances, pdf, publish
 from inkflow import pack as core_pack
 from inkflow import transitions as transitions_module
-from inkflow.animations import Cue
+from inkflow.animations import Cue, Frame
 from inkflow.assets import AssetRoots, AssetSource
 from inkflow.builtin_themes import THEMES, theme_id
 from inkflow.catalog import background_name, layout_entries, overlay_entries
@@ -46,7 +46,7 @@ from inkflow.charts import (
 )
 from inkflow.deps import file_hash
 from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, open_with
-from inkflow.enums import ColorMode, MediaFit, Muted
+from inkflow.enums import ColorMode, FrameTarget, MediaFit, Muted
 from inkflow.fontreport import (
     BundlePlan,
     FontDirs,
@@ -5160,7 +5160,13 @@ class EditorSession:
     def _build(self, spec: dict[str, object], base: type) -> object:
         cls = self._deck_class(str(spec.get("type")), base)
         fields = coerce_fields(cls, cast("dict[str, object]", spec.get("fields") or {}))
-        if issubclass(cls, Cue):
+        if issubclass(cls, Frame) and str(spec.get("element") or "") in (
+            "",
+            FrameTarget.FULL_SLIDE,
+        ):
+            # A camera cue framing the whole slide: no element (the default).
+            fields["element"] = FrameTarget.FULL_SLIDE
+        elif issubclass(cls, Cue):
             fields["element"] = str(spec.get("element") or "")
             if not fields["element"]:
                 raise EditError("an animation needs a target element")

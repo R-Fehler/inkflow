@@ -601,6 +601,268 @@
     return makeCubicBezier(points);
   }
 
+  // src/ts/shared/zoom-camera.ts
+  function clamp(n2, lo, hi) {
+    return Math.min(Math.max(n2, lo), hi);
+  }
+  function scaleOf(vb, base) {
+    return base.w / vb.w;
+  }
+  function isZoomedIn(vb, base, epsilon = 1e-3) {
+    return scaleOf(vb, base) > 1 + epsilon;
+  }
+  function clampToBounds(vb, base) {
+    const w2 = Math.min(vb.w, base.w);
+    const h2 = Math.min(vb.h, base.h);
+    const x2 = w2 >= base.w ? base.x + (base.w - w2) / 2 : clamp(vb.x, base.x, base.x + base.w - w2);
+    const y2 = h2 >= base.h ? base.y + (base.h - h2) / 2 : clamp(vb.y, base.y, base.y + base.h - h2);
+    return { x: x2, y: y2, w: w2, h: h2 };
+  }
+  function zoomAt(current2, base, factor, focus, limits) {
+    const targetScale = clamp(
+      scaleOf(current2, base) * factor,
+      limits.minScale,
+      limits.maxScale
+    );
+    const w2 = base.w / targetScale;
+    const h2 = base.h / targetScale;
+    const fx = (focus.ux - current2.x) / current2.w;
+    const fy = (focus.uy - current2.y) / current2.h;
+    return clampToBounds(
+      { x: focus.ux - fx * w2, y: focus.uy - fy * h2, w: w2, h: h2 },
+      base
+    );
+  }
+  function panBy(current2, base, dxUser, dyUser) {
+    return clampToBounds(
+      { ...current2, x: current2.x + dxUser, y: current2.y + dyUser },
+      base
+    );
+  }
+  function lerpViewBox(a2, b2, t2) {
+    return {
+      x: a2.x + (b2.x - a2.x) * t2,
+      y: a2.y + (b2.y - a2.y) * t2,
+      w: a2.w + (b2.w - a2.w) * t2,
+      h: a2.h + (b2.h - a2.h) * t2
+    };
+  }
+
+  // src/ts/shared/camera.ts
+  function parseCameraCues(raw) {
+    if (!raw) return [];
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  function fitFrame(rect, margin, base) {
+    let w2 = rect.w + 2 * margin;
+    let h2 = rect.h + 2 * margin;
+    if (w2 <= 0 && h2 <= 0) return { ...base };
+    const aspect = base.w / base.h;
+    if (w2 / aspect > h2) h2 = w2 / aspect;
+    else w2 = h2 * aspect;
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h / 2;
+    return clampToBounds({ x: cx - w2 / 2, y: cy - h2 / 2, w: w2, h: h2 }, base);
+  }
+  var RHO = Math.SQRT2;
+  var RHO2 = 2;
+  var RHO4 = 4;
+  var EPSILON2 = 1e-12;
+  function zoomPath(from, to) {
+    const cx0 = from.x + from.w / 2;
+    const cy0 = from.y + from.h / 2;
+    const cx1 = to.x + to.w / 2;
+    const cy1 = to.y + to.h / 2;
+    const w0 = from.w;
+    const w1 = to.w;
+    const dx = cx1 - cx0;
+    const dy = cy1 - cy0;
+    const d2 = dx * dx + dy * dy;
+    const aspect0 = from.h / from.w;
+    const aspect1 = to.h / to.w;
+    const view = (t2, cx, cy, w2) => {
+      const h2 = w2 * (aspect0 + (aspect1 - aspect0) * t2);
+      return { x: cx - w2 / 2, y: cy - h2 / 2, w: w2, h: h2 };
+    };
+    let at2;
+    if (d2 < EPSILON2) {
+      at2 = (t2) => view(t2, cx0 + dx * t2, cy0 + dy * t2, w0 * (w1 / w0) ** t2);
+    } else {
+      const d1 = Math.sqrt(d2);
+      const b0 = (w1 * w1 - w0 * w0 + RHO4 * d2) / (2 * w0 * RHO2 * d1);
+      const b1 = (w1 * w1 - w0 * w0 - RHO4 * d2) / (2 * w1 * RHO2 * d1);
+      const r0 = Math.log(Math.sqrt(b0 * b0 + 1) - b0);
+      const r1 = Math.log(Math.sqrt(b1 * b1 + 1) - b1);
+      const length = (r1 - r0) / RHO;
+      at2 = (t2) => {
+        const s2 = t2 * length;
+        const coshR0 = Math.cosh(r0);
+        const u2 = w0 / (RHO2 * d1) * (coshR0 * Math.tanh(RHO * s2 + r0) - Math.sinh(r0));
+        return view(
+          t2,
+          cx0 + u2 * dx,
+          cy0 + u2 * dy,
+          w0 * coshR0 / Math.cosh(RHO * s2 + r0)
+        );
+      };
+    }
+    return (t2) => t2 <= 0 ? { ...from } : t2 >= 1 ? { ...to } : at2(t2);
+  }
+  function cameraTimeline(cues, start, resolve) {
+    const segments = cues.map((cue) => ({
+      startMs: (Math.max(0, cue.offset) + Math.max(0, cue.opts.delay)) * 1e3,
+      durationMs: Math.max(0, cue.opts.duration) * 1e3,
+      ease: cubicBezierEasing(cue.opts.easing),
+      to: resolve(cue),
+      path: null
+    })).sort((a2, b2) => a2.startMs - b2.startMs);
+    const evaluate = (timeMs, upTo) => {
+      let current2 = null;
+      for (let i2 = 0; i2 < upTo; i2++) {
+        if (segments[i2].startMs <= timeMs) current2 = segments[i2];
+      }
+      if (!current2?.path) return { ...start };
+      const progress = current2.durationMs > 0 ? Math.min(1, (timeMs - current2.startMs) / current2.durationMs) : 1;
+      return current2.path(current2.ease(progress));
+    };
+    segments.forEach((segment, i2) => {
+      segment.path = zoomPath(evaluate(segment.startMs, i2), segment.to);
+    });
+    return {
+      totalMs: segments.reduce(
+        (m2, s2) => Math.max(m2, s2.startMs + s2.durationMs),
+        0
+      ),
+      at: (timeMs) => evaluate(timeMs, segments.length)
+    };
+  }
+  function stepStartView(cues, step, base, resolve) {
+    return step <= 0 ? { ...base } : restingCamera(cues, step - 1, base, resolve);
+  }
+  function restingCamera(cues, step, base, resolve) {
+    let view = { ...base };
+    const steps = [...new Set(cues.map((c2) => c2.step))].sort((a2, b2) => a2 - b2);
+    for (const s2 of steps) {
+      if (s2 > Math.max(step, 0)) break;
+      const timeline = cameraTimeline(
+        cues.filter((c2) => c2.step === s2),
+        view,
+        resolve
+      );
+      view = timeline.at(step < 0 ? 0 : Number.POSITIVE_INFINITY);
+    }
+    return view;
+  }
+
+  // src/ts/shared/svg-geometry.ts
+  function screenMatrix(element) {
+    const ctm = element.getScreenCTM();
+    return ctm ? DOMMatrix.fromMatrix(ctm) : null;
+  }
+  function boxFrame(screen, box) {
+    return screen.translate(box.x, box.y).scale(box.width, box.height);
+  }
+
+  // src/ts/shared/camera-dom.ts
+  var authoredViews = /* @__PURE__ */ new WeakMap();
+  function cameraSvg(root) {
+    const svg = root.matches("svg[data-camera]") ? root : root.querySelector("svg[data-camera]");
+    return svg instanceof SVGSVGElement ? svg : null;
+  }
+  function authoredView(svg) {
+    let view = authoredViews.get(svg);
+    if (!view) {
+      view = parseViewBox(svg.getAttribute("viewBox"));
+      authoredViews.set(svg, view);
+    }
+    return view;
+  }
+  function measureShown(svg, el, measure) {
+    const lifted = [];
+    for (let node = el; node && node !== svg; node = node.parentElement) {
+      if (node instanceof SVGElement && getComputedStyle(node).display === "none") {
+        lifted.push({
+          node,
+          value: node.style.getPropertyValue("display"),
+          priority: node.style.getPropertyPriority("display")
+        });
+        node.style.setProperty("display", "inline", "important");
+      }
+    }
+    try {
+      return measure();
+    } finally {
+      for (const { node, value, priority } of lifted.reverse()) {
+        if (value) node.style.setProperty("display", value, priority);
+        else node.style.removeProperty("display");
+      }
+    }
+  }
+  function targetRect(svg, id) {
+    const el = svg.querySelector(`[id="${CSS.escape(id)}"]`);
+    if (!(el instanceof SVGGraphicsElement)) return null;
+    return measureShown(svg, el, () => {
+      const slideScreen = screenMatrix(svg);
+      const elementScreen = screenMatrix(el);
+      if (!slideScreen || !elementScreen) return null;
+      const toSlide = slideScreen.inverse().multiply(boxFrame(elementScreen, el.getBBox()));
+      const corners = [
+        new DOMPoint(0, 0),
+        new DOMPoint(1, 0),
+        new DOMPoint(0, 1),
+        new DOMPoint(1, 1)
+      ].map((corner) => corner.matrixTransform(toSlide));
+      const xs = corners.map((corner) => corner.x);
+      const ys = corners.map((corner) => corner.y);
+      const rect = {
+        x: Math.min(...xs),
+        y: Math.min(...ys),
+        w: Math.max(...xs) - Math.min(...xs),
+        h: Math.max(...ys) - Math.min(...ys)
+      };
+      return Object.values(rect).every(Number.isFinite) ? rect : null;
+    });
+  }
+  function resolver(svg) {
+    const base = authoredView(svg);
+    return (cue) => {
+      const rect = cue.target === null ? null : targetRect(svg, cue.target);
+      return rect ? fitFrame(rect, cue.margin, base) : { ...base };
+    };
+  }
+  function writeView(svg, view) {
+    svg.setAttribute("viewBox", formatViewBox(view));
+  }
+  function applyCameraInstant(root, step) {
+    const svg = cameraSvg(root);
+    if (!svg) return;
+    const cues = parseCameraCues(svg.getAttribute("data-camera"));
+    writeView(svg, restingCamera(cues, step, authoredView(svg), resolver(svg)));
+  }
+  function cameraRun(root, step) {
+    const svg = cameraSvg(root);
+    if (!svg) return null;
+    const cues = parseCameraCues(svg.getAttribute("data-camera"));
+    const stepCues = cues.filter((c2) => c2.step === step);
+    if (stepCues.length === 0) return null;
+    const resolve = resolver(svg);
+    const timeline = cameraTimeline(
+      stepCues,
+      stepStartView(cues, step, authoredView(svg), resolve),
+      resolve
+    );
+    return { timeline, seek: (timeMs) => writeView(svg, timeline.at(timeMs)) };
+  }
+  function maxCameraStep(root) {
+    const svg = root.matches("[data-camera]") ? root : root.querySelector("[data-camera]");
+    const cues = parseCameraCues(svg?.getAttribute("data-camera") ?? null);
+    return cues.reduce((m2, c2) => Math.max(m2, c2.step), 0);
+  }
+
   // src/ts/shared/keyframes.ts
   var templates = /* @__PURE__ */ new Map();
   function parseOffsets(keyText) {
@@ -749,12 +1011,22 @@
         const anim = ensureAnim(el, st);
         anim.pause();
         items.push({
-          anim,
+          seek: (timeMs) => {
+            anim.currentTime = timeMs;
+          },
           offsetMs: Math.max(0, st.cue.offset) * 1e3,
           spanMs: effectEndMs(st.cue)
         });
       }
     });
+    const camera2 = cameraRun(root, runStep);
+    if (camera2) {
+      items.push({
+        seek: camera2.seek,
+        offsetMs: 0,
+        spanMs: camera2.timeline.totalMs
+      });
+    }
     const totalMs = items.reduce(
       (m2, it) => Math.max(m2, it.offsetMs + it.spanMs),
       0
@@ -764,10 +1036,7 @@
   function seekStepRun(run, value) {
     const runTimeMs = value * run.totalMs;
     for (const it of run.items) {
-      it.anim.currentTime = Math.min(
-        Math.max(runTimeMs - it.offsetMs, 0),
-        it.spanMs
-      );
+      it.seek(Math.min(Math.max(runTimeMs - it.offsetMs, 0), it.spanMs));
     }
   }
   function applyCodeHighlights(root, step) {
@@ -791,7 +1060,7 @@
     return rootStep.get(root) ?? 0;
   }
   function maxStep(root) {
-    let m2 = 0;
+    let m2 = maxCameraStep(root);
     root.querySelectorAll("[data-cues]").forEach((el) => {
       for (const c2 of parseCues(el)) if (c2.step > m2) m2 = c2.step;
     });
@@ -830,6 +1099,7 @@
         else st.anim?.cancel();
       });
     });
+    applyCameraInstant(root, step);
     applyCodeHighlights(root, step);
     rootStep.set(root, step);
   }
@@ -1411,10 +1681,9 @@
   }
   function captureFrame(element) {
     const bbox = element.getBBox();
-    const screenCTM = DOMMatrix.fromMatrix(element.getScreenCTM());
-    const frame = screenCTM.translate(bbox.x, bbox.y).scale(bbox.width, bbox.height);
+    const screenCTM = screenMatrix(element);
     return {
-      comp: decomposeAffine(frame),
+      comp: decomposeAffine(boxFrame(screenCTM, bbox)),
       screenScale: { x: matrixScaleX(screenCTM), y: matrixScaleY(screenCTM) },
       bbox
     };
@@ -2242,145 +2511,6 @@
     });
   }
 
-  // src/ts/presenter/status.ts
-  var stage = document.getElementById("stage");
-  var slideInfo = document.getElementById("slide-info");
-  var stepInfo = document.getElementById("step-info");
-  var mhudSlideInfo = document.getElementById("mhud-slide-info");
-  var mhudStepRing = document.getElementById("mhud-step-ring");
-  var maxStepSlides = null;
-  var maxStepIndex = -1;
-  var maxStepValue = 0;
-  function maxStep2() {
-    if (maxStepSlides === state.slides && maxStepIndex === state.slideIndex)
-      return maxStepValue;
-    const scratch = document.createElement("div");
-    scratch.innerHTML = state.slides[state.slideIndex]?.svg ?? "";
-    maxStepValue = maxStep(scratch);
-    maxStepSlides = state.slides;
-    maxStepIndex = state.slideIndex;
-    return maxStepValue;
-  }
-  var runController = null;
-  var runDriver = null;
-  var runRun = null;
-  var runTo = 0;
-  var runForward = true;
-  function inflightStepDirection() {
-    if (!runController) return null;
-    return runForward ? "forward" : "backward";
-  }
-  function driveRun() {
-    const ctrl = new AbortController();
-    runController = ctrl;
-    const driver2 = runDriver;
-    const run = runRun;
-    const to = runTo;
-    void driver2.animateTo(
-      runForward ? 1 : 0,
-      run.totalMs / 1e3,
-      ctrl.signal,
-      (v2) => seekStepRun(run, v2)
-    ).then(() => {
-      if (ctrl.signal.aborted) return;
-      if (runController === ctrl) {
-        runController = null;
-        runDriver = null;
-        runRun = null;
-      }
-      applyStepInstant(stage, to);
-      updateStatus();
-    });
-  }
-  function landRun() {
-    if (!runController) return;
-    runController.abort();
-    runController = null;
-    runDriver = null;
-    runRun = null;
-    applyStepInstant(stage, runTo);
-    syncVideos(stage, runTo);
-  }
-  function snapStepRun() {
-    if (!runController) return;
-    landRun();
-    updateStatus();
-  }
-  function reverseStepRun() {
-    if (!runController || !runDriver || !runRun) return false;
-    const nextTo = runForward ? runTo - 1 : runTo + 1;
-    if (nextTo < 0) return false;
-    runController.abort();
-    runForward = !runForward;
-    runTo = nextTo;
-    state.step = runTo;
-    applyCodeHighlights(stage, runTo);
-    syncVideos(stage, runTo);
-    updateStatus();
-    driveRun();
-    return true;
-  }
-  function settleStepRun() {
-    landRun();
-  }
-  function applyCurrentStep() {
-    landRun();
-    const from = appliedStep(stage);
-    const to = state.step;
-    applyCodeHighlights(stage, to);
-    syncVideos(stage, to);
-    const run = buildStepRun(stage, from, to);
-    if (run.totalMs <= 0 || from === to) {
-      applyStepInstant(stage, to);
-      updateStatus();
-      return;
-    }
-    runRun = run;
-    runDriver = new ProgressDriver();
-    runDriver.value = run.forward ? 0 : 1;
-    runTo = to;
-    runForward = run.forward;
-    updateStatus();
-    driveRun();
-  }
-  function applyCurrentStepInstant() {
-    landRun();
-    applyStepInstant(stage, state.step);
-    syncVideos(stage, state.step);
-    updateStatus();
-  }
-  function syncURL() {
-    const href = positionHref(
-      new URL(window.location.href),
-      state.slideIndex,
-      state.step
-    );
-    try {
-      history.replaceState(null, "", href);
-    } catch (_2) {
-    }
-  }
-  function readURL() {
-    const { slideIndex, step } = readPosition(
-      new URL(window.location.href),
-      state.slides.length
-    );
-    if (slideIndex !== null) state.slideIndex = slideIndex;
-    state.step = step;
-    return slideIndex !== null;
-  }
-  function updateStatus() {
-    const infoHtml = `<span class="slide-current">${state.slideIndex + 1}</span> / ${state.slides.length}`;
-    const at2 = sectionPosition(state.slides, state.slideIndex);
-    slideInfo.title = at2 ? `${at2.name}: ${at2.at} of ${at2.of}` : "";
-    const ringHtml = buildStepRing(state.step, maxStep2());
-    slideInfo.innerHTML = infoHtml;
-    stepInfo.innerHTML = ringHtml;
-    mhudSlideInfo.innerHTML = infoHtml;
-    mhudStepRing.innerHTML = ringHtml;
-    syncURL();
-  }
-
   // src/ts/shared/gestures.ts
   var DELTA_LINE = 1;
   var DELTA_PAGE = 2;
@@ -2876,55 +3006,8 @@
     }
   };
 
-  // src/ts/shared/zoom-camera.ts
-  function clamp(n2, lo, hi) {
-    return Math.min(Math.max(n2, lo), hi);
-  }
-  function scaleOf(vb, base) {
-    return base.w / vb.w;
-  }
-  function isZoomedIn(vb, base, epsilon = 1e-3) {
-    return scaleOf(vb, base) > 1 + epsilon;
-  }
-  function clampToBounds(vb, base) {
-    const w2 = Math.min(vb.w, base.w);
-    const h2 = Math.min(vb.h, base.h);
-    const x2 = w2 >= base.w ? base.x + (base.w - w2) / 2 : clamp(vb.x, base.x, base.x + base.w - w2);
-    const y2 = h2 >= base.h ? base.y + (base.h - h2) / 2 : clamp(vb.y, base.y, base.y + base.h - h2);
-    return { x: x2, y: y2, w: w2, h: h2 };
-  }
-  function zoomAt(current2, base, factor, focus, limits) {
-    const targetScale = clamp(
-      scaleOf(current2, base) * factor,
-      limits.minScale,
-      limits.maxScale
-    );
-    const w2 = base.w / targetScale;
-    const h2 = base.h / targetScale;
-    const fx = (focus.ux - current2.x) / current2.w;
-    const fy = (focus.uy - current2.y) / current2.h;
-    return clampToBounds(
-      { x: focus.ux - fx * w2, y: focus.uy - fy * h2, w: w2, h: h2 },
-      base
-    );
-  }
-  function panBy(current2, base, dxUser, dyUser) {
-    return clampToBounds(
-      { ...current2, x: current2.x + dxUser, y: current2.y + dyUser },
-      base
-    );
-  }
-  function lerpViewBox(a2, b2, t2) {
-    return {
-      x: a2.x + (b2.x - a2.x) * t2,
-      y: a2.y + (b2.y - a2.y) * t2,
-      w: a2.w + (b2.w - a2.w) * t2,
-      h: a2.h + (b2.h - a2.h) * t2
-    };
-  }
-
   // src/ts/presenter/zoom.ts
-  var stage2 = document.getElementById("stage");
+  var stage = document.getElementById("stage");
   var stageWrap = document.getElementById("stage-wrap");
   var indicator = document.getElementById("zoom-indicator");
   var LIMITS = { minScale: 1, maxScale: 8 };
@@ -2936,12 +3019,17 @@
   var baseViewBox = null;
   var camera = null;
   var navReset = null;
+  var beforeGesture = () => {
+  };
+  function setBeforeCameraGesture(fn) {
+    beforeGesture = fn;
+  }
   var dragStartCamera = null;
   var dragStartInverse = null;
   var dragStartClientX = 0;
   var dragStartClientY = 0;
   function currentSvg() {
-    return stage2?.querySelector("svg") ?? null;
+    return stage?.querySelector("svg") ?? null;
   }
   function clientToUser(clientX, clientY, inverse) {
     const inv = inverse ?? currentSvg()?.getScreenCTM()?.inverse();
@@ -3028,20 +3116,24 @@
     navReset = after;
     animateCameraTo({ ...baseViewBox }, NAV_RESET_MS, runNavReset);
   }
+  function hasPendingNav() {
+    return navReset !== null;
+  }
   function cancelPendingNav() {
     navReset = null;
   }
-  function flushPendingNav() {
+  function takeCamera() {
     if (navReset) runNavReset();
+    beforeGesture();
   }
   function smoothResetCamera() {
-    flushPendingNav();
+    takeCamera();
     if (!ensureBase() || !camera || !baseViewBox) return;
     if (!isZoomedIn(camera, baseViewBox)) return;
     animateCameraTo({ ...baseViewBox }, RESET_ANIM_MS);
   }
   function keyZoom(direction) {
-    flushPendingNav();
+    takeCamera();
     if (!ensureBase() || !camera || !baseViewBox) return;
     const factor = direction === "in" ? KEY_ZOOM_STEP : 1 / KEY_ZOOM_STEP;
     const target = zoomAt(
@@ -3054,7 +3146,7 @@
     animateCameraTo(target, KEY_ANIM_MS);
   }
   function zoomAbout(factor, from, to) {
-    flushPendingNav();
+    takeCamera();
     cancelAnim();
     if (!ensureBase() || !camera || !baseViewBox) return;
     const focus = clientToUser(from.x, from.y);
@@ -3070,6 +3162,7 @@
   }
   function panPixels(dx, dy) {
     if (!camera || !baseViewBox) return;
+    takeCamera();
     const inv = currentSvg()?.getScreenCTM()?.inverse();
     if (!inv) return;
     const units = Math.hypot(inv.a, inv.b);
@@ -3116,7 +3209,7 @@
     });
     wrap.addEventListener("pointerdown", (e2) => {
       if (!isCameraGesture(e2) || overGrid(e2.target)) return;
-      flushPendingNav();
+      takeCamera();
       cancelAnim();
       if (!ensureBase() || !camera) return;
       const inverse = currentSvg()?.getScreenCTM()?.inverse();
@@ -3148,6 +3241,160 @@
     wrap.addEventListener("pointerup", endDrag);
     wrap.addEventListener("pointercancel", endDrag);
     wrap.addEventListener("dblclick", smoothResetCamera);
+  }
+
+  // src/ts/presenter/status.ts
+  var stage2 = document.getElementById("stage");
+  var slideInfo = document.getElementById("slide-info");
+  var stepInfo = document.getElementById("step-info");
+  var mhudSlideInfo = document.getElementById("mhud-slide-info");
+  var mhudStepRing = document.getElementById("mhud-step-ring");
+  var maxStepSlides = null;
+  var maxStepIndex = -1;
+  var maxStepValue = 0;
+  function maxStep2() {
+    if (maxStepSlides === state.slides && maxStepIndex === state.slideIndex)
+      return maxStepValue;
+    const scratch = document.createElement("div");
+    scratch.innerHTML = state.slides[state.slideIndex]?.svg ?? "";
+    maxStepValue = maxStep(scratch);
+    maxStepSlides = state.slides;
+    maxStepIndex = state.slideIndex;
+    return maxStepValue;
+  }
+  var runController = null;
+  var runDriver = null;
+  var runRun = null;
+  var runTo = 0;
+  var runForward = true;
+  function inflightStepDirection() {
+    if (!runController) return null;
+    return runForward ? "forward" : "backward";
+  }
+  function driveRun() {
+    const ctrl = new AbortController();
+    runController = ctrl;
+    const driver2 = runDriver;
+    const run = runRun;
+    const to = runTo;
+    void driver2.animateTo(
+      runForward ? 1 : 0,
+      run.totalMs / 1e3,
+      ctrl.signal,
+      (v2) => seekStepRun(run, v2)
+    ).then(() => {
+      if (ctrl.signal.aborted) return;
+      if (runController === ctrl) {
+        runController = null;
+        runDriver = null;
+        runRun = null;
+      }
+      applyStepInstant(stage2, to);
+      updateStatus();
+    });
+  }
+  function landRun() {
+    if (!runController) return;
+    runController.abort();
+    runController = null;
+    runDriver = null;
+    runRun = null;
+    applyStepInstant(stage2, runTo);
+    syncVideos(stage2, runTo);
+  }
+  function snapStepRun() {
+    if (!runController) return;
+    landRun();
+    updateStatus();
+  }
+  function reverseStepRun() {
+    if (!runController || !runDriver || !runRun) return false;
+    const nextTo = runForward ? runTo - 1 : runTo + 1;
+    if (nextTo < 0) return false;
+    runController.abort();
+    runForward = !runForward;
+    runTo = nextTo;
+    state.step = runTo;
+    applyCodeHighlights(stage2, runTo);
+    syncVideos(stage2, runTo);
+    updateStatus();
+    driveRun();
+    return true;
+  }
+  function settleStepRun() {
+    landRun();
+  }
+  setBeforeCameraGesture(snapStepRun);
+  function applyCurrentStep() {
+    if (hasPendingNav()) return;
+    if (cameraIsZoomed()) {
+      resetCameraThen(() => {
+        resetCamera();
+        runCurrentStep();
+      });
+    } else {
+      cancelPendingNav();
+      resetCamera();
+      runCurrentStep();
+    }
+  }
+  function runCurrentStep() {
+    landRun();
+    const from = appliedStep(stage2);
+    const to = state.step;
+    applyCodeHighlights(stage2, to);
+    syncVideos(stage2, to);
+    const run = buildStepRun(stage2, from, to);
+    if (run.totalMs <= 0 || from === to) {
+      applyStepInstant(stage2, to);
+      updateStatus();
+      return;
+    }
+    runRun = run;
+    runDriver = new ProgressDriver();
+    runDriver.value = run.forward ? 0 : 1;
+    runTo = to;
+    runForward = run.forward;
+    updateStatus();
+    driveRun();
+  }
+  function applyCurrentStepInstant() {
+    resetCamera();
+    landRun();
+    applyStepInstant(stage2, state.step);
+    syncVideos(stage2, state.step);
+    updateStatus();
+  }
+  function syncURL() {
+    const href = positionHref(
+      new URL(window.location.href),
+      state.slideIndex,
+      state.step
+    );
+    try {
+      history.replaceState(null, "", href);
+    } catch (_2) {
+    }
+  }
+  function readURL() {
+    const { slideIndex, step } = readPosition(
+      new URL(window.location.href),
+      state.slides.length
+    );
+    if (slideIndex !== null) state.slideIndex = slideIndex;
+    state.step = step;
+    return slideIndex !== null;
+  }
+  function updateStatus() {
+    const infoHtml = `<span class="slide-current">${state.slideIndex + 1}</span> / ${state.slides.length}`;
+    const at2 = sectionPosition(state.slides, state.slideIndex);
+    slideInfo.title = at2 ? `${at2.name}: ${at2.at} of ${at2.of}` : "";
+    const ringHtml = buildStepRing(state.step, maxStep2());
+    slideInfo.innerHTML = infoHtml;
+    stepInfo.innerHTML = ringHtml;
+    mhudSlideInfo.innerHTML = infoHtml;
+    mhudStepRing.innerHTML = ringHtml;
+    syncURL();
   }
 
   // src/ts/presenter/transitions.ts
@@ -5098,8 +5345,12 @@
     renderEditButton();
   }
   function togglePv() {
-    document.body.classList.toggle("pv-open");
-    pvPanel.addEventListener("transitionend", _scalePvNext, { once: true });
+    const opening = document.body.classList.toggle("pv-open");
+    pvPanel.addEventListener(
+      "transitionend",
+      opening ? renderPvNext : _scalePvNext,
+      { once: true }
+    );
   }
   window.addEventListener("resize", _scalePvNext);
   function _onPvResizeMove(e2) {

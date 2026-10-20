@@ -77,6 +77,7 @@ in the browser that writes every change straight back to the same files.
 That's the core loop—the rest is there once you need it:
 reusable layouts that inherit from each other like master slides,
 Markdown-filled zones for text-heavy slides,
+camera moves that tour a diagram or lay out a whole talk on one canvas,
 a presenter view with speaker notes,
 one-command export to a single self-contained HTML file or a PDF,
 and more.

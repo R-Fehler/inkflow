@@ -45,6 +45,17 @@ class TestMath:
         assert len(out) > 0
 
 
+class TestFootnotes:
+    def test_reference_is_plain_superscript(self) -> None:
+        out = markdown_to_html("Claim.[^1]\n\n[^1]: Source.")
+        assert '<sup class="footnote-ref">[1]</sup>' in out
+
+    def test_footnote_has_no_links(self) -> None:
+        out = markdown_to_html("Claim.[^1]\n\n[^1]: Source.")
+        assert "Source." in out
+        assert "<a " not in out
+
+
 class TestParseHlSpec:
     def test_single_line(self) -> None:
         assert _parse_hl_spec("1") == [[1]]

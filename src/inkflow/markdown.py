@@ -230,6 +230,31 @@ def _render_link_open(
 _md.add_render_rule("link_open", _render_link_open)
 
 
+# A slide shows a footnote and its reference at once, so the jump links serve no
+# purpose. Worse, following one overwrites the URL fragment holding the deck
+# position.
+def _render_footnote_ref(
+    renderer: object, tokens: object, idx: int, options: object, env: object
+) -> str:
+    caption = cast(
+        str,
+        cast(RendererHTML, renderer).rules["footnote_caption"](
+            tokens, idx, options, env
+        ),
+    )
+    return f'<sup class="footnote-ref">{caption}</sup>'
+
+
+def _render_footnote_anchor(
+    _renderer: object, _tokens: object, _idx: int, _options: object, _env: object
+) -> str:
+    return ""
+
+
+_md.add_render_rule("footnote_ref", _render_footnote_ref)
+_md.add_render_rule("footnote_anchor", _render_footnote_anchor)
+
+
 def render_md_with_steps(md: str, base_step: int) -> tuple[str, int]:
     """Render markdown, assigning base steps to fenced code blocks with specs.
 

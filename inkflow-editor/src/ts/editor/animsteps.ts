@@ -5,15 +5,28 @@ import type { CueInfo } from "./types";
 /**
  * The step each animation of the list plays on, read off the built slide:
  * an element's cues there are its animations in order (data-cues, sorted
- * by step), a video's step is its data-play-on-step. Null when not found.
+ * by step), a video's step is its data-play-on-step, a camera cue's
+ * (`Frame`) its place in the root's data-camera list. Null when not found.
  */
 export function cueSteps(
     cues: CueInfo[],
     svg: Element | null,
 ): (number | null)[] {
     const seen = new Map<string, number>();
+    let frames = 0;
     return cues.map((cue) => {
         if (!svg) return null;
+        if (cue.kind === "camera") {
+            try {
+                const list = JSON.parse(
+                    svg.getAttribute("data-camera") ?? "[]",
+                ) as { step: number }[];
+                const steps = list.map((c) => c.step).sort((a, b) => a - b);
+                return steps[frames++] ?? null;
+            } catch {
+                return null;
+            }
+        }
         const byId = (id: string) =>
             svg.querySelector(`[id="${CSS.escape(id)}"]`);
         if (cue.kind === "video") {

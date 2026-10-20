@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from inkflow import sync
-from inkflow.animations import FadeIn, PlayVideo
+from inkflow.animations import FadeIn, Frame, PlayVideo
 from inkflow.manifest import Deck, Image, Slide, Video
 from inkflow.overlay import Overlay
 from inkflow.sync import PreviewContext
@@ -195,6 +195,20 @@ class TestVerifyAnimations:
         assert any(
             "animation element #nonexistent not found" in msg for _, msg in issues
         )
+
+    def test_missing_frame_target_is_error(self, tmp_path: Path) -> None:
+        src = _setup(tmp_path)
+        slide = Slide(str(src), animations=[Frame("nonexistent")])
+        issues = verify_slide(slide, tmp_path, None, _preview(tmp_path))
+        assert ("error", "frame target #nonexistent not found in SVG") in issues
+
+    def test_frame_on_present_target_or_full_slide_no_error(
+        self, tmp_path: Path
+    ) -> None:
+        src = _setup(tmp_path)
+        slide = Slide(str(src), animations=[Frame("my-rect"), Frame()])
+        issues = verify_slide(slide, tmp_path, None, _preview(tmp_path))
+        assert not any("frame target" in msg for _, msg in issues)
 
     def test_present_animation_element_no_error(self, tmp_path: Path) -> None:
         src = _setup(tmp_path)

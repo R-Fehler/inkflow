@@ -63,6 +63,7 @@ open formats, plain text, not tied to any software or service—fully compatible
 That's the core loop—the rest is there once you need it:
 reusable layouts that inherit from each other like master slides,
 Markdown-filled zones for text-heavy slides,
+camera moves that tour a diagram or lay out a whole talk on one canvas,
 a presenter view with speaker notes,
 a [visual editor](editor/index.md) that writes those same files,
 [charts from data](authoring/charts.md) and [PDF figures](authoring/pdf-figures.md),
