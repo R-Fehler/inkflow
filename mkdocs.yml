@@ -90,6 +90,7 @@ nav:
     - Presenting a deck: presenting/index.md
     - Presenter panel: presenting/presenter-panel.md
     - Multi-window sync: presenting/sync.md
+    - Sharing: presenting/sharing.md
     - Export: presenting/export.md
   - Reference:
     - Manifest: reference/manifest.md

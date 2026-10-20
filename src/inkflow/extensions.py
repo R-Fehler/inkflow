@@ -1,16 +1,19 @@
 """Server extensions: how a frontend plugs into the server inkflow runs.
 
 ``inkflow serve`` is the core's server: it builds the deck on every change,
-serves the presenter and the deck's files, and relays positions between
-windows over a WebSocket. An extension adds to that without the core knowing
-what it is: a visual editor, a review tool, a remote control.
+serves the presenter and the deck's files on one port, relays positions
+between windows over a WebSocket (``/_inkflow/ws``), and decides at the door
+who may connect and as whom (``access.py``: the owner, an editor or a
+viewer). An extension adds to that without the core knowing what it is: a
+visual editor, a review tool, a remote control, a second transport.
 
 An extension is a ``ServerExtension`` subclass, handed to ``serve`` by the
 command that starts the server (or by a plugin, see ``inkflow.plugins``).
 Every hook has a do-nothing default. In the order they happen:
 
 - ``start(server)`` once, with the ``ServerContext`` it keeps: what the
-  server knows and the things it can do (send, broadcast, rebuild, stop);
+  server knows and the things it can do (send, broadcast, rebuild, stop,
+  serve a connection that came another way);
 - ``open(deck_path)`` for the deck served;
 - per build: ``before_build`` and ``build`` run in a worker thread, inside
   the build (an exception there fails the build: the error overlay);
@@ -23,10 +26,12 @@ Every hook has a do-nothing default. In the order they happen:
   ``hello`` when a page said what it is (``{"type": "hello", "role": ...}``);
   ``message`` for each message type the extension lists in ``messages``
   (with the least role that may send it: anything else from a lesser role is
-  dropped); ``disconnected`` when it goes;
+  dropped at the door); ``disconnected`` when it goes;
 - ``http(request)`` for every request the core does not answer itself (the
   deck's assets come first, the presenter last);
 - ``keys()``: keys in the server's terminal;
+- ``share_*``: the Share dialog's extra operations and status, the terminal's
+  extra share lines (a relay, say);
 - ``close()`` when the deck stops being served, ``stop()`` when the server
   stops.
 """
@@ -41,7 +46,9 @@ from typing import TYPE_CHECKING, Protocol, TypedDict
 if TYPE_CHECKING:
     from websockets.asyncio.server import ServerConnection
 
-    from inkflow.collab import Client, People, Role
+    from inkflow.access import Access, Role
+    from inkflow.access import Request as AccessRequest
+    from inkflow.collab import Client, People
     from inkflow.edit import EditCommands
     from inkflow.enums import ColorMode
     from inkflow.manifest import Deck
@@ -49,7 +56,8 @@ if TYPE_CHECKING:
 
 
 class ResponseWriter(Protocol):
-    """Where a response is written (a socket's ``asyncio.StreamWriter``)."""
+    """Where a response is written: a socket's ``asyncio.StreamWriter``, or
+    a connection that came another way (``ServerContext.serve_request``)."""
 
     def write(self, data: bytes) -> None: ...
 
@@ -112,24 +120,44 @@ class Build:
 class HttpRequest:
     """A request the core did not answer itself, with who asks."""
 
-    method: str
-    target: str
-    """The path with its query, as requested."""
+    request: AccessRequest
     raw: bytes
-    """The request head as read (headers included)."""
+    """The request head as read (headers included: ``Range``)."""
     role: Role
+    token: str | None
+    """The share token that admitted it (None: the owner, by place)."""
     writer: ResponseWriter
     respond: Callable[[str, bytes, str, bytes], Awaitable[None]]
     """``respond(status, body, content_type, extra_headers)``."""
     send_file: Callable[[Path], Awaitable[None]]
-    """Send a file (its type from ``inkflow.assets.MIME_TYPES``)."""
+    """Stream a file (its type from ``inkflow.assets.MIME_TYPES``; byte
+    ranges honoured)."""
     refuse: Callable[[str, str, str], Awaitable[None]]
     """``refuse(status, title, text)``: a small HTML page saying why."""
 
     @property
+    def method(self) -> str:
+        return self.request.method
+
+    @property
     def path(self) -> str:
         """The path without its query."""
-        return self.target.split("?", 1)[0]
+        return self.request.path
+
+    @property
+    def target(self) -> str:
+        """The path with its query."""
+        return self.request.target
+
+
+class VirtualConnection(Protocol):
+    """A page connection that came another way than this server's socket
+    (an online guest's, through a relay): shaped as a websockets
+    ``ServerConnection`` for what the server uses of one."""
+
+    async def send(self, message: str) -> None: ...
+
+    async def close(self, code: int = 1000, reason: str = "") -> None: ...
 
 
 class ServerContext(Protocol):
@@ -147,6 +175,11 @@ class ServerContext(Protocol):
         ...
 
     @property
+    def access(self) -> Access:
+        """Who may connect (share links, the owner token)."""
+        ...
+
+    @property
     def deck_path(self) -> Path: ...
 
     @property
@@ -156,7 +189,8 @@ class ServerContext(Protocol):
 
     @property
     def address(self) -> dict[str, object]:
-        """Where this server listens: ``host``, ``port``, ``wsPort``."""
+        """Where this server listens for this machine's own pages and
+        programs: ``host``, ``port``, ``wsPath``, ``wsPort``, ``tls``."""
         ...
 
     @property
@@ -177,6 +211,11 @@ class ServerContext(Protocol):
         """One message to every page but ``sender``."""
         ...
 
+    async def send_owners(self, payload: dict[str, object]) -> None:
+        """One message to every page of the owner but the presenter's (where
+        a Share dialog lives); never to a program."""
+        ...
+
     async def notify(
         self, conn: ServerConnection | None, message: str, style: str = "green"
     ) -> None:
@@ -189,6 +228,23 @@ class ServerContext(Protocol):
 
     def shutdown(self) -> None:
         """Stop the server."""
+        ...
+
+    def share_changed(self) -> None:
+        """Something an extension adds to sharing changed: the terminal's
+        share lines and the owner's Share dialog are refreshed."""
+        ...
+
+    async def serve_connection(self, conn: VirtualConnection, role: Role) -> None:
+        """Run a page connection that came another way (``VirtualConnection``)
+        as one of ``role``: joined, handled like any other, until it closes."""
+        ...
+
+    async def serve_request(
+        self, path: str, range_: str | None, role: Role, writer: ResponseWriter
+    ) -> None:
+        """Answer a GET that came another way, as this server answers one
+        from the network for ``role``."""
         ...
 
 
@@ -265,3 +321,17 @@ class ServerExtension:
     def keys(self) -> Mapping[str, Key]:
         """Terminal keys (one character each) this extension adds."""
         return {}
+
+    def share_status(self) -> dict[str, object]:
+        """Fields added to the owner's ``share-status``."""
+        return {}
+
+    async def share_op(self, op: str, msg: dict[str, object]) -> str | bool | None:
+        """An operation of the Share dialog the core does not know: an error
+        message, None when done, False when it is not this extension's."""
+        del op, msg
+        return False
+
+    def share_lines(self) -> list[str]:
+        """Lines the terminal adds under sharing."""
+        return []

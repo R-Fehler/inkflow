@@ -1,21 +1,15 @@
-"""The connections a server has: who each one is (its role) and what it is
-(a page, and which, or a program). Frontends keep more about the people
-behind them (names, colours, selections) in server extensions of their own."""
+"""The connections a server has: who each one is (its role at the door, the
+share token that admitted it) and what it is (a page, and which, or a
+program). Frontends keep more about the people behind them (an editor's
+names, colours and selections) in extensions of their own."""
 
 from __future__ import annotations
 
 import itertools
 import secrets
 from dataclasses import dataclass
-from typing import Literal
 
-Role = Literal["owner", "editor", "viewer"]
-"""Who a connection is. The owner is this machine's own user (a page or
-program on loopback, not opened by another site); anyone else is a viewer.
-``editor`` is for share links that may edit (a server extension's own
-messages say which role each needs)."""
-
-ROLE_RANK: dict[Role, int] = {"viewer": 0, "editor": 1, "owner": 2}
+from inkflow.access import Role
 
 
 @dataclass
@@ -23,15 +17,25 @@ class Client:
     """One connection: a page (presenter, editor…) or a program."""
 
     id: str
-    """Public, per connection."""
+    """Public, per connection: what a share dialog's "Disconnect" names."""
     role: Role
+    token: str | None = None
+    """The share token that admitted it (None: the owner)."""
     peer: str | None = None
     page: str = ""
     """What the page said it is in ``hello`` (``presenter``, ``editor``);
     "" for a program, which never says."""
+    online: bool = False
+    """Came another way than this server's port (``serve_connection``: a
+    relay), so sharing on the network and the other way stop separately."""
 
     def public(self) -> dict[str, object]:
-        return {"id": self.id, "role": self.role, "page": self.page}
+        return {
+            "id": self.id,
+            "role": self.role,
+            "page": self.page,
+            "online": self.online,
+        }
 
 
 class People:
@@ -41,9 +45,14 @@ class People:
         self._clients: dict[object, Client] = {}
         self._serial: itertools.count[int] = itertools.count(1)
 
-    def join(self, conn: object, role: Role, peer: str | None = None) -> Client:
+    def join(
+        self, conn: object, role: Role, token: str | None, peer: str | None
+    ) -> Client:
         client = Client(
-            id=f"p{next(self._serial)}{secrets.token_hex(3)}", role=role, peer=peer
+            id=f"p{next(self._serial)}{secrets.token_hex(3)}",
+            role=role,
+            token=token,
+            peer=peer,
         )
         self._clients[conn] = client
         return client

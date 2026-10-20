@@ -1602,6 +1602,17 @@
     pvResizeHandle.addEventListener("pointerup", _onPvResizeUp);
   });
 
+  // src/ts/shared/wsurl.ts
+  var WS_PATH = "/_inkflow/ws";
+  function socketUrl(loc) {
+    const scheme = loc.protocol === "https:" ? "wss" : "ws";
+    return `${scheme}://${loc.host || "localhost"}${WS_PATH}`;
+  }
+  var SENT_AWAY = 4001;
+  function openSocket() {
+    return new WebSocket(socketUrl(location));
+  }
+
   // src/ts/shared/morph-math.ts
   var INTERPOLATED_ATTRIBUTES = [
     "fill",
@@ -3193,6 +3204,24 @@
     }
     if (isSyncMode(stored)) state.syncMode = stored;
   }
+  function storedSyncMode() {
+    try {
+      return isSyncMode(sessionStorage.getItem(SYNC_MODE_KEY));
+    } catch (_) {
+      return false;
+    }
+  }
+  var role = "owner";
+  function welcome(msg) {
+    role = String(msg.role ?? "owner");
+    if (role !== "viewer") return;
+    const edit = document.getElementById("btn-edit");
+    if (edit) edit.style.display = "none";
+    if (!storedSyncMode() && state.syncMode !== "follow") {
+      state.syncMode = "follow";
+      requestSync();
+    }
+  }
   function applySyncMode(mode) {
     state.syncMode = mode;
     try {
@@ -3267,14 +3296,15 @@
   }
   function connectWS(wsPort, authoritative) {
     if (!wsPort) return;
-    state.ws = new WebSocket(`ws://localhost:${wsPort}`);
+    state.ws = openSocket();
     let firstPositionPending = false;
     state.ws.onopen = () => {
       wsDot.className = "connected";
       wsDot.dataset.tooltip = "Connected";
       const assert = authoritative && sends();
       firstPositionPending = assert;
-      if (assert) sendNav();
+      if (assert && role !== "viewer") sendNav();
+      state.ws?.send(JSON.stringify({ type: "hello", role: "presenter" }));
     };
     state.ws.onmessage = (ev) => {
       let msg;
@@ -3303,6 +3333,8 @@
         showError(msg.message);
       } else if (msg.type === "notify") {
         showNotify(msg.message, msg.style);
+      } else if (msg.type === "welcome") {
+        welcome(msg);
       } else if (msg.type === "position") {
         if (receives() && !msg.snap && firstPositionPending) {
           firstPositionPending = false;
@@ -3311,10 +3343,17 @@
         applyIncomingPosition(msg);
       }
     };
-    state.ws.onclose = () => {
+    state.ws.onclose = (ev) => {
       wsDot.className = "";
       wsDot.dataset.tooltip = "Disconnected";
       state.ws = null;
+      if (ev.code === SENT_AWAY) {
+        showNotify(
+          `Disconnected: ${ev.reason || "the link stopped working"}`,
+          "red"
+        );
+        return;
+      }
       setTimeout(() => connectWS(wsPort, true), 2e3);
     };
     state.ws.onerror = () => state.ws?.close();
