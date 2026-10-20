@@ -53,3 +53,11 @@ presence, Share via SSH): it is a plugin over the API of part A.
 ## Status
 
 - PR 1 (plugins): `claude/upstream-01-plugins`, R-Fehler/inkflow#3.
+- PR 2 (server extensions): `claude/upstream-02-server-extensions`,
+  R-Fehler/inkflow#4. Interim owner rule: loopback peer through a loopback
+  Host/Origin (PR 4 replaces it with `access.py`). `Role` lives in
+  `collab.py` until then. Not yet in it: `provenance` (PR 3), `access`,
+  `send_owners`, `share_*`, `serve_connection`/`serve_request` (PR 4),
+  `open_deck`, `serves_without_deck`, `home` (PR 6), `resync` and patches
+  (PR 5), `HttpRequest.token`/ranged `send_file` (PR 4).
+- Next: PR 3 (source locators).
