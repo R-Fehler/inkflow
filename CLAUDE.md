@@ -40,7 +40,8 @@ src/
                                (in animations.py) and `PlayVideo`; `Slide.animations`
                                is `list[Cue]`. Media is a `_MediaBase` shared by Image +
                                Video; `Media` is the `Image | Video` union alias (not
-                               callable). Video adds playback fields (controls, autoplay,
+                               callable). `Image(page=)` (a PDF's page) is kept in `src`
+                               as `#page=N`. Video adds playback fields (controls, autoplay,
                                muted, loop, poster, start, end). `Chart` is the third zone
                                value kind (data file `src` or inline `data`, kind, x, y…).
                                `Slugged` mixin (kebab slug from class name) is shared by
@@ -98,7 +99,7 @@ src/
                                incremental.py)
     deps.py           which files a piece of the build read: `note(path)` at every
                                read or lookup of the slide pipeline (svgio, layout,
-                               loaders, charts, the slide's own file), collected by
+                               loaders, charts, pdf, the slide's own file), collected by
                                `recording()` as path -> `Stamp` (mtime, ctime, size,
                                inode; None = not there; a file changed within
                                `RACY_NS`, or `COARSE_NS` on a whole-second file
@@ -112,7 +113,8 @@ src/
                                / `Build` (`slide`, `notes`, `finish`), `frozen`
                                (deck values compared by value and type), the
                                stand-in slide number and count (`_Template`,
-                               `_plain`), warnings said again for kept slides; and
+                               `_plain`), warnings said again for kept slides (the
+                               one "no PDF converter" warning by `finish`); and
                                what the pages are sent: `set_keys` (each slide's
                                content digest), `keys_of`, `as_patch`
     content.py        TextBox / Image / Video / chart injection into zone rects, with
@@ -248,10 +250,30 @@ src/
                                re-assembled from its xref table (left alone when
                                it is not a classic-xref PDF)
     assets.py         asset reference resolution. `AssetRoots` holds the allowed roots
-                               (project dir, theme asset dir) and converts between an
+                               (project dir, theme asset dir, and the PDF page cache
+                               `.inkflow/cache/pdf/` as `_pdf/`) and converts between an
                                absolute path and a canonical ref both ways; `AssetSource`
                                resolves the refs written in one file; `svg_reader` is the
                                composition reader that canonicalises each SVG as it is read
+    pdf.py            PDF figures: a picture naming a PDF (`plot.pdf#page=2`; `Image(...,
+                               page=2)` is kept as that fragment) shows its page converted
+                               to SVG by the first converter available: PyMuPDF (the
+                               optional `pdf` extra, AGPL, imported by name only here),
+                               then pdftocairo, mutool, Inkscape (`converter`, `CONVERTERS`).
+                               `convert` caches by content hash + page + converter;
+                               `PdfPages` (one per build, in `DeckContext`) rewrites every
+                               `<image>`/`<img>` after content injection, keeping the PDF
+                               ref in `data-inkflow-pdf`, or draws a placeholder (one
+                               warning per build, `install_hint`); `page_count` for
+                               `verify`. A page committed beside its PDF
+                               (`committed_path`: `figure.pdf.p1.svg`, text from
+                               `page_for_commit`, root stamped with the PDF's hash
+                               `data-inkflow-pdf-digest`) is used instead while the hash
+                               matches (`committed_page`), so references keep naming
+                               the PDF
+    workdir.py        the project's `.inkflow/` (`WORK_DIR`, `work_dir` = created
+                               ignoring itself in git): caches (PDF pages) and plugins'
+                               files; never watched
     __main__.py       `python -m inkflow` (stdout/stderr to devnull when started
                                without a console, as by pythonw)
     cli/              CLI package (entry point inkflow.cli:main). _common.py holds the
@@ -412,7 +434,7 @@ Non-fatal records collected during the rebuild (`inkflow.logging.collect_logs`, 
 The HTTP response includes `Cache-Control: no-store` so hard refreshes always get fresh content.
 
 **A served deck rebuilds what a change touched (`incremental.py`).**
-The watcher still rebuilds on every change of any project file, and `server.rebuild` still runs deck.py and walks every slide, but `process_deck(cache=)` takes a slide from the last build unless one of its inputs changed (`server.Kept`: a `SlideCache` per served deck; `build`, `export`, `verify` pass none and are untouched). A slide's inputs and how each is watched: the files it read or looked for, recorded by `deps.note` while it is processed and compared by stamp at the next build, "not there" included (so its layout chain and overlays, its Markdown and style file, each candidate of a name search: a `slides/x.svg` that now shadows the layout `x` is a change); what deck.py says of it and of the deck, compared by value (`frozen`: types count, `Inline("a")` is not the path `"a"`; a class deck.py defines is a new class on every load, so slides using one are always processed; a Markdown reveal's `type=Name` makes the slide depend on deck.py, whether the name was found or not); its id. **Not** its number or the slide count: they reach the output only as the root's `inkflow-slide-N` id (and the `@scope` naming it) and the text of `zone-slide-number`/`-total`, so the cache processes a slide with stand-in numbers and puts the real ones into the result (`_Template`), and inserting or moving a slide processes no other slide (a slide whose result shows a stand-in anywhere else is kept by its numbers instead, `_plain`). The notes file is a cache entry of its own, so typing a note processes no slide. What is deliberately outside the cache and done for every slide on every build: the asset time stamps (`server._versioned`, which is how a changed picture reaches the pages), the keys, the deck stylesheet, fonts, transitions. A slide whose build fell short for a reason that may pass is not kept (`deps.retry`). Warnings logged while a slide (or its notes) was processed are logged again when it is kept. Whoever adds a file read to the slide pipeline must `note` it: tests/test_incremental.py compares every incremental build with a full one and holds each slide's recorded files to what an audit hook saw Python open. `r` in the terminal (`rebuild(full=True)`) forgets what is kept; the TUI says how many slides a rebuild processed (`(N changed)`).
+The watcher still rebuilds on every change of any project file, and `server.rebuild` still runs deck.py and walks every slide, but `process_deck(cache=)` takes a slide from the last build unless one of its inputs changed (`server.Kept`: a `SlideCache` per served deck; `build`, `export`, `verify` pass none and are untouched). A slide's inputs and how each is watched: the files it read or looked for, recorded by `deps.note` while it is processed and compared by stamp at the next build, "not there" included (so its layout chain and overlays, its Markdown and style file, chart data, PDFs and their converted or committed pages, each candidate of a name search: a `slides/x.svg` that now shadows the layout `x` is a change); what deck.py says of it and of the deck, compared by value (`frozen`: types count, `Inline("a")` is not the path `"a"`; a class deck.py defines is a new class on every load, so slides using one are always processed; a Markdown reveal's `type=Name` makes the slide depend on deck.py, whether the name was found or not); its id. **Not** its number or the slide count: they reach the output only as the root's `inkflow-slide-N` id (and the `@scope` naming it) and the text of `zone-slide-number`/`-total`, so the cache processes a slide with stand-in numbers and puts the real ones into the result (`_Template`), and inserting or moving a slide processes no other slide (a slide whose result shows a stand-in anywhere else is kept by its numbers instead, `_plain`). The notes file is a cache entry of its own, so typing a note processes no slide. What is deliberately outside the cache and done for every slide on every build: the asset time stamps (`server._versioned`, which is how a changed picture reaches the pages), the keys, the deck stylesheet, fonts, transitions. A slide whose build fell short for a reason that may pass (a PDF page that could not be converted) is not kept (`deps.retry`). Warnings logged while a slide (or its notes) was processed are logged again when it is kept; the one "no PDF converter" warning per build is said by `Build.finish`, and the converter is part of the deck's key, so one installed while the server runs shows the figures. Whoever adds a file read to the slide pipeline must `note` it: tests/test_incremental.py compares every incremental build with a full one and holds each slide's recorded files to what an audit hook saw Python open. `r` in the terminal (`rebuild(full=True)`) forgets what is kept; the TUI says how many slides a rebuild processed (`(N changed)`).
 
 **Position sync is a dumb relay with client-side authority + modes.**
 Clients send `{"type":"nav","slideIndex","step"}` (validated + clamped server-side by `_coerce_nav_position`; a view link's are dropped, and its page starts in `follow`); the server stores the last position and rebroadcasts it as `{"type":"position",...}` to the *other* clients, and pushes it once to each newly connected client. A window that booted from a deep link (a slide named in the URL, captured by `readURL()` before `syncURL()` rewrites the bar) or reconnected asserts its own position and ignores that first push; a bare window adopts it. Each client also has a per-tab **sync mode** (`two-way`/`present`/`follow`/`solo`, `shared/types.ts`) deciding locally whether it broadcasts nav (`sends()`) and applies incoming positions (`receives()`) — the server knows nothing about modes. `s` cycles the mode; `syncmenu.ts` owns the status-bar widget, `websocket.ts` the network/state. Switching into a receiving mode sends `{"type":"sync-request"}` to catch up. Persisted in `sessionStorage`.
@@ -472,6 +494,9 @@ Opt out per-deck: `Deck(embed_fonts=False)`.
 An asset must live under an allowed root: the project dir (canonical prefix `""`), or the active theme's `asset_dir()` (prefix `_theme/`, so a pip-installed theme can ship branding). `locate` matches longest prefix first, which reserves `_theme/` at the project root. A reference that escapes every root is warned about and left as written rather than re-anchored somewhere it never pointed at — the server has always refused paths outside the project, so it was never reachable. Symlink the directory in to bring it back inside; containment collapses `..` without resolving symlinks precisely so that works.
 
 `build`/`export` copy every referenced local file into the output dir, mirroring the source tree; a canonical ref is relative and `..`-free by construction, so `out_dir / ref` always lands inside and needs no rewriting. `_slide_refs` scans the *emitted* SVG and notes rather than walking the deck, so a pruned zone takes its asset with it. A reference that resolves to nothing is a `logger.warning`, not a silent skip. `serve` streams the same refs on demand instead of copying.
+
+**PDF figures are a derived asset, converted at build time and never committed.**
+Browsers show no PDF in `<image>`/`<img>`, so `pdf.PdfPages.apply` (a pipeline step after content injection, so SVG pictures, `Image` zones and Markdown images are covered alike) points each PDF reference at its page converted to SVG in `.inkflow/cache/pdf/` (git-ignored, unwatched; named by content hash + page + converter, so a saved PDF converts again and the watcher's rebuild shows it). The cache is a third `AssetRoots` root with the canonical prefix `_pdf/`, reserved like `_theme/`: `serve`, `build` (copied to `out/_pdf/`, not a hidden folder static hosts may refuse; inlined with `--inline-assets`) and `export` handle a converted page exactly as any picture, with no special case. The PDF reference survives beside it as `data-inkflow-pdf`, which a frontend writing back reads instead of the href, so nothing it writes ever names the cache. PyMuPDF is optional (`inkflow[pdf]`) and loaded with `importlib` so inkflow stays MIT and type-checks without it; the system tools are the fallback. With no converter the picture becomes a placeholder data URI and the build warns once; `verify` (`_check_pdfs`) reports that and a page the PDF does not have.
 
 `build --inline-assets` swaps the copy for `_inline_assets`, which rewrites each reference to a `data:` URI through `assets.rewrite_references` — the same `REFERENCE_PATTERNS` the scan uses, so both halves learn a new reference kind at once. It runs *after* `embed_fonts_css_subsetted`, because the subsetter scans these very slide strings for used characters and base64 would pin the whole font. `assets.MIME_TYPES` is the shared table naming what `serve` sends and what the data URI claims; a suffix missing from it is copied out and warned about rather than dropped, so the build can fall short of one file but never loses an asset. Each reference is inlined where it stands, so a shared asset is carried once per use — the reason this is a flag and not the default.
 
@@ -649,3 +674,6 @@ rich>=15.0           terminal UI
 watchfiles>=0.21     inotify-based file watcher
 websockets>=12.0     WebSocket server (uses 16.x asyncio API)
 ```
+
+Optional: the `pdf` extra (`inkflow[pdf]`) adds pymupdf, which converts PDF
+figures without system tools (AGPL-3.0, so never required; see pdf.py).

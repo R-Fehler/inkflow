@@ -41,6 +41,7 @@ from inkflow.manifest import (
 )
 from inkflow.ns import INKFLOW_HINT
 from inkflow.overlay import Overlay
+from inkflow.pdf import PdfPages
 from inkflow.provenance import INK, stamper
 from inkflow.steps import StepResolver
 from inkflow.svg import compose_overlays, compose_with_ancestors, duplicate_zone_ids
@@ -659,6 +660,9 @@ class SlideSvg:
             self.root, content, font_size, dark_mode, chart_scale
         )
 
+    def convert_pdfs(self, pages: PdfPages) -> None:
+        self.root = pages.apply(self.root)
+
     def annotate(self, cues: list[tuple[Cue, int]]) -> None:
         self.root = annotate_svg(self.root, cues)
 
@@ -687,6 +691,8 @@ class DeckContext:
     overlays: Sequence[Overlay]  # deck default, already resolved against the theme
     mode: ColorMode
     total_slides: int
+    pdf_pages: PdfPages
+    """Converts the PDF pictures (and reports a missing converter once)."""
     chart_scale: float = ZONE_TEXT_SCALE
     """A chart's text size relative to the body text (`PageSize.chart_text_scale`)."""
     editor: bool = False
@@ -805,6 +811,8 @@ def process_slide(
             doc.inject_content(
                 content, font_size, ctx.mode == ColorMode.DARK, ctx.chart_scale
             )
+    # After injection, so a PDF in a zone or in Markdown is converted as well.
+    doc.convert_pdfs(ctx.pdf_pages)
 
     # The deck animations=[...] list continues the timeline after the markdown
     # reveals (steps 1..reveal_max), so the two form one continuous count.
@@ -912,6 +920,7 @@ def deck_context(
         overlays=deck.effective_overlays,
         mode=deck.effective_mode,
         total_slides=total_slides,
+        pdf_pages=PdfPages(assets),
         chart_scale=deck.effective_size.chart_text_scale,
         editor=editor,
     )

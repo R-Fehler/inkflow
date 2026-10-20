@@ -9,15 +9,15 @@ of the slide's inputs changed. One-shot commands (`build`, `export`,
 What a slide's result depends on, and how each part is watched:
 
 - **The files it read or looked for** (its SVG, layout chain, overlays,
-  Markdown, chart data, a style file, every candidate a name was searched
-  at):
+  Markdown, chart data, PDFs and their converted or committed pages, a style
+  file, every candidate a name was searched at):
   recorded while it is processed (`inkflow.deps`) and compared by stamp
   (time, size, inode; "not there" included) at the next build. A layout or an
   overlay edited is thus every slide built on it, and nothing else.
 - **What deck.py says of it** (`Slide(...)`, every field) **and of the deck**
   (theme, mode, font size, overlays, deck style, the chart text scale its
-  size gives): compared by value
-  (`_frozen`). A class deck.py defines itself (a custom animation) is new on
+  size gives) **and of the machine** (the PDF converter installed): compared
+  by value (`_frozen`). A class deck.py defines itself (a custom animation) is new on
   every load, so slides using one are processed every time.
 - **Its id**: entries are kept by id, and the id is part of the key.
 - **Its number and the deck's slide count**: *not* part of the key. They
@@ -37,7 +37,8 @@ build (`server._versioned`).
 
 Warnings logged while a slide was processed are logged again when it is
 taken from the cache, so the banner and the terminal show what a full build
-would.
+would. The one "no PDF converter" warning a build says is said by
+`Build.finish`, whichever slide (processed or kept) wanted it first.
 
 The pages are sent what changed, the same way: every slide (and any list a
 frontend keys the same way) carries a ``key``, a digest of its content
@@ -62,6 +63,7 @@ from typing import cast
 
 from typing_extensions import override
 
+from inkflow import pdf
 from inkflow.deps import Stamp, Stamps, recording
 from inkflow.logging import logger
 from inkflow.manifest import Slide
@@ -142,6 +144,7 @@ def _context_key(ctx: DeckContext, deck_path: Path) -> object:
         ctx.font_size,
         frozen(list(ctx.overlays)),
         ctx.mode,
+        ctx.pdf_pages.tool,
         ctx.chart_scale,
         ctx.editor,
     )
@@ -194,6 +197,8 @@ class _Entry:
     """A template, or (see `_plain`) the slide as built for ``numbers``."""
     numbers: tuple[int, int] | None
     warnings: list[tuple[int, str]]
+    unconverted: str | None
+    """The first PDF picture of the slide no converter could draw."""
 
 
 @dataclass
@@ -235,8 +240,12 @@ class Build:
         self.stamps: Stamps = Stamps()
         self.key: object = _context_key(ctx, deck_path)
         self.seen: set[str] = set()
+        self.unconverted: str | None = None
         cache.processed = []
         cache.notes_read = []
+        # One "no PDF converter" warning per build, whichever slide wants one
+        # first: said in `finish`, not by a slide that may come from the cache.
+        ctx.pdf_pages.warned = True
 
     def slide(self, slide: Slide, number: int, slide_id: str) -> BuiltSlide:
         """`build_slide`, from the cache when nothing it depends on changed."""
@@ -256,14 +265,18 @@ class Build:
         else:
             for level, message in entry.warnings:
                 logger.log(level, message)
+        if self.unconverted is None:
+            self.unconverted = entry.unconverted
         if isinstance(entry.result, _Template):
             return entry.result.numbered(number, total)
         return entry.result
 
     def _process(self, slide: Slide, number: int, slide_id: str, key: object) -> _Entry:
+        pages = self.ctx.pdf_pages
         capture = _Capture()
         logger.addHandler(capture)
         try:
+            before = len(pages.unconverted)
             with recording(self.deck_path) as deps:
                 stand_in = replace(self.ctx, total_slides=_TOTAL)
                 built = build_slide(slide, stand_in, _NUMBER, slide_id, self.deck_path)
@@ -273,6 +286,7 @@ class Build:
                 # Its own text spells a stand-in: built with its real numbers,
                 # and kept only while those stay.
                 capture.records.clear()
+                del pages.unconverted[before:]
                 with recording(self.deck_path) as deps:
                     result = build_slide(
                         slide, self.ctx, number, slide_id, self.deck_path
@@ -280,7 +294,10 @@ class Build:
                 numbers = (number, self.ctx.total_slides)
         finally:
             logger.removeHandler(capture)
-        return _Entry(key, deps, result, numbers, capture.records)
+        wanted = pages.unconverted[before:]
+        return _Entry(
+            key, deps, result, numbers, capture.records, wanted[0] if wanted else None
+        )
 
     def notes(self, slide: Slide, slide_id: str) -> str:
         """`slide_notes`, from the cache while the notes file is the same."""
@@ -309,6 +326,8 @@ class Build:
         for kept in (self.cache.slides, self.cache.notes):
             for gone in [k for k in kept if k not in self.seen]:
                 del kept[gone]
+        if self.unconverted is not None:
+            logger.warning(f"cannot show {self.unconverted}: {pdf.install_hint()}")
 
 
 # ── What the pages are sent ──────────────────────────────────────────────────
