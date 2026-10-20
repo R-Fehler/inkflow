@@ -11,6 +11,7 @@ import asyncio
 import gc
 import json
 import os
+import subprocess
 import sys
 import textwrap
 from collections.abc import AsyncIterator, Iterator
@@ -20,7 +21,7 @@ from typing import cast
 import pytest
 from websockets.asyncio.server import ServerConnection
 
-from inkflow import deps, server
+from inkflow import deps, pdf, server
 from inkflow.edit import NO_EDIT_COMMANDS
 from inkflow.incremental import SlideCache, as_patch, frozen, keys_of, set_keys
 from inkflow.layout import builtin_theme_dir
@@ -163,6 +164,16 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Project:
     _ = p.write("deck.py", DECK)
     assert p.rebuilt() == IDS
     return p
+
+
+def _nowhere(_name: str) -> str | None:
+    """`shutil.which` on a machine without the program."""
+    return None
+
+
+def _somewhere(name: str) -> str | None:
+    """`shutil.which` on a machine that has every program."""
+    return f"/usr/bin/{name}"
 
 
 def _by_id(slides: list[SlideData]) -> dict[str, SlideData]:
@@ -494,6 +505,69 @@ def test_a_renamed_id_rebuilds_that_slide(project: Project) -> None:
     assert set(project.cache.slides) == {"drawing", "intro", "two", "two-2", "five"}
 
 
+def test_a_page_committed_beside_its_pdf_rebuilds_the_slide(
+    project: Project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # No converter on this machine, whatever it has.
+    monkeypatch.setattr(pdf, "_pymupdf", lambda: None)
+    monkeypatch.setattr("shutil.which", _nowhere)
+    # Which converter draws the pages is every slide's (one installed while
+    # the server runs shows the figures without a restart).
+    assert project.rebuilt() == IDS
+    _ = project.write("figures/plot.pdf", b"%PDF-1.4 one")
+    project.edit(
+        "slides/drawing.svg",
+        "<text",
+        '<image id="fig" href="../figures/plot.pdf" width="300" height="160"/><text',
+    )
+    with collect_logs(0) as first:
+        assert project.rebuilt() == ["drawing"]
+    said = [e.message for e in first if "cannot show plot.pdf" in e.message]
+    # One warning per build (the full build `rebuilt` compares with says it too).
+    assert len(said) == 2
+    with collect_logs(0) as again:
+        assert project.rebuilt() == []
+    assert len([e for e in again if "cannot show plot.pdf" in e.message]) == 2
+    # The page drawn once and committed beside the PDF: shown from now on.
+    digest = pdf.digest(project.root / "figures" / "plot.pdf")
+    page = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" data-inkflow-pdf-digest="{digest}"/>'
+    )
+    _ = project.write("figures/plot.pdf.p1.svg", page)
+    assert project.rebuilt() == ["drawing"]
+    assert "figures/plot.pdf.p1.svg" in _by_id(project.full())["drawing"]["svg"]
+    # The PDF saved again: the committed page is no longer its page.
+    _ = project.write("figures/plot.pdf", b"%PDF-1.4 two")
+    assert project.rebuilt() == ["drawing"]
+    assert "plot.pdf.p1.svg" not in _by_id(project.full())["drawing"]["svg"]
+
+
+def test_a_page_that_could_not_be_converted_is_tried_again(
+    project: Project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tried: list[Path] = []
+
+    def failing(pdf_path: Path, _page: int, _project: Path, _tool: str) -> Path:
+        tried.append(pdf_path)
+        raise pdf.PdfError("the converter timed out")
+
+    monkeypatch.setattr(pdf, "_pymupdf", lambda: None)
+    monkeypatch.setattr("shutil.which", _somewhere)
+    monkeypatch.setattr(pdf, "convert", failing)
+    _ = project.write("figures/plot.pdf", b"%PDF-1.4 one")
+    project.edit(
+        "slides/drawing.svg",
+        "<text",
+        '<image id="fig" href="../figures/plot.pdf" width="300" height="160"/><text',
+    )
+    _ = project.rebuilt()
+    tried.clear()
+    # A failure that may pass (a timeout, a full disk) is not kept: the
+    # slide is processed again, as a full build would try again.
+    assert "drawing" in project.rebuilt()
+    assert tried
+
+
 def test_a_notes_warning_is_said_again_and_its_pictures_follow_the_theme(
     project: Project,
 ) -> None:
@@ -553,13 +627,17 @@ def test_a_file_replaced_by_one_of_the_same_size_and_time(project: Project) -> N
 
 @pytest.fixture
 def opened(project: Project) -> Iterator[set[str]]:
-    """Every file under the project Python opens while the fixture is live."""
+    """Every file under the project Python opens to read while the fixture is
+    live (a file written, such as a converted PDF page, is not read)."""
     seen: set[str] = set()
     root = str(project.root)
     live = [True]
 
     def hook(event: str, args: tuple[object, ...]) -> None:
         if live[0] and event == "open" and isinstance(args[0], str | bytes):
+            mode = args[1]
+            if isinstance(mode, str) and set(mode) & set("wax"):
+                return
             name = os.fsdecode(args[0])
             if name.startswith(root):
                 seen.add(name)
@@ -594,6 +672,51 @@ def test_every_file_a_slide_opens_is_one_it_depends_on(
     # And what lxml read: every SVG a slide is composed of.
     for name in ("layouts/two.svg", "layouts/child.svg", "overlays/footer.svg"):
         assert str(project.root / name) in noted
+
+
+def test_every_file_a_pdf_picture_opens_is_one_it_depends_on(
+    project: Project, opened: set[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The PDF, the page committed beside it (not there) and the converted
+    page in the cache are all the slide's."""
+
+    def run(command: list[str]) -> subprocess.CompletedProcess[str]:
+        _ = Path(command[-1]).write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg"/>', encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(pdf, "_pymupdf", lambda: None)
+    monkeypatch.setattr("shutil.which", _somewhere)
+    monkeypatch.setattr(pdf, "_run", run)
+    _ = project.write("figures/plot.pdf", b"%PDF-1.4 one")
+    project.edit(
+        "slides/drawing.svg",
+        "<text",
+        '<image id="fig" href="../figures/plot.pdf" width="300" height="160"/><text',
+    )
+    project.cache.clear()
+    opened.clear()
+    deck = load_deck(project.deck_path)
+    seen_before = set(opened)
+    _ = process_deck(
+        deck, project.root, project.deck_path, editor=True, cache=project.cache
+    )
+    noted: set[str] = set()
+    for kept in (project.cache.slides, project.cache.notes):
+        for entry in kept.values():
+            noted |= set(entry.deps)
+    cache = str(project.root / ".inkflow" / "cache" / "pdf")
+    # The converter's scratch folder is opened to be removed: not an input.
+    read = {
+        n for n in opened - seen_before if not n.startswith(cache) or Path(n).is_file()
+    }
+    figure = str(project.root / "figures" / "plot.pdf")
+    assert figure in read
+    assert read <= noted, f"read but not noted: {sorted(read - noted)}"
+    drawing = set(project.cache.slides["drawing"].deps)
+    assert {figure, figure + ".p1.svg"} <= drawing
+    assert any(n.startswith(cache) for n in drawing)
 
 
 def test_keys_name_content_and_patches_name_what_is_held(project: Project) -> None:

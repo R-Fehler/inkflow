@@ -30,7 +30,8 @@ Every reference is resolved relative to the file it was written in
 (see [Images](../authoring/markdown.md#images)),
 and the source tree is mirrored inside the output directory,
 so the build stays self-contained wherever it is copied.
-A theme's own assets are copied under `_theme/`.
+A theme's own assets are copied under `_theme/`,
+converted [PDF figures](../authoring/pdf-figures.md) under `_pdf/`.
 A reference that resolves to no file is reported as a warning and skipped rather than dropped silently,
 and one that points outside both the project and the theme is reported when it is resolved.
 

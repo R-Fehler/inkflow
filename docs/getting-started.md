@@ -10,6 +10,9 @@ This page takes you from zero to a running presentation in about five minutes.
 - An SVG editor.
   [Inkscape](https://inkscape.org/) is the primary authoring tool,
   but any editor that exports standard SVG works
+- Optional, for [PDF figures](authoring/pdf-figures.md) on slides:
+  `pip install "inkflow[pdf]"` (brings in PyMuPDF, AGPL-3.0), or poppler's
+  `pdftocairo`, MuPDF's `mutool` or Inkscape
 
 ## Run the demo
 

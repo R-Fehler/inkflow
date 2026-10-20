@@ -6,7 +6,8 @@ change touches (`inkflow.incremental`), each slide's processing is run inside
 whether one exists, says so with `note(path)`. The recording is the slide's
 dependencies: each path with its `Stamp` at the time, where "not there" is a
 stamp too, so a file that appears later (a slide that now shadows the
-layout of its name) is a change like any other.
+layout of its name, a page committed beside its PDF) is a change like any
+other.
 
 Outside a recording `note` does nothing, which is every build that is not a
 server's (`inkflow build`, `export`, `verify`).
@@ -92,8 +93,8 @@ def note(path: str | Path) -> None:
 
 def retry() -> None:
     """Say that what is being built fell short for a reason that may pass (a
-    program that timed out, a cache folder that could not be written): it is
-    built again next time rather than kept as it came out."""
+    converter that timed out, a cache folder that could not be written): it
+    is built again next time rather than kept as it came out."""
     deps = _recording.get()
     if deps is not None:
         deps[RETRY] = _NEVER
