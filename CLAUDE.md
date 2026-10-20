@@ -121,10 +121,23 @@ src/
                                to pages (`Client.patches`); runs the server extensions
                                (`serve(extensions=)`, default `extensions_for` the installed
                                plugins); `context` = the `ServerContext` (send, broadcast,
-                               rebuild(full=), shutdown, `serve_connection`/`serve_request` for
-                               connections that came another way); `listening(ui, deck,
-                               extensions)` (the one port without TUI/watcher: tests,
-                               embedding); `pick_port`, `auto_ports` (`_PortBusy`)
+                               rebuild(full=), `open_deck`, shutdown, `serve_connection`/
+                               `serve_request` for connections that came another way);
+                               `serve` loops over `_serve_deck` (`_serve_decks`): `open_deck`
+                               closes this deck (`close(switching=True)`) and serves another
+                               on the same port; `serve(None)` = no deck, only when an
+                               extension `serves_without_deck` (its `http` answers, the
+                               core's presenter 404s "No deck open"); `owner_page()` = the
+                               first extension's `home` (owner link, terminal, `o`),
+                               `editor_page()` = the editing extension's `home`; `open_path`
+                               (a browser on that page after the first build),
+                               `quit_when_idle` (`_quit_when_idle`: stops once no page has
+                               been connected that long); `load_deck` turns any failure in
+                               deck.py into `DeckError` (`deck.py:42: NameError: …` + the
+                               line), which the CLI's `_Group` prints as one error line
+                               instead of a traceback; `listening(ui, deck, extensions)` (the
+                               one port without TUI/watcher: tests, embedding);
+                               `pick_port`, `auto_ports` (`_PortBusy`)
     access.py         who may reach a server and as whom (pure): `parse_request`,
                                `Access.host_ok` (Host: loopback names, IP literals,
                                `machine_names`, `--allow-host`; DNS rebinding),
@@ -149,10 +162,11 @@ src/
                                (`adopt`), so pages, files and the WebSocket share
                                one port
     instances.py      one server per deck: each server records {pid, host, port,
-                               ws_port (= port unless `--ws-port`), deck, tls,
-                               owner_token (SSH mode)} in the user state dir (dir 0700,
-                               records 0600; `ws_url()`/`owner_url()` carry `?k=`, the
-                               probe a cookie; `url()` never does) (`register`/`unregister`, by
+                               ws_port (= port unless `--ws-port`), deck (None: no deck),
+                               tls, owner_token (SSH mode), home (`owner_page()`: what
+                               `url()`/`owner_url()` lead to by default)} in the user state
+                               dir (dir 0700, records 0600; `ws_url()`/`owner_url()` carry
+                               `?k=`, the probe a cookie; `url()` never does) (`register`/`unregister`, by
                                `_serve_deck`); `serving(deck)` finds the live one, trusting
                                a record only when `/_inkflow/instance` answers with its
                                pid (stale ones are deleted). `inkflow serve` opens no second
@@ -163,8 +177,11 @@ src/
                                absolute path and a canonical ref both ways; `AssetSource`
                                resolves the refs written in one file; `svg_reader` is the
                                composition reader that canonicalises each SVG as it is read
+    __main__.py       `python -m inkflow` (stdout/stderr to devnull when started
+                               without a console, as by pythonw)
     cli/              CLI package (entry point inkflow.cli:main). _common.py holds the
-                               `main` group, shared options, and the Project/Target helpers;
+                               `main` group (`_Group`: a `DeckError` is one error line),
+                               shared options, and the Project/Target helpers;
                                commands are grouped by area: project.py (init, setup-git,
                                completion), present.py (serve, build, export), authoring.py
                                (clean, label2id, add, parent group, sync, layouts), color.py (colorize,
@@ -212,9 +229,11 @@ src/
     svgio.py          SVG parse/serialize primitives: one hardened parser, SvgElement alias
     extensions.py     `ServerExtension` (build hooks, `messages` with the least `Role`,
                                `welcome`/`hello`/`message`/`disconnected`, `http`, `keys`,
-                               `share_status`/`share_op`/`share_lines`),
+                               `share_status`/`share_op`/`share_lines`, `home` = the
+                               owner's page, `serves_without_deck`; `open(None)` = no deck),
                                `ServerContext` (server.`context`: `access`, `send_owners`,
-                               `share_changed`, `serve_connection`/`serve_request`), `Build`
+                               `share_changed`, `open_deck`, `serve_connection`/
+                               `serve_request`; `deck_path` None without a deck), `Build`
                                (deck, slides as built, `served` = the pages' copies, `fresh`),
                                `HttpRequest` (the parsed `request`, `role`, `token`,
                                ranged `send_file`), `VirtualConnection`, `State`, `ServeConfig`
@@ -269,7 +288,10 @@ src/
                       via progress-driver.ts), overview, picker, websocket, status bar,
                       keyboard, syncmenu.ts (sync-mode status-bar control),
                       pv.ts (presenter panel sidebar), video.ts (step-driven
-                      <video> playback, wired in via status.ts), and deck-url.ts
+                      <video> playback, wired in via status.ts), toeditor.ts (back
+                      to an editor at this slide, `E`: shown only when a `welcome`
+                      names an `editor` page; the opener editor tab when there is
+                      one; hidden in a static build), and deck-url.ts
                       (pure position<->fragment codec behind syncURL/readURL; the
                       only module reading location.pathname/search/hash)
   css/                CSS source
@@ -473,7 +495,7 @@ Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop +
   links name `localhost`; the TUI prints the owner link (`owner_lines`,
   `LiveUI.set_owner`) and the instance record holds the owner token
 - Each connection is a `collab.Client` (`welcome` {id, role} on connect, plus
-  each extension's fields)
+  each extension's fields; `editor`: the presenter's back-to-the-editor button)
 - Ports: without `--port`, `pick_port` takes the first free one from 7777 up
   (`_port_free` tries every address the host names, ::1 too) and the CLI says so
   when 7777 was taken; `serve(auto_ports=True)` picks again if the port is lost
@@ -484,7 +506,10 @@ Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop +
   some `.inkflow/` folder is watched normally. Every batch of changes is one
   `rebuild`, which processes only the slides the change touched (incremental.py)
   and sends each page what changed (`Client.patches`)
-- The listener, the watcher and the keyboard run as tasks of `_serve_deck`
+- The listener, the watcher and the keyboard run as tasks of `_serve_deck`,
+  one deck at a time: `serve` runs it again for the deck an extension opens
+  (`open_deck`), on the same port (pages reconnect); without a deck nothing is
+  built or watched
 
 ## Animation pipeline
 

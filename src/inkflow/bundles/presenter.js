@@ -1649,6 +1649,35 @@
     return new WebSocket(socketUrl(location));
   }
 
+  // src/ts/presenter/toeditor.ts
+  var editorPath = null;
+  function backToEditor() {
+    if (editorPath === null) return;
+    const hash = `#slide=${state.slideIndex + 1}`;
+    const opener = window.opener;
+    try {
+      if (opener && !opener.closed && opener.location.origin === location.origin && opener.location.pathname.startsWith(editorPath)) {
+        opener.location.hash = hash;
+        opener.focus();
+        window.close();
+        if (window.closed) return;
+      }
+    } catch {
+    }
+    location.href = `${editorPath}${hash}`;
+  }
+  function setEditor(path) {
+    editorPath = path?.startsWith("/") ? path : null;
+    const button = document.getElementById("btn-to-editor");
+    if (button) button.style.display = editorPath === null ? "none" : "";
+  }
+  function initToEditor() {
+    const button = document.getElementById("btn-to-editor");
+    if (!button) return;
+    button.style.display = "none";
+    button.addEventListener("click", backToEditor);
+  }
+
   // src/ts/shared/morph-math.ts
   var INTERPOLATED_ATTRIBUTES = [
     "fill",
@@ -3250,6 +3279,9 @@
   var role = "owner";
   function welcome(msg) {
     role = String(msg.role ?? "owner");
+    setEditor(
+      role !== "viewer" && typeof msg.editor === "string" ? msg.editor : null
+    );
     if (role !== "viewer") return;
     const edit = document.getElementById("btn-edit");
     if (edit) edit.style.display = "none";
@@ -4116,6 +4148,7 @@
     g: { action: openPicker, preventDefault: true },
     o: { action: toggleOverview, preventDefault: true },
     e: { action: toggleMenu },
+    E: { action: backToEditor },
     f: { action: toggleFullscreen },
     b: { action: () => toggleCurtain("black") },
     ".": { action: toggleLaser },
@@ -4253,6 +4286,7 @@
   initSyncMenu();
   initWindowSync(WS_PORT);
   initEditMenu(EDIT_COMMANDS, WS_PORT);
+  initToEditor();
   var deepLinked = readURL();
   loadSlide();
   renderPv();
