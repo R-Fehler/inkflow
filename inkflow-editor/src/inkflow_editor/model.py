@@ -69,7 +69,7 @@ def _rel(path: Path, project_dir: Path) -> str:
         return path.name
 
 
-def cue_slug(cls: type) -> str:
+def cue_slug(cls: type[object]) -> str:
     """A cue type's kebab name: an animation's slug, ``play-video``,
     ``frame``."""
     if issubclass(cls, Animation):
@@ -79,7 +79,7 @@ def cue_slug(cls: type) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "-", cls.__name__).lower()
 
 
-def cue_kind(cls: type) -> str:
+def cue_kind(cls: type[object]) -> str:
     """What a cue does, as the editor groups them: an animation's kind
     (enter/exit/emphasis), ``video`` (PlayVideo), ``camera`` (Frame)."""
     if issubclass(cls, Animation):
@@ -125,8 +125,8 @@ def _transition_json(t: Transition, deck_module: str) -> dict[str, object]:
 def _type_catalog(
     base: type, module: object, deck_module: str
 ) -> list[dict[str, object]]:
-    seen: dict[str, type] = {}
-    stack = list(base.__subclasses__())
+    seen: dict[str, type[object]] = {}
+    stack: list[type[object]] = list(base.__subclasses__())
     while stack:
         cls = stack.pop()
         stack.extend(cls.__subclasses__())
@@ -147,9 +147,8 @@ def _type_catalog(
         if issubclass(cls, Transition):
             entry["slug"] = cls.slug()
         else:
-            cue_type = cast("type", cls)
-            entry["slug"] = cue_slug(cue_type)
-            entry["kind"] = cue_kind(cue_type)
+            entry["slug"] = cue_slug(cls)
+            entry["kind"] = cue_kind(cls)
         out.append(entry)
     return out
 
