@@ -46,11 +46,12 @@ from inkflow.logging import logger
 from inkflow.manifest import Deck
 from inkflow.pipeline import SlideData
 from inkflow.server import favicon_data_uri, open_browser, served_ui_fonts
-from inkflow_editor import projects
+from inkflow_editor import projects, sshshare
 from inkflow_editor.comparehub import CompareHub, side_build_from
 from inkflow_editor.comparesrc import CompareError
 from inkflow_editor.context import write_context
 from inkflow_editor.model import ModelCache, build_model, starred_ids
+from inkflow_editor.presence import Presence
 from inkflow_editor.problems import Problems
 from inkflow_editor.session import EditError, EditorSession, Exporters
 
@@ -116,6 +117,8 @@ class EditorExtension(ServerExtension):
         # Opening a program, the agents' context file and commands.
         "editor-context": "owner",
         "editor-command": "owner",
+        # Who is where: every page says, the editors show it.
+        "presence": "viewer",
     }
 
     def __init__(
@@ -150,6 +153,11 @@ class EditorExtension(ServerExtension):
         self._pending: tuple[dict[str, object], dict[str, object]] | None = None
         self._problems_lock: asyncio.Lock = asyncio.Lock()
         self._background: set[asyncio.Task[None]] = set()
+        self.presence: Presence = Presence()
+        """Names, colours, selections (by client: the whole server's life)."""
+        self.ssh_info: dict[str, object] | None = None
+        """What "Share via SSH" writes its commands from (``sshshare``),
+        gathered when the owner opens the Share dialog."""
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -252,8 +260,12 @@ class EditorExtension(ServerExtension):
 
     @override
     def welcome(self, client: Client) -> dict[str, object]:
-        # The presenter's "back to the editor" button goes here.
-        return {} if client.role == "viewer" else {"editor": "/edit"}
+        person = self.presence.of(client)
+        out: dict[str, object] = {"color": person.color, "name": person.name}
+        if client.role != "viewer":
+            # The presenter's "back to the editor" button goes here.
+            out["editor"] = "/edit"
+        return out
 
     @override
     async def hello(
@@ -274,9 +286,7 @@ class EditorExtension(ServerExtension):
             return
         if (problems_msg := self._problems_message()) is not None:
             await conn.send(json.dumps(problems_msg))
-        await conn.send(
-            json.dumps({"type": "presence", "people": self._ctx.people.listing()})
-        )
+        await conn.send(json.dumps(self._presence_message()))
 
     @override
     async def message(
@@ -284,7 +294,10 @@ class EditorExtension(ServerExtension):
     ) -> None:
         kind = msg.get("type")
         session = self.session
-        if kind == "edit-op":
+        if kind == "presence":
+            if self.presence.update(client, msg):
+                await self._broadcast_presence()
+        elif kind == "edit-op":
             if session is not None:
                 await self.edit_op(conn, client, msg, session)
         elif kind in ("compare-open", "compare-close", "compare-sources"):
@@ -313,8 +326,10 @@ class EditorExtension(ServerExtension):
 
     @override
     async def disconnected(self, conn: ServerConnection, client: Client) -> None:
-        del client
         self.clients.discard(conn)
+        self.presence.forget(client)
+        if client.page:
+            await self._broadcast_presence()
         if self.compare is not None:
             self.compare.close(conn)
 
@@ -413,6 +428,41 @@ class EditorExtension(ServerExtension):
             raise RuntimeError("the editor extension has not started")
         return self.server
 
+    def _presence_message(self) -> dict[str, object]:
+        return {
+            "type": "presence",
+            "people": self.presence.listing(self._ctx.people),
+        }
+
+    async def _broadcast_presence(self) -> None:
+        """Everyone's page, slide and selection, to everyone with a page
+        open; the owner's Share dialog lists them too."""
+        await self._ctx.broadcast(self._presence_message())
+        self._ctx.share_changed()
+
+    @override
+    def share_status(self) -> dict[str, object]:
+        return {
+            "people": self.presence.listing(self._ctx.people),
+            "sshInfo": self.ssh_info,
+        }
+
+    @override
+    async def share_op(self, op: str, msg: dict[str, object]) -> str | bool | None:
+        del msg
+        if op == "status":
+            session = self.session
+            deck = (
+                session.deck_path if session is not None and session.has_deck else None
+            )
+            try:
+                self.ssh_info = await asyncio.to_thread(
+                    sshshare.details, deck, self._ctx.access.port
+                )
+            except Exception as exc:  # A guess for the dialog: never fails it.
+                logger.debug(f"share via SSH: {exc}")
+        return False
+
     async def send_editors(
         self,
         payload: dict[str, object] | Callable[[Client | None], dict[str, object]],
@@ -432,7 +482,7 @@ class EditorExtension(ServerExtension):
         session = self.session
         if session is None:
             return {"canUndo": False, "canRedo": False}
-        return session.history_state(client.author if client else "owner")
+        return session.history_state(self.presence.author(client))
 
     def _model_message(
         self, client: Client | None = None, *, whole: bool = False
@@ -541,8 +591,8 @@ class EditorExtension(ServerExtension):
         role: Role = client.role
         msg["_local"] = role == "owner"
         msg["_role"] = role
-        msg["_author"] = client.author
-        msg["_name"] = client.name
+        msg["_author"] = self.presence.author(client)
+        msg["_name"] = self.presence.of(client).name
         hub = self.compare
         try:
             if role not in ("owner", "editor"):
@@ -590,7 +640,7 @@ class EditorExtension(ServerExtension):
                     "type": "agent-edit" if agent else "history",
                     "label": result.get("label"),
                     "step": result.get("step"),
-                    "mine": (c.author if c is not None else "owner") == author,
+                    "mine": self.presence.author(c) == author,
                     **self.history_state(c),
                 }
 

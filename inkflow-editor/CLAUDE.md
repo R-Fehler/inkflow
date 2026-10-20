@@ -62,6 +62,19 @@ inkflow-editor/
                                the start page while no deck is open, `edit_op` (the `_local`/
                                `_role`/`_author`/`_name` it sets, post-edit messages, a deck
                                switch or quit through the `ServerContext`), `default_exporters`
+    presence.py       who is editing: `Presence` (by client id) of `Person`s (name, colour,
+                               private `key`, slide, selection, editing), `author` = whose
+                               History steps ("owner" for the owner's pages and agents,
+                               `guest:<key>`), `listing` = the `presence` payload (never the
+                               key or token); the extension relays `presence` messages and
+                               adds colour and name to the welcome
+    sshshare.py       what "Share via SSH" writes commands from (`details`, the
+                               `share-status`'s `sshInfo`, gathered on the dialog's `status`
+                               op): the core's `server_names`/`login_user`, the deck's repo
+                               via `publish.layout` (remote with web credentials stripped,
+                               `clone_folder`, deck path in the repo, pyproject pins inkflow
+                               -> `uv run`, else `uv tool install <requirement> --with
+                               <plugins>`)
     checks.py         the editor's `inkflow verify` lines: `check_connectors` (arrows
                                whose shapes moved, scene.py's rule), `check_portable`
                                (pack's items)

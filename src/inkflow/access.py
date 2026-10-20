@@ -26,6 +26,7 @@ Pure: no sockets are opened here except to list this machine's addresses.
 from __future__ import annotations
 
 import contextlib
+import getpass
 import ipaddress
 import os
 import secrets
@@ -429,19 +430,48 @@ class Access:
         )
         return f"{name}={token}; Path=/; HttpOnly; SameSite=Strict{secure}"
 
-    def links(self, addresses: list[str]) -> list[dict[str, str]]:
-        """The two share links for each address (and ``<host>.local``)."""
+    def links(
+        self, addresses: list[str], editor_page: str | None = None
+    ) -> list[dict[str, str]]:
+        """The share links for each address (and ``<host>.local``): the view
+        link, and an editor link to ``editor_page`` when the server has one
+        (an extension that edits)."""
         out: list[dict[str, str]] = []
         for address in addresses:
             base = f"{self.scheme}://{url_host(address)}:{self.port}"
-            out.append(
-                {
-                    "address": address,
-                    "editor": f"{base}/edit?{TOKEN_PARAM}={self.editor_token}",
-                    "view": f"{base}/?{TOKEN_PARAM}={self.viewer_token}",
-                }
-            )
+            link = {
+                "address": address,
+                "view": f"{base}/?{TOKEN_PARAM}={self.viewer_token}",
+            }
+            if editor_page is not None:
+                link["editor"] = (
+                    f"{base}{editor_page}?{TOKEN_PARAM}={self.editor_token}"
+                )
+            out.append(link)
         return out
+
+
+def server_names() -> list[str]:
+    """Guesses at the name others log in to this machine by: the address the
+    current SSH login reached (if any), its fully qualified name, its host
+    name."""
+    names: list[str] = []
+    address = ssh_server_address()
+    if address:
+        names.append(address)
+    for get in (socket.getfqdn, socket.gethostname):
+        with contextlib.suppress(OSError):
+            name = get()
+            if name and name not in names and not is_loopback_name(name.lower()):
+                names.append(name)
+    return names
+
+
+def login_user() -> str:
+    try:
+        return getpass.getuser()
+    except (OSError, KeyError, ImportError):
+        return ""
 
 
 def over_ssh(environ: Mapping[str, str] | None = None) -> bool:

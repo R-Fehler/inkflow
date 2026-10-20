@@ -250,20 +250,9 @@ src/
                                the cookie, then moves on without the token; not a
                                redirect: SameSite=Strict), `redacted` (what logs may
                                show of a token), `ssh_server_address`
-    sshshare.py       what "Share via SSH" writes commands from (`details`, the
-                               `share-status`'s `sshInfo`, gathered on the dialog's
-                               `status` op): server names (SSH_CONNECTION's server
-                               address, fqdn, host name), login user, the deck's repo
-                               via `publish.layout` (remote with web credentials
-                               stripped, `clone_folder`, deck path in the repo,
-                               pyproject pins inkflow -> `uv run`, else `uv tool
-                               install <requirement>`)
-    collab.py         the connected people (`People`, `Client`: id, role, token,
-                               page's private `key`, name, colour, page, slide,
-                               selection, editing); `Client.author` = whose History
-                               steps ("owner" for the owner's pages and agents,
-                               `guest:<key>`); `listing()` is the `presence` payload
-                               (never the key or token)
+    collab.py         the connections (`People`, `Client`: id, role, token, peer,
+                               page = what `hello` said it is, online, patches); `listing()` =
+                               the pages open (no names: an editor's presence is its own)
     wsbridge.py       `Bridge`: a websockets `Server` without a listener; the HTTP
                                handler hands it an upgrade request it has read
                                (`adopt`), so pages, files and the WebSocket share
@@ -650,7 +639,7 @@ tsconfig.json         TypeScript config (noEmit, verbatimModuleSyntax — tsc as
 
 **Frontends are plugins; the core never knows them.**
 A frontend (inkflow-editor's visual editor, a remote control, a review tool) is an installed package naming a `plugins.Plugin` under the `inkflow.plugins` entry point. The core finds plugins once per process (`plugins.loaded()`; `INKFLOW_NO_PLUGINS=1` turns them off) and asks each, at the place it matters: `register_cli(main)` after the core's own commands (a plugin may add subcommands to a core group, as inkflow-editor does to `fonts`); `slide_checks`/`deck_checks` in `inkflow verify`; `completion_spec` in `inkflow completion carapace` (command blocks merged into the core's spec, one named like a core command replacing it); `current_slide` for `inkflow render`'s default; `server_extensions(config)` when `serve` starts without a list of its own (`serve_options()` adds options to `inkflow serve` whose values reach it as `config.options`: inkflow-editor's `--share-online`); `requirement()` is pinned beside inkflow in a new deck's pyproject. A plugin's command that starts a server (`inkflow edit`) passes its extensions to `server.serve(..., extensions=)` itself.
-A server extension (`extensions.ServerExtension`) is how a frontend lives in the server: per deck it is opened and closed; per build `before_build` and `build(Build)` run in the worker thread inside the build (raising fails it, as any build error), `built` after the pages have the new slides; `provenance = True` makes it the editor build (`process_deck(editor=True)`: source locators on every element, `SlideData.edit` facts, both for writing back). Its `messages` (type -> least role) are the only extra messages the door lets through (`server.allowed`); `hello` tells it what a page is (the editor says `role: "editor"`); `http` answers what the core does not (after its own pages, fonts and the deck's assets); `welcome` adds to the first message a page gets (the presenter's back-to-the-editor button appears only when one names an `editor` page); `keys` adds terminal keys, `share_*` the Share dialog's operations and the terminal's share lines, `home` the page the owner link and the terminal name (`/edit`; `server.owner_page`). `share-status` and presence go to the owner's pages other than the presenter (`send_owners`: a page says what it is in `hello`). It acts through the `ServerContext` (`server.context`): the served state, the people and the door, send/broadcast/notify, `rebuild`, `open_deck` (the server closes this deck and serves another on the same port), `shutdown`, and `serve_connection`/`serve_request`, which run a page connection or a GET that came another way (an online guest's, through a relay) exactly as one from the network, for its role. The order matters once: `build-status` says a build is done only after every extension's `built`, so a program that changed the deck (an agent's command) and waits for its build finds the editor's session on it too.
+A server extension (`extensions.ServerExtension`) is how a frontend lives in the server: per deck it is opened and closed; per build `before_build` and `build(Build)` run in the worker thread inside the build (raising fails it, as any build error), `built` after the pages have the new slides; `provenance = True` makes it the editor build (`process_deck(editor=True)`: source locators on every element, `SlideData.edit` facts, both for writing back). Its `messages` (type -> least role) are the only extra messages the door lets through (`server.allowed`); `hello` tells it what a page is (the editor says `role: "editor"`); `http` answers what the core does not (after its own pages, fonts and the deck's assets); `welcome` adds to the first message a page gets (the presenter's back-to-the-editor button appears only when one names an `editor` page); `keys` adds terminal keys, `share_*` the Share dialog's operations (an extension sees every one, the core's `status` included) and status fields and the terminal's share lines; an editor link is offered only when an extension takes editors (a message for the `editor` role; `server.editor_page`), `home` the page the owner link and the terminal name (`/edit`; `server.owner_page`). `share-status` goes to the owner's pages other than the presenter (`send_owners`: a page says what it is in `hello`). It acts through the `ServerContext` (`server.context`): the served state, the people and the door, send/broadcast/notify, `rebuild`, `open_deck` (the server closes this deck and serves another on the same port), `shutdown`, and `serve_connection`/`serve_request`, which run a page connection or a GET that came another way (an online guest's, through a relay) exactly as one from the network, for its role. The order matters once: `build-status` says a build is done only after every extension's `built`, so a program that changed the deck (an agent's command) and waits for its build finds the editor's session on it too.
 Without any extension the server is the presenter's alone, and still saves the presenter's ink with "Keep" (`ink.save_ink`, no undo). The TypeScript side mirrors this: `src/ts/shared` is the client library (step engine, fit, patches, ink, gestures, the socket, identity), and a frontend's bundle imports it as `@inkflow/shared/*` (tsconfig `paths`, vitest alias), never a path into the presenter.
 
 **No SVG editor subprocess at serve time.**
@@ -867,10 +856,9 @@ The ask is PowerPoint's slide master: edit the background of every slide, or eve
   for sharing (only `--host` does), links name `localhost`, `share-status` adds
   `ssh` + `sshInfo`; the TUI prints the owner link (`owner_lines`, `LiveUI.
   set_owner`) and the instance record holds the owner token
-- Presence: each connection is a `collab.Client` (`welcome` {id, role, colour,
-  name} on connect); pages send `presence` {page, key, name, slide, selection,
-  editing}, relayed to everyone as `presence` {people} (never persisted, never
-  the key)
+- Each connection is a `collab.Client` (`welcome` {id, role} on connect, plus
+  each extension's fields: inkflow-editor adds the person's colour and name and
+  relays `presence`)
 - Ports: without `--port`, `pick_port` takes the first free one from 7777 up
   (`_port_free` tries every address the host names, ::1 too) and the CLI says so
   when 7777 was taken; `serve(auto_ports=True)` picks again if the port is lost

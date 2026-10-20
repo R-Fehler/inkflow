@@ -52,7 +52,7 @@ from websockets.asyncio.server import serve as ws_serve
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response as WsResponse
 
-from inkflow import ink, instances, plugins, sshshare
+from inkflow import ink, instances, plugins
 from inkflow.access import (
     TOKEN_PARAM,
     WS_PATH,
@@ -61,10 +61,12 @@ from inkflow.access import (
     enter_page,
     is_loopback_name,
     lan_addresses,
+    login_user,
     page,
     parse_request,
     peer_host,
     redacted,
+    server_names,
     split_host,
 )
 from inkflow.access import Request as AccessRequest
@@ -182,9 +184,6 @@ class _Share:
     rebind: Callable[[bool], Awaitable[None]] | None
     """Set while serving: listen on the LAN (True) or this machine only
     (in SSH mode: where it listens already, links on or off)."""
-    ssh_info: dict[str, object] | None
-    """What "Share via SSH" writes its commands from (``sshshare.details``),
-    gathered when the owner opens the Share dialog."""
     route: Route | None
     """How the one port answers a request: requests that came another way
     (``ServerContext.serve_request``) too."""
@@ -198,7 +197,6 @@ class _Share:
         self.access = Access(DEFAULT_PORT)
         self.people = People()
         self.rebind = None
-        self.ssh_info = None
         self.route = None
         self.ws_handler = None
         self.on_change = None
@@ -498,13 +496,6 @@ async def send_owners(payload: dict[str, object]) -> None:
                 await cast("ServerConnection", conn).send(msg)
 
 
-async def broadcast_presence() -> None:
-    """Everyone's page, slide and selection, to everyone with a page open."""
-    people = _share.people.listing()
-    await broadcast(json.dumps({"type": "presence", "people": people}))
-    await send_owners(share_status())
-
-
 NotifyStyle = Literal["green", "yellow", "red"]
 
 
@@ -540,7 +531,9 @@ def share_status() -> dict[str, object]:
     status: dict[str, object] = {
         "type": "share-status",
         "sharing": access.sharing,
-        "links": access.links(_link_addresses(access)) if access.sharing else [],
+        "links": access.links(_link_addresses(access), editor_page())
+        if access.sharing
+        else [],
         "names": []
         if access.ssh
         else sorted(
@@ -548,7 +541,6 @@ def share_status() -> dict[str, object]:
         ),
         "port": access.port,
         "ssh": access.ssh,
-        "sshInfo": _share.ssh_info,
         "people": _share.people.listing(),
     }
     for ext in _served.extensions:
@@ -557,16 +549,6 @@ def share_status() -> dict[str, object]:
         except Exception:
             logger.exception(f"{ext.name}: share status failed")
     return status
-
-
-async def _gather_ssh_info() -> None:
-    deck = _served.deck_path
-    try:
-        _share.ssh_info = await asyncio.to_thread(
-            sshshare.details, deck, _share.access.port
-        )
-    except Exception as exc:  # A guess for the dialog: never fails the status.
-        logger.debug(f"share via SSH: {exc}")
 
 
 async def _disconnect(
@@ -590,11 +572,10 @@ async def _handle_share(websocket: ServerConnection, msg: dict[str, object]) -> 
     op = msg.get("op")
     access = _share.access
     error: str | None = None
+    core_op = op in ("status", "on", "off", "rotate", "kick")
     changed = op in ("on", "off", "rotate")
     try:
-        if op == "status":
-            await _gather_ssh_info()
-        elif op == "on" and not access.sharing:
+        if op == "on" and not access.sharing:
             access.sharing = True
             if _share.rebind is not None:
                 await _share.rebind(True)
@@ -612,10 +593,12 @@ async def _handle_share(websocket: ServerConnection, msg: dict[str, object]) -> 
         elif op == "kick":
             target = str(msg.get("id") or "")
             _ = await _disconnect(lambda c: c.id == target, "disconnected by the owner")
-        elif isinstance(op, str):
+        if isinstance(op, str):
+            # Every extension sees every operation (after the core's own), so
+            # one adding to the dialog can refresh what it adds on `status`.
             for ext in _served.extensions:
                 answer = await ext.share_op(op, msg)
-                if answer is not False:
+                if answer is not False and not core_op:
                     error = answer if isinstance(answer, str) else None
                     changed = True
                     break
@@ -788,8 +771,6 @@ def _welcome(client: Client) -> dict[str, object]:
         "type": "welcome",
         "id": client.id,
         "role": client.role,
-        "color": client.color,
-        "name": client.name,
     }
     for ext in _served.extensions:
         try:
@@ -886,9 +867,6 @@ def make_ws_handler(
                     # server holds none of it, every other window draws it.
                     # Saving is an ``edit-op`` (the editor's, else _save_ink).
                     await broadcast(json.dumps(msg), sender=websocket)
-                elif msg_type == "presence":
-                    if _share.people.update(websocket, msg):
-                        await broadcast_presence()
                 elif msg_type in ("hello", "resync"):
                     # A page says which rebuilds it takes (``patch``: what
                     # changed), and is told which slides the deck has now:
@@ -929,12 +907,12 @@ def make_ws_handler(
                             await notify(websocket, error, style="red")
         finally:
             _state["ws_clients"].discard(websocket)
+            # Gone from the registry first: what an extension says about who
+            # is left (presence) must not list this one.
+            _ = _share.people.leave(websocket)
             await _each_extension(
                 "disconnected", lambda ext: ext.disconnected(websocket, client)
             )
-            left = _share.people.leave(websocket)
-            if left is not None and left.page:
-                await broadcast_presence()
             logger.debug(f"client disconnected ({len(_state['ws_clients'])} total)")
             ui.refresh()
 
@@ -1193,7 +1171,7 @@ async def _refuse(writer: ResponseWriter, status: str, title: str, text: str) ->
 _SSH_401 = (
     "This inkflow server runs on a machine other people can log in to, so "
     + "being on it is not enough to edit. If you started it, open the owner "
-    + "link it printed in its terminal (http://localhost:<port>/edit?k=…, "
+    + "link it printed in its terminal (http://localhost:<port>/…?k=…, "
     + "with your tunnel's local port if you forwarded another one). If someone "
     + "shared the deck with you, open the link they sent."
 )
@@ -1626,6 +1604,16 @@ def _shares(host: str) -> bool:
     return not is_loopback_name(split_host(host)[0])
 
 
+def editor_page() -> str | None:
+    """Where an editor link leads, when an extension takes editors (one of its
+    messages is for editors): its ``home``, else the presenter. None: no
+    extension edits, so the server offers view links only."""
+    for ext in _served.extensions:
+        if "editor" in ext.messages.values():
+            return ext.home or "/"
+    return None
+
+
 def owner_page() -> str:
     """The page the owner opens: the first extension's ``home`` (an editor's
     ``/edit``), else the presenter."""
@@ -1637,8 +1625,8 @@ def owner_lines(access: Access, port: int) -> list[str]:
     server opens, through their tunnel) and the tunnel to open it through."""
     if not access.ssh:
         return []
-    server = next(iter(sshshare.server_names()), "<this server>")
-    user = sshshare.login_user() or "<you>"
+    server = next(iter(server_names()), "<this server>")
+    user = login_user() or "<you>"
     return [
         f"{access.scheme}://localhost:{port}{access.owner_path(owner_page())}",
         f"open it through: ssh -L {port}:localhost:{port} {user}@{server}",
@@ -1663,9 +1651,11 @@ def share_lines(access: Access, port: int) -> list[str]:
     if not access.sharing:
         return _extension_lines()
     lines: list[str] = []
-    links = access.links(_link_addresses(access))
+    links = access.links(_link_addresses(access), editor_page())
     for link in links:
-        lines += [f"edit  {link['editor']}", f"view  {link['view']}"]
+        if "editor" in link:
+            lines.append(f"edit  {link['editor']}")
+        lines.append(f"view  {link['view']}")
     if access.ssh:
         lines.append(
             f"guests: ssh -N -L {port}:localhost:{port} <their login>@<this "
@@ -2151,7 +2141,6 @@ async def _serve_deck(
             ui_ref[0].set_share(share_lines(access, http_port))
 
         _share.rebind = rebind
-        _share.ssh_info = None
         for ext in _served.extensions:
             await ext.open(deck_path)
             opened.append(ext)

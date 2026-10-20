@@ -317,6 +317,7 @@ class ServerExtension:
         del conn, client, msg
 
     async def disconnected(self, conn: ServerConnection, client: Client) -> None:
+        """The page is gone (already out of ``ServerContext.people``)."""
         del conn, client
 
     async def http(self, request: HttpRequest) -> bool:

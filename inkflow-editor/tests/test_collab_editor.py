@@ -758,7 +758,6 @@ def ssh_mode(served: tuple[EditorSession, int]) -> Iterator[tuple[EditorSession,
         yield session, port
     finally:
         server._share.access = Access(server.DEFAULT_PORT)  # pyright: ignore[reportPrivateUsage]
-        server._share.ssh_info = None  # pyright: ignore[reportPrivateUsage]
 
 
 def test_ssh_mode_asks_this_machine_for_the_owner_link(

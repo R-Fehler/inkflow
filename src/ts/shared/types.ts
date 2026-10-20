@@ -122,6 +122,15 @@ export type WsMessage =
       }
     | { type: "error"; message: string }
     | { type: "notify"; message: string; style: NotifyStyle }
-    | { type: "welcome"; id: string; role: string; color: string; name: string }
+    | {
+          type: "welcome";
+          id: string;
+          role: string;
+          // An extension's additions: an editor's colour and name for this
+          // person, and where its page is.
+          color?: string;
+          name?: string;
+          editor?: string;
+      }
     | { type: "presence"; people: unknown[] }
     | ({ type: "position" } & SyncPosition);

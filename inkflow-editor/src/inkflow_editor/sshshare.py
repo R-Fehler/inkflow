@@ -9,13 +9,10 @@ themselves are written by the page (``src/ts/editor/sshtext.ts``).
 
 from __future__ import annotations
 
-import contextlib
-import getpass
-import socket
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from inkflow.access import is_loopback_name, ssh_server_address
+from inkflow.access import login_user, server_names
 
 
 def strip_credentials(url: str) -> str:
@@ -40,29 +37,6 @@ def clone_folder(remote: str | None, fallback: str) -> str:
     name = path.rstrip("/").rpartition("/")[2]
     name = name.removesuffix(".git")
     return name or fallback
-
-
-def server_names() -> list[str]:
-    """Guesses at the name others log in to this machine by: the address the
-    current SSH login reached (if any), its fully qualified name, its host
-    name."""
-    names: list[str] = []
-    address = ssh_server_address()
-    if address:
-        names.append(address)
-    for get in (socket.getfqdn, socket.gethostname):
-        with contextlib.suppress(OSError):
-            name = get()
-            if name and name not in names and not is_loopback_name(name.lower()):
-                names.append(name)
-    return names
-
-
-def login_user() -> str:
-    try:
-        return getpass.getuser()
-    except (OSError, KeyError, ImportError):
-        return ""
 
 
 def details(deck_path: Path | None, port: int) -> dict[str, object]:

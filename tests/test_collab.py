@@ -20,7 +20,6 @@ from inkflow.access import (
     parse_request,
     split_host,
 )
-from inkflow.collab import People
 
 GUEST = {"X-Forwarded-For": "192.0.2.50"}
 
@@ -150,9 +149,11 @@ def test_cookie_and_links() -> None:
     ) and "Secure" not in access.set_cookie("t")
     assert Access(7777, tls=True).set_cookie("t").endswith("; Secure")
     links = access.links(["192.168.1.5", "fd7a::1"])
-    assert links[0]["editor"] == f"http://192.168.1.5:7777/edit?k={access.editor_token}"
+    assert "editor" not in links[0]  # nothing on the server edits
     assert links[0]["view"] == f"http://192.168.1.5:7777/?k={access.viewer_token}"
     assert links[1]["view"].startswith("http://[fd7a::1]:7777/?k=")
+    links = access.links(["192.168.1.5"], "/edit")
+    assert links[0]["editor"] == f"http://192.168.1.5:7777/edit?k={access.editor_token}"
 
 
 def test_the_token_leaves_the_address() -> None:
@@ -208,12 +209,6 @@ def test_sharing_moves_the_listener_and_keeps_connections() -> None:
 
     asyncio.run(run())
     assert got == [b"still here\n", b"new\n"]
-
-
-def test_people_get_distinct_colours() -> None:
-    people = People()
-    colours = {people.join(object(), "editor", None, None).color for _ in range(5)}
-    assert len(colours) == 5
 
 
 def test_tls_serves_on_the_one_port(tmp_path: Path) -> None:
@@ -396,45 +391,3 @@ def test_ssh_mode_never_listens_on_the_network() -> None:
         "100.101.102.103",
         "localhost",
     ]
-
-
-def test_share_via_ssh_knows_where_the_deck_lives(tmp_path: Path) -> None:
-    import subprocess
-
-    from inkflow import sshshare
-
-    assert (
-        sshshare.strip_credentials("https://user:tok@github.com/o/r.git")
-        == "https://github.com/o/r.git"
-    )
-    assert sshshare.strip_credentials("git@github.com:o/r.git") == (
-        "git@github.com:o/r.git"
-    )
-    assert sshshare.strip_credentials("ssh://git@host:2222/o/r") == (
-        "ssh://git@host:2222/o/r"
-    )
-    repo = tmp_path / "my talks"
-    deck = repo / "keynote" / "deck.py"
-    deck.parent.mkdir(parents=True)
-    deck.write_text("# deck\n", encoding="utf-8")
-    (repo / "pyproject.toml").write_text(
-        '[project]\nname = "talks"\nversion = "0"\ndependencies = ["inkflow"]\n',
-        encoding="utf-8",
-    )
-    info = sshshare.details(deck, 7777)
-    assert info["inRepo"] is False and info["remote"] is None
-    for args in (
-        ["init", "-q", "-b", "main"],
-        ["remote", "add", "origin", "https://x:secret@example.com/o/talks.git"],
-    ):
-        _ = subprocess.run(["git", "-C", str(repo), *args], check=True)
-    info = sshshare.details(deck, 7777)
-    # Cloned on the server into the repository's name, as git clone does.
-    assert info["inRepo"] is True and info["folder"] == "talks"
-    assert sshshare.clone_folder("git@host:me/talks.git", "x") == "talks"
-    assert sshshare.clone_folder("ssh://git@host:22/g/sub/r/", "x") == "r"
-    assert sshshare.clone_folder(None, "my talks") == "my talks"
-    assert info["remote"] == "https://example.com/o/talks.git"
-    assert info["deck"] == "keynote/deck.py"
-    assert info["pinned"] is True and info["project"] == ""
-    assert info["port"] == 7777 and info["branch"] == "main"
