@@ -32,7 +32,7 @@ src/
                                Cue, Transition, Align, VAlign, Direction, Easing,
                                AnimationKind, Trigger, Inline, Content, ZoneContent,
                                ColorMode, MediaFit,
-                               MediaAlign, Muted, Overlay, PageSize
+                               MediaAlign, Muted, Overlay, Chart, ChartKind, PageSize
                                and the `animations` and `transitions` namespaces
                                (`Animation` is NOT top-level — it lives in `animations`)
     manifest.py       dataclasses for the deck DSL; Cue/Transition base.
@@ -41,8 +41,10 @@ src/
                                is `list[Cue]`. Media is a `_MediaBase` shared by Image +
                                Video; `Media` is the `Image | Video` union alias (not
                                callable). Video adds playback fields (controls, autoplay,
-                               muted, loop, poster, start, end). `Slugged` mixin (kebab slug
-                               from class name) is shared by Animation + Transition
+                               muted, loop, poster, start, end). `Chart` is the third zone
+                               value kind (data file `src` or inline `data`, kind, x, y…).
+                               `Slugged` mixin (kebab slug from class name) is shared by
+                               Animation + Transition
                                Deck params: slides, transition, overlays, theme,
                                mode: ColorMode, style, font_size, embed_fonts,
                                size (a PageSize; None = each slide its own, new
@@ -65,7 +67,8 @@ src/
                                = 1 CSS px. `same_aspect` (1%), `parse_view_box`,
                                `physical_length_pt` (an SVG root's 841mm)
     enums.py          shared enums (Direction, Align, VAlign, MediaFit, MediaAlign,
-                               ColorMode, Muted, Trigger, AnimationKind, FrameTarget);
+                               ColorMode, Muted, Trigger, AnimationKind, ChartKind,
+                               FrameTarget);
                                `_KebabStrEnum`
                                base emits CSS token values (Muted is a plain Enum, resolved
                                in Python). `AnimationKind` (enter/exit/emphasis) is the
@@ -95,7 +98,7 @@ src/
                                incremental.py)
     deps.py           which files a piece of the build read: `note(path)` at every
                                read or lookup of the slide pipeline (svgio, layout,
-                               loaders, the slide's own file), collected by
+                               loaders, charts, the slide's own file), collected by
                                `recording()` as path -> `Stamp` (mtime, ctime, size,
                                inode; None = not there; a file changed within
                                `RACY_NS`, or `COARSE_NS` on a whole-second file
@@ -112,12 +115,20 @@ src/
                                `_plain`), warnings said again for kept slides; and
                                what the pages are sent: `set_keys` (each slide's
                                content digest), `keys_of`, `as_patch`
-    content.py        TextBox / Image / Video injection into zone rects, with alignment
-                               support; Video emits data-* playback attrs (driven by video.ts);
+    content.py        TextBox / Image / Video / chart injection into zone rects, with
+                               alignment support; Video emits data-* playback attrs (driven
+                               by video.ts); a chart is a nested <svg> in the zone's box;
                                a zone shape's own `--inkflow-*` style properties reach its
                                text, and one marked `inkflow:show-shape` paints the text's
                                box (`zone_shape_css`: fill, border, radius) and is kept
                                when empty (`unreferenced_zones` = what is pruned)
+    charts.py         charts from data: `Table` read from CSV/TSV/JSON/a Markdown table
+                               (`read_table`, cell text kept as typed by `read_text_rows` /
+                               `serialize_rows`), `resolve` (a Chart's data, its path against
+                               the file it is written in), `render` (bar/line/area/scatter/
+                               pie SVG in theme tokens, `nice_ticks`), and the ```chart
+                               fence (`parse_fence`, `expand_fences` over markdown.py's
+                               placeholder)
     layout.py         parent inject/set/strip: layout chain resolution and Inkscape layer
                                writing. `AssetKind` (layouts/overlays) selects the searched
                                subdir, so `resolve_parent_path`/`resolve_chain` serve both
@@ -153,7 +164,9 @@ src/
     overlay.py        the `Overlay` DSL type (src only). Its own module because both
                                `themes` and `manifest` reference it, same as `Transition`
     markdown.py       markdown-it-py rendering only: code-fence highlighting, LaTeX math,
-                               HTML->well-formed-XML normalization (no inkflow-specific grammar)
+                               HTML->well-formed-XML normalization (inline <svg> keeps its
+                               camelCase names); a ```chart fence becomes a placeholder
+                               charts.py draws (no inkflow-specific grammar)
     steps.py          `StepResolver` — the trigger-resolution rule (ON_CLICK/WITH_PREVIOUS/
                                Trigger.at) shared by pipeline.py (the animations=[...] list)
                                and zones.py (markdown reveals)
@@ -374,8 +387,9 @@ src/
     shared/           theme variables, animation keyframes
     presenter/        presenter partials including pv.css (sidebar panel)
 demo/
-  deck.py             12-slide demo deck (SVG slides, some filling zones with Markdown via md=)
+  deck.py             13-slide demo deck (SVG slides, some filling zones with Markdown via md=)
   slides/             source SVGs and Markdown content files
+  data/               chart data (sales.csv)
 mise.toml             task runner + tool versions (replaces poethepoet)
 package.json          JS devDependencies: biome, esbuild, typescript
 pnpm-lock.yaml        pnpm lockfile (JS deps); package manager is pnpm, not npm
@@ -511,6 +525,9 @@ The target zone is the `zones` dict key (`"content"` → `zone-content`); `TextB
 </foreignObject>
 ```
 Inline styles are only emitted when the corresponding param is non-`None`; CSS variables handle layout-level defaults without touching the element's `style`.
+
+**Charts are drawn at build time from data files, in theme tokens.**
+A `Chart` zone value or a ```` ```chart ```` Markdown fence is turned into plain SVG by `charts.py` while the deck builds, so serve, the static build, the PDF export and an editor's thumbnails show the same chart and nothing runs in the browser. The data is a CSV/TSV/JSON file (or inline `data={...}` / a Markdown table), its path resolving against the file it is written in like any asset; it is inlined into the slide, so nothing is copied or versioned, and the watcher's rebuild on any project file is what redraws a chart when its data changes. `zones.build_slide_content` resolves a deck chart to a `ResolvedChart` (data read, or the error to draw in its place) and expands fence placeholders with the Markdown file's `AssetSource`; `content.py` swaps the zone shape for a nested `<svg>` with the zone's box and user units (provenance carried, so an editor moves and resizes it as the zone rect). `y_min`/`y_max` fix the value axis's ends (`_bounded`: the fixed end is the first/last tick, round ticks too close to it dropped) and `y2` puts columns on a second axis on the right (`_Series.axis`, with `y2_min`/`y2_max`; refused for stacked or horizontal bars); with any end fixed the marks are clipped to the plot (`<id>-clip`). Marks are painted with the palette tokens (`charts.PALETTE`, the chromatic part of `colors.SVG_TOKENS` in a fixed order) in `style` (never presentation attributes, where `var()` is invalid) and text with the text tokens, so charts follow the theme and colour mode. Chart text is `PageSize.chart_text_scale` of the body size (0.6 on a screen, 1.0 on paper; `DeckContext.chart_scale`, `charts.fence_font` for a fence). Every series is a `<g id="<zone>-series-<slug>">` holding its marks, value labels and legend entry (pie slices `-slice-`), which is what `animations=[...]` targets to reveal them one by one (`verify` draws a slide's charts to know those ids, and reports unreadable data). A fence chart is inline SVG inside a zone's HTML: `html_fragment_to_xml` restores the camelCase names lxml's HTML parser lowercases, and `_replace_with_foreignobject` attaches the foreignObject before its content because lxml otherwise drops the inline `<svg>`'s xmlns as "redundant" with the slide root's.
 
 **Layout chain resolution at build time, not on disk.**
 `inject-layout` writes locked Inkscape preview layers into SVGs for authoring reference,

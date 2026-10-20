@@ -10,6 +10,7 @@ from inkflow import (
     Image,
     Video,
     TextBox,
+    Chart,
     Overlay,
     PageSize,
     Align,
@@ -35,6 +36,8 @@ see the [Animations](animations.md) and [Transitions](transitions.md) reference 
 ::: inkflow.manifest.Video
 
 ::: inkflow.manifest.TextBox
+
+::: inkflow.manifest.Chart
 
 ::: inkflow.manifest.Inline
 
