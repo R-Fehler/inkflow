@@ -5,11 +5,11 @@ from pathlib import Path
 
 import click
 
-from inkflow.cli._common import Project, deck_option, main
+from inkflow.cli._common import Project, deck_option, main, resolve_deck_path
 from inkflow.enums import ColorMode
 from inkflow.logging import console
 from inkflow.pipeline import resolve_slide_src
-from inkflow.verify import verify_slide
+from inkflow.verify import verify_deck, verify_slide
 
 
 @main.command("verify")
@@ -19,11 +19,17 @@ from inkflow.verify import verify_slide
 @click.option(
     "--strict", is_flag=True, help="Treat warnings as errors (exit 1 if any warn)."
 )
+@click.option(
+    "--no-deck-checks",
+    is_flag=True,
+    help="Skip the plugins' checks of the deck as a whole.",
+)
 def verify_cmd(
     files: tuple[Path, ...],
     deck_path: Path,
     include_hidden: bool,
     strict: bool,
+    no_deck_checks: bool,
 ) -> None:
     """Check slides for authoring errors before presenting or building.
 
@@ -33,6 +39,9 @@ def verify_cmd(
     from the composed SVG; an overlay paints an opaque full-canvas rect, which would
     hide the slide. Warnings: animation steps are not contiguous from 1, a zone id is
     declared twice after composition, or layout layers are stale (run `inkflow sync`).
+
+    Installed plugins add checks of their own: per slide, and for the whole
+    deck (one `deck` line; not with FILES or `--no-deck-checks`).
 
     Exits 1 on any error, or on any warning when `--strict` is set. Hidden slides
     (`visible=False`) are skipped unless `--all` is passed.
@@ -67,6 +76,16 @@ def verify_cmd(
             else:
                 has_warn = True
         _print_slide_issues(str(slide.src), issues)
+
+    if not files and not no_deck_checks:
+        deck_issues = verify_deck(deck_obj, project_dir, resolve_deck_path(deck_path))
+        for level, _ in deck_issues:
+            if level == "error":
+                has_error = True
+            else:
+                has_warn = True
+        if deck_issues:
+            _print_slide_issues("deck", deck_issues)
 
     if has_error or (strict and has_warn):
         sys.exit(1)

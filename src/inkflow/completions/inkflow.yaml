@@ -180,6 +180,7 @@ commands:
       -d, --deck=: Path to deck.py
       --all: Include hidden slides
       --strict: Treat warnings as errors
+      --no-deck-checks: Skip the plugins' checks of the deck as a whole
     completion:
       positionalany:
         - "$files([\".svg\"])"
