@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import textwrap
 from importlib.resources import files
 from pathlib import Path
@@ -459,6 +460,66 @@ class TestLayouts:
         result = runner.invoke(main, ["layouts", "--no-deck"])
         assert result.exit_code == 0
         assert "base" in result.output
+
+    def test_plain_is_one_line_per_layout_without_a_table(
+        self, runner: CliRunner
+    ) -> None:
+        result = runner.invoke(main, ["layouts", "--no-deck", "--plain"])
+        assert result.exit_code == 0
+        lines = result.output.splitlines()
+        content = next(line for line in lines if line.startswith("content  "))
+        assert content == (
+            "content  [builtin]  parents: base > numbered > title"
+            + "  zones: content*, title  numbered"
+        )
+        assert not any(ch in result.output for ch in "│╭╰─┃")
+
+    @pytest.mark.usefixtures("project")
+    def test_json_lists_layouts_with_their_use_in_the_deck(
+        self, runner: CliRunner
+    ) -> None:
+        Path("layouts").mkdir()
+        Path("layouts/mine.svg").write_text(_SLIDE_SVG, encoding="utf-8")
+        Path("layouts/agenda.svg").write_text(_SLIDE_SVG, encoding="utf-8")
+        Path("deck.py").write_text(
+            _DECK_PY.replace(
+                'Slide("slides/01.svg")',
+                'Slide("slides/01.svg"), Slide("content"), Slide("content"),'
+                + ' Slide("two-cols")',
+            ),
+            encoding="utf-8",
+        )
+        result = runner.invoke(main, ["layouts", "--json"])
+        assert result.exit_code == 0
+        data = cast("dict[str, list[dict[str, object]]]", json.loads(result.output))
+        assert set(data) == {"layouts", "overlays"}
+        by_name = {(e["source"], e["name"]): e for e in data["layouts"]}
+        content = by_name[("builtin", "content")]
+        assert content["parents"] == ["base", "numbered", "title"]
+        assert content["zones"] == ["content", "title"]
+        assert content["defaultZone"] == "content" and content["numbered"] is True
+        assert content["slides"] == 2
+        assert by_name[("builtin", "two-cols")]["slides"] == 1
+        assert by_name[("builtin", "title")]["slides"] == 0
+        mine = by_name[("local", "mine")]
+        assert mine["parents"] == [] and mine["slides"] == 0
+        # The project's agenda shadows the built-in one, which is not counted.
+        shadowed = by_name[("builtin", "agenda")]
+        assert shadowed["slides"] is None
+        assert shadowed["note"] == "shadowed by the deck's"
+        assert by_name[("local", "agenda")]["slides"] == 0
+
+    @pytest.mark.usefixtures("project")
+    def test_table_counts_slides(self, runner: CliRunner) -> None:
+        Path("deck.py").write_text(
+            _DECK_PY.replace('Slide("slides/01.svg")', 'Slide("quad")'),
+            encoding="utf-8",
+        )
+        result = runner.invoke(main, ["layouts"])
+        assert result.exit_code == 0
+        assert "SLIDES" in result.output
+        quad = next(line for line in result.output.splitlines() if " quad " in line)
+        assert quad.rstrip(" │").endswith("1")
 
 
 class TestInitGit:
