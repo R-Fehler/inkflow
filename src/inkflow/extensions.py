@@ -15,7 +15,10 @@ Every hook has a do-nothing default. In the order they happen:
 - per build: ``before_build`` and ``build`` run in a worker thread, inside
   the build (an exception there fails the build: the error overlay);
   ``built`` runs after the pages got the new slides, ``build_failed`` when a
-  build failed;
+  build failed. ``provenance = True`` asks for the editor build: every element
+  stamped with its source locator (``inkflow.provenance``, inert attributes
+  every page gets) and each slide's ``edit`` facts (``SlideData.edit``,
+  which stay with the extensions: the pages' copies drop them);
 - per page: ``welcome`` adds fields to the first message a page gets;
   ``hello`` when a page said what it is (``{"type": "hello", "role": ...}``);
   ``message`` for each message type the extension lists in ``messages``
@@ -92,9 +95,10 @@ class Build:
     """deck.py's content hash (``file_hash``): which version of it this build
     ran, so a program that edited it can wait for its own edit's build."""
     slides: list[SlideData]
-    """The slides as built."""
+    """The slides as built: with source locators and ``edit`` facts when an
+    extension asked for ``provenance``."""
     served: list[SlideData] = field(default_factory=list)
-    """The pages' copies (set once the build is done)."""
+    """The pages' copies (set once the build is done): no ``edit`` facts."""
     fresh: bool = True
     """Nothing was kept from earlier builds: an extension's own caches should
     start over too."""
@@ -196,6 +200,8 @@ class ServerExtension:
     """Base class of a server extension: override what you add."""
 
     name: str = "extension"
+    provenance: bool = False
+    """Build with source locators (the editor build, ``inkflow.provenance``)."""
     messages: Mapping[str, Role] = {}
     """WebSocket message types this extension handles, each with the least
     role that may send it (``"owner"``, ``"editor"`` or ``"viewer"``)."""
