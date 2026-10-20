@@ -4,6 +4,7 @@
 
 ```bash
 uv run inkflow serve --deck demo/deck.py   # start server at localhost:7777
+uv run inkflow serve --deck demo/deck.py --share   # also on the LAN: view links
 mise run check                      # lint + format + typecheck + test (Python and JS)
 mise run bundle                     # rebuild JS/CSS bundles from src/ts/ and src/css/
 ```
@@ -87,9 +88,51 @@ src/
                                and zones.py (markdown reveals)
     zones.py          ::zone:: / ::step:: marker grammar, zone param extraction, and slide
                                assembly (parsed markdown -> per-zone TextBox/Media)
-    server.py         HTTP server, WebSocket server, file watcher, build pipeline;
-                               runs the server extensions (`serve(extensions=)`,
-                               default `extensions_for` the installed plugins)
+    server.py         the server `inkflow serve` runs: HTTP and the WebSocket on one
+                               port (`/_inkflow/ws`), file watcher, build pipeline; the door
+                               (`_share`: `Access` + `People`, `allowed(role, msg)`: the core's
+                               messages, then each extension's `messages` by least role),
+                               sharing on/off (`Listener.move`), `share_status` (+ each
+                               extension's `share_status`/`share_op`/`share_lines`),
+                               `send_owners`; runs the server extensions
+                               (`serve(extensions=)`, default `extensions_for` the installed
+                               plugins); `context` = the `ServerContext` (send, broadcast,
+                               rebuild, shutdown, `serve_connection`/`serve_request` for
+                               connections that came another way); `listening(ui, deck,
+                               extensions)` (the one port without TUI/watcher: tests,
+                               embedding); `pick_port`, `auto_ports` (`_PortBusy`)
+    access.py         who may reach a server and as whom (pure): `parse_request`,
+                               `Access.host_ok` (Host: loopback names, IP literals,
+                               `machine_names`, `--allow-host`; DNS rebinding),
+                               `origin_ok` (a WebSocket's Origin = the page's own
+                               host:port; none = a program), `is_local` (loopback peer +
+                               loopback Host + no proxy headers: an SSH tunnel is
+                               local, `tailscale serve` is not) = the owner, except in
+                               SSH mode (`Access.ssh`: `--ssh`, default `over_ssh()` =
+                               SSH_CONNECTION/SSH_CLIENT set), where the owner is a
+                               local request with the `owner_token` (the printed owner
+                               link `owner_path`, kept across `rotate`); `admit` (`?k=`
+                               or the cookie, named `cookie_name_for(Host)`: the port
+                               the browser sees, `inkflow-8000` through `ssh -L
+                               8000:…:7777`, else the server's -> owner/editor/viewer
+                               token, `secrets.compare_digest`), `presents_token`,
+                               `rotate`, `links`, `lan_addresses`, `enter_page` (sets
+                               the cookie, then moves on without the token; not a
+                               redirect: SameSite=Strict), `redacted` (what logs may
+                               show of a token), `server_names`/`login_user`
+    wsbridge.py       `Bridge`: a websockets `Server` without a listener; the HTTP
+                               handler hands it an upgrade request it has read
+                               (`adopt`), so pages, files and the WebSocket share
+                               one port
+    instances.py      one server per deck: each server records {pid, host, port,
+                               ws_port (= port unless `--ws-port`), deck, tls,
+                               owner_token (SSH mode)} in the user state dir (dir 0700,
+                               records 0600; `ws_url()`/`owner_url()` carry `?k=`, the
+                               probe a cookie; `url()` never does) (`register`/`unregister`, by
+                               `_serve_deck`); `serving(deck)` finds the live one, trusting
+                               a record only when `/_inkflow/instance` answers with its
+                               pid (stale ones are deleted). `inkflow serve` opens no second
+                               server for a deck (`cli.present.already_served`)
     export.py         static HTML export (inkflow build) and PDF export (inkflow export)
     assets.py         asset reference resolution. `AssetRoots` holds the allowed roots
                                (project dir, theme asset dir) and converts between an
@@ -144,9 +187,12 @@ src/
                                duplicate_zone_ids, is_full_canvas_fill)
     svgio.py          SVG parse/serialize primitives: one hardened parser, SvgElement alias
     extensions.py     `ServerExtension` (build hooks, `messages` with the least `Role`,
-                               `welcome`/`hello`/`message`/`disconnected`, `http`, `keys`),
-                               `ServerContext` (server.`context`), `Build`, `HttpRequest`,
-                               `State`, `ServeConfig`
+                               `welcome`/`hello`/`message`/`disconnected`, `http`, `keys`,
+                               `share_status`/`share_op`/`share_lines`),
+                               `ServerContext` (server.`context`: `access`, `send_owners`,
+                               `share_changed`, `serve_connection`/`serve_request`), `Build`,
+                               `HttpRequest` (the parsed `request`, `role`, `token`,
+                               ranged `send_file`), `VirtualConnection`, `State`, `ServeConfig`
     provenance.py     source locators on the composed SVG (`data-ink="<source>:<child
                                path>"`, counted on the tree as parsed from disk:
                                `clean_inkscape_tree(before_clean=)`) and `locate`, their
@@ -157,9 +203,9 @@ src/
                                (`SlideEditInfo`: sources, `emptyZones`, `zoneOrigins`);
                                the server builds so when an extension has `provenance`,
                                and the pages' copies drop `edit` (`_without_edit`)
-    collab.py         `Client` (id, role, page from `hello`) / `People` per connection;
-                               `Role` owner/editor/viewer (server.`role_for`: owner = loopback
-                               peer through a loopback Host/Origin)
+    collab.py         the connections (`People`, `Client`: id, role, token, peer,
+                               page = what `hello` said it is, online); `listing()` =
+                               the pages open; `Role` (owner/editor/viewer) is access.py's
     verify.py         slide authoring checks (inkflow verify); plugins' `slide_checks`
                                run after the core's, `verify_deck` their `deck_checks`
     plugins.py        `Plugin` (entry-point group `inkflow.plugins`): `register_cli`,
@@ -187,7 +233,9 @@ src/
                       measurement, viewBox writes), svg-geometry.ts (screen
                       measurement shared with morph: `screenMatrix`, `boxFrame`),
                       keyframes.ts (reads @keyframes + per-cue var substitution),
-                      step-ring SVG builder, cubic-bezier easing
+                      step-ring SVG builder, cubic-bezier easing; wsurl.ts
+                      (`socketUrl(location)`: the WebSocket on the page's own
+                      host and port, `SENT_AWAY` = 4001)
     presenter/        main presenter modules — navigation, transitions (progress-driven
                       via progress-driver.ts), overview, picker, websocket, status bar,
                       keyboard, syncmenu.ts (sync-mode status-bar control),
@@ -222,7 +270,7 @@ Non-fatal records collected during the rebuild (`inkflow.logging.collect_logs`, 
 The HTTP response includes `Cache-Control: no-store` so hard refreshes always get fresh content.
 
 **Position sync is a dumb relay with client-side authority + modes.**
-Clients send `{"type":"nav","slideIndex","step"}` (validated + clamped server-side by `_coerce_nav_position`); the server stores the last position and rebroadcasts it as `{"type":"position",...}` to the *other* clients, and pushes it once to each newly connected client. A window that booted from a deep link (a slide named in the URL, captured by `readURL()` before `syncURL()` rewrites the bar) or reconnected asserts its own position and ignores that first push; a bare window adopts it. Each client also has a per-tab **sync mode** (`two-way`/`present`/`follow`/`solo`, `shared/types.ts`) deciding locally whether it broadcasts nav (`sends()`) and applies incoming positions (`receives()`) — the server knows nothing about modes. `s` cycles the mode; `syncmenu.ts` owns the status-bar widget, `websocket.ts` the network/state. Switching into a receiving mode sends `{"type":"sync-request"}` to catch up. Persisted in `sessionStorage`.
+Clients send `{"type":"nav","slideIndex","step"}` (validated + clamped server-side by `_coerce_nav_position`; a view link's are dropped, and its page starts in `follow`); the server stores the last position and rebroadcasts it as `{"type":"position",...}` to the *other* clients, and pushes it once to each newly connected client. A window that booted from a deep link (a slide named in the URL, captured by `readURL()` before `syncURL()` rewrites the bar) or reconnected asserts its own position and ignores that first push; a bare window adopts it. Each client also has a per-tab **sync mode** (`two-way`/`present`/`follow`/`solo`, `shared/types.ts`) deciding locally whether it broadcasts nav (`sends()`) and applies incoming positions (`receives()`) — the server knows nothing about modes. `s` cycles the mode; `syncmenu.ts` owns the status-bar widget, `websocket.ts` the network/state. Switching into a receiving mode sends `{"type":"sync-request"}` to catch up. Persisted in `sessionStorage`.
 
 **The deck position lives in the URL fragment, `#slide=7&steps=2` (`deck-url.ts`).**
 The fragment never reaches a server, so nothing has to route it and rewriting it is a same-document change every browser permits. The path segment this used to write (`/7`) only ever worked under `serve`, whose catch-all answers any path with the presenter: a static host 404s it on reload (the docs demo included), and a `file://` deck cannot have it at all — the browser rejects the rewrite (`history.replaceState` throws `SecurityError`; Firefox logs "Content at …/index.html may not load data from …/7"). The fragment is the only form: nothing writes a path segment any more and nothing reads one, so the position has exactly one representation. `deck-url.ts` is the only module that touches `location.hash`, and its two functions are pure over a `URL` so every case is unit-tested; `status.ts` supplies `window.location` and keeps a `try/catch` around `replaceState`.
@@ -348,10 +396,54 @@ Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop +
 
 ## Server
 
-- HTTP on port 7777 (asyncio streams, custom handler)
-- WebSocket on port 7778 (websockets 16.0 — uses `websockets.asyncio.server.serve`, not the legacy `websockets.serve`)
+- HTTP on port 7777 (asyncio streams, custom handler); assets are streamed in
+  chunks with byte-range support (`_send_file`, 206/416), which Safari needs for video
+- anything else an extension's `http` answers, then the presenter at any path
+- WebSocket on the same port at `/_inkflow/ws` (`access.WS_PATH`): the HTTP
+  handler reads the request head, checks it, and hands an upgrade to
+  `wsbridge.Bridge` (websockets 16.0's `ServerConnection` adopted onto the
+  transport, so pings/close/flow control/TLS are websockets' own). Pages connect
+  to `ws(s)://<location.host>/_inkflow/ws` (`shared/wsurl.ts`), so a LAN address,
+  an SSH tunnel's forwarded port or an HTTPS proxy all work; `__WS_PORT__` only
+  says whether the page is served (null in a static build). `--ws-port`
+  (deprecated) additionally opens the old separate port on this machine only,
+  behind the same checks (`_ws_check`, origin = the HTTP port's pages)
+- The door, before anything else, for every HTTP request and WebSocket
+  handshake: `Host` must name this machine (else 403: DNS rebinding); a
+  WebSocket's `Origin`, when sent, must be this server's page (else 403:
+  cross-site WebSocket hijacking); then who it is (`Access.admit`): the owner
+  (loopback, see access.py; in SSH mode loopback + the owner token), or a valid
+  share token in `?k=` or the cookie, else 401 (SSH mode without any token: "Open
+  the owner link", `_SSH_401`, never the token). A `?k=` request answers
+  `enter_page` with `Set-Cookie: inkflow-<browser port>=…; HttpOnly;
+  SameSite=Strict` (+ `Secure` with `--tls`). Pages carry
+  `X-Frame-Options`/`frame-ancestors 'self'` and `Referrer-Policy: no-referrer`;
+  `/_inkflow/instance` is the owner's; only the owner's page gets the edit
+  commands. Messages by role: `allowed()` (owner only: `edit`, `share`; owner
+  and editors: a `hello` as `role: "editor"`; each extension's `messages` by
+  their least role; a viewer sends no `nav`, and its page starts in `follow`)
+- Sharing (`--share`, a non-loopback `--host`, or the `share` ops
+  status/on/off/rotate/kick, owner only): `Listener.move` rebinds the one port
+  between this machine and every interface (or `--host`) without dropping
+  connections; turning it off, new links (`rotate`) and kick close guest sockets
+  with code 4001 (`SENT_AWAY`: the page says why and stops reconnecting). View
+  links (and editor links, only when an extension takes editors: `editor_page`)
+  per `lan_addresses()` (+ `.local`, `--allow-host` names) are printed in the TUI
+  and sent as `share-status` to the owner's pages but the presenter
+  (`send_owners`); tokens never reach the log in full. `--tls CERT KEY` serves
+  HTTPS/WSS on the same port. SSH mode (`--ssh/--no-ssh`, `Sharing.ssh`):
+  `_listen_hosts` never moves the listener for sharing (only `--host` does),
+  links name `localhost`; the TUI prints the owner link (`owner_lines`,
+  `LiveUI.set_owner`) and the instance record holds the owner token
+- Each connection is a `collab.Client` (`welcome` {id, role} on connect, plus
+  each extension's fields)
+- Ports: without `--port`, `pick_port` takes the first free one from 7777 up
+  (`_port_free` tries every address the host names, ::1 too) and the CLI says so
+  when 7777 was taken; `serve(auto_ports=True)` picks again if the port is lost
+  to a server starting at the same moment (`_PortBusy`). One server per deck:
+  `instances.serving` finds the deck's server first
 - File watcher: `watchfiles.awatch` (async generator)
-- Both run inside an `asyncio.TaskGroup`
+- The listener, the watcher and the keyboard run as tasks of `_serve_deck`
 
 ## Animation pipeline
 

@@ -76,4 +76,7 @@ export type WsMessage =
       }
     | { type: "error"; message: string }
     | { type: "notify"; message: string; style: NotifyStyle }
+    // Who this page is at the server's door (`owner`, `editor`, `viewer`);
+    // server extensions may add fields.
+    | { type: "welcome"; id: string; role: string }
     | ({ type: "position" } & SyncPosition);

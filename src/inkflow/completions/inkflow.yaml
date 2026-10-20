@@ -31,9 +31,14 @@ commands:
     description: Start the presentation server.
     flags:
       -d, --deck=: Path to deck.py
-      --host=: Bind address
-      --port=: HTTP port
-      --ws-port=: WebSocket port
+      --host=: Bind address (any but this machine's own shares the deck)
+      --port=: Port
+      --ws-port=: Also open the old separate WebSocket port (deprecated)
+      --share: Share on the network with view links
+      --allow-host=: Also answer to this host name
+      --tls=: Serve HTTPS with this certificate and key
+      --ssh: "SSH mode: only the owner link makes the owner, links for tunnels"
+      --no-ssh: Not SSH mode, even from an SSH login
     completion:
       flag:
         deck: ["$files([\".py\"])"]

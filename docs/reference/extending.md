@@ -74,8 +74,9 @@ skipped. `INKFLOW_NO_PLUGINS=1` runs inkflow without any plugin.
 ## A server extension
 
 The server `inkflow serve` runs builds the deck on every change, serves the
-presenter and the deck's files, and relays positions between windows over a
-WebSocket. A `ServerExtension` lives in it:
+presenter and the deck's files on one port, and relays positions between
+windows over a WebSocket on that port (`/_inkflow/ws`). A `ServerExtension`
+lives in it:
 
 ```python
 import json
@@ -111,8 +112,10 @@ of its own passes `extensions=[...]` to `inkflow.server.serve`). The hooks, in
 the order they happen:
 
 - `start(server)` once, with the `ServerContext` to act through: the served
-  state, who is connected, `send`/`broadcast`/`notify`, `rebuild`,
-  `shutdown`;
+  state, who is connected and the door (`access`), `send`/`broadcast`/
+  `send_owners`/`notify`, `rebuild`, `shutdown`, and
+  `serve_connection`/`serve_request` for a page that reached it another way
+  (through a relay, say), run exactly as one from the network, for its role;
 - `open(deck_path)` / `close(switching=…)` for the deck served;
 - `before_build()` and `build(build)` in a worker thread, inside each build
   (raising fails the build); `built(build)` once the pages have the new
@@ -129,15 +132,23 @@ the order they happen:
   to the first message a page gets;
 - `http(request)` for every request the core does not answer itself (the
   deck's files come first, the presenter last);
-- `keys()`: keys in the server's terminal, shown on its help line.
+- `keys()`: keys in the server's terminal, shown on its help line;
+- `share_status()`/`share_op(op, msg)`/`share_lines()`: its part of the
+  owner's Share dialog (`{"type": "share", "op": …}` messages, answered with
+  `share-status`) and of the terminal's share lines; `ServerContext.share_changed()`
+  refreshes both.
 
-The owner is this machine's own user: a page or program connecting over
-loopback through a loopback name (`Host`, and a WebSocket's `Origin` when it
-sends one). Another site's page open in the same browser, or a name that was
-DNS-rebound to this machine, is a viewer, so it never reaches an extension's
-owner-only messages. Every page also may ask `{"type": "build-status"}`:
-which deck.py the server built last (`deckHash`), so a program that edited it
-can wait for its own edit to build.
+Who may connect, and as whom, is the core's decision, made at the door before
+any extension sees a request ([Sharing a served deck](../presenting/sharing.md)):
+every request must name this machine (`Host`, against DNS rebinding), a
+WebSocket must come from a page this server served (`Origin`, against
+cross-site sockets), and then it is the **owner** (this machine; in SSH mode
+the owner link), or an **editor** or **viewer** with a share link. A message
+from a lesser role than an extension's `messages` names never reaches it, and
+`HttpRequest.role`/`.token` say who asks for a page. The server offers editor
+links only when an extension takes a message from editors. Every page also may
+ask `{"type": "build-status"}`: which deck.py the server built last
+(`deckHash`), so a program that edited it can wait for its own edit to build.
 
 ## API
 
