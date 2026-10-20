@@ -16,7 +16,8 @@ adds:
   ``inkflow`` command line;
 - ``slide_checks`` / ``deck_checks`` add lines to ``inkflow verify``;
 - ``server_extensions`` adds pages, messages and build steps to the server
-  (``inkflow.extensions.ServerExtension``);
+  (``inkflow.extensions.ServerExtension``), ``serve_options`` options to
+  ``inkflow serve`` for them;
 - ``completion_spec`` adds its commands to the shell completion spec;
 - ``requirement`` is pinned beside inkflow in a new deck's pyproject.toml;
 - ``current_slide`` says which slide the author is looking at, for commands
@@ -73,6 +74,11 @@ class Plugin:
 
     def deck_checks(self) -> Sequence[DeckCheck]:
         """Checks ``inkflow verify`` runs once on the whole deck."""
+        return ()
+
+    def serve_options(self) -> Sequence[click.Option]:
+        """Options this plugin adds to ``inkflow serve``; their values reach
+        ``server_extensions`` as ``config.options`` (by parameter name)."""
         return ()
 
     def server_extensions(self, config: ServeConfig) -> Sequence[ServerExtension]:

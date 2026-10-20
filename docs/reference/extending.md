@@ -66,6 +66,7 @@ What a plugin can add:
 | `register_cli(main)` | Commands on `inkflow` (or subcommands on one of its groups) |
 | `slide_checks()` / `deck_checks()` | Lines of `inkflow verify`, per slide and for the whole deck |
 | `server_extensions(config)` | Pages, messages and build steps on the deck's server (below) |
+| `serve_options()` | Options of `inkflow serve`, read back as `config.options` |
 | `completion_spec()` | Its commands in `inkflow completion carapace` |
 | `requirement()` | Pinned beside inkflow in a new deck's `pyproject.toml` (`init`, `pack`), so its commands work in a clone |
 | `current_slide(project_dir)` | The slide `inkflow render` shows when none is named |
@@ -135,7 +136,8 @@ the order they happen:
   `{"editor": "/edit"}`);
 - `http(request)` for every request the core does not answer itself (the
   presenter, the handout, fonts and the deck's files come first);
-- `keys()`: keys in the server's terminal; `share_status`/`share_op`/
+- `home`: the page the owner link and the terminal point to (an editor's
+  `/edit`); `keys()`: keys in the server's terminal; `share_status`/`share_op`/
   `share_lines`: its part of the Share dialog and the terminal's share lines.
 
 Who may connect, and as whom, is the core's decision: the owner (this

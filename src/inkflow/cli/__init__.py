@@ -13,6 +13,7 @@ from importlib import import_module
 
 from inkflow import plugins
 from inkflow.cli._common import main
+from inkflow.cli.present import add_serve_options
 from inkflow.logging import logger
 
 # Import each submodule for its side effect: registering commands on ``main``.
@@ -30,6 +31,7 @@ for _submodule in (
 for _plugin in plugins.loaded():
     try:
         _plugin.register_cli(main)
+        add_serve_options(_plugin.serve_options())
     except Exception:
         logger.exception(f"plugin {_plugin.name!r}: its commands failed to load")
 

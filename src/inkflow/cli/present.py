@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import click
@@ -12,8 +12,15 @@ from inkflow import instances
 from inkflow.access import over_ssh
 from inkflow.cli._common import deck_option, main, resolve_deck_path
 from inkflow.export import build_handout_pdf, build_pdf, build_static_html
+from inkflow.extensions import ServeConfig
 from inkflow.logging import Levels, report
-from inkflow.server import DEFAULT_PORT, Sharing, open_browser, pick_port
+from inkflow.server import (
+    DEFAULT_PORT,
+    Sharing,
+    extensions_for,
+    open_browser,
+    pick_port,
+)
 from inkflow.server import serve as _serve
 from inkflow.sizes import PageSize
 
@@ -111,6 +118,7 @@ def serve(
     allow_hosts: tuple[str, ...],
     tls: tuple[Path, Path] | None,
     ssh: bool | None,
+    **plugin_options: object,
 ) -> None:
     """Start the presentation server with live reload.
 
@@ -147,8 +155,17 @@ def serve(
                 levels,
                 auto_ports=auto,
                 sharing=sharing(share, allow_hosts, tls, ssh),
+                extensions=extensions_for(
+                    ServeConfig(resolved, host, port, plugin_options)
+                ),
             )
         )
+
+
+def add_serve_options(options: Sequence[click.Option]) -> None:
+    """Options a plugin adds to ``inkflow serve`` (``Plugin.serve_options``):
+    their values go to the extensions as ``ServeConfig.options``."""
+    serve.params.extend(options)
 
 
 def port_for(host: str, port: int | None) -> int:

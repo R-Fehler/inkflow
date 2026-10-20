@@ -489,10 +489,11 @@ async def broadcast(
 
 
 async def send_owners(payload: dict[str, object]) -> None:
-    """To the owner's pages (the Share dialog, among others)."""
+    """To the owner's pages other than the presenter's (where the Share
+    dialog lives); never to a program (an agent's socket says no page)."""
     msg = json.dumps(payload)
     for conn, client in _share.people.items():
-        if client.role == "owner":
+        if client.role == "owner" and client.page not in ("", "presenter"):
             with contextlib.suppress(Exception):
                 await cast("ServerConnection", conn).send(msg)
 
@@ -895,6 +896,8 @@ def make_ws_handler(
                     # with), whole when it found it does not (``resync``).
                     if msg_type == "hello":
                         client.patches = bool(msg.get("patch"))
+                        if not client.page and isinstance(msg.get("role"), str):
+                            client.page = str(msg.get("role"))
                     if client.patches and _state["error"] is None:
                         whole = msg_type == "resync"
                         slides = _state["slides"]
@@ -1623,6 +1626,12 @@ def _shares(host: str) -> bool:
     return not is_loopback_name(split_host(host)[0])
 
 
+def owner_page() -> str:
+    """The page the owner opens: the first extension's ``home`` (an editor's
+    ``/edit``), else the presenter."""
+    return next((e.home for e in _served.extensions if e.home), "/")
+
+
 def owner_lines(access: Access, port: int) -> list[str]:
     """In SSH mode, the owner link (the one thing the person who started the
     server opens, through their tunnel) and the tunnel to open it through."""
@@ -1631,7 +1640,7 @@ def owner_lines(access: Access, port: int) -> list[str]:
     server = next(iter(sshshare.server_names()), "<this server>")
     user = sshshare.login_user() or "<you>"
     return [
-        f"{access.scheme}://localhost:{port}{access.owner_path('/edit')}",
+        f"{access.scheme}://localhost:{port}{access.owner_path(owner_page())}",
         f"open it through: ssh -L {port}:localhost:{port} {user}@{server}",
     ]
 
@@ -1670,7 +1679,7 @@ def share_lines(access: Access, port: int) -> list[str]:
         lines.append("no network address found: use --host <address>")
     lines.append(
         f"ssh   ssh -L {port}:localhost:{port} <you>@<this machine>, "
-        + f"then http://localhost:{port}/ (as the owner)"
+        + f"then http://localhost:{port}{owner_page()} (as the owner)"
     )
     return lines + _extension_lines()
 
@@ -1830,9 +1839,11 @@ async def serve(
         report("Error", "no deck to serve", style="red")
         return
     _served.address = _address(_local_host(host), http_port, ws_port, sharing.tls)
-    for ext in _served.extensions:
-        await ext.start(context)
+    started: list[ServerExtension] = []
     try:
+        for ext in list(_served.extensions):
+            await ext.start(context)
+            started.append(ext)
         await _serve_decks(
             deck_path,
             host,
@@ -1845,6 +1856,7 @@ async def serve(
             sharing,
         )
     finally:
+        _served.extensions = started
         await _each_extension("stop", lambda ext: ext.stop())
         _served.extensions = []
 

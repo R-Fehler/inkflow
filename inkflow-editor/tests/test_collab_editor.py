@@ -732,7 +732,13 @@ def test_an_ssh_tunnel_is_the_owner(shared: tuple[EditorSession, int]) -> None:
         stop.set()
 
 
-def test_the_terminal_shows_the_owner_link_in_ssh_mode() -> None:
+def test_the_terminal_shows_the_owner_link_in_ssh_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inkflow_editor.server import EditorExtension
+
+    # With the editor on the server, the owner's page is the editor.
+    monkeypatch.setattr(server._served, "extensions", [EditorExtension()])  # pyright: ignore[reportPrivateUsage]
     access = Access(7777, names=set(), ssh=True, sharing=True)
     owner = server.owner_lines(access, 7777)
     assert owner[0] == f"http://localhost:7777/edit?k={access.owner_token}"

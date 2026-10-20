@@ -91,6 +91,9 @@ class ServeConfig:
     """The deck it serves first (None: none yet)."""
     host: str
     port: int
+    options: Mapping[str, object] = field(default_factory=dict[str, object])
+    """Values of the options plugins added to the command (``serve_options``),
+    by parameter name: ``{"share_online": True}``."""
 
 
 @dataclass
@@ -262,6 +265,9 @@ class ServerExtension:
     role that may send it (``"owner"``, ``"editor"`` or ``"viewer"``)."""
     serves_without_deck: bool = False
     """The server may run with no deck (its ``http`` answers every page)."""
+    home: str | None = None
+    """The page the owner opens (``/edit``): what the server's owner link
+    and its terminal name instead of the presenter."""
 
     async def start(self, server: ServerContext) -> None:
         del server

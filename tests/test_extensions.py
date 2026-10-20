@@ -373,3 +373,61 @@ def test_an_ink_save_without_an_editor_writes_the_file(
         refused = _until(ws, "edit-result")
         assert refused["ok"] is False and "edits the deck" in str(refused["error"])
     assert (project / "ink" / "two.svg").is_file()
+
+
+def test_the_owner_is_sent_to_an_extensions_home() -> None:
+    from inkflow.access import Access
+
+    class Home(ServerExtension):
+        home: str | None = "/mine"
+
+    access = Access(7777, names=set(), ssh=True)
+    assert server.owner_lines(access, 7777)[0].split("?")[0].endswith(":7777/")
+    server._served.extensions = [Home()]  # pyright: ignore[reportPrivateUsage]
+    try:
+        assert server.owner_page() == "/mine"
+        assert "/mine?k=" in server.owner_lines(access, 7777)[0]
+    finally:
+        server._served.extensions = []  # pyright: ignore[reportPrivateUsage]
+
+
+def test_a_plugins_serve_option_reaches_its_extensions(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from inkflow.cli import present
+    from inkflow.extensions import ServeConfig
+
+    seen: list[ServeConfig] = []
+
+    class Loud(Plugin):
+        name: str = "loud"
+
+        @override
+        def serve_options(self) -> Sequence[click.Option]:
+            return (click.Option(["--loud"], is_flag=True),)
+
+        @override
+        def server_extensions(self, config: ServeConfig) -> Sequence[ServerExtension]:
+            seen.append(config)
+            return ()
+
+    plugin = Loud()
+    plugins.register(plugin)
+    # On a copy of serve's options, put back after the test.
+    monkeypatch.setattr(present.serve, "params", list(present.serve.params))
+    present.add_serve_options(plugin.serve_options())
+
+    async def no_server(*_args: object, **kwargs: object) -> None:
+        del kwargs
+
+    monkeypatch.setattr(present, "_serve", no_server)
+    try:
+        result = CliRunner().invoke(
+            present.serve,
+            ["--deck", str(project / "deck.py"), "--port", "7899", "--loud"],
+            obj=resolve_levels(),
+        )
+        assert result.exit_code == 0, result.output
+        assert seen and seen[0].options["loud"] is True
+    finally:
+        plugins.unregister(plugin)

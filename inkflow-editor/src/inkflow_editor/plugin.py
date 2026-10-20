@@ -43,11 +43,26 @@ class EditorPlugin(Plugin):
         return (check_portable,)
 
     @override
+    def serve_options(self) -> Sequence[click.Option]:
+        import click
+
+        return (
+            click.Option(
+                ["--share-online"],
+                is_flag=True,
+                help="Share online through your relay (see `inkflow relay`): "
+                + "prints an editor link and a view link that work from "
+                + "anywhere, end-to-end encrypted.",
+            ),
+        )
+
+    @override
     def server_extensions(self, config: ServeConfig) -> Sequence[ServerExtension]:
         from inkflow_editor.online.extension import OnlineExtension
         from inkflow_editor.server import EditorExtension
 
-        return (EditorExtension(config), OnlineExtension())
+        online = bool(config.options.get("share_online"))
+        return (EditorExtension(config), OnlineExtension(start_online=online))
 
     @override
     def completion_spec(self) -> str | None:

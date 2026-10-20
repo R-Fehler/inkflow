@@ -106,6 +106,7 @@ class EditorExtension(ServerExtension):
     name: str = "inkflow-editor"
     provenance: bool = True
     serves_without_deck: bool = True
+    home: str | None = "/edit"
     messages: Mapping[str, Role] = {
         "edit-op": "editor",
         "compare-open": "editor",
@@ -179,6 +180,8 @@ class EditorExtension(ServerExtension):
         self.model = None
         self.model_patch = None
         self.models = ModelCache()
+        self._pending = None
+        self._build_id = 0
         if deck_path is not None:
             projects.remember(deck_path)
 
