@@ -76,7 +76,7 @@ reusable layouts that inherit from each other like master slides,
 Markdown-filled zones for text-heavy slides,
 camera moves that tour a diagram or lay out a whole talk on one canvas,
 a presenter view with speaker notes,
-one-command export to static HTML or PDF,
+one-command export to a single self-contained HTML file or a PDF,
 and more.
 Inkflow ships its fonts (Inter, JetBrains Mono, STIX Two Math for formulas,
 Twemoji for emoji) and embeds every font a deck uses,

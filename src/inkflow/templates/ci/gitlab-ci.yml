@@ -43,7 +43,7 @@ pages:
   # once and each video streams when its slide needs it.
   script:
     - |
-      __UV_RUN__ inkflow build__DECK_OPT__ --output public
+      __UV_RUN__ inkflow build__DECK_OPT__ --assets-folder --output public
     - uv cache prune --ci
   artifacts:
     paths:

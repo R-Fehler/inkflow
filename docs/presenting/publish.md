@@ -1,7 +1,7 @@
 # Publishing online
 
 A deck in a GitHub or GitLab repository can put itself online at every push:
-a CI job runs [`inkflow build`](export.md#static-html-inkflow-build)
+a CI job runs [`inkflow build --assets-folder`](export.md#media-in-a-folder-assets-folder)
 (media as files beside the page, so videos stream) and
 publishes the result with GitHub Pages or GitLab Pages, so the link to the
 slides always shows the last version you pushed. Optionally, every tag
@@ -72,8 +72,8 @@ git tag v1.0
 git push origin v1.0
 ```
 
-The release carries `<repository>-1.0-slides.html` ([`inkflow build
---inline-assets`](export.md#one-file-instead-of-a-directory-inline-assets):
+The release carries `<repository>-1.0-slides.html` ([`inkflow
+build`](export.md#static-html-inkflow-build):
 the whole deck, pictures, videos and fonts included, in one file that opens
 without a server) and `<repository>-1.0-slides.pdf` (`inkflow
 export`). For a deck in a folder of a larger repository the folder's name is

@@ -257,7 +257,9 @@ def test_github_pages_for_a_deck_at_the_root(tmp_path: Path, branch: str) -> Non
     uses = [s.get("uses") for s in _steps(build)]
     assert "astral-sh/setup-uv@v5" in uses
     assert "actions/upload-pages-artifact@v3" in uses
-    assert _run_of(build, "Build the slides") == "uv run inkflow build --output _site"
+    assert _run_of(build, "Build the slides") == (
+        "uv run inkflow build --assets-folder --output _site"
+    )
     assert "'*.pdf'" in _run_of(
         build, "Install a PDF converter if the deck has PDF figures"
     )
@@ -279,7 +281,7 @@ def test_github_for_a_deck_in_a_folder_with_its_own_pyproject(tmp_path: Path) ->
     pages = _jobs(_load(files[publish.GITHUB_PAGES]))["build"]
     assert _run_of(pages, "Build the slides") == (
         "uv run --project talks/intro inkflow build "
-        + "--deck talks/intro/deck.py --output _site"
+        + "--deck talks/intro/deck.py --assets-folder --output _site"
     )
     assert "'talks/intro/*.pdf'" in _run_of(
         pages, "Install a PDF converter if the deck has PDF figures"
@@ -291,7 +293,7 @@ def test_github_for_a_deck_in_a_folder_with_its_own_pyproject(tmp_path: Path) ->
     )
     assert _run_of(release, "Build the slides as a single self-contained file") == (
         "uv run --project talks/intro inkflow build --deck talks/intro/deck.py "
-        + "--inline-assets --output dist"
+        + "--output dist"
     )
     assert _run_of(release, "Print the slides to PDF") == (
         "uv run --project talks/intro inkflow export --deck talks/intro/deck.py "
@@ -347,10 +349,10 @@ def test_gitlab_ci(tmp_path: Path, subdir: bool, release: bool) -> None:
     if subdir:
         assert build == (
             "uv run --project talk inkflow build --deck talk/deck.py "
-            + "--output public"
+            + "--assets-folder --output public"
         )
     else:
-        assert build == "uv run inkflow build --output public"
+        assert build == "uv run inkflow build --assets-folder --output public"
     assert ("release" in doc) is release
     assert ("release-files" in doc) is release
     if release:
