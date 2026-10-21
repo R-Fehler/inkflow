@@ -4,7 +4,7 @@
 `SlideCache` makes that rebuild cost what the change touched: `process_deck`
 asks it for each slide, and it hands back the last build's result unless one
 of the slide's inputs changed. One-shot commands (`build`, `export`,
-`verify`) pass no cache and build every slide, as before.
+`render`, `verify`) pass no cache and build every slide, as before.
 
 What a slide's result depends on, and how each part is watched:
 

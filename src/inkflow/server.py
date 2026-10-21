@@ -34,6 +34,7 @@ from collections.abc import (
     Awaitable,
     Callable,
     Collection,
+    Iterable,
     Sequence,
 )
 from dataclasses import dataclass, field
@@ -81,6 +82,7 @@ from inkflow.edit import (
     NO_EDIT_COMMANDS,
     EditCommands,
     command_for,
+    configured_suffixes,
     open_in_editor,
     resolve_edit_commands,
 )
@@ -234,18 +236,22 @@ def _deck_failure(deck_path: Path, exc: BaseException) -> str:
     return f"{where}: {type(exc).__name__}: {exc}{detail}"
 
 
-def load_deck(deck_path: Path) -> Deck:
-    """Run deck.py's ``main()``; any failure in it is a ``DeckError``."""
+def load_deck(deck_path: Path, module: str = "_inkflow_deck") -> Deck:
+    """Run deck.py's ``main()``; any failure in it is a ``DeckError``.
+
+    ``module`` names the module it runs as: another deck loaded beside the one
+    being served (to compare two versions, say) takes a name of its own, so
+    the served deck's custom animation classes stay the ones found by name."""
     try:
-        return _load_deck(deck_path)
+        return _load_deck(deck_path, module)
     except DeckError:
         raise
     except Exception as exc:
         raise DeckError(_deck_failure(deck_path, exc)) from exc
 
 
-def _load_deck(deck_path: Path) -> Deck:
-    spec = importlib.util.spec_from_file_location("_inkflow_deck", deck_path)
+def _load_deck(deck_path: Path, module: str = "_inkflow_deck") -> Deck:
+    spec = importlib.util.spec_from_file_location(module, deck_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load module from {deck_path}")
     mod = importlib.util.module_from_spec(spec)
@@ -256,7 +262,12 @@ def _load_deck(deck_path: Path) -> Deck:
     # the class *name*, so nothing else keeps the class from being collected).
     # A live-reload re-load replaces this entry with the fresh module.
     sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
+    # Compiled from source every time rather than through the loader: the
+    # bytecode cache validates by mtime (whole seconds) and size, so an edit
+    # that keeps the size (two slides swapped) within the same second would
+    # load the stale cached code.
+    code = compile(deck_path.read_bytes(), str(deck_path), "exec")
+    exec(code, mod.__dict__)
     if not hasattr(mod, "main"):
         raise AttributeError(f"{deck_path} must define a main() -> Deck function")
     return cast(Callable[[], Deck], mod.main)()
@@ -777,6 +788,18 @@ def _welcome(client: Client) -> dict[str, object]:
     return msg
 
 
+DEFAULT_MAX_MESSAGE = 2**20
+"""The largest WebSocket message a page may send (websockets' own default),
+unless an extension asks for more (``ServerExtension.max_message_size``)."""
+
+
+def max_message_size(extensions: Iterable[ServerExtension]) -> int:
+    """The largest message the server accepts: the most any of
+    ``extensions`` asks for, at least ``DEFAULT_MAX_MESSAGE``."""
+    sizes = [e.max_message_size or 0 for e in extensions]
+    return max([DEFAULT_MAX_MESSAGE, *sizes])
+
+
 def make_ws_handler(
     ui: LiveUI, edit_commands: EditCommands
 ) -> Callable[[ServerConnection], Awaitable[None]]:
@@ -964,6 +987,7 @@ def build_html(
         {
             "default": edit_commands.default is not None,
             "svg": edit_commands.svg is not None,
+            "suffixes": configured_suffixes(edit_commands),
         }
     )
     html = (
@@ -1452,9 +1476,14 @@ def open_browser(url: str) -> None:
 def _open_browser(url: str) -> None:
     # Redirect fd 1/2 to /dev/null so the browser process can't write startup
     # noise to the terminal and corrupt the Rich Live cursor tracking.
+    try:
+        saved_out = os.dup(1)
+        saved_err = os.dup(2)
+    except OSError:
+        # No console at all (pythonw on Windows): nothing to protect.
+        webbrowser.open(url)
+        return
     devnull = os.open(os.devnull, os.O_WRONLY)
-    saved_out = os.dup(1)
-    saved_err = os.dup(2)
     try:
         os.dup2(devnull, 1)
         os.dup2(devnull, 2)
@@ -1969,7 +1998,9 @@ async def listening(
     port it listens on."""
     project_dir = deck_path.parent if deck_path is not None else None
     handler = make_ws_handler(ui, edit_commands)
-    bridge = Bridge(handler, forget=_share.people.leave)
+    bridge = Bridge(
+        handler, max_size=max_message_size(extensions), forget=_share.people.leave
+    )
     handlers: list[_StreamHandler] = []
 
     async def http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -2133,7 +2164,11 @@ async def _serve_deck(
         async def ws_entry(connection: ServerConnection) -> None:
             await make_ws_handler(ui_ref[0], edit_commands)(connection)
 
-        bridge = Bridge(ws_entry, forget=_share.people.leave)
+        bridge = Bridge(
+            ws_entry,
+            max_size=max_message_size(_served.extensions),
+            forget=_share.people.leave,
+        )
         http_handler = make_http_handler(http_port, project_dir, edit_commands, bridge)
         _share.ws_handler = ws_entry
         _share.route = make_http_route(http_port, project_dir, edit_commands)
@@ -2230,6 +2265,7 @@ async def _serve_deck(
                                 local_host,
                                 ws_port,
                                 process_request=_ws_check(http_port),
+                                max_size=max_message_size(_served.extensions),
                                 ssl=_tls_context(tls),
                             )
                         )

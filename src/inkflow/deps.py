@@ -10,7 +10,7 @@ shadows the layout of its name, a page committed beside its PDF) is a change
 like any other.
 
 Outside a recording `note` does nothing, which is every build that is not a
-server's (`inkflow build`, `export`, `verify`).
+server's (`inkflow build`, `export`, `render`, `verify`).
 
 Whoever adds a file read to the slide pipeline must note it: a read that is
 not noted is a slide that stays as it was when that file changes.

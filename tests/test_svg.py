@@ -163,3 +163,23 @@ class TestIsFullCanvasFill:
     def test_translucent_watermark_not_detected(self) -> None:
         root = self._svg('<rect width="1920" height="1080" opacity="0.08"/>')
         assert not is_full_canvas_fill(root)
+
+
+def test_links_on_drawn_objects_work_in_the_presentation() -> None:
+    from inkflow.svg import resolve_links
+
+    root = parse_svg(
+        '<svg xmlns="http://www.w3.org/2000/svg"'
+        + ' xmlns:xlink="http://www.w3.org/1999/xlink">'
+        + '<a href="slide:overview"><rect id="box"/></a>'
+        + '<a xlink:href="slide:end"><rect id="old"/></a>'
+        + '<a href="https://example.org"><text>web</text></a>'
+        + '<a href="mailto:a@b.c" target="_self"><text>mail</text></a>'
+        + '<a href="#local"><text>here</text></a></svg>'
+    )
+    out = serialize_svg(resolve_links(root))
+    assert 'data-inkflow-slide="overview"' in out
+    assert 'data-inkflow-slide="end"' in out and "slide:" not in out
+    assert 'href="https://example.org" target="_blank"' in out
+    assert 'target="_self"' in out  # an author's target is kept
+    assert '<a href="#local">' in out

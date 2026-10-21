@@ -263,3 +263,21 @@ class TestCleanCheckFlag:
             main, ["clean", "--check", "--stdout", str(svg_file)]
         )
         assert result.exit_code != 0
+
+
+def test_a_tree_already_parsed_is_cleaned_the_same(tmp_path: Path) -> None:
+    from inkflow.clean import clean_inkscape_root, clean_inkscape_tree
+    from inkflow.svgio import parse_svg, serialize_svg
+
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg"'
+        ' xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"'
+        ' xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"'
+        ' inkscape:version="1.3"><sodipodi:namedview id="v"/>'
+        '<rect width="1"/></svg>'
+    )
+    path = tmp_path / "s.svg"
+    path.write_text(svg, encoding="utf-8")
+    cleaned = serialize_svg(clean_inkscape_root(parse_svg(svg)))
+    assert cleaned == serialize_svg(clean_inkscape_tree(path))
+    assert "inkscape:version" not in cleaned and "namedview" not in cleaned

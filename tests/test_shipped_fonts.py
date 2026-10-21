@@ -463,3 +463,15 @@ def test_a_large_single_file_names_its_largest_assets(
         build_static_html(deck, tmp_path / "out")
     text = " ".join(w.message for w in warnings)
     assert "--assets-folder" in text and "assets/cat.png" in text
+
+
+@pytest.mark.usefixtures("no_system_fonts")
+def test_the_font_index_lists_every_family_by_its_files(tmp_path: Path) -> None:
+    from inkflow.fonts import font_index
+
+    families = font_index(tmp_path)
+    by_file = {record.path.name: group for group in families for record in group}
+    assert set(SHIPPED) <= set(by_file)
+    # One family per entry: Inter's upright and italic files are one family.
+    inter = by_file["InterVariable.woff2"]
+    assert by_file["InterVariable-Italic.woff2"] is inter

@@ -234,6 +234,14 @@ def _lookup(index: dict[str, list[_FontRecord]], family: str) -> list[_FontRecor
     return index.get(_family_key(family)) or index.get(family.lower()) or []
 
 
+def font_index(
+    project_dir: Path, theme_fonts_dir: Path | None = None
+) -> list[list[_FontRecord]]:
+    """Every font family that can be embedded, each as its font files (in the
+    search order: the project's, the theme's, inkflow's, the machine's)."""
+    return list(_build_index(project_dir, theme_fonts_dir).values())
+
+
 def _weight_distance(record: _FontRecord, weight_class: int) -> int:
     if record.weight_range is not None:
         lo, hi = record.weight_range

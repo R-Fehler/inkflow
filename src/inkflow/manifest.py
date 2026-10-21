@@ -112,6 +112,13 @@ def parse_text_scale(value: str) -> float:
     return scale
 
 
+def format_text_scale(scale: float) -> str:
+    """A text size as its marker writes it: ``80%``, ``67%``, ``112.5%``
+    (what `parse_text_scale` reads back)."""
+    percent = round(scale * 100, 1)
+    return f"{percent:g}%"
+
+
 @dataclass
 class _MediaBase:
     """Shared geometry/placement fields for `Image` and `Video`.
@@ -300,9 +307,6 @@ A ``str`` is rendered as inline Markdown; a ``TextBox`` gives explicit
 alignment and padding control; an ``Image`` or ``Video`` injects media; a
 ``Chart`` plots data.
 """
-
-
-# ── Slide / Deck ──────────────────────────────────────────────────────────────
 
 
 # ── Slide / Deck ──────────────────────────────────────────────────────────────

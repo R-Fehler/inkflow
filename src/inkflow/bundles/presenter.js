@@ -282,9 +282,9 @@
     Deck: `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 4 2 8l3.5 4"/><path d="M10.5 4 14 8l-3.5 4"/></svg>`
   };
   function isConfigured(file) {
-    if (file.path.toLowerCase().endsWith(".svg")) {
-      return config.svg || config.default;
-    }
+    const suffix = file.path.split(".").pop()?.toLowerCase() ?? "";
+    if (config.suffixes) return config.suffixes.includes(suffix);
+    if (suffix === "svg") return config.svg || config.default;
     return config.default;
   }
   function actOn(file) {
@@ -5384,6 +5384,42 @@
       document.documentElement.dataset.theme = msg.mode;
   }
 
+  // src/ts/shared/identity.ts
+  var NAME_KEY = "inkflow-name";
+  var ID_KEY = "inkflow-key";
+  function read(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+  function write(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+    }
+  }
+  function storedName() {
+    const name = read(NAME_KEY)?.trim();
+    return name ? name.slice(0, 40) : null;
+  }
+  var sessionKey = null;
+  function clientKey() {
+    const stored = read(ID_KEY);
+    if (stored && /^[A-Za-z0-9_-]{16,64}$/.test(stored)) return stored;
+    if (!sessionKey) {
+      const bytes = new Uint8Array(18);
+      crypto.getRandomValues(bytes);
+      sessionKey = Array.from(
+        bytes,
+        (b2) => b2.toString(16).padStart(2, "0")
+      ).join("");
+      write(ID_KEY, sessionKey);
+    }
+    return sessionKey;
+  }
+
   // src/ts/shared/patch.ts
   function isWhole(sent) {
     return !sent.some((item) => typeof item === "string");
@@ -5417,8 +5453,21 @@
     return `${scheme}://${loc.host || "localhost"}${WS_PATH}`;
   }
   var SENT_AWAY = 4001;
+  function relay() {
+    try {
+      if (window.parent !== window) {
+        return window.parent.__inkflowRelay;
+      }
+    } catch {
+    }
+    return void 0;
+  }
   function openSocket() {
-    return new WebSocket(socketUrl(location));
+    const relayed = relay();
+    if (!relayed) return new WebSocket(socketUrl(location));
+    const sock = relayed.openSocket();
+    window.addEventListener("pagehide", () => sock.close(1001, "page left"));
+    return sock;
   }
 
   // src/ts/presenter/toeditor.ts
@@ -5493,6 +5542,23 @@
       requestSync();
     }
   }
+  var presenceSent = -1;
+  function sendPresence(force = false) {
+    const ws = state.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!force && presenceSent === state.slideIndex) return;
+    presenceSent = state.slideIndex;
+    ws.send(
+      JSON.stringify({
+        type: "presence",
+        page: "presenter",
+        key: clientKey(),
+        ...storedName() ? { name: storedName() } : {},
+        slide: state.slideIndex
+      })
+    );
+  }
+  window.setInterval(() => sendPresence(), 1e3);
   function applySyncMode(mode) {
     state.syncMode = mode;
     try {
@@ -5583,6 +5649,7 @@
       firstPositionPending = assert;
       if (assert && role !== "viewer") sendNav();
       requestInk();
+      sendPresence(true);
       state.ws?.send(
         JSON.stringify({ type: "hello", role: "presenter", patch: true })
       );
@@ -6032,7 +6099,9 @@
     svg.style.width = `${vb.w}px`;
     svg.style.height = `${vb.h}px`;
     const scale = Math.min(thumb.clientWidth / vb.w, thumb.clientHeight / vb.h);
-    svg.style.transform = `scale(${scale})`;
+    const dx = (thumb.clientWidth - vb.w * scale) / 2;
+    const dy = (thumb.clientHeight - vb.h * scale) / 2;
+    svg.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
   }
   function cellAt(i2) {
     return overviewGrid.querySelector(
@@ -6054,8 +6123,9 @@
     const heading = overviewGrid.querySelector(".overview-section");
     const headings = runs.filter((r2) => r2.section).length;
     const headingH = heading ? heading.offsetHeight + gap : 0;
-    let cols = n2;
-    for (let c2 = 1; c2 <= n2; c2++) {
+    const most = Math.max(n2, 8);
+    let cols = most;
+    for (let c2 = 1; c2 <= most; c2++) {
       const thumbW = (availW - (c2 - 1) * gap) / c2;
       const rows = gridRows(runs, c2);
       if (rows * (thumbW * ratio + gap) - gap + headings * headingH <= availH) {

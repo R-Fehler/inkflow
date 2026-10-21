@@ -1,9 +1,11 @@
-"""Launching an external editor on a slide's source file, from the presenter.
+"""Launching an external program on a deck's source file, from the presenter.
 
-Resolution is env-var only (``INKFLOW_EDIT_CMD`` / ``INKFLOW_EDIT_CMD_SVG``): no
-command is bundled by default because "jump an already-open editor to this file"
-is inherently editor- and machine-specific (see the two env vars' docs). When
-unset, the presenter falls back to copying the path to the clipboard instead.
+The presenter's edit menu resolves a command from env vars only
+(``INKFLOW_EDIT_CMD``, ``INKFLOW_EDIT_CMD_SVG``, and per extension or kind:
+``INKFLOW_EDIT_CMD_PNG``, ``INKFLOW_EDIT_CMD_IMAGE``, ``INKFLOW_EDIT_CMD_TEXT``…);
+when none applies it copies the path to the clipboard. No command is bundled
+by default because "jump an already-open editor to this file" is inherently
+editor- and machine-specific.
 """
 
 from __future__ import annotations
@@ -21,6 +23,10 @@ from inkflow.logging import logger
 class EditCommands:
     default: str | None
     svg: str | None
+    overrides: tuple[tuple[str, str], ...] = ()
+    """Other ``INKFLOW_EDIT_CMD_<NAME>`` vars: an extension (``PNG``, ``MD``) or
+    a kind (``IMAGE``, ``TEXT``, ``VIDEO``, ``PDF``, ``DATA``), upper-case, in
+    env order."""
 
 
 NO_EDIT_COMMANDS = EditCommands(default=None, svg=None)
@@ -30,19 +36,53 @@ equal-but-distinct instance — and so it can be used as a default argument with
 ruff's B008 (no function call in a default value)."""
 
 
+_PREFIX = "INKFLOW_EDIT_CMD_"
+
+KINDS: dict[str, str] = {
+    **dict.fromkeys(
+        ("png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"), "IMAGE"
+    ),
+    **dict.fromkeys(("md", "py", "css", "js", "txt", "toml", "json", "yaml"), "TEXT"),
+    **dict.fromkeys(("mp4", "webm", "mov", "ogg"), "VIDEO"),
+    "pdf": "PDF",
+    # A chart's table: a spreadsheet opens it as one.
+    **dict.fromkeys(("csv", "tsv"), "DATA"),
+}
+"""File extension → the kind an ``INKFLOW_EDIT_CMD_<KIND>`` var covers."""
+
+
 def resolve_edit_commands() -> EditCommands:
+    overrides = tuple(
+        (name.removeprefix(_PREFIX).upper(), value)
+        for name, value in os.environ.items()
+        if name.startswith(_PREFIX) and name != f"{_PREFIX}SVG" and value
+    )
     return EditCommands(
         default=os.environ.get("INKFLOW_EDIT_CMD"),
         svg=os.environ.get("INKFLOW_EDIT_CMD_SVG"),
+        overrides=overrides,
     )
 
 
 def command_for(path: Path, commands: EditCommands) -> str | None:
-    """``INKFLOW_EDIT_CMD_SVG`` overrides ``INKFLOW_EDIT_CMD`` for SVG files;
-    every other file kind always uses the general command."""
-    if path.suffix.lower() == ".svg" and commands.svg is not None:
+    """The most specific configured command: ``INKFLOW_EDIT_CMD_<EXT>`` (``_SVG``
+    for SVG files), then ``INKFLOW_EDIT_CMD_<KIND>``, then ``INKFLOW_EDIT_CMD``."""
+    suffix = path.suffix.lower().lstrip(".")
+    if suffix == "svg" and commands.svg is not None:
         return commands.svg
+    named = dict(commands.overrides)
+    if suffix.upper() in named:
+        return named[suffix.upper()]
+    kind = KINDS.get(suffix)
+    if kind and kind in named:
+        return named[kind]
     return commands.default
+
+
+def configured_suffixes(commands: EditCommands) -> list[str]:
+    """Every extension a command is configured for (the presenter's menu)."""
+    known = ["svg", *KINDS]
+    return [s for s in known if command_for(Path(f"x.{s}"), commands) is not None]
 
 
 def open_in_editor(path: Path, template: str) -> str | None:

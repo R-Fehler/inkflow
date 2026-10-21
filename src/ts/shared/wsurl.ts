@@ -13,6 +13,32 @@ export function socketUrl(loc: { protocol: string; host: string }): string {
 // does not reconnect (its link stopped working, or the owner disconnected it).
 export const SENT_AWAY = 4001;
 
+// A page shared through a relay (an extension's online sharing) may run in a
+// frame whose top window holds the channel to the server: there the page's
+// connection is one over that channel, shaped like a WebSocket, which the
+// top window offers as `__inkflowRelay`. Anywhere else it is the server's
+// WebSocket on the page's own address.
+interface RelayParent {
+    __inkflowRelay?: { openSocket(): unknown };
+}
+
+function relay(): RelayParent["__inkflowRelay"] {
+    try {
+        if (window.parent !== window) {
+            return (window.parent as unknown as RelayParent).__inkflowRelay;
+        }
+    } catch {
+        // Framed by another site: no relay.
+    }
+    return undefined;
+}
+
 export function openSocket(): WebSocket {
-    return new WebSocket(socketUrl(location));
+    const relayed = relay();
+    if (!relayed) return new WebSocket(socketUrl(location));
+    const sock = relayed.openSocket() as WebSocket;
+    // The page going away (a reload, another page) ends its connection, as
+    // the browser ends a WebSocket.
+    window.addEventListener("pagehide", () => sock.close(1001, "page left"));
+    return sock;
 }

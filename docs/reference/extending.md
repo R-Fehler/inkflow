@@ -148,6 +148,9 @@ the order they happen:
   `/edit`): where the owner link, the terminal's <kbd>o</kbd> and its SSH
   hint, an editor link, and another inkflow finding this server send them;
 - `keys()`: keys in the server's terminal, shown on its help line;
+- `max_message_size`: the largest WebSocket message its pages send, in bytes
+  (a picture pasted as base64, say); the server accepts the largest any
+  extension asks for, else 1 MiB;
 - `share_status()`/`share_op(op, msg)`/`share_lines()`: its part of the
   owner's Share dialog (`{"type": "share", "op": …}` messages, answered with
   `share-status`) and of the terminal's share lines; `ServerContext.share_changed()`
@@ -183,6 +186,20 @@ current slides by key; a key it does not hold means it missed a build, and it
 sends `{"type": "resync"}` to get every slide whole. `src/ts/shared/patch.ts`
 (`applyPatch`) puts the list together. A page that never says so is sent
 whole lists.
+
+## In the browser
+
+The presenter's client code is a library a frontend's own pages can use:
+`src/ts/shared` in the repository (the step engine that plays animations,
+shrink-to-fit, rebuilds as patches, ink, touch gestures, the socket to the
+server, who this browser is). A frontend's bundle imports it from there, for
+example through a TypeScript path alias such as `@inkflow/shared/*`.
+
+The presenter tells the server which slide it shows, for an extension that
+lists who is where: `{"type": "presence", "page": "presenter", "key": …,
+"name": …, "slide": …}` whenever its slide changes (`key` and `name` from
+`shared/identity.ts`: a private key per browser and the name its user chose).
+The core ignores the message.
 
 ## API
 

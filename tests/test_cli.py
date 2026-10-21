@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import textwrap
-from importlib.resources import files
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -12,6 +11,8 @@ import yaml
 from click.testing import CliRunner
 
 from inkflow.cli import main
+from inkflow.cli.project import carapace_spec
+from inkflow.cli.verify import verify_summary
 
 ROOT = "<root>"
 FlagsByCommand = dict[str, dict[str, bool]]
@@ -397,7 +398,62 @@ class TestSyncOverlays:
         assert runner.invoke(main, ["sync", "--check"]).exit_code == 1
 
 
+class TestSyncBareSlides:
+    """A slide on no layout and no overlays: `sync` and `verify` must agree."""
+
+    @pytest.mark.usefixtures("project")
+    def test_never_synced_is_neither_written_nor_stale(self, runner: CliRunner) -> None:
+        assert "No parent" not in runner.invoke(main, ["sync"]).output
+        assert 'id="inkflow-preview"' not in Path("slides/01.svg").read_text(
+            encoding="utf-8"
+        )
+        assert "stale" not in runner.invoke(main, ["verify"]).output
+
+    @pytest.mark.usefixtures("project")
+    def test_its_style_block_follows_a_mode_change(self, runner: CliRunner) -> None:
+        # Synced once by name, it carries the block.
+        assert runner.invoke(main, ["sync", "slides/01.svg"]).exit_code == 0
+        Path("deck.py").write_text(
+            _DECK_PY.replace(
+                "from inkflow import Deck", "from inkflow import ColorMode, Deck"
+            ).replace("Deck(slides", "Deck(mode=ColorMode.LIGHT, slides"),
+            encoding="utf-8",
+        )
+        assert "stale" in runner.invoke(main, ["verify"]).output
+        # The sweep refreshes it, after which verify has nothing to say.
+        assert runner.invoke(main, ["sync"]).exit_code == 0
+        assert "stale" not in runner.invoke(main, ["verify"]).output
+        assert runner.invoke(main, ["sync", "--check"]).exit_code == 0
+
+
 class TestVerify:
+    @pytest.mark.usefixtures("project")
+    def test_each_line_names_its_slide_and_a_summary_ends_the_run(
+        self, runner: CliRunner
+    ) -> None:
+        Path("slides/intro.md").write_text("# Intro\n", encoding="utf-8")
+        Path("deck.py").write_text(
+            _DECK_PY.replace(
+                'Slide("slides/01.svg")',
+                'Slide("slides/01.svg"), Slide("content", md="intro.md"),'
+                + ' Slide("content", md="intro.md", visible=False)',
+            ),
+            encoding="utf-8",
+        )
+        result = runner.invoke(main, ["verify", "--no-deck-checks", "--all"])
+        assert result.exit_code == 0, result.output
+        lines = [" ".join(line.split()) for line in result.output.splitlines()]
+        # Number and id; the layout too when the id does not say it; a hidden
+        # slide has no number.
+        assert lines[:3] == ["ok 1 01", "ok 2 intro (content)", "ok - intro (content)"]
+        assert lines[-1] == "no problems in 3 slides"
+
+    def test_the_summary_counts_errors_and_warnings(self) -> None:
+        assert verify_summary(1, 0, 0) == "no problems in 1 slide"
+        assert verify_summary(12, 1, 0) == "1 error in 12 slides"
+        assert verify_summary(12, 2, 3) == "2 errors and 3 warnings in 12 slides"
+        assert verify_summary(12, 0, 1) == "1 warning in 12 slides"
+
     def test_missing_src_exits_1(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -701,12 +757,7 @@ class TestCarapaceSpec:
         return found
 
     def test_spec_matches_the_click_command_tree(self) -> None:
-        spec = cast(
-            SpecNode,
-            yaml.safe_load(
-                files("inkflow").joinpath("completions/inkflow.yaml").read_text()
-            ),
-        )
+        spec = cast(SpecNode, yaml.safe_load(carapace_spec()))
         assert self._spec_flags(spec) == self._click_flags(main)
 
 
@@ -737,3 +788,43 @@ class TestBrokenDeck:
         assert result.exit_code == 1
         assert f"Error: {expected}" in result.output
         assert "Traceback" not in result.output
+
+
+class TestDeckSlides:
+    """What a command that names a slide or a section of the deck reads."""
+
+    _SECTIONED: str = textwrap.dedent("""\
+        from inkflow import Deck, Section, Slide
+
+        def main():
+            return Deck(slides=[
+                Slide("slides/01.svg"),
+                Section("Intro", slides=[Slide("slides/01.svg", id="hi")]),
+                Section("intro", slides=[Slide("slides/01.svg", visible=False)]),
+                Section("End", slides=[]),
+            ])
+    """)
+
+    def test_names_sections_and_slides(self, project: Path) -> None:
+        from inkflow.cli._common import DeckSlides
+        from inkflow.deps import file_hash
+
+        deck_py = project / "deck.py"
+        deck_py.write_text(self._SECTIONED, encoding="utf-8")
+        found = DeckSlides.load(deck_py)
+        assert found.hash == file_hash(deck_py.read_bytes())
+        assert found.name(0) == "slide 1 (01)"
+        assert found.name(1) == "slide 2 (hi)"
+        assert found.name(2).startswith("hidden slide ")
+        assert found.section("end") == 2 and found.section("3") == 2
+        assert found.section_name(2) == "'End'"
+        with pytest.raises(click.BadParameter, match="give its number"):
+            _ = found.section("intro")
+        with pytest.raises(click.BadParameter, match="sections: Intro, intro, End"):
+            _ = found.section("middle")
+
+    def test_a_deck_without_sections_says_so(self, project: Path) -> None:
+        from inkflow.cli._common import DeckSlides
+
+        with pytest.raises(click.BadParameter, match="no sections"):
+            _ = DeckSlides.load(project / "deck.py").section("1")

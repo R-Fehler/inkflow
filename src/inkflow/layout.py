@@ -509,6 +509,12 @@ def _preview_css(root: SvgElement, layers: PreviewLayers) -> str:
     return "\n".join(filter(None, [layers.preview_css, zone_placeholder_css(root)]))
 
 
+def has_preview_style(svg_path: Path) -> bool:
+    """Whether the file carries the preview ``<style>`` block ``sync`` writes."""
+    root = parse_svg_file(svg_path)
+    return root.find(f'.//{{{ns.SVG}}}style[@id="inkflow-preview"]') is not None
+
+
 def are_preview_layers_current(svg_path: Path, layers: PreviewLayers) -> bool:
     """Return True if svg_path already carries exactly these layers and style."""
     root = parse_svg_file(svg_path)
@@ -627,17 +633,17 @@ def _update_preview_style(
     style_el.text = preview_css
 
 
-def inject_preview_layers(svg_path: Path, layers: PreviewLayers) -> bool:
-    """Inject preview layers as locked Inkscape layers into svg_path in place.
+def preview_layers_text(svg_path: Path, layers: PreviewLayers) -> str | None:
+    """svg_path with its preview layers injected as locked Inkscape layers.
 
     Ancestors are inserted below the file's own content and overlays appended
     above it, so the Inkscape layer stack matches runtime paint order. Also writes
     a ``<style id="inkflow-preview">`` block when ``preview_css`` is provided, so
     Inkscape renders semantic classes with the correct colors.
-    Returns True if the file was modified, False if already up to date.
+    Returns the file's new text, or None when it is already up to date.
     """
     if are_preview_layers_current(svg_path, layers):
-        return False
+        return None
 
     root = parse_svg_file(svg_path)
     overlay_layers = layers.flat_overlays()
@@ -660,10 +666,18 @@ def inject_preview_layers(svg_path: Path, layers: PreviewLayers) -> bool:
         root,
         {"inkflow": ns.INKFLOW, "inkscape": ns.INKSCAPE, "sodipodi": ns.SODIPODI},
     )
-    svg_path.write_text(
-        etree.tostring(out, encoding="unicode", xml_declaration=False),
-        encoding="utf-8",
-    )
+    return etree.tostring(out, encoding="unicode", xml_declaration=False) + "\n"
+
+
+def inject_preview_layers(svg_path: Path, layers: PreviewLayers) -> bool:
+    """Inject preview layers into svg_path in place (see ``preview_layers_text``).
+
+    Returns True if the file was modified, False if already up to date.
+    """
+    text = preview_layers_text(svg_path, layers)
+    if text is None:
+        return False
+    svg_path.write_text(text, encoding="utf-8")
     return True
 
 

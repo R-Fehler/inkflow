@@ -120,7 +120,7 @@ def test_build_html_transitions_json_embedded() -> None:
 
 def test_build_html_edit_commands_default_both_false() -> None:
     html = build_html(_state(), ws_port=7778).decode()
-    assert json.dumps({"default": False, "svg": False}) in html
+    assert json.dumps({"default": False, "svg": False, "suffixes": []}) in html
 
 
 def test_build_html_edit_commands_reflects_configured() -> None:
@@ -129,7 +129,7 @@ def test_build_html_edit_commands_reflects_configured() -> None:
         ws_port=7778,
         edit_commands=EditCommands(svg="code {path}", default=None),
     ).decode()
-    assert json.dumps({"default": False, "svg": True}) in html
+    assert json.dumps({"default": False, "svg": True, "suffixes": ["svg"]}) in html
 
 
 def test_build_html_logs_json_embedded() -> None:
@@ -345,3 +345,59 @@ def test_the_watcher_skips_what_inkflow_writes_below_the_deck(tmp_path: Path) ->
     assert not watch(Change.added, str(deck / "build" / "index.html"))
     # A deck living below some .inkflow/ folder is watched like any other.
     assert watch(Change.modified, str(deck / "deck.py"))
+
+
+# ── Loading deck.py ───────────────────────────────────────────────────────────
+
+_TITLED_DECK = """\
+from inkflow import Deck, Slide
+
+
+def main() -> Deck:
+    return Deck(slides=[Slide("slides/{name}.svg")])
+"""
+
+
+def test_an_edit_keeping_size_and_time_is_loaded(tmp_path: Path) -> None:
+    """deck.py is compiled from its source each time: the bytecode cache
+    checks only the whole-second time and the size, which two slides
+    swapped within a second both keep."""
+    import os
+
+    from inkflow.server import load_deck
+
+    deck_py = tmp_path / "deck.py"
+    deck_py.write_text(_TITLED_DECK.format(name="aaa"), encoding="utf-8")
+    stamp = deck_py.stat()
+    assert load_deck(deck_py).slides[0].src == "slides/aaa.svg"
+    deck_py.write_text(_TITLED_DECK.format(name="bbb"), encoding="utf-8")
+    os.utime(deck_py, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert load_deck(deck_py).slides[0].src == "slides/bbb.svg"
+
+
+def test_another_deck_loads_as_a_module_of_its_own(tmp_path: Path) -> None:
+    from inkflow.server import load_deck
+
+    for name in ("one", "two"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "deck.py").write_text(
+            _TITLED_DECK.format(name=name), encoding="utf-8"
+        )
+    _ = load_deck(tmp_path / "one" / "deck.py")
+    other = load_deck(tmp_path / "two" / "deck.py", module="_other_deck")
+    assert other.slides[0].src == "slides/two.svg"
+    assert "one" in str(sys.modules["_inkflow_deck"].__file__)
+    assert "two" in str(sys.modules["_other_deck"].__file__)
+
+
+def test_the_largest_message_is_the_most_an_extension_asks_for() -> None:
+    from inkflow.extensions import ServerExtension
+    from inkflow.server import DEFAULT_MAX_MESSAGE, max_message_size
+
+    class Pastes(ServerExtension):
+        name: str = "pastes"
+        max_message_size: int | None = 80 * 2**20
+
+    assert max_message_size([]) == DEFAULT_MAX_MESSAGE
+    assert max_message_size([ServerExtension()]) == DEFAULT_MAX_MESSAGE
+    assert max_message_size([ServerExtension(), Pastes()]) == 80 * 2**20

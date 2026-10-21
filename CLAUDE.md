@@ -147,8 +147,9 @@ src/
     layout.py         parent inject/set/strip: layout chain resolution and Inkscape layer
                                writing. `AssetKind` (layouts/overlays) selects the searched
                                subdir, so `resolve_parent_path`/`resolve_chain` serve both
-                               namespaces with one grammar. `inject_preview_layers` /
-                               `are_preview_layers_current` take a `PreviewLayers`
+                               namespaces with one grammar. `inject_preview_layers` (=
+                               `preview_layers_text` written; None = up to date) /
+                               `are_preview_layers_current` / `has_preview_style` take a `PreviewLayers`
                                (`behind` + `overlays` + css), each layer a
                                `PreviewLayer(path, ref)` — refs come from the caller since
                                a backdrop or an overlay is not named by an inkflow:parent.
@@ -181,7 +182,9 @@ src/
     markdown.py       markdown-it-py rendering only: code-fence highlighting, LaTeX math,
                                HTML->well-formed-XML normalization (inline <svg> keeps its
                                camelCase names); a ```chart fence becomes a placeholder
-                               charts.py draws (no inkflow-specific grammar)
+                               charts.py draws (no inkflow-specific grammar); a formula's
+                               `<math>` carries its source as `data-latex`; one render at
+                               a time (`_rendering`, the fence queue is module state)
     steps.py          `StepResolver` — the trigger-resolution rule (ON_CLICK/WITH_PREVIOUS/
                                Trigger.at) shared by pipeline.py (the animations=[...] list)
                                and zones.py (markdown reveals)
@@ -190,7 +193,12 @@ src/
                                marker `size=80%`/`fit=none` -> `TextBox.size`/`.fit`,
                                `set_zone_params` (a marker's params changed in place;
                                auto-extracted zones get explicit markers, an unnamed
-                               zone an empty one at the end), `zone_params`
+                               zone an empty one at the end), `zone_params`; a
+                               `zones={...}` string is Markdown with reveals like a
+                               `.md` section; source spans for writing one zone back
+                               (`zone_spans` mirrors the parser, `replace_zone_text`,
+                               `remove_zone_section`, `zone_names`, `rename_zone`:
+                               every other byte kept)
     server.py         the server `inkflow serve` runs: HTTP and the WebSocket on one
                                port (`/_inkflow/ws`), file watcher, build pipeline; the door
                                (`_share`: `Access` + `People`, `allowed(role, msg)`: the core's
@@ -215,10 +223,17 @@ src/
                                `editor_page()` = the editing extension's `home`; `open_path`
                                (a browser on that page after the first build),
                                `quit_when_idle` (`_quit_when_idle`: stops once no page has
-                               been connected that long); `load_deck` turns any failure in
-                               deck.py into `DeckError` (`deck.py:42: NameError: …` + the
-                               line), which the CLI's `_Group` prints as one error line
-                               instead of a traceback; `listening(ui, deck, extensions)` (the
+                               been connected that long); `load_deck(path, module=)`
+                               compiles deck.py from source each time (the bytecode
+                               cache checks only whole-second mtime and size: a
+                               same-size edit within a second would load stale code;
+                               another deck beside the served one takes its own
+                               `module`) and turns any failure in it into `DeckError`
+                               (`deck.py:42: NameError: …` + the line), which the CLI's
+                               `_Group` prints as one error line instead of a traceback;
+                               `max_message_size` (the WebSocket limit the extensions
+                               ask for); the presenter's edit menu is told
+                               `configured_suffixes`; `listening(ui, deck, extensions)` (the
                                one port without TUI/watcher: tests, embedding);
                                `pick_port`, `auto_ports` (`_PortBusy`)
     access.py         who may reach a server and as whom (pure): `parse_request`,
@@ -386,7 +401,9 @@ src/
     cli/              CLI package (entry point inkflow.cli:main). _common.py holds the
                                `main` group (`_Group`: a `DeckError` is one error line),
                                shared options, the Project/Target helpers and
-                               `DeckSlides`/`slide_number` (SLIDE = presentation number or id);
+                               `DeckSlides` (ids, numbers, deck.py's `hash`; `index`,
+                               `section` = SECTION by name or position, `name` = "slide 3
+                               (intro)") / `slide_number` (SLIDE = presentation number or id);
                                commands are grouped by area: project.py (init, setup-git,
                                setup-pages, completion), present.py (serve, build, export
                                [--handout]), fonts.py (`inkflow fonts [--json]` = the
@@ -394,10 +411,19 @@ src/
                                render.py (`inkflow render`; `current_slide` asks the
                                plugins), authoring.py
                                (clean, label2id, add, parent group, sync, layouts [--plain | --json]), color.py (colorize,
-                               palette), verify.py. Submodules register on `main` by import,
+                               palette), verify.py (each line: the slide's number and id,
+                               `_slide_names`; a closing count, `verify_summary`;
+                               `--no-deck-checks`). Submodules register on `main` by import,
                                then each plugin's `register_cli` (cli/__init__.py)
     clean.py          SVG Inkscape metadata stripping (used by cli and pre-commit hook;
-                               the `clean` command skips draw.io files, drawio.py)
+                               the `clean` command skips draw.io files, drawio.py);
+                               `clean_inkscape_root` cleans a tree already parsed
+    edit.py           launching an external program on a source file from the
+                               presenter's edit menu: `INKFLOW_EDIT_CMD*` resolution
+                               (`command_for`: extension > kind (`KINDS`: IMAGE, TEXT,
+                               VIDEO, PDF, DATA) > the general command; `_SVG` for SVG),
+                               `configured_suffixes` (what the page is told has a
+                               command), `open_in_editor` (detached, never raises)
     ink.py            pen ink: `ink_path` (ink/<slide id>.svg or Slide(ink=)),
                                `compose_ink` (the file's strokes as the slide's last
                                `<g class="inkflow-ink">`, stretched if its viewBox differs),
@@ -482,6 +508,10 @@ src/
                                `plan_preview` (the single answer to "what does this file
                                preview", shared by `sync`, `sync --check` and `verify`),
                                `PreviewRule` (which of the three overlay rules fired),
+                               `PreviewPlan.swept` (whether a whole-deck sync keeps a file
+                               current, and so whether verify may call it stale: a bare
+                               slide only once it carries the preview style block),
+                               `deck_files` (what a whole-deck sync sweeps),
                                `sync_slides`; shared by the `sync` command and `init`
                                (run live after scaffolding)
     logging.py        unified log sink over stdlib logging: `logger`, shared Rich
@@ -496,9 +526,12 @@ src/
     svg.py            SVG tree utilities (ensure_defs, with_namespaces,
                                compose_with_ancestors, compose_overlays,
                                duplicate_zone_ids, is_full_canvas_fill, canvas_size,
-                               theme_generic_fonts)
+                               theme_generic_fonts, `resolve_links`: an SVG `<a
+                               href="slide:id">` becomes `data-inkflow-slide`, a web
+                               link opens in a new tab)
     fonts.py          font discovery + embedding (see "Font embedding" below):
                                `font_sources` (each face's file, for publish.py),
+                               `font_index` (every family that can be embedded),
                                `SHIPPED_FONTS_DIR`/`is_shipped`, `embed_fonts_css`
                                (serve; `font_url=shipped_font_url` links shipped files),
                                `embed_fonts_css_subsetted` (build/export),
@@ -508,7 +541,9 @@ src/
     extensions.py     `ServerExtension` (build hooks, `messages` with the least `Role`,
                                `welcome`/`hello`/`message`/`disconnected`, `http`, `keys`,
                                `share_status`/`share_op`/`share_lines`, `home` = the
-                               owner's page, `serves_without_deck`; `open(None)` = no deck),
+                               owner's page, `serves_without_deck`; `open(None)` = no deck;
+                               `max_message_size`: the server's WebSocket limit is the
+                               largest any extension asks for, else 1 MiB),
                                `ServerContext` (server.`context`: `access`, `send_owners`,
                                `share_changed`, `open_deck`, `serve_connection`/
                                `serve_request`; `deck_path` None without a deck), `Build`
@@ -590,7 +625,11 @@ src/
                       keyframes.ts (reads @keyframes + per-cue var substitution),
                       step-ring SVG builder, cubic-bezier easing; wsurl.ts
                       (`socketUrl(location)`: the WebSocket on the page's own
-                      host and port, `SENT_AWAY` = 4001); patch.ts (a rebuild
+                      host and port, `SENT_AWAY` = 4001; `openSocket()` takes a
+                      relay's channel instead when the page runs in a frame
+                      whose top window offers `__inkflowRelay`); identity.ts
+                      (who this browser is: a chosen name and a private key in
+                      localStorage; tested); patch.ts (a rebuild
                       as what changed: `applyPatch` puts a list together from
                       the items a page holds, named by `key`; null = a key it
                       lacks, the page sends `resync`; tested); deck-styles.ts
@@ -621,7 +660,12 @@ src/
                       is in flight), pv.ts (presenter panel sidebar; current section under the
                       strip), overview.ts (grid with a heading per section, up/down
                       by geometry), picker.ts (sections match too), video.ts (step-driven
-                      <video> playback, wired in via status.ts), toeditor.ts (back
+                      <video> playback, wired in via status.ts), websocket.ts
+                      (the socket, `welcome` role, `presence`: this page's
+                      slide, for an extension's list of who is where, with
+                      shared/identity.ts's key and name), edit.ts (the edit
+                      menu: a command for the extensions the server names in
+                      `suffixes`, else the path copied), toeditor.ts (back
                       to an editor at this slide, `E`: shown only when a `welcome`
                       names an `editor` page; the opener editor tab when there is
                       one; hidden in a static build), ink.ts (ink mode, key `i`:
@@ -667,6 +711,11 @@ tsconfig.json         TypeScript config (noEmit, verbatimModuleSyntax — tsc as
 ```
 
 ## Key architecture decisions
+
+**Frontends are plugins; the core never knows them.**
+A frontend (a visual editor, a remote control, a review tool) is an installed package naming a `plugins.Plugin` under the `inkflow.plugins` entry point. The core finds plugins once per process (`plugins.loaded()`; `INKFLOW_NO_PLUGINS=1` turns them off) and asks each, at the place it matters: `register_cli(main)` after the core's own commands (a plugin may add subcommands to a core group, `fonts` say: `group_deck`); `slide_checks`/`deck_checks` in `inkflow verify` (a check that raises is a warning line naming the plugin); `completion_spec` in `inkflow completion carapace` (command blocks merged into the core's spec, one named like a core command replacing it); `current_slide` for `inkflow render`'s default; `server_extensions(config)` when `serve` starts without a list of its own (`serve_options()` adds options to `inkflow serve` whose values reach it as `config.options`); `requirement()` is pinned beside inkflow in a new deck's pyproject. A plugin's own command that starts a server passes its extensions to `server.serve(..., extensions=)` itself.
+A server extension (`extensions.ServerExtension`) is how a frontend lives in the server: per deck it is opened and closed; per build `before_build` and `build(Build)` run in the worker thread inside the build (raising fails it, as any build error), `built` after the pages have the new slides; `provenance = True` makes it the editor build (`process_deck(editor=True)`: source locators on every element, `SlideData.edit` facts, both for writing back). Its `messages` (type -> least role) are the only extra messages the door lets through (`server.allowed`); `hello` tells it what a page is; `http` answers what the core does not (after its own pages, fonts and the deck's assets); `welcome` adds to the first message a page gets (the presenter's back-to-the-editor button appears only when one names an `editor` page); `keys` adds terminal keys, `share_*` the Share dialog's operations and status fields and the terminal's share lines; an editor link is offered only when an extension takes editors (`server.editor_page`), `home` the page the owner link and the terminal name (`server.owner_page`); `max_message_size` raises the WebSocket's limit for its pages. It acts through the `ServerContext` (`server.context`): the served state, the people and the door, send/broadcast/notify, `rebuild`, `open_deck` (the server closes this deck and serves another on the same port), `shutdown`, and `serve_connection`/`serve_request`, which run a page connection or a GET that came another way (through a relay) exactly as one from the network, for its role. The order matters once: `build-status` says a build is done only after every extension's `built`, so a program that changed the deck and waits for its build finds every extension on it too.
+Without any extension the server is the presenter's alone, and still saves the presenter's ink with "Keep" (`ink.save_ink`, no undo). The TypeScript side mirrors this: `src/ts/shared` is the client library (step engine, fit, patches, ink, gestures, the socket, identity) a frontend's pages use, never a path into the presenter.
 
 **No SVG editor subprocess at serve time.**
 Any SVG editor writes the files; the pipeline reads them directly with lxml,
@@ -758,6 +807,7 @@ Only the deck's own files and the pinned inkflow/theme travel with a `git clone`
 Markdown is rendered to HTML via `markdown-it-py`.
 Zone `<rect>` elements in the layout SVG are replaced with `<foreignObject>` of the same geometry containing the rendered HTML.
 Typography and color come from the CSS cascade (`contract.css` + theme tokens + `theme/styles.css` + per-deck/per-slide `style=`, see `loaders.load_deck_styles`) injected into the `<foreignObject>` HTML head.
+contract.css also draws task lists (`- [x]`) in theme colours and has `inkflow-color-<token>` classes for coloured words (`<span class="inkflow-color-green">`), beside the SVG `inkflow-fill-*`/`-stroke-*` ones; a pen's highlighter strokes (`inkflow-highlighter`) multiply on a light slide and screen on a dark one.
 
 **Text zone alignment — three layers, increasing specificity.**
 
@@ -902,7 +952,7 @@ Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop +
 1. `clean_inkscape_tree(src)` — parse with the hardened lxml parser, remove elements/attrs in `http://www.inkscape.org/namespaces/inkscape` and `http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd`, call `etree.cleanup_namespaces()`. (`clean_inkscape_svg` wraps this and serializes to a pretty-printed string for the CLI/pre-commit hook.)
 2. `annotate_svg(root, cues)` — `cues` are `(Cue, step)` pairs already resolved to concrete step numbers (see below). Finds elements by plain id (no leading `#`); `Animation` cues are **grouped per target element** (an element may carry several) and written as one `data-cues` JSON array (sorted by step) via `_cue_entry` — each entry is `{step, kind, name, opts, vars}`, where `opts` are the base `Animation` fields as element.animate() options (`duration`/`delay`/`easing`/`iterations`) and `vars` are ready strings (slide direction+distance → `from-x`/`from-y`, `scale`/`color`/custom fields) substituted for `var(--anim-<key>)` in the keyframes. Enter-first elements also get an `anim-pending` class (initial-hidden guard); two same-kind cues with no opposing kind between them warn. A `PlayVideo` cue still sets `data-play-on-step` on the target zone's `<video>`. `Frame` cues become one `data-camera` JSON array on the slide root (`{step, offset, target, margin, opts}`, the full slide as a null target).
 
-**Steps are inferred from triggers, never written by hand.** Every `Animation`/`PlayVideo` cue carries a `Trigger` (`ON_CLICK`, `WITH_PREVIOUS`, or a `Trigger.at(n)` pin). `steps.py`'s `StepResolver` walks a cue sequence in order and assigns concrete step numbers — `pipeline.resolve_steps` for the deck's `animations=[...]` list, the reveal counter in `zones.py` for markdown `::step::`/`::steps::` reveals. A slide's markdown reveals number first, then the `animations=[...]` list continues the count, so both form one timeline.
+**Steps are inferred from triggers, never written by hand.** Every `Animation`/`PlayVideo` cue carries a `Trigger` (`ON_CLICK`, `WITH_PREVIOUS`, or a `Trigger.at(n)` pin). `steps.py`'s `StepResolver` walks a cue sequence in order and assigns concrete step numbers — `pipeline.resolve_steps` for the deck's `animations=[...]` list, the reveal counter in `zones.py` for markdown `::step::`/`::steps::` reveals. A slide's markdown reveals number first (the `.md` file, then `zones={...}` Markdown strings, which go through the same `_split_steps`/`chunks_to_html`), then the `animations=[...]` list continues the count, so all form one timeline.
 
 **Autoplay vs. a `PlayVideo` cue.** If a `Video` sets `autoplay=True` and is also targeted by a `PlayVideo` cue, the cue wins: `process_slide` suppresses `autoplay` before content injection (so `Muted.AUTO` resolves to unmuted) and logs a warning.
 

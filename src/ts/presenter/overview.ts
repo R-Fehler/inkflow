@@ -35,7 +35,10 @@ function scaleThumb(thumb: Element): void {
     svg.style.width = `${vb.w}px`;
     svg.style.height = `${vb.h}px`;
     const scale = Math.min(thumb.clientWidth / vb.w, thumb.clientHeight / vb.h);
-    svg.style.transform = `scale(${scale})`;
+    // A slide of another shape than the first is centred in its cell.
+    const dx = (thumb.clientWidth - vb.w * scale) / 2;
+    const dy = (thumb.clientHeight - vb.h * scale) / 2;
+    svg.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
 }
 
 /** Slide `i`'s cell (section headings sit between the cells). */
@@ -68,8 +71,11 @@ function applyOptimalCols(): void {
     const headings = runs.filter((r) => r.section).length;
     const headingH = heading ? heading.offsetHeight + gap : 0;
 
-    let cols = n;
-    for (let c = 1; c <= n; c++) {
+    // Tall slides (a phone deck, a poster) may need more columns than there
+    // are slides for a row of them to fit the screen's height.
+    const most = Math.max(n, 8);
+    let cols = most;
+    for (let c = 1; c <= most; c++) {
         const thumbW = (availW - (c - 1) * gap) / c;
         const rows = gridRows(runs, c);
         if (

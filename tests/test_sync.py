@@ -246,3 +246,42 @@ class TestSyncSlides:
         sync.sync_slides([slide], _ctx(tmp_path, deck))
         root = clean_inkscape_tree(slide)
         assert root.find('.//{http://www.w3.org/2000/svg}text[@id="footer"]') is None
+
+
+def test_deck_files_are_what_a_sweep_writes(tmp_path: Path) -> None:
+    """Each slide's SVG and its project layouts, then the project's overlays;
+    nothing outside the project (the built-in layouts)."""
+    _project(tmp_path)
+    deck = Deck(
+        slides=[Slide("slides/01.svg"), Slide("slides/02.svg"), Slide("title")],
+        overlays=[Overlay("footer")],
+    )
+    files = sync.deck_files(deck, tmp_path, None)
+    root = tmp_path.resolve()
+    assert all(p.is_relative_to(root) for p in files)
+    names = [p.relative_to(root).as_posix() for p in files]
+    assert names[:3] == ["slides/01.svg", "layouts/content.svg", "slides/02.svg"]
+    assert "overlays/footer.svg" in names
+    assert len(names) == len(set(names))
+
+
+def test_preview_text_is_what_injecting_writes(tmp_path: Path) -> None:
+    from inkflow.layout import (
+        has_preview_style,
+        inject_preview_layers,
+        preview_layers_text,
+    )
+
+    _project(tmp_path)
+    slide = tmp_path / "slides" / "01.svg"
+    deck = Deck(slides=[Slide("slides/01.svg")])
+    layers = sync.plan_preview(slide, _ctx(tmp_path, deck)).layers
+    before = slide.read_text(encoding="utf-8")
+    text = preview_layers_text(slide, layers)
+    assert text is not None and "__inkflow:layout:content__" in text
+    assert slide.read_text(encoding="utf-8") == before  # nothing written
+    assert not has_preview_style(slide)
+    assert inject_preview_layers(slide, layers)
+    assert slide.read_text(encoding="utf-8") == text
+    assert has_preview_style(slide)
+    assert preview_layers_text(slide, layers) is None  # up to date

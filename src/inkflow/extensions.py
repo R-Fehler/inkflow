@@ -282,6 +282,10 @@ class ServerExtension:
     serves_without_deck: bool = False
     """The server may run with no deck (``serve(None)``): this extension's
     ``http`` answers the pages then (a start page, say)."""
+    max_message_size: int | None = None
+    """The largest WebSocket message, in bytes, this extension's pages send
+    (a picture pasted as base64, say); the server accepts the largest any
+    extension asks for, else ``server.DEFAULT_MAX_MESSAGE`` (1 MiB)."""
     home: str | None = None
     """The page the owner opens instead of the presenter (``/edit``): what
     the owner link, the terminal and an editor link lead to."""
