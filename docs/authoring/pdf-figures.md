@@ -31,7 +31,6 @@ A path resolves against the file it is written in, as for
 [any other picture](markdown.md#images).
 The page shows at its own box (the crop box, what a PDF viewer shows),
 so a LaTeX `standalone` figure or a cropped plot needs no trimming.
-In the editor, [**Crop**](../editor/index.md#pictures) trims a figure further.
 
 Most PDF figures have no background of their own: the slide shows through,
 as it does with a transparent PNG. On a dark deck, black axes and labels
@@ -42,10 +41,11 @@ it, with a small margin and rounded corners, whatever the deck's mode:
 zones = {"media": Image("figures/plot.pdf", background="paper")}
 ```
 
-In a slide's SVG it is `inkflow:background="paper"` on the `<image>` (the
-editor's **Background** setting writes it). `"surface"` uses the theme's
-surface colour instead, and a theme colour name (`"blue"`) or `#rrggbb` any
-other. It works for any picture: an SVG or a transparent PNG, too.
+In a slide's SVG it is `inkflow:background="paper"` on the `<image>`
+(`inkflow:background-padding` sets the margin in user units; by default it is
+4 % of the picture's shorter side). `"surface"` uses the theme's surface
+colour instead, and a theme colour name (`"blue"`) or `#rrggbb` any other.
+It works for any picture: an SVG or a transparent PNG, too.
 
 ## Installing a converter
 
@@ -97,12 +97,18 @@ Only the PDF belongs in git. Converted pages are a cache in the project's
 `.inkflow/cache/pdf/`, which ignores itself in git, named by the PDF's
 content, the page and the converter: an unchanged PDF is never converted
 twice, and a changed one is converted again the moment it is saved
-(`inkflow serve` and the editor update the slide).
+(`inkflow serve` updates the slide).
 
 [`inkflow build`](../presenting/export.md) embeds the converted pages
 like any picture (with `--assets-folder` it copies them into the output under
 `_pdf/`); the PDF itself is not copied. `inkflow export` draws them into the
 deck's PDF as vectors.
+
+A page can also be committed beside its PDF, so that a clone shows the
+figure without any converter: `figure.pdf` page 1 is `figure.pdf.p1.svg`,
+its root stamped with the PDF's content hash (`data-inkflow-pdf-digest`).
+References still name the PDF; the build uses the committed page while the
+PDF is the one it was drawn from, and converts again as usual once it changes.
 
 !!! note "`.gitignore` from older projects"
     Projects created by earlier versions of `inkflow init` ignore `*.pdf`

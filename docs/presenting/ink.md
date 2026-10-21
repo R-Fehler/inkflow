@@ -54,23 +54,21 @@ and is gone when they close; nothing is written to the deck.
 With **Keep** on, each stroke is also saved to the slide's
 [ink file](#how-ink-is-saved) as soon as the pen lifts, so it is part of the
 deck from then on: in every window, after a reload, in an
-[exported](export.md) build or PDF, and in the editor. With Keep on, the eraser
+[exported](export.md) build or PDF. With Keep on, the eraser
 and Clear also remove saved strokes (Clear asks first); with it off, they only
 touch the ink of the talk and leave the deck's saved ink alone.
 
-Keep needs `inkflow serve` (or `inkflow edit`) and a presenter window opened on
-the same machine as the server. A window on another computer, such as an
-audience screen reached over the network, can draw ink for the talk but never
-writes the deck's files; the server refuses it.
+Keep needs `inkflow serve` and a presenter window opened on the same machine
+as the server. A window on another computer, such as an audience screen
+reached over a [view link](sharing.md), can draw ink for the talk but never
+writes the deck's files; the server refuses it. When the server runs a visual
+editor (a [plugin](../reference/extending.md)), a kept stroke is one of the
+editor's steps, undone like any other; without one the server writes the ink
+file itself.
 
 A [static build](export.md) has no server, so its ink is for the talk only. Two
 windows of a build (the second opened with <kbd>n</kbd>) still show each
 other's ink.
-
-## In the editor
-
-The [editor's](../editor/index.md#ink) pen tool (<kbd>P</kbd>) draws saved ink
-directly, with the same palette. See its section there.
 
 ## How ink is saved
 
@@ -102,12 +100,10 @@ as one `<g class="inkflow-ink">`. The slide's own SVG is never touched, so:
 To keep a slide's ink somewhere else, name the file with
 `Slide(..., ink="annotations/intro.svg")` (relative to the project).
 
-**Ink follows its slide.** A slide's id comes from its `.md` or SVG file name
-when it has no `id=`, so it can change when the editor gives a slide its own
-drawing, changes its layout, or moves it among slides with the same name. The
-editor renames the ink file in the same undo step; deleting a slide deletes its
-ink, and duplicating it copies the ink. Renaming a slide's files outside the
-editor does not move the ink: rename `ink/<old id>.svg` to match, or give the
+**Ink follows its slide's id.** A slide's id comes from its `.md` or SVG file
+name when it has no `id=` (numbered `-2`, `-3`… when several slides share a
+name), so renaming a slide's files, or reordering slides with the same name,
+changes which ink file it gets. Rename `ink/<old id>.svg` to match, or give the
 slide an explicit `id=` (or `ink=`) so its ink never depends on file names.
 
 The [pre-commit hook](../getting-started.md#git-integration) leaves ink files as they are: they

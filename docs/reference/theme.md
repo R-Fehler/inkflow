@@ -37,5 +37,3 @@ The default theme, and the two others inkflow ships (see [Built-in themes](../bu
 ::: inkflow.builtin_themes.Paper
 
 ::: inkflow.builtin_themes.Stage
-
-::: inkflow.themes.Builtin

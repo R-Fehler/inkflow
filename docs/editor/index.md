@@ -541,7 +541,7 @@ edit the text right where it is on the slide, with a formatting bar above it:
 - **bold**, *italic*, ~~strikethrough~~ and `code` for the selected words
   (<kbd>Ctrl</kbd>+<kbd>B</kbd>, <kbd>Ctrl</kbd>+<kbd>I</kbd> work too);
 - a text colour from the theme's palette, so coloured words follow dark and light
-  mode;
+  mode (it writes the span of [Coloured words](../authoring/markdown.md#coloured-words));
 - links (<kbd>Ctrl</kbd>+<kbd>K</kbd>): a web address, or `slide:<id>` to jump to
   another slide;
 - bulleted, numbered and checklists (<kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd>
@@ -713,7 +713,8 @@ Select a picture and the panel offers:
   SVG, a transparent PNG) has black lines on nothing, and disappears on a dark
   slide. **Paper (white)** paints white behind it with a small margin, whatever
   the deck's mode; **Theme surface** or a **Colour…** paint others. Image zones
-  and draw.io diagrams have the same setting.
+  and draw.io diagrams have the same setting. It is written as
+  `inkflow:background` on the `<image>` ([PDF figures](../authoring/pdf-figures.md)).
 - **Alt text**, for screen readers (any object has it, see below).
 
 ## Diagrams (draw.io)
@@ -1363,7 +1364,7 @@ default app:
 
 A command set in the environment comes first: `INKFLOW_EDIT_CMD`, or a more
 specific `INKFLOW_EDIT_CMD_SVG`, `INKFLOW_EDIT_CMD_PNG` (any extension) or
-`INKFLOW_EDIT_CMD_IMAGE` / `_TEXT` / `_VIDEO` / `_DATA` (see
+`INKFLOW_EDIT_CMD_IMAGE` / `_TEXT` / `_VIDEO` / `_PDF` / `_DATA` (see
 [CLI reference](../reference/cli.md#editing-from-the-presenter)). Save in the other
 program and the editor picks up the change as it does any other.
 
@@ -1384,3 +1385,29 @@ zones as faint dashed outlines (an unfilled shape would otherwise be painted
 black). Slides the editor creates get it straight away, and **Open ▾ → Inkscape**
 brings it up to date first (after a theme change, say) as an undoable step. For
 files made elsewhere, `inkflow sync` does the same for the whole deck.
+
+### Locks and connectors in the files
+
+`inkflow:locked="true"` on an object or a layer makes the editor leave it
+alone: it cannot be selected on the slide (it still renders, and the Objects
+tab can unlock it). Unlike Inkscape's own lock (`sodipodi:insensitive`), it
+survives the pre-commit cleanup, so a locked background stays locked for
+everyone working on the deck. Inkscape layer locks are honoured by the editor
+too.
+
+A line drawn between two shapes is a `<path>` that names the shapes it is
+attached to:
+
+```xml
+<path d="M576,242 L912,242 L912,717 L1248,717"
+      inkflow:connector="elbow"
+      inkflow:connect-start="box-a:right"
+      inkflow:connect-end="box-b:left"
+      marker-end="url(#inkflow-arrow)"/>
+```
+
+`inkflow:connector` is the route (`straight`, `elbow` or `curved`), and each end is
+`<id>:<side>` (`top`, `right`, `bottom`, `left`). The `d` is ordinary path data, so
+the arrow renders anywhere, including in Inkscape. The editor rewrites it whenever
+one of the shapes moves there; if you move shapes in Inkscape, **Re-route all**
+in the slide panel catches up.

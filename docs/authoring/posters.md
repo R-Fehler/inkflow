@@ -12,9 +12,7 @@ inkflow init my-poster --poster            # A0 portrait
 inkflow init my-poster --size a1-landscape # any paper size
 ```
 
-or, in the [editor](../editor/index.md#new-decks-and-switching-between-them),
-**deck ▾ → New deck…** with the **Poster** look and a paper size. Either way
-the deck is:
+The deck is:
 
 ```python
 from inkflow import Deck, Image, Slide
@@ -71,17 +69,16 @@ Without a size a deck keeps each slide's own size and draws new slides at
   proportion. The layouts below are drawn on that canvas.
 - **Other sheets** are their size at 1 unit = 1 CSS px.
 
-Every new slide (the editor's **+ New slide**, `inkflow add`) takes the deck's
-canvas, and the editor's thumbnails its shape. A slide drawn in another shape
-is still shown, letterboxed; `inkflow verify` says so.
+Every new blank slide (`inkflow add`) takes the deck's canvas. A slide drawn
+in another shape is still shown, letterboxed; `inkflow verify` says so.
 
 A paper size also makes the deck light (unless `mode=` or the theme says
 otherwise) and gives it a print type scale.
 
 ## Layouts
 
-Four built-in poster layouts, offered by the layout gallery to a poster deck
-(a 16:9 deck gets the 16:9 ones, a deck's own layouts are always offered):
+Four built-in poster layouts, listed by `inkflow layouts` for a poster deck
+(a 16:9 deck gets the 16:9 ones, a deck's own layouts are always listed):
 
 | Layout | Sheet | Body |
 |---|---|---|
@@ -141,8 +138,8 @@ little closer. `Deck(font_size=...)` still sets the body size in units
 - **Charts** ([`Chart`](charts.md) or a ```` ```chart ```` fence) draw their
   text at the body size on paper (0.6 of it on a screen): axis labels 24 pt on
   A0. They are vector, so they print sharp at any size.
-- **Figures from a paper**: a [PDF figure](pdf-figures.md) stays vector, as
-  does an SVG. Prefer them to screenshots.
+- **Drawings**: an SVG stays vector and prints sharp at any size. Prefer it to
+  a screenshot.
 - **Photos** need pixels: at least 150 dpi at their printed size (a picture
   30 cm wide wants 1800 px). `inkflow render --check` reports any below.
 
@@ -154,7 +151,7 @@ inkflow render --check  # text and pictures, measured as printed
 inkflow render          # a PNG to look at
 ```
 
-On a print deck `inkflow render` measures the slide as printed:
+On a print deck [`inkflow render`](checking.md) measures the slide as printed:
 
 - text in points against the sheet's body size: below 0.6 of it is a hint
   (18 pt on A0), body text (paragraphs, lists, tables) below 0.8 of it (24 pt);
@@ -173,9 +170,7 @@ inkflow export --size a1                # the same poster on A1
 inkflow export --bleed 3mm --crop-marks # for a print shop that asks
 ```
 
-or **Export → PDF** in the editor, which shows the page and offers "3 mm bleed
-and crop marks". See [Export](../presenting/export.md#page-size) for the
-details.
+See [Export](../presenting/export.md#page-size) for the details.
 
 ## Printing tips
 

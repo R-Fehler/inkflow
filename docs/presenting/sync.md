@@ -23,9 +23,9 @@ though the behaviour is the same either way.
 
 **Under `inkflow serve`,** position travels over the same WebSocket used for live
 reload. Any number of windows can join, in any browser. Another device on the
-network joins with a view link from `inkflow serve --share` (or the editor's
-**Share…** dialog); see [Editing together](../editor/collaborate.md). A view
-link follows the presenter and never moves anyone else's slide.
+network joins with a view link from `inkflow serve --share`; see
+[Sharing a served deck](sharing.md). A view link follows the presenter and
+never moves anyone else's slide.
 
 **In an exported build,** including a deck opened straight from disk with no
 server at all, there is no WebSocket. Two windows sync directly instead:

@@ -29,6 +29,8 @@ inkflow sync
 
 Bottom to top, a synced slide holds its ancestor chain, its own content, then the overlays.
 You can see how much room the footer needs and where the content zone actually sits.
+Zone shapes with no fill of their own (the placeholders content fills) are drawn
+as faint dashed outlines, so they do not paint black over the slide.
 
 These layers are authoring reference only.
 The pipeline strips them before serving, so they never reach the browser.
@@ -195,9 +197,9 @@ warn    3 demo  preview layers stale — run inkflow sync
 1 warning in 3 slides
 ```
 
-Each line starts with the slide's number and id, the names `inkflow outline`,
-`render -s` and `slide` take, followed by the layout or file it is drawn from
-when the id does not say it.
+Each line starts with the slide's number and id (what `inkflow render -s`
+takes), followed by the layout or file it is drawn from when the id does not
+say it.
 
 **Errors** are things that will not render:
 a missing SVG, `.md`, notes file or media file,
@@ -210,34 +212,6 @@ a zone id declared twice after composition,
 or layout layers that are stale and need `inkflow sync`.
 
 Hidden slides (`visible=False`) are skipped unless you pass `--all`.
-
-## Locking objects for the visual editor
-
-`inkflow:locked="true"` on an object or a layer makes the
-[visual editor](../editor/index.md) leave it alone: it cannot be selected on the
-slide (it still renders, and the Objects tab can unlock it). Unlike Inkscape's own
-lock (`sodipodi:insensitive`), it survives the pre-commit cleanup, so a locked
-background stays locked for everyone working on the deck. Inkscape layer locks are
-honoured by the editor too.
-
-## Connectors
-
-A line drawn between two shapes in the visual editor is a `<path>` that names
-the shapes it is attached to:
-
-```xml
-<path d="M576,242 L912,242 L912,717 L1248,717"
-      inkflow:connector="elbow"
-      inkflow:connect-start="box-a:right"
-      inkflow:connect-end="box-b:left"
-      marker-end="url(#inkflow-arrow)"/>
-```
-
-`inkflow:connector` is the route (`straight`, `elbow` or `curved`), and each end is
-`<id>:<side>` (`top`, `right`, `bottom`, `left`). The `d` is ordinary path data, so
-the arrow renders anywhere, including in Inkscape. The editor rewrites it whenever
-one of the shapes moves there; if you move shapes in Inkscape, **Re-route all**
-in the editor's slide panel catches up.
 
 ## Keeping SVGs clean in git
 
@@ -253,3 +227,8 @@ To clean files committed before the hook was in place:
 ```bash
 inkflow clean slides/*.svg
 ```
+
+draw.io diagrams (`*.drawio.svg`, or any SVG carrying a draw.io source) are
+left alone by `inkflow clean` and the hook: the file is draw.io's own. Through
+the diff driver, `git diff` shows such a file as its draw.io source, one shape
+a line, compressed in the file or not. See [draw.io diagrams](diagrams.md).

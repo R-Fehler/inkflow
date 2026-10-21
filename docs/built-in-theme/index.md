@@ -36,13 +36,8 @@ inkflow init my-talk --theme paper      # or stage; default is the default
 inkflow init my-poster --poster --theme stage
 ```
 
-In the [visual editor](../editor/index.md), **deck ▾ → New deck…** offers Paper and
-Stage as looks, and the **Theme** dialog has a *Theme* menu that switches the open
-deck between the three (it rewrites `Deck(theme=...)` in `deck.py`, one undoable
-step).
-
-Every theme has both colour modes: `Deck(mode=ColorMode.LIGHT)` (or the Theme
-dialog, or the presenter's light/dark switch) picks the other one. A printed deck
+Every theme has both colour modes: `Deck(mode=ColorMode.LIGHT)` (or the presenter's
+light/dark switch) picks the other one. A printed deck
 (a poster, `Deck(size="a0")`) is white paper unless you ask for dark, Stage
 included.
 
@@ -136,7 +131,7 @@ def main() -> Deck:
 ```
 
 Or leave `deck.py` alone and override tokens in the project's `styles.css`, which
-loads after the theme (the editor's Theme dialog writes exactly this):
+loads after the theme:
 
 ```css
 :root { --inkflow-accent: #f08c84; }
@@ -164,8 +159,8 @@ def main() -> Deck:
     )
 ```
 
-The themes ship eighteen layouts plus two building blocks,
-listed with their zones in [Layouts](../design/layouts.md#built-in-layouts).
+The themes ship eighteen layouts plus two building blocks (and the poster
+layouts for the A paper sizes), listed with their zones in [Layouts](../design/layouts.md#built-in-layouts).
 [Markdown zone markers](../authoring/markdown.md#explicit-markers)
 such as `::left::` and `::quote::` target the named zones in each layout.
 

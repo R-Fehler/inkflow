@@ -117,20 +117,21 @@ This zone keeps its size even when the text runs past the box.
 
 **Every text zone shrinks its text to fit, by default.** When a zone's text
 runs past its box, the slide shows it smaller, just enough to fit: in the
-presenter, the editor, the static build, the PDF export and `inkflow render`
-alike. Nothing is written to your files; only `size` and `fit` are.
+presenter (its overview and next-slide preview too), the static build, the
+PDF export and `inkflow render` alike. Nothing is written to your files; only
+`size` and `fit` are.
 
 Shrinking stops at a floor: a third of the zone's own size, or the smallest
 text `inkflow render --check` calls readable (1/80 of the slide's height on a
 screen; on a printed deck, 0.6 of the sheet's body size), whichever is larger.
-Text that still does not fit at the floor stays there and overflows; the
-editor marks the box *Doesn't fit*, and `inkflow render --check` reports it.
+Text that still does not fit at the floor stays there and overflows, and
+[`inkflow render --check`](checking.md) reports it.
 
 The same two settings are CSS custom properties, so they have the three layers
 alignment has. The slide's own text wins (a marker parameter, or
 `TextBox(size=0.8, fit=False)` in `deck.py`), then the zone shape's own style
-(`style="--inkflow-font-scale:0.8"` on the rect: a text box the editor drew,
-or a layout's zone for every slide built on it), then the layout's CSS:
+(`style="--inkflow-font-scale:0.8"` on the rect: a text box drawn on the
+slide, or a layout's zone for every slide built on it), then the layout's CSS:
 
 ```css
 #zone-content { --inkflow-font-scale: 0.9; }
@@ -229,9 +230,9 @@ Collisions get `-2`, `-3` appended.
 A link to an id that does not exist is left inert.
 
 The same scheme works on drawn objects: wrap one in an SVG link,
-`<a href="slide:overview">…</a>` (the visual editor's **Link** field does this),
-and clicking it in the presentation jumps there. A web link on an object opens in
-a new tab, so the presentation stays where it is.
+`<a href="slide:overview">…</a>` (in Inkscape: *Object → Link*), and clicking
+it in the presentation jumps there. A web link on an object opens in a new
+tab, so the presentation stays where it is.
 
 ## Coloured words
 
@@ -243,8 +244,7 @@ To colour a few words with the theme's palette, wrap them in a span with an
 Revenue is <span class="inkflow-color-green">up 12%</span> this quarter.
 ```
 
-The colour follows dark and light mode. The visual editor's text colour button
-writes exactly this.
+The colour follows dark and light mode.
 
 ## Speaker notes
 

@@ -40,9 +40,10 @@ attribute (`font-family="sans-serif"`, mapped by the stylesheet, so any rule of
 yours still wins) or in a `style` (rewritten in the built slide; the file on disk
 is left alone). Text that names no font at all is in the body font.
 
-**The interface.** The editor and the presenter's own text (menus, status bar,
-panels, the ink palette) use Inter and JetBrains Mono too, so inkflow itself looks
-the same on Linux, macOS and Windows.
+**The interface.** The presenter's own text (status bar, panels, menus) uses
+Inter and JetBrains Mono too, under names of their own (`Inkflow UI`, `Inkflow UI
+Mono`) so they never mix with a deck's fonts: inkflow itself looks the same on
+Linux, macOS and Windows.
 
 **Not covered.** Chinese, Japanese and Korean, Arabic, Hebrew, the Indic scripts
 and other scripts the shipped fonts do not include fall back to the computer's
@@ -51,8 +52,8 @@ that has it in the project's `fonts/` and name it in the theme (below).
 
 ## Using other fonts
 
-Name them in the theme's typography (or a `Theme` subclass, or the editor's
-**Theme** dialog), or on an SVG element (`font-family`, as Inkscape writes it):
+Name them in the theme's typography (a `Theme` subclass), or on an SVG element
+(`font-family`, as Inkscape writes it):
 
 ```python
 class Talk(Theme):
@@ -91,14 +92,13 @@ italic…). A family a slide defines itself with an `@font-face` in its `<style>
 is used as it is.
 
 `inkflow fonts` lists where each font the deck uses comes from (`project`,
-`theme`, `machine`, `missing`, `generic`), and `inkflow fonts bundle` copies the
-ones only your computer has into `fonts/`, with their licences: see
+`theme`, `machine`, `missing`, `generic`): see
 [A deck that looks the same everywhere](../presenting/portable.md).
 
 ## How it is embedded
 
-- **`inkflow serve` and the editor** link the shipped fonts from the server
-  (`/_inkflow/fonts/…`, fetched once and cached) and embed any other font whole.
+- **`inkflow serve`** links the shipped fonts from the server
+  (`/_inkflow/fonts/…`, fetched once and cached) and embeds any other font whole.
 - **`inkflow build`, `inkflow export` (PDF) and `inkflow render`** subset each
   font to the characters the deck uses, as WOFF2 data inside the page: typically
   20–80 KB a face. A subset keeps every OpenType feature (tabular figures in
@@ -106,7 +106,9 @@ ones only your computer has into `fonts/`, with their licences: see
   licence). The emoji font is carried only if the deck has emoji, the maths font
   only if it has formulas, with the forms a browser draws a formula with (the
   italic 𝑥 of `$x$`, stretched brackets and roots). Subsets are cached in your
-  user cache folder, so rebuilding the same deck is quick.
+  user cache folder (or `$INKFLOW_CACHE_DIR`), so rebuilding the same deck is
+  quick. The presenter's interface fonts come along too, subset to its own
+  words, the slide titles and the notes, so a built deck needs no server.
 - **The PDF** embeds every face: Chromium writes the variable fonts and the
   maths and emoji fonts as Type 3 fonts (their outlines, text still selectable
   and searchable), static TrueType fonts as TrueType.

@@ -14,8 +14,7 @@ inkflow setup-pages github --release  # also a release at every tag v*
 ```
 
 For a new project, `inkflow init my-talk --pages github [--release]` does the
-same and writes a short `README.md`. In the [visual editor](../editor/index.md#version-control),
-**Git → Publish…** does it with a dialog.
+same and writes a short `README.md`.
 
 `setup-pages` prints the address the slides will have and what is left to do:
 
@@ -73,7 +72,8 @@ git tag v1.0
 git push origin v1.0
 ```
 
-The release carries `<repository>-1.0-slides.html` (`inkflow build`:
+The release carries `<repository>-1.0-slides.html` ([`inkflow
+build`](export.md#static-html-inkflow-build):
 the whole deck, pictures, videos and fonts included, in one file that opens
 without a server) and `<repository>-1.0-slides.pdf` (`inkflow
 export`). For a deck in a folder of a larger repository the folder's name is
@@ -113,9 +113,10 @@ deck's folder has a PDF in git, and only then.
 **Fonts.** `inkflow build` embeds the fonts it finds. The ones inkflow ships
 (Inter, JetBrains Mono, STIX Two Math, Twemoji) are there on every runner, but
 a CI runner has none of the fonts installed on your computer. `setup-pages`
-(and the Publish dialog) names the fonts the deck uses that only your computer
-has: copy their files into the project's `fonts/` and commit them, or the
-online deck falls back to the runner's fonts. See [Fonts](../design/fonts.md).
+names the fonts the deck uses that only your computer has: copy their files
+into the project's `fonts/` and commit them, or the online deck falls back to
+the runner's fonts. See [Fonts](../design/fonts.md) and
+[A deck that looks the same everywhere](portable.md).
 
 ## Changing it later
 

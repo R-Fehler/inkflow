@@ -195,6 +195,24 @@ Each one is a single undo step, an *Agent: …* step in an open editor, like
 `inkflow slide`, and brings the Inkscape previews of the deck's files up to
 date in the same step.
 
+A placeholder is a `zone-<name>` rect, plus an optional prompt,
+`<inkflow:hint zone="<name>">…</inkflow:hint>` ([Layouts](../design/layouts.md#placeholder-prompts-and-names)).
+A picture placeholder's name says it is one (`zone-picture-hero`, `zone-logo`):
+that is how the editor knows to offer a picture there.
+
+A placeholder rename follows the slides in the same step: on every slide built
+on the layout (directly or on a layout built on it; for an overlay, every slide
+that gets it) `::old::` markers in its Markdown, `zones={"old": …}` keys and
+animations aimed at `zone-old` are renamed, as are prompts, `#zone-old` rules
+in the layout's own `<style>`, arrows attached to it and an
+`inkflow:default-zone` naming it. Markdown the layout's `title` or `content`
+zone took without a marker gets an explicit `::new::` marker, and renaming
+`content` declares the new name as the default zone, so plain Markdown keeps
+flowing into it. It is refused when a slide already uses the new name, or when
+a slide's Markdown file is also the Markdown of a slide on another layout.
+`#zone-old` rules in a `styles.css` are not rewritten; the rename warns about
+them.
+
 ## Renaming and moving files
 
 Never rename or move a deck's file with `mv` or `git mv`: slides name it by
@@ -258,7 +276,8 @@ inkflow pack                     # fonts, outside files, pyproject + uv.lock,
 inkflow pack --zip talk.zip      # and a zip of the deck's source tree
 ```
 
-`fonts bundle`, `fonts set` and `pack` go through the editor when it is open:
+[Packing a deck](packing.md) has the details. `fonts bundle`, `fonts set` and
+`pack` go through the editor when it is open:
 each is one *Agent: …* step there, undone with <kbd>Ctrl</kbd>+<kbd>Z</kbd>.
 `inkflow verify` warns about each font from this machine, generic-first
 stacks, files outside the deck, a missing `uv.lock` or line-ending rules.

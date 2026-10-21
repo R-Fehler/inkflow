@@ -5,7 +5,7 @@ for the top-level list, or `inkflow COMMAND --help` for any single command.
 
 The list below includes the commands of [inkflow-editor](../editor/index.md)
 (`edit`, `slide`, `shape`, `anim`, `outline`, `pack`…), which a plugin adds to
-`inkflow` when it is installed ([Extending inkflow](extending.md)).
+`inkflow` when it is installed ([Extending](extending.md)).
 
 ::: mkdocs-click
     :module: inkflow.cli
@@ -75,11 +75,9 @@ for content, notes, and the deck script itself.
 Any other extension works the same way (`INKFLOW_EDIT_CMD_PNG`,
 `INKFLOW_EDIT_CMD_MD`), and so does a kind of file:
 `INKFLOW_EDIT_CMD_IMAGE` (PNG, JPEG, WebP, GIF…), `INKFLOW_EDIT_CMD_TEXT`
-(Markdown, Python, CSS…), `INKFLOW_EDIT_CMD_VIDEO` and `INKFLOW_EDIT_CMD_DATA`
-(a chart's CSV or TSV).
+(Markdown, Python, CSS…), `INKFLOW_EDIT_CMD_VIDEO`, `INKFLOW_EDIT_CMD_PDF`
+(a PDF figure) and `INKFLOW_EDIT_CMD_DATA` (a chart's CSV or TSV).
 The most specific one set wins: extension, then kind, then `INKFLOW_EDIT_CMD`.
-The visual editor's **Open ▾** menu offers the same command first, followed by the
-programs it finds installed (see [Visual editor](../editor/index.md#opening-files-in-other-programs)).
 
 ```bash
 INKFLOW_EDIT_CMD="code -r --goto {path}" inkflow serve deck.py

@@ -22,6 +22,28 @@ When inkflow builds the slide it replaces that shape with a `<foreignObject>`
 of the same bounding box, holding the rendered content.
 A zone that the slide never fills is removed rather than left showing.
 
+The zone shape itself is a placeholder: its fill and stroke are never painted
+(Inkscape gives every rect a style). Custom properties in its own `style`
+(`--inkflow-padding: 20px`, `--inkflow-valign: center`) do apply to its text,
+like the layout CSS that sets them.
+
+### A zone drawn as a box
+
+Mark the shape `inkflow:show-shape="true"` and it is drawn instead: its fill
+becomes the background of the box the text is in, its stroke a border, its
+`rx`/`ry` (or an ellipse's outline) the corner radius, with some padding to
+keep the text off the edge. On an accent-coloured fill (`inkflow-fill-accent`
+or another vivid theme colour) the text takes the theme's `accent-fg` colour.
+Text and box stay one element, so an animation or a transition moves them
+together. Such a zone stays on the slide, drawn and empty, when nothing fills
+it.
+
+```xml
+<rect id="zone-callout" x="1200" y="300" width="600" height="300" rx="24"
+      class="inkflow-fill-surface inkflow-stroke-accent" style="stroke-width:3"
+      inkflow:show-shape="true"/>
+```
+
 !!! tip
     Inkscape's Layers & Objects panel edits an element's *label*, not its `id`.
     Label the rect `zone-content` there and run
@@ -151,34 +173,38 @@ inkflow layouts
 ```
 
 It prints every layout and overlay with its parent chain, its zones and how
-many slides use it, and marks the deck's own copies of the theme's layouts.
+many slides use it (with a deck, the layouts in its size's shape), and notes
+the deck's own copies of theme layouts (below), the theme layouts they
+replace, and a theme's layout the deck's own of the same name only shadows.
 `inkflow layouts --plain` prints one line per layout instead of tables (for a
 narrow terminal, or a program reading it), `--json` the same as data.
 
 ## Changing a theme's layout: the deck's own copy
 
 A theme's layouts (the built-in ones included) live in an installed package
-and are never written. To change one for a deck, the deck gets its own copy:
-
-```bash
-inkflow layout copy base      # or edit it in the editor's slide master
-```
-
-The copy is `layouts/base.svg`, the theme's file with two root attributes:
+and are never written. To change one for a deck, give the deck its own copy:
+copy the theme's file to `layouts/<same name>.svg` in the project and add
+`inkflow:copy-of` to its root, naming the file it replaces. If the original
+has an `inkflow:parent`, name that parent explicitly too (the theme's
+`./title` would now look in your `layouts/`):
 
 ```xml
 <svg ... inkflow:copy-of="builtin:base">              <!-- base has no parent -->
 <svg ... inkflow:copy-of="builtin:agenda" inkflow:parent="builtin:title">
 ```
 
-`inkflow:copy-of` names the theme's file the copy replaces, and the copy then
-stands in for it **everywhere**, not only for slides naming it: when any
-reference (a bare name, `builtin:base`, `theme:agenda`, or the theme's own
-`./base` inside `numbered.svg`) resolves to the theme's file, the project's
-copy is used instead. So a copy of `base` is the background of every built-in
-layout, and of every layout of yours built on them, and a copy of `title`
-changes `content`, `agenda` and the other layouts built on `title`. The copy's
-own parent names the theme's ancestor explicitly (`builtin:title`), which the
+For a pip-installed theme's layout, write `theme:agenda` and `theme:title`
+instead. The built-in files are in the installed package
+(`python -c "import inkflow, pathlib; print(pathlib.Path(inkflow.__file__).parent / 'theme/layouts')"`);
+an editor's slide master can make the copy for you on the first edit.
+
+The copy then stands in for the theme's file **everywhere**, not only for
+slides naming it: when any reference (a bare name, `builtin:base`,
+`theme:agenda`, or the theme's own `./base` inside `numbered.svg`) resolves to
+the theme's file, the project's copy is used instead. So a copy of `base` is
+the background of every built-in layout, and of every layout of yours built on
+them, and a copy of `title` changes `content`, `agenda` and the other layouts
+built on `title`. The copy's own parent names the theme's ancestor, which the
 project's copy of that ancestor stands in for whenever there is one. Only what
 you copy changes: copying `agenda` touches agenda slides only.
 
@@ -188,69 +214,29 @@ slides naming it, as the search above says, but never slips into the theme's
 chains. A copy built on its own original (`inkflow:parent="builtin:content"`
 in a copy of `content`) goes on to the theme's file rather than looping.
 
-`inkflow layout revert base` deletes the copy: the theme's layout is used
-again. The editor's [slide master](../editor/index.md#slide-master) copies on
-the first edit and reverts from its menu.
+Delete the copy and the theme's layout is used again. Run
+[`inkflow sync`](../authoring/inkscape.md#previewing-the-full-slide-sync)
+after making or deleting one, so the Inkscape previews show the new
+background (`inkflow verify` reports the previews it made stale).
 
-## Templates: a slide saved as a layout
+## Placeholder prompts and names
 
-```bash
-inkflow layout save 2 customCodeExamples --hints
-inkflow slide add --layout custom-code-examples
-```
-
-Saves slide 2 as `layouts/custom-code-examples.svg`, keeping the name as typed
-in `inkflow:label` (the editor's gallery shows it). The slide's own drawing
-carries over (its preview layers dropped, its file references rewritten for
-`layouts/`), with its `inkflow:parent`; a slide drawn straight from a layout
-gives a layout built on that one. Zones stay, empty: their text lives in the
-slide's Markdown or `deck.py`. `--hints` keeps each zone's first line as a
-placeholder prompt the editor shows in the empty zone of a new slide:
+A layout's zones are its placeholders: what each slide on it fills. Two
+optional additions are for editors:
 
 ```xml
-<inkflow:hint zone="title">Code examples</inkflow:hint>
+<svg ... inkflow:label="Code examples">
+  <rect id="zone-code" x="100" y="300" width="1000" height="600"/>
+  <inkflow:hint zone="code">Paste the code example</inkflow:hint>
+</svg>
 ```
 
-Hints are editor-only: the build takes them out. `--pictures` turns the
-slide's own pictures into picture zones (`zone-picture`, `zone-picture-2`…) of
-the same box. `inkflow layout rename` and `layout delete [--move-to L]`
-manage the deck's own layouts; references follow a rename.
-
-## Placeholders
-
-A layout's zones are its placeholders: what each slide on it fills. The
-editor's [slide master](../editor/index.md#slide-master) adds, renames and
-removes them; so does the command line:
-
-```bash
-inkflow layout placeholders content            # kind, prompt, box, filled on which slides
-inkflow layout placeholder add content code-example --prompt "Click to add the code example"
-inkflow layout placeholder add content hero --kind picture --box 1100,300,700,500
-inkflow layout placeholder rename content code-example snippet -n   # what would change
-inkflow layout placeholder rename content code-example snippet
-inkflow layout placeholder prompt content snippet "Paste the snippet"   # or --clear
-inkflow layout placeholder remove content snippet [--drop-content]
-```
-
-A placeholder is a `zone-<name>` rect, plus an optional prompt,
-`<inkflow:hint zone="<name>">…</inkflow:hint>`, which the editor shows in the
-empty zone on a new slide and the build leaves out. A picture placeholder's name
-says it is one (`zone-picture-hero`, `zone-logo`): that is how the editor knows
-to offer a picture there. A theme's layout is copied into the deck on the first
-change (`layouts/<name>.svg`, see above).
-
-A rename follows the slides in the same step: on every slide built on the
-layout (directly or on a layout built on it; for an overlay, every slide that
-gets it) `::old::` markers in its Markdown, `zones={"old": …}` keys and
-animations aimed at `zone-old` are renamed, as are prompts, `#zone-old` rules
-in the layout's own `<style>`, arrows attached to it and an
-`inkflow:default-zone` naming it. Markdown the layout's `title` or `content`
-zone took without a marker gets an explicit `::new::` marker, and renaming
-`content` declares the new name as the default zone, so plain Markdown keeps
-flowing into it. It is refused when a slide already uses the new name, or when
-a slide's Markdown file is also the Markdown of a slide on another layout.
-`#zone-old` rules in a `styles.css` are not rewritten; the rename warns about
-them.
+`<inkflow:hint zone="<name>">` is the prompt an editor shows in that zone
+while a slide leaves it empty. The build takes it out of every slide; a
+layout's prompt for a zone replaces one its parent gives the same zone.
+`inkflow:label` is the layout's name as its author typed it, which
+`inkflow layouts` shows beside the file's own name for the deck's
+own layouts.
 
 ## Built-in layouts
 
@@ -292,8 +278,7 @@ Slide("cover", md="title")
 Slide("two-cols", md="compare")
 ```
 
-The [built-in themes page](../built-in-theme/index.md) has a live showcase of all of them,
-and shows them in each of the three themes.
+The [built-in theme page](../built-in-theme/index.md) has a live showcase of all of them.
 
 They take your theme's palette automatically,
 because they paint through the token classes rather than hardcoded colours.

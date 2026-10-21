@@ -3,9 +3,8 @@
 A chart plots a table of data on a slide: bars, lines, areas, dots or a pie.
 The data lives in a plain file next to your slides (CSV, TSV or JSON), so it
 diffs well in git and opens in any spreadsheet. inkflow draws the chart as SVG
-when it builds the deck, which means the presenter, the static build, the PDF
-export and the editor all show exactly the same chart, and no script runs in
-the browser.
+when it builds the deck, which means the presenter, the static build and the
+PDF export all show exactly the same chart, and no script runs in the browser.
 
 Charts take their colours and fonts from the deck's [theme](../design/themes.md):
 series use the theme palette and text uses its text colours, so a chart follows
@@ -57,8 +56,7 @@ gap: a bar is left out, a line breaks.
 The chart is drawn at the zone's size, its text at a size that suits the
 slide's body text. Put the zone anywhere: in a [layout](../design/layouts.md),
 or as a `<rect id="zone-sales">` in the slide's own SVG to place a chart
-anywhere on one slide (the [visual editor](../editor/index.md#charts) does that
-for you).
+anywhere on one slide.
 
 ### Options
 
@@ -213,5 +211,5 @@ takes the zone's place (`chart-series-visits`). The axes are `<zone>-axes`.
 ## Editing the data
 
 Change the file and the slide redraws: `inkflow serve` watches the whole deck
-folder. In the [visual editor](../editor/index.md#charts), double-click a chart
-to edit its data in a grid, or open its file in a spreadsheet with **Open ▾**.
+folder, so editing the file in a spreadsheet or a text editor and saving it is
+all it takes.

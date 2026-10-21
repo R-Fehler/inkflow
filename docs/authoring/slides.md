@@ -247,10 +247,10 @@ def main() -> Deck:
 ```
 
 A section changes nothing on the slides themselves: the deck still runs from
-the first slide to the last. The name groups the slide list and the grid view
-in the [editor](../editor/index.md#sections), heads its slides in the
-presenter's [overview](../presenting/index.md#moving-around) and picker, and
-shows in the [presenter panel](../presenting/presenter-panel.md#layout).
+the first slide to the last. The name heads its slides in the presenter's
+[overview](../presenting/index.md#moving-around) and picker, and shows in the
+[presenter panel](../presenting/presenter-panel.md#layout); a frontend listing
+the slides (an editor's slide list) can group them by it too.
 
 - Slides written before the first section belong to none; after it, every
   slide goes in a section (a bare `Slide` after one is an error).
@@ -259,10 +259,6 @@ shows in the [presenter panel](../presenting/presenter-panel.md#layout).
 - In Python, `deck.slides` is still the flat list of every slide;
   `deck.sections` lists the `Section`s and `deck.section_ranges()` their slide
   indices.
-
-The editor and [`inkflow slide section …`](../editor/claude-code.md#changing-the-slide-list)
-add, rename, move and remove sections by rewriting these `Section(...)` entries,
-keeping your comments and formatting.
 
 ## Hiding a slide
 
