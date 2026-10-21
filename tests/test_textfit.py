@@ -215,6 +215,9 @@ def test_the_pdf_page_fits_text_to_its_box(
         args = [a for a in cmd if not a.startswith("--print-to-pdf")]
         out = run([*args[:-1], "--dump-dom", args[-1]], capture_output=True, text=True)
         dumped.append(out.stdout)
+        # Stands in for the printed file the export checks for.
+        target = next(a for a in cmd if a.startswith("--print-to-pdf="))
+        _ = Path(target.split("=", 1)[1]).write_bytes(b"%PDF-1.4\n")
         return out
 
     monkeypatch.setattr(subprocess, "run", dump_dom)

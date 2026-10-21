@@ -1,7 +1,8 @@
 # pyright: reportPrivateUsage=none, reportUnknownMemberType=false, reportAny=false
 # pyright: reportUnknownVariableType=false, reportUnknownArgumentType=false
 # pyright: reportPrivateLocalImportUsage=false
-"""The fonts inkflow ships, and how decks and the interface embed them."""
+"""The fonts inkflow ships, how decks and the interface embed them, and the
+self-contained single-file build."""
 
 from __future__ import annotations
 
@@ -15,9 +16,11 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 from fontTools.ttLib import TTFont
 
 from inkflow import fonts
+from inkflow.cli import main
 from inkflow.export import build_static_html
 from inkflow.fonts import (
     SHIPPED_FONTS_DIR,
@@ -386,16 +389,77 @@ def test_interface_fonts_served_by_url_and_built_inline() -> None:
     assert '"Inkflow UI Emoji"' not in ui_fonts_css("plain words")
 
 
-# ── A static build ────────────────────────────────────────────────────────────
+# ── The single-file build ─────────────────────────────────────────────────────
+
+_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
+
+
+def _media_deck(tmp_path: Path) -> Path:
+    deck = _deck(
+        tmp_path,
+        "::content::\n# Pictures\n\n![a cat](../assets/cat.png) $e^{i\\pi}$ 🎉\n",
+    )
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "cat.png").write_bytes(_PNG)
+    (tmp_path / "assets" / "bg.png").write_bytes(_PNG)
+    (tmp_path / "styles.css").write_text(
+        ".inkflow-content { background: url(assets/bg.png); }", encoding="utf-8"
+    )
+    return deck
+
+
+_REF_RE = re.compile(
+    r"""\b(?:src|href|poster)\s*=\s*["']([^"']*)["']|url\(\s*["']?([^"')]*)"""
+)
+
+
+def _external_refs(html: str) -> list[str]:
+    # The page's own scripts build URLs from variables: not references.
+    html = re.sub(r"<script\b.*?</script>", "", html, flags=re.S)
+    refs = [(a or b).strip() for a, b in _REF_RE.findall(html)]
+    return [r for r in refs if r and not r.startswith(("data:", "#", "javascript:"))]
 
 
 @pytest.mark.usefixtures("no_system_fonts")
-def test_a_static_build_carries_every_font_inside(tmp_path: Path) -> None:
-    deck = _deck(tmp_path, "::content::\n# Fonts\n\n$e^{i\\pi}$ 🎉\n")
+def test_the_default_build_is_one_file_with_nothing_outside(tmp_path: Path) -> None:
+    deck = _media_deck(tmp_path)
     out = tmp_path / "out"
     build_static_html(deck, out)
+    assert [p.name for p in out.iterdir()] == ["index.html"]
     html = (out / "index.html").read_text(encoding="utf-8")
+    assert _external_refs(html) == []
     for family in ("Inter", "STIX Two Math", "Twemoji Mozilla", "Inkflow UI Mono"):
         assert f'font-family: "{family}";' in html, family
-    # Nothing loaded from a server: a static build has none.
-    assert "/_inkflow/fonts/" not in html
+    # The stylesheet's own url() came along too.
+    assert "assets/bg.png" not in html
+
+
+def test_assets_folder_copies_them_beside_index(tmp_path: Path) -> None:
+    deck = _media_deck(tmp_path)
+    out = tmp_path / "out"
+    result = CliRunner().invoke(
+        main, ["build", "--deck", str(deck), "-o", str(out), "--assets-folder"]
+    )
+    assert result.exit_code == 0, result.output
+    assert (out / "assets" / "cat.png").read_bytes() == _PNG
+    assert (out / "assets" / "bg.png").is_file()
+    html = (out / "index.html").read_text(encoding="utf-8")
+    assert "assets/cat.png" in html
+    # Fonts stay inside either way.
+    assert 'font-family: "Inter";' in html and "/_inkflow/fonts/" not in html
+
+
+def test_a_large_single_file_names_its_largest_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from inkflow import export
+    from inkflow.logging import collect_logs
+
+    monkeypatch.setattr(export, "SINGLE_FILE_WARN_BYTES", 1000)
+    deck = _media_deck(tmp_path)
+    with collect_logs(30) as warnings:
+        build_static_html(deck, tmp_path / "out")
+    text = " ".join(w.message for w in warnings)
+    assert "--assets-folder" in text and "assets/cat.png" in text

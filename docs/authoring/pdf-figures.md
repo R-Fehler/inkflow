@@ -99,10 +99,10 @@ content, the page and the converter: an unchanged PDF is never converted
 twice, and a changed one is converted again the moment it is saved
 (`inkflow serve` updates the slide).
 
-[`inkflow build`](../presenting/export.md) copies the converted pages into
-the output under `_pdf/` like any picture (`--inline-assets` embeds them);
-the PDF itself is not copied. `inkflow export` draws them into the deck's PDF
-as vectors.
+[`inkflow build`](../presenting/export.md) embeds the converted pages
+like any picture (with `--assets-folder` it copies them into the output under
+`_pdf/`); the PDF itself is not copied. `inkflow export` draws them into the
+deck's PDF as vectors.
 
 A page can also be committed beside its PDF, so that a clone shows the
 figure without any converter: `figure.pdf` page 1 is `figure.pdf.p1.svg`,

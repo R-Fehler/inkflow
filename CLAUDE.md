@@ -254,21 +254,28 @@ src/
                                a record only when `/_inkflow/instance` answers with its
                                pid (stale ones are deleted). `inkflow serve` opens no second
                                server for a deck (`cli.present.already_served`)
-    export.py         static HTML export (inkflow build) and PDF export (inkflow export);
+    export.py         static HTML export (inkflow build: one self-contained index.html by
+                               default, every asset, stylesheet url() and font inlined,
+                               the interface fonts subset to `_interface_text`; a
+                               single file > 50 MB warns naming its largest assets
+                               (`_warn_large`); `--assets-folder` = `inline_assets=False`,
+                               media copied beside it) and PDF export (inkflow export);
                                `pdf_pages`: each slide's page (the --size override,
                                else the deck's size, else the slide's own: physical
                                width/height, else viewBox px), every distinct size a
                                named `@page` the slide's box selects (`page:`), so
                                mixed sizes print each on its own sheet; `--bleed`
                                (`extend_backgrounds`: canvas-covering rects/images
-                               grown into it) and `--crop-marks`; `find_chromium`;
-                               the PDF page inlines bundles/fit.js (shrink-to-fit);
-                               `build_handout_pdf` (`inkflow export --handout`), which
-                               reaches Chromium over a loopback HTTP server (`served`,
-                               also `render`'s), never file:// (a snap/Flatpak Chromium
-                               has a private /tmp), and `_run_chromium` checks the
-                               written file and reports Chromium's stderr
-                               (`cdp.chromium_said`); `is_paper_svg` (an SVG in mm)
+                               grown into it) and `--crop-marks`; `find_chromium`
+                               (PATH names, then a Playwright download); the PDF page
+                               inlines bundles/fit.js (shrink-to-fit); PDF pages (the
+                               deck's and `build_handout_pdf`'s, `inkflow export
+                               --handout`) reach Chromium over a loopback HTTP server
+                               (`served`, also `render`'s), never file:// (a snap/Flatpak
+                               Chromium has a private /tmp), and `_run_chromium` checks
+                               the written file and reports Chromium's stderr
+                               (`cdp.chromium_said`); as root `export` passes
+                               `--no-sandbox` itself; `is_paper_svg` (an SVG in mm)
     pdfboxes.py       `set_page_boxes`: Chromium writes page sizes on a ~1/75 in grid, so
                                each page's MediaBox is rewritten to the exact size
                                (aligned with the content hung from the top-left),
@@ -737,9 +744,9 @@ An asset must live under an allowed root: the project dir (canonical prefix `""`
 `build`/`export` copy every referenced local file into the output dir, mirroring the source tree; a canonical ref is relative and `..`-free by construction, so `out_dir / ref` always lands inside and needs no rewriting. `_slide_refs` scans the *emitted* SVG and notes rather than walking the deck, so a pruned zone takes its asset with it. A reference that resolves to nothing is a `logger.warning`, not a silent skip. `serve` streams the same refs on demand instead of copying.
 
 **PDF figures are a derived asset, converted at build time and never committed.**
-Browsers show no PDF in `<image>`/`<img>`, so `pdf.PdfPages.apply` (a pipeline step after content injection, so SVG pictures, `Image` zones and Markdown images are covered alike) points each PDF reference at its page converted to SVG in `.inkflow/cache/pdf/` (git-ignored, unwatched; named by content hash + page + converter, so a saved PDF converts again and the watcher's rebuild shows it). The cache is a third `AssetRoots` root with the canonical prefix `_pdf/`, reserved like `_theme/`: `serve`, `build` (copied to `out/_pdf/`, not a hidden folder static hosts may refuse; inlined with `--inline-assets`) and `export` handle a converted page exactly as any picture, with no special case. The PDF reference survives beside it as `data-inkflow-pdf`, which a frontend writing back reads instead of the href, so nothing it writes ever names the cache. PyMuPDF is optional (`inkflow[pdf]`) and loaded with `importlib` so inkflow stays MIT and type-checks without it; the system tools are the fallback. With no converter the picture becomes a placeholder data URI and the build warns once; `verify` (`_check_pdfs`) reports that and a page the PDF does not have.
+Browsers show no PDF in `<image>`/`<img>`, so `pdf.PdfPages.apply` (a pipeline step after content injection, so SVG pictures, `Image` zones and Markdown images are covered alike) points each PDF reference at its page converted to SVG in `.inkflow/cache/pdf/` (git-ignored, unwatched; named by content hash + page + converter, so a saved PDF converts again and the watcher's rebuild shows it). The cache is a third `AssetRoots` root with the canonical prefix `_pdf/`, reserved like `_theme/`: `serve`, `build` (inlined; with `--assets-folder` copied to `out/_pdf/`, not a hidden folder static hosts may refuse) and `export` handle a converted page exactly as any picture, with no special case. The PDF reference survives beside it as `data-inkflow-pdf`, which a frontend writing back reads instead of the href, so nothing it writes ever names the cache. PyMuPDF is optional (`inkflow[pdf]`) and loaded with `importlib` so inkflow stays MIT and type-checks without it; the system tools are the fallback. With no converter the picture becomes a placeholder data URI and the build warns once; `verify` (`_check_pdfs`) reports that and a page the PDF does not have.
 
-`build --inline-assets` swaps the copy for `_inline_assets`, which rewrites each reference to a `data:` URI through `assets.rewrite_references` — the same `REFERENCE_PATTERNS` the scan uses, so both halves learn a new reference kind at once. It runs *after* `embed_fonts_css_subsetted`, because the subsetter scans these very slide strings for used characters and base64 would pin the whole font. `assets.MIME_TYPES` is the shared table naming what `serve` sends and what the data URI claims; a suffix missing from it is copied out and warned about rather than dropped, so the build can fall short of one file but never loses an asset. Each reference is inlined where it stands, so a shared asset is carried once per use — the reason this is a flag and not the default.
+`build` (the default; `--assets-folder` copies instead) uses `_inline_assets`, which rewrites each reference to a `data:` URI through `assets.rewrite_references` — the same `REFERENCE_PATTERNS` the scan uses, so both halves learn a new reference kind at once. It runs *after* `embed_fonts_css_subsetted`, because the subsetter scans these very slide strings for used characters and base64 would pin the whole font. `assets.MIME_TYPES` is the shared table naming what `serve` sends and what the data URI claims; a suffix missing from it is copied out and warned about rather than dropped, so the build can fall short of one file but never loses an asset. Each reference is inlined where it stands, so a shared asset is carried once per use — the reason `--assets-folder` exists (the Pages CI templates use it, so videos stream). `_inline_css_urls` does the same for `url()` in the deck CSS (resolved from the project root, as the served page resolves it; `--assets-folder` copies those files too), and `_warn_remote` names web pictures a single file still needs the network for.
 
 **A deck is portable when a clone of its folder looks the same anywhere.**
 Only the deck's own files and the pinned inkflow/theme travel with a `git clone`, so `fontreport.py` classifies every font as project / theme (portable) or machine / missing / generic (`inkflow fonts`), and `pack.py` holds the building blocks that take the rest away as `Item`s (fixable or not): pyproject pin + uv.lock, `.gitattributes` LF/diff/LFS rules, the machine fonts copied into `fonts/`, a zip of the source tree. `inkflow init` uses them for every new deck (`_self_contained` in cli/project.py: LF rules, fonts, `uv lock`; `git_setup.setup_lfs` the LFS rules, `--no-lfs` the opt-out); a frontend can put them together with copying in files from outside the deck. Licences warn, never refuse. fontreport only reads fonts.py's discovery (`_font_dirs`, `_read_font_record`) with its own uncached index, so a just-bundled font is seen at once.
