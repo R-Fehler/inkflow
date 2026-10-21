@@ -365,5 +365,6 @@ def test_a_plugins_serve_option_reaches_its_extensions(
         serve_cmd.params[:] = before
         plugins.unregister(plugin)
     assert plugin.config is not None
-    assert plugin.config.options == {"shout": True}
-    assert [e.name for e in seen[0]] == ["recorder"]
+    # Other installed plugins may add options and extensions of their own.
+    assert plugin.config.options["shout"] is True
+    assert "recorder" in [e.name for e in seen[0]]
