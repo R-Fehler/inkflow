@@ -1,7 +1,7 @@
 """The server ``inkflow serve`` runs: one port for the presenter's pages, the
 deck's assets and fonts, and the WebSocket (``/_inkflow/ws``) that pushes
 every rebuild (only what changed, ``inkflow.incremental``) and relays
-positions between windows.
+positions and ink between windows.
 
 Who may connect, and as whom, is decided at the door (``inkflow.access``):
 the owner (this machine), or a share link's editor or viewer.
@@ -56,7 +56,7 @@ from websockets.asyncio.server import serve as ws_serve
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response as WsResponse
 
-from inkflow import instances, plugins
+from inkflow import ink, instances, plugins
 from inkflow.access import (
     TOKEN_PARAM,
     WS_PATH,
@@ -106,7 +106,14 @@ from inkflow.loaders import load_deck_scripts, load_deck_styles
 from inkflow.logging import Levels, collect_logs, logger, report, resolve_levels
 from inkflow.manifest import Deck
 from inkflow.os_compat import install_shutdown_handler, raw_keypresses
-from inkflow.pipeline import SlideData, process_deck, resolve_transitions
+from inkflow.pipeline import (
+    SlideData,
+    process_deck,
+    resolve_slide_src,
+    resolve_transitions,
+    slide_ids,
+)
+from inkflow.svgio import parse_svg_file
 from inkflow.titles import resolve_deck_title
 from inkflow.tui import LiveUI
 from inkflow.wsbridge import Bridge
@@ -674,6 +681,48 @@ def _resolve_edit_request(
     return Path(path_str), template
 
 
+def _ink_file(
+    deck: Deck, project_dir: Path, slide_id: str
+) -> tuple[Path, tuple[float, float, float, float]]:
+    """Slide ``slide_id``'s ink file and its canvas (what a new file takes)."""
+    visible = [s for s in deck.slides if s.visible]
+    slide = next(
+        (s for s, i in zip(visible, slide_ids(visible), strict=True) if i == slide_id),
+        None,
+    )
+    if slide is None:
+        raise ink.InkError(f"no slide {slide_id!r}")
+    try:
+        src = resolve_slide_src(slide.src, project_dir, deck.theme)
+        box = ink.view_box(parse_svg_file(src))
+    except (OSError, ValueError):
+        box = None
+    canvas = box or (0.0, 0.0, *deck.effective_size.canvas)
+    return ink.ink_path(slide, slide_id, project_dir), canvas
+
+
+async def _save_ink(websocket: ServerConnection, msg: dict[str, object]) -> None:
+    """An ``edit-op`` when no extension edits the deck: only the presenter's
+    "Keep" (``action: "ink"``) is answered, writing the ink file directly."""
+    reply: dict[str, object] = {"type": "edit-result", "id": msg.get("id")}
+    deck = _served.deck
+    slide_id = msg.get("slideId")
+    try:
+        if msg.get("action") != "ink":
+            raise ink.InkError("nothing on this server edits the deck")
+        if deck is None or _served.deck_path is None:
+            raise ink.InkError("the deck has not built")
+        if not isinstance(slide_id, str):
+            raise ink.InkError("which slide?")
+        project_dir = _served.deck_path.parent
+        path, canvas = _ink_file(deck, project_dir, slide_id)
+        await asyncio.to_thread(ink.save_ink, path, msg, canvas)
+        reply.update(ok=True, ink=path.relative_to(project_dir).as_posix())
+    except (ink.InkError, OSError) as exc:
+        reply.update(ok=False, error=str(exc))
+    await websocket.send(json.dumps(reply))
+
+
 _ROLE_RANK: dict[Role, int] = {"viewer": 0, "editor": 1, "owner": 2}
 
 _OWNER_ONLY = frozenset({"edit", "share"})
@@ -702,10 +751,19 @@ def allowed(role: Role, msg: dict[str, object]) -> bool:
     handled = _extension_for(kind)
     if handled is not None:
         return _ROLE_RANK[role] >= _ROLE_RANK[handled[1]]
+    if kind == "edit-op":
+        # The presenter's "Keep" with no editor: the ink file, written directly.
+        return role in ("owner", "editor")
     if kind == "hello" and msg.get("role") == "editor":
         return role in ("owner", "editor")
-    # A viewer follows: it moves no one else's slide.
-    return not (role == "viewer" and kind == "nav")
+    if role == "viewer":
+        # A viewer follows: it moves no one else's slide and draws on no one
+        # else's screen (it may ask for the ink already drawn).
+        if kind == "nav":
+            return False
+        if kind == "ink":
+            return msg.get("op") == "request"
+    return True
 
 
 def _welcome(client: Client) -> dict[str, object]:
@@ -755,6 +813,17 @@ def make_ws_handler(
                 msg = cast(dict[str, object], parsed)
                 msg_type = msg.get("type")
                 if not allowed(client.role, msg):
+                    if msg_type == "edit-op":
+                        await websocket.send(
+                            json.dumps(
+                                {
+                                    "type": "edit-result",
+                                    "id": msg.get("id"),
+                                    "ok": False,
+                                    "error": "this link is view-only",
+                                }
+                            )
+                        )
                     continue
                 handled = _extension_for(msg_type)
                 if handled is not None:
@@ -818,6 +887,13 @@ def make_ws_handler(
                     if msg.get("snap"):
                         position_msg["snap"] = True
                     await broadcast(json.dumps(position_msg), sender=websocket)
+                elif msg_type == "ink":
+                    # Ink drawn without "Keep" is relayed like a position: the
+                    # server holds none of it, every other window draws it.
+                    # Saving is an ``edit-op`` (an extension's, else _save_ink).
+                    await broadcast(json.dumps(msg), sender=websocket)
+                elif msg_type == "edit-op":
+                    await _save_ink(websocket, msg)
                 elif msg_type == "share":
                     await _handle_share(websocket, msg)
                 elif msg_type == "edit":

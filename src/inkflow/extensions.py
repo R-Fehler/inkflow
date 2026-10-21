@@ -2,9 +2,9 @@
 
 ``inkflow serve`` is the core's server: it builds the deck on every change,
 serves the presenter and the deck's files on one port, relays positions
-between windows over a WebSocket (``/_inkflow/ws``), and decides at the door
-who may connect and as whom (``access.py``: the owner, an editor or a
-viewer). An extension adds to that without the core knowing what it is: a
+and ink between windows over a WebSocket (``/_inkflow/ws``), and decides at
+the door who may connect and as whom (``access.py``: the owner, an editor or
+a viewer). An extension adds to that without the core knowing what it is: a
 visual editor, a review tool, a remote control, a second transport.
 
 An extension is a ``ServerExtension`` subclass, handed to ``serve`` by the

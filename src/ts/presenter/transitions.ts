@@ -4,7 +4,7 @@ import type { TransitionData } from "../shared/types";
 import { formatViewBox, parseViewBox } from "../shared/viewbox";
 import { MorphTransition } from "./morph";
 import { ProgressDriver } from "./progress-driver";
-import { slideMounted } from "./slidehooks";
+import { slideLeaving, slideMounted } from "./slidehooks";
 import { state } from "./state";
 import {
     applyCurrentStep,
@@ -523,6 +523,8 @@ function loadSlideBody(
     // A step run in flight (mid-chain when a slide change is triggered) is landed on its
     // destination before we capture and replace the outgoing slide.
     settleStepRun();
+    // So is anything else in progress on it (a stroke being drawn).
+    slideLeaving();
 
     const params: TransitionData =
         transition ?? state.transitions[state.slideIndex] ?? CUT;
@@ -556,7 +558,8 @@ function loadSlideBody(
             : '<p style="color:var(--accent);padding:2rem">No slides.</p>';
         fitSlideToStage(stage.firstElementChild);
         // Before a transition takes the new slide into its layer, so what is
-        // done to it (its text fitted) travels in with it.
+        // done to it (its text fitted, the slide's ink put in) travels in
+        // with it.
         slideMounted();
         initialLand();
     };

@@ -219,6 +219,17 @@ def test_chart_data_rebuilds_the_slide_drawing_it(project: Project) -> None:
     assert project.rebuilt() == ["two-2"]
 
 
+def test_ink_appearing_and_going_rebuilds_its_slide(project: Project) -> None:
+    ink = DRAWING.replace(
+        '<text id="label"', '<path id="s1" d="M0 0L9 9"/><text id="t"'
+    )
+    _ = project.write("ink/drawing.svg", ink)
+    assert project.rebuilt() == ["drawing"]
+    assert 'id="s1"' in _by_id(project.full())["drawing"]["svg"]
+    (project.root / "ink" / "drawing.svg").unlink()
+    assert project.rebuilt() == ["drawing"]
+
+
 def test_a_layout_rebuilds_the_slides_built_on_it(project: Project) -> None:
     project.edit("layouts/two.svg", 'y="60"', 'y="70"')
     # The drawing has no layout; "two" is on one built on it (its parent).

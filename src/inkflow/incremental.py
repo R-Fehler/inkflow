@@ -8,7 +8,7 @@ of the slide's inputs changed. One-shot commands (`build`, `export`,
 
 What a slide's result depends on, and how each part is watched:
 
-- **The files it read or looked for** (its SVG, layout chain, overlays,
+- **The files it read or looked for** (its SVG, layout chain, overlays, ink,
   Markdown, chart data, PDFs and their converted or committed pages, a
   drawn-in diagram, a style file, every candidate a name was searched at):
   recorded while it is processed (`inkflow.deps`) and compared by stamp

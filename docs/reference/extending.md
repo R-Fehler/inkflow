@@ -74,8 +74,8 @@ skipped. `INKFLOW_NO_PLUGINS=1` runs inkflow without any plugin.
 ## A server extension
 
 The server `inkflow serve` runs builds the deck on every change, serves the
-presenter and the deck's files on one port, and relays positions between
-windows over a WebSocket on that port (`/_inkflow/ws`). A `ServerExtension`
+presenter and the deck's files on one port, and relays positions and ink
+between windows over a WebSocket on that port (`/_inkflow/ws`). A `ServerExtension`
 lives in it:
 
 ```python
@@ -159,7 +159,11 @@ cross-site sockets), and then it is the **owner** (this machine; in SSH mode
 the owner link), or an **editor** or **viewer** with a share link. A message
 from a lesser role than an extension's `messages` names never reaches it, and
 `HttpRequest.role`/`.token` say who asks for a page. The server offers editor
-links only when an extension takes a message from editors. Every page also may
+links only when an extension takes a message from editors. An `edit-op` no
+extension takes is the core's: it answers only the presenter's ink "Keep"
+(`action: "ink"`, from the owner or an editor link), writing the slide's ink
+file itself; an extension that edits the deck takes `edit-op` in its
+`messages` and makes ink one of its edits. Every page also may
 ask `{"type": "build-status"}`: which deck.py the server built last
 (`deckHash`), so a program that edited it can wait for its own edit to build.
 

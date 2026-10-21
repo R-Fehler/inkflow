@@ -1,5 +1,6 @@
 import { initEditMenu } from "./edit";
 import { initFit } from "./fit";
+import { initInk } from "./ink";
 import { renderPv, updatePvClock } from "./pv";
 import { state } from "./state";
 import { readURL } from "./status";
@@ -12,7 +13,7 @@ import {
     registerTransition,
 } from "./transitions";
 import { showError, showLogs } from "./ui";
-import { connectWS, loadSyncMode } from "./websocket";
+import { connectWS, loadSyncMode, sendInk } from "./websocket";
 import { initWindowSync } from "./windowsync";
 import "./keyboard";
 
@@ -46,6 +47,7 @@ initSyncMenu();
 initWindowSync(WS_PORT);
 initEditMenu(EDIT_COMMANDS, WS_PORT);
 initToEditor();
+initInk(WS_PORT, sendInk);
 initFit();
 // Capture deep-link authority before loadSlide()/syncURL() rewrites the URL.
 const deepLinked = readURL();

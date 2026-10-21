@@ -60,7 +60,7 @@ src/
                                stays `list[Slide]` everywhere, `deck.sections` /
                                `section_ranges()` / `section_of(i)` record the groups
                                Slide params: src, id, md, zones, animations, transition,
-                               overlays, extra_style, title, notes, visible, font_size
+                               overlays, extra_style, title, notes, visible, font_size, ink
     sizes.py          `PageSize`: a str value object naming a deck size ("16:9", "4:3",
                                "9:16"/phone, "a0".."a5" [-landscape], letter/legal/
                                tabloid, WxH mm/cm/in/pt or px; constructors .mm/.cm/
@@ -196,7 +196,9 @@ src/
                                messages, then each extension's `messages` by least role),
                                sharing on/off (`Listener.move`), `share_status` (+ each
                                extension's `share_status`/`share_op`/`share_lines`),
-                               `send_owners`; `Kept` (a `SlideCache` per served deck),
+                               `send_owners`; `ink` relayed untouched, `_save_ink`
+                               (the presenter's "Keep" when no extension takes
+                               `edit-op`); `Kept` (a `SlideCache` per served deck),
                                `rebuild(full=)`, `_versioned` (asset stamps), patches
                                to pages (`Client.patches`); runs the server extensions
                                (`serve(extensions=)`, default `extensions_for` the installed
@@ -334,6 +336,13 @@ src/
                                then each plugin's `register_cli` (cli/__init__.py)
     clean.py          SVG Inkscape metadata stripping (used by cli and pre-commit hook;
                                the `clean` command skips draw.io files, drawio.py)
+    ink.py            pen ink: `ink_path` (ink/<slide id>.svg or Slide(ink=)),
+                               `compose_ink` (the file's strokes as the slide's last
+                               `<g class="inkflow-ink">`, stretched if its viewBox differs),
+                               `Stroke` (a page's stroke validated field by field into a
+                               filled `<path>`), `add_strokes` / `erase_strokes` (the file
+                               as bytes, laid out as `inkflow clean` would write it),
+                               `save_ink` (the presenter's "Keep" with no editor)
     label2id.py       `inkflow label2id`: promote each element's inkscape:label to its
                                SVG id (Inkscape convenience for Morph/animation targets).
                                Slugifies non-id labels, skips clashes and preview-layer
@@ -475,7 +484,13 @@ src/
                       bisection, `floorScale`, `neededHeight`, `nextTextSize`,
                       `parseTextSize`, `MIN_TEXT_FRACTION`; DOM
                       `fitSlide`/`fitZone`/`scheduleFit`/`neededBoxHeight`,
-                      `onFontsLoaded`; tested)
+                      `onFontsLoaded`; tested); ink (presenter and any editor
+                      alike): ink.ts (pure: perfect-freehand options, outline ->
+                      path data, Douglas-Peucker `simplify`, eraser hit test, relay
+                      validation; tested), inksettings.ts (pure palette state;
+                      tested), inkpad.ts (pointer input -> strokes: coalesced +
+                      predicted samples, one redraw per frame, eraser, palm and
+                      click swallowing), inkpalette.ts (the floating palette)
     presenter/        main presenter modules — navigation, transitions (progress-driven
                       via progress-driver.ts), overview, picker, websocket, status bar,
                       keyboard, syncmenu.ts (sync-mode status-bar control),
@@ -487,14 +502,17 @@ src/
                       <video> playback, wired in via status.ts), toeditor.ts (back
                       to an editor at this slide, `E`: shown only when a `welcome`
                       names an `editor` page; the opener editor tab when there is
-                      one; hidden in a static build), and deck-url.ts
+                      one; hidden in a static build), ink.ts (ink mode, key `i`:
+                      strokes held per slide in inkstore.ts, mounted into the
+                      slide's <svg> through slidehooks.ts, relayed as `ink`
+                      messages, saved with "Keep" as an `edit-op` `ink`), and deck-url.ts
                       (pure position<->fragment codec behind syncURL/readURL; the
                       only module reading location.pathname/search/hash)
     fit/              main.ts: the PDF export page's script (bundles/fit.js, inlined
                       into pdf.html by export.py): `fitSlide` on every slide, again
                       on load and once fonts are ready
   css/                CSS source
-    shared/           theme variables, animation keyframes
+    shared/           theme variables, animation keyframes, ink.css (the ink palette)
     presenter/        presenter partials including pv.css (sidebar panel)
 themes-tour/          a theme on every layout with text, code, a table and charts
                       (INKFLOW_TOUR_THEME / INKFLOW_TOUR_MODE): the built-in themes
@@ -504,7 +522,8 @@ demo/
   slides/             source SVGs and Markdown content files
   data/               chart data (sales.csv)
 mise.toml             task runner + tool versions (replaces poethepoet)
-package.json          JS devDependencies: biome, esbuild, typescript
+package.json          JS devDependencies: biome, esbuild, typescript, vitest,
+                      happy-dom, perfect-freehand (bundled: the ink stroke outline)
 pnpm-lock.yaml        pnpm lockfile (JS deps); package manager is pnpm, not npm
 pnpm-workspace.yaml   pnpm settings: allowlists esbuild's postinstall build script
 biome.json            Biome lint + format config (4-space indent, noUnusedVariables=error)
@@ -529,6 +548,9 @@ The watcher still rebuilds on every change of any project file, and `server.rebu
 
 **Position sync is a dumb relay with client-side authority + modes.**
 Clients send `{"type":"nav","slideIndex","step"}` (validated + clamped server-side by `_coerce_nav_position`; a view link's are dropped, and its page starts in `follow`); the server stores the last position and rebroadcasts it as `{"type":"position",...}` to the *other* clients, and pushes it once to each newly connected client. A window that booted from a deep link (a slide named in the URL, captured by `readURL()` before `syncURL()` rewrites the bar) or reconnected asserts its own position and ignores that first push; a bare window adopts it. Each client also has a per-tab **sync mode** (`two-way`/`present`/`follow`/`solo`, `shared/types.ts`) deciding locally whether it broadcasts nav (`sends()`) and applies incoming positions (`receives()`) — the server knows nothing about modes. `s` cycles the mode; `syncmenu.ts` owns the status-bar widget, `websocket.ts` the network/state. Switching into a receiving mode sends `{"type":"sync-request"}` to catch up. Persisted in `sessionStorage`.
+
+**Ink is drawn into the slide, held per slide, and saved to a file of its own.**
+A stroke is perfect-freehand's outline around the pen's track (`shared/ink.ts`), written as one filled `<path>` so it renders anywhere without inkflow. `shared/inkpad.ts` turns pointer input into strokes for any page: every coalesced sample is kept, the live stroke is one path redrawn once per animation frame (plus the browser's predicted samples) straight into the slide's own `<svg>`, so it is in slide units through the zoom camera, resizes and transitions; a pen's real pressure is used, a mouse's or finger's is simulated. By default only a pen draws (a mouse click and a swipe stay navigation, a palm near a pen is swallowed), and the click a gesture ends with never reaches the page. In the presenter (`presenter/ink.ts`, key `i`) ink is held per slide id (`inkstore.ts`, with undo) and re-mounted as `g.inkflow-live-ink` whenever `transitions.ts` mounts a slide (`slidehooks.ts`, which keeps transitions.ts and its tests free of ink; `onSlideLeaving` drops a stroke in progress before the outgoing slide is captured). Other windows get it as `{"type":"ink","op":"draw"|"add"|"erase"|"abandon"|"request"|"state",...}`, relayed by the server untouched (or over the window link in a static build) and gated by the same `sends()`/`receives()` as the position; receivers validate every field (`strokeFrom`); a view link may send only `request`. With "Keep" (offered on a page on this machine only), a stroke also goes to the server as `edit-op` action `ink`, which only the owner and share-link editors may send (a view link is answered "this link is view-only"), so an audience screen never writes files: an extension that takes `edit-op` makes it a step of its own (undoable), without one the server writes the ink file itself (`server._save_ink`, `ink.save_ink`; any other `edit-op` is refused). Saved ink is `ink/<slide id>.svg` (or `Slide(ink=)`), strokes directly under its root so each is an object of its own (located like any shape in an editor build; `SlideEditInfo.ink` names the file, which need not exist yet); `process_slide` composes it right after the overlays and before annotation (a cue can reveal a stroke), and `deps.note`s it, so ink appearing or going rebuilds its slide. `serialize_ink` writes exactly what `inkflow clean` would, so the pre-commit hook leaves ink files alone.
 
 **The deck position lives in the URL fragment, `#slide=7&steps=2` (`deck-url.ts`).**
 The fragment never reaches a server, so nothing has to route it and rewriting it is a same-document change every browser permits. The path segment this used to write (`/7`) only ever worked under `serve`, whose catch-all answers any path with the presenter: a static host 404s it on reload (the docs demo included), and a `file://` deck cannot have it at all — the browser rejects the rewrite (`history.replaceState` throws `SecurityError`; Firefox logs "Content at …/index.html may not load data from …/7"). The fragment is the only form: nothing writes a path segment any more and nothing reads one, so the position has exactly one representation. `deck-url.ts` is the only module that touches `location.hash`, and its two functions are pure over a `URL` so every case is unit-tested; `status.ts` supplies `window.location` and keeps a `try/catch` around `replaceState`.
@@ -694,8 +716,10 @@ Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop +
   `X-Frame-Options`/`frame-ancestors 'self'` and `Referrer-Policy: no-referrer`;
   `/_inkflow/instance` is the owner's; only the owner's page gets the edit
   commands. Messages by role: `allowed()` (owner only: `edit`, `share`; owner
-  and editors: a `hello` as `role: "editor"`; each extension's `messages` by
-  their least role; a viewer sends no `nav`, and its page starts in `follow`)
+  and editors: a `hello` as `role: "editor"`, `edit-op` (with no extension
+  taking it: ink "Keep", `_save_ink`); each extension's `messages` by their
+  least role; a viewer sends no `nav` and no ink but `request`, and its page
+  starts in `follow`)
 - Sharing (`--share`, a non-loopback `--host`, or the `share` ops
   status/on/off/rotate/kick, owner only): `Listener.move` rebinds the one port
   between this machine and every interface (or `--host`) without dropping

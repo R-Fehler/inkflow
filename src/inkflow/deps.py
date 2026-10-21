@@ -5,9 +5,9 @@ change touches (`inkflow.incremental`), each slide's processing is run inside
 `recording()`, and every place of the pipeline that reads a file, or looks
 whether one exists, says so with `note(path)`. The recording is the slide's
 dependencies: each path with its `Stamp` at the time, where "not there" is a
-stamp too, so a file that appears later (a slide that now shadows the
-layout of its name, a page committed beside its PDF) is a change like any
-other.
+stamp too, so a file that appears later (a slide's ink, a slide that now
+shadows the layout of its name, a page committed beside its PDF) is a change
+like any other.
 
 Outside a recording `note` does nothing, which is every build that is not a
 server's (`inkflow build`, `export`, `verify`).
