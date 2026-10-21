@@ -376,74 +376,157 @@
     renderEditButton();
   }
 
-  // src/ts/shared/ring.ts
-  function buildStepRing(current, total) {
-    const size = 20, cx = 10, cy = 10, ro = 9, ri = 5;
-    if (total === 0) {
-      return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:middle"><circle cx="${cx}" cy="${cy}" r="${(ro + ri) / 2}" fill="none" stroke="var(--overlay)" stroke-width="${ro - ri}" opacity="0.2"/></svg>`;
-    }
-    const gap = total > 1 ? 0.15 : 0;
-    const sweep = 2 * Math.PI / total;
-    let paths = "";
-    for (let i = 0; i < total; i++) {
-      const a1 = -Math.PI / 2 + i * sweep + gap / 2;
-      const a2 = -Math.PI / 2 + (i + 1) * sweep - gap / 2;
-      const ox1 = (cx + ro * Math.cos(a1)).toFixed(2), oy1 = (cy + ro * Math.sin(a1)).toFixed(2);
-      const ox2 = (cx + ro * Math.cos(a2)).toFixed(2), oy2 = (cy + ro * Math.sin(a2)).toFixed(2);
-      const ix1 = (cx + ri * Math.cos(a1)).toFixed(2), iy1 = (cy + ri * Math.sin(a1)).toFixed(2);
-      const ix2 = (cx + ri * Math.cos(a2)).toFixed(2), iy2 = (cy + ri * Math.sin(a2)).toFixed(2);
-      const large = a2 - a1 > Math.PI ? 1 : 0;
-      const active = i < current;
-      const d = `M${ox1},${oy1}A${ro},${ro},0,${large},1,${ox2},${oy2}L${ix2},${iy2}A${ri},${ri},0,${large},0,${ix1},${iy1}Z`;
-      paths += `<path d="${d}" fill="${active ? "var(--text)" : "var(--overlay)"}" opacity="${active ? 1 : 0.3}"/>`;
-    }
-    return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:middle" aria-label="Step ${current} of ${total}">${paths}</svg>`;
+  // src/ts/shared/viewbox.ts
+  var deckCanvas = { w: 1920, h: 1080 };
+  function parseViewBox(attr, fallback = `0 0 ${deckCanvas.w} ${deckCanvas.h}`) {
+    const parts = (attr ?? "").trim().split(/[\s,]+/).map(Number);
+    const valid = parts.length === 4 && parts.every((n) => Number.isFinite(n)) && parts[2] > 0 && parts[3] > 0;
+    const [x, y, w, h] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
+    return { x, y, w, h };
+  }
+  function formatViewBox(vb) {
+    const round2 = (n) => Math.round(n * 1e3) / 1e3;
+    return `${round2(vb.x)} ${round2(vb.y)} ${round2(vb.w)} ${round2(vb.h)}`;
   }
 
-  // src/ts/shared/sections.ts
-  function sectionRuns(slides) {
-    const runs = [];
-    slides.forEach((s, i) => {
-      const section = s.section ?? null;
-      const last = runs[runs.length - 1];
-      if (last && (last.section?.index ?? -1) === (section?.index ?? -1)) {
-        last.end = i + 1;
-      } else {
-        runs.push({ section, start: i, end: i + 1 });
-      }
-    });
-    return runs;
+  // src/ts/shared/fit.ts
+  var MIN_TEXT_FRACTION = 1 / 80;
+  var FIT_FLOOR = 0.33;
+  var FIT_TOLERANCE = 0.01;
+  var SLACK = 1;
+  function floorScale(baseSize, minText) {
+    if (!(baseSize > 0)) return 1;
+    return Math.min(1, Math.max(FIT_FLOOR, minText / baseSize));
   }
-  function sectionPosition(slides, i) {
-    const run = sectionRuns(slides).find((r) => i >= r.start && i < r.end);
-    if (!run?.section) return null;
+  function searchScale(fits, floor, tolerance = FIT_TOLERANCE) {
+    if (fits(1)) return { scale: 1, overflow: false };
+    const lowest = Math.min(1, Math.max(0, floor));
+    if (lowest >= 1 || !fits(lowest)) return { scale: lowest, overflow: true };
+    let lo = lowest;
+    let hi = 1;
+    while (hi - lo > tolerance) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) lo = mid;
+      else hi = mid;
+    }
     return {
-      name: run.section.name,
-      at: i - run.start + 1,
-      of: run.end - run.start
+      scale: Math.max(lowest, Math.floor(lo * 1e3) / 1e3),
+      overflow: false
     };
   }
-  function gridRows(runs, cols) {
-    return runs.reduce((n, r) => n + Math.ceil((r.end - r.start) / cols), 0);
+  function neededHeight(children) {
+    let total = 0;
+    for (const c of children) {
+      if (c.inFlow) total += c.height + c.marginTop + c.marginBottom;
+    }
+    return total;
   }
-  function verticalNeighbor(boxes, i, dir) {
-    const me = boxes[i];
-    if (!me) return i;
-    const tops = [...new Set(boxes.map((b) => b.top))].sort((a, b) => a - b);
-    const row = tops.indexOf(me.top) + dir;
-    if (row < 0 || row >= tops.length) return i;
-    const center = me.left + me.width / 2;
-    let best = i;
-    let bestD = Number.POSITIVE_INFINITY;
-    boxes.forEach((b, j) => {
-      if (b.top !== tops[row]) return;
-      const d = Math.abs(b.left + b.width / 2 - center);
-      if (d < bestD) {
-        best = j;
-        bestD = d;
-      }
+  var px = (v) => Number.parseFloat(v) || 0;
+  function slideSvg(el) {
+    let svg = el.ownerSVGElement ?? null;
+    while (svg?.ownerSVGElement) svg = svg.ownerSVGElement;
+    return svg ?? (el instanceof SVGSVGElement ? el : null);
+  }
+  function minTextSize(svg) {
+    const own = Number.parseFloat(
+      svg.getAttribute("data-inkflow-min-text") ?? ""
+    );
+    if (own > 0) return own;
+    return parseViewBox(svg.getAttribute("viewBox")).h * MIN_TEXT_FRACTION;
+  }
+  function unitScale(fo) {
+    const root = slideSvg(fo);
+    const a = fo.getScreenCTM?.();
+    const b = root?.getScreenCTM();
+    if (!a || !b) return 1;
+    const da = Math.sqrt(Math.abs(a.a * a.d - a.b * a.c));
+    const db = Math.sqrt(Math.abs(b.a * b.d - b.b * b.c));
+    return da > 0 && db > 0 ? da / db : 1;
+  }
+  function laidOut(wrapper) {
+    return Array.from(wrapper.children, (el) => {
+      const s = getComputedStyle(el);
+      return {
+        height: el.offsetHeight ?? 0,
+        marginTop: px(s.marginTop),
+        marginBottom: px(s.marginBottom),
+        inFlow: s.display !== "none" && s.position !== "absolute" && s.position !== "fixed"
+      };
     });
-    return best;
+  }
+  function overflows(wrapper, content) {
+    const ws = getComputedStyle(wrapper);
+    const avail = wrapper.clientHeight - px(ws.paddingTop) - px(ws.paddingBottom);
+    if (neededHeight(laidOut(wrapper)) > avail + SLACK) return true;
+    const width = content.clientWidth;
+    for (const el of Array.from(content.querySelectorAll("pre, table"))) {
+      const box = el;
+      if (box.localName === "pre") {
+        if (box.scrollWidth > box.clientWidth + SLACK) return true;
+      } else if (box.offsetWidth > width + SLACK) {
+        return true;
+      }
+    }
+    return false;
+  }
+  function fitZone(fo, minText) {
+    const wrapper = fo.querySelector(
+      ":scope > .inkflow-wrapper"
+    );
+    const content = wrapper?.querySelector(
+      ":scope > .inkflow-content"
+    );
+    if (!wrapper || !content) return null;
+    wrapper.style.removeProperty("--inkflow-fit-scale");
+    fo.removeAttribute("data-inkflow-fit");
+    fo.removeAttribute("data-inkflow-overflow");
+    const cs = getComputedStyle(wrapper);
+    if (cs.display === "none" || wrapper.clientHeight === 0) return null;
+    const apply = (scale) => {
+      if (scale < 1)
+        wrapper.style.setProperty("--inkflow-fit-scale", String(scale));
+      else wrapper.style.removeProperty("--inkflow-fit-scale");
+    };
+    const fits = (scale) => {
+      apply(scale);
+      return !overflows(wrapper, content);
+    };
+    const off = cs.getPropertyValue("--inkflow-fit").trim() === "none";
+    const result = off ? { scale: 1, overflow: !fits(1) } : searchScale(
+      fits,
+      floorScale(px(cs.fontSize) * unitScale(fo), minText)
+    );
+    apply(result.scale);
+    if (result.scale < 1)
+      fo.setAttribute("data-inkflow-fit", result.scale.toFixed(3));
+    if (result.overflow) fo.setAttribute("data-inkflow-overflow", "");
+    return result;
+  }
+  function fitSlide(root) {
+    if (!root) return;
+    const svg = root instanceof SVGSVGElement ? root : root.querySelector("svg");
+    if (!svg) return;
+    const min = minTextSize(slideSvg(svg) ?? svg);
+    for (const wrapper of Array.from(
+      svg.querySelectorAll("foreignObject > .inkflow-wrapper")
+    )) {
+      const fo = wrapper.parentElement;
+      if (fo) fitZone(fo, min);
+    }
+  }
+  function onFontsLoaded(fn) {
+    if (typeof document === "undefined" || !document.fonts) return;
+    document.fonts.addEventListener("loadingdone", () => fn());
+    void document.fonts.ready.then(() => fn());
+  }
+
+  // src/ts/presenter/slidehooks.ts
+  var mounted = [];
+  function onSlideMounted(fn) {
+    mounted.push(fn);
+  }
+  function slideMounted() {
+    for (const fn of mounted) fn();
   }
 
   // src/ts/shared/easing.ts
@@ -675,19 +758,6 @@
   }
   function boxFrame(screen, box) {
     return screen.translate(box.x, box.y).scale(box.width, box.height);
-  }
-
-  // src/ts/shared/viewbox.ts
-  var deckCanvas = { w: 1920, h: 1080 };
-  function parseViewBox(attr, fallback = `0 0 ${deckCanvas.w} ${deckCanvas.h}`) {
-    const parts = (attr ?? "").trim().split(/[\s,]+/).map(Number);
-    const valid = parts.length === 4 && parts.every((n) => Number.isFinite(n)) && parts[2] > 0 && parts[3] > 0;
-    const [x, y, w, h] = valid ? parts : fallback.split(/[\s,]+/).map(Number);
-    return { x, y, w, h };
-  }
-  function formatViewBox(vb) {
-    const round2 = (n) => Math.round(n * 1e3) / 1e3;
-    return `${round2(vb.x)} ${round2(vb.y)} ${round2(vb.w)} ${round2(vb.h)}`;
   }
 
   // src/ts/shared/camera-dom.ts
@@ -1025,712 +1095,6 @@
     applyCameraInstant(root, step);
     applyCodeHighlights(root, step);
     rootStep.set(root, step);
-  }
-
-  // src/ts/presenter/deck-url.ts
-  var SLIDE = "slide";
-  var STEPS = "steps";
-  function hashParams(url) {
-    return new URLSearchParams(url.hash.slice(1));
-  }
-  function positionHref(url, slideIndex, step) {
-    const next = new URL(url.href);
-    const params = hashParams(next);
-    params.set(SLIDE, String(slideIndex + 1));
-    if (step > 0) params.set(STEPS, String(step));
-    else params.delete(STEPS);
-    next.hash = params.toString();
-    return next.href;
-  }
-  function readPosition(url, slideCount) {
-    const params = hashParams(url);
-    const slide = parseInt(params.get(SLIDE) ?? "", 10);
-    const inDeck = !Number.isNaN(slide) && slide >= 1 && slide <= slideCount;
-    const step = parseInt(params.get(STEPS) ?? "0", 10);
-    return {
-      slideIndex: inDeck ? slide - 1 : null,
-      step: !Number.isNaN(step) && step >= 0 ? step : 0
-    };
-  }
-
-  // src/ts/presenter/progress-driver.ts
-  var ProgressDriver = class {
-    value = 0;
-    // The end the most recent animateTo is travelling toward. Callers read this to
-    // decide which way a reversal should go.
-    heading = 1;
-    animateTo(target, durationSeconds, signal, onFrame) {
-      this.heading = target;
-      const ratePerMillisecond = 1 / (durationSeconds * 1e3);
-      return new Promise((resolve) => {
-        let lastTimestamp = null;
-        const step = (timestamp) => {
-          if (signal.aborted) {
-            resolve();
-            return;
-          }
-          if (lastTimestamp === null) lastTimestamp = timestamp;
-          const direction = target >= this.value ? 1 : -1;
-          this.value += direction * ratePerMillisecond * (timestamp - lastTimestamp);
-          lastTimestamp = timestamp;
-          const reachedTarget = direction === 1 && this.value >= target || direction === -1 && this.value <= target;
-          if (reachedTarget) {
-            this.value = target;
-            onFrame(this.value);
-            resolve();
-            return;
-          }
-          onFrame(this.value);
-          requestAnimationFrame(step);
-        };
-        requestAnimationFrame(step);
-      });
-    }
-  };
-
-  // src/ts/presenter/video.ts
-  var armed = /* @__PURE__ */ new WeakSet();
-  var activeState = /* @__PURE__ */ new WeakMap();
-  function readSpec(v) {
-    const step = v.getAttribute("data-play-on-step");
-    const start = v.getAttribute("data-start");
-    const end = v.getAttribute("data-end");
-    return {
-      autoplay: v.hasAttribute("data-autoplay"),
-      loop: v.hasAttribute("data-loop"),
-      playOnStep: step === null ? null : Number(step),
-      start: start === null ? 0 : Number(start),
-      end: end === null ? null : Number(end)
-    };
-  }
-  function arm(v, spec) {
-    if (armed.has(v)) return;
-    armed.add(v);
-    if (spec.start > 0) {
-      const seek = () => {
-        if (v.currentTime < spec.start) v.currentTime = spec.start;
-      };
-      if (v.readyState >= 1) seek();
-      else v.addEventListener("loadedmetadata", seek, { once: true });
-    }
-    if (spec.end !== null || spec.loop) {
-      v.addEventListener("timeupdate", () => {
-        if (spec.end !== null && v.currentTime >= spec.end) {
-          if (spec.loop) v.currentTime = spec.start;
-          else v.pause();
-        }
-      });
-    }
-    if (spec.loop) {
-      v.addEventListener("ended", () => playFrom(v, spec.start));
-    }
-  }
-  function playFrom(v, start) {
-    const go = () => {
-      v.currentTime = start;
-      void v.play().catch(() => {
-      });
-    };
-    if (start > 0 && v.readyState < 1) {
-      v.addEventListener("loadedmetadata", go, { once: true });
-    } else {
-      go();
-    }
-  }
-  function syncVideos(root, step) {
-    root.querySelectorAll("video").forEach((v) => {
-      const spec = readSpec(v);
-      arm(v, spec);
-      const shouldPlay = spec.autoplay || spec.playOnStep !== null && step >= spec.playOnStep;
-      const wasActive = activeState.get(v) ?? false;
-      if (shouldPlay && !wasActive) {
-        playFrom(v, spec.start);
-      } else if (!shouldPlay && wasActive) {
-        v.pause();
-        v.currentTime = spec.start;
-      }
-      activeState.set(v, shouldPlay);
-    });
-  }
-
-  // src/ts/presenter/zoom.ts
-  var stage = document.getElementById("stage");
-  var stageWrap = document.getElementById("stage-wrap");
-  var indicator = document.getElementById("zoom-indicator");
-  var LIMITS = { minScale: 1, maxScale: 8 };
-  var WHEEL_STEP = 1.0015;
-  var KEY_ZOOM_STEP = 1.4;
-  var KEY_ANIM_MS = 140;
-  var RESET_ANIM_MS = 240;
-  var NAV_RESET_MS = 150;
-  var EASE = cubicBezierEasing("cubic-bezier(0.22, 1, 0.36, 1)");
-  var baseViewBox = null;
-  var camera = null;
-  var navReset = null;
-  var beforeGesture = () => {
-  };
-  function setBeforeCameraGesture(fn) {
-    beforeGesture = fn;
-  }
-  var dragStartCamera = null;
-  var dragStartInverse = null;
-  var dragStartClientX = 0;
-  var dragStartClientY = 0;
-  function currentSvg() {
-    return stage?.querySelector("svg") ?? null;
-  }
-  function clientToUser(clientX, clientY, inverse) {
-    const inv = inverse ?? currentSvg()?.getScreenCTM()?.inverse();
-    if (!inv) return null;
-    const p = new DOMPoint(clientX, clientY).matrixTransform(inv);
-    return { ux: p.x, uy: p.y };
-  }
-  function ensureBase() {
-    if (camera && baseViewBox) return true;
-    const svg = currentSvg();
-    if (!svg) return false;
-    baseViewBox = parseViewBox(svg.getAttribute("viewBox"));
-    camera = { ...baseViewBox };
-    return true;
-  }
-  function renderIndicator() {
-    if (!indicator) return;
-    const factor = camera && baseViewBox ? scaleOf(camera, baseViewBox) : 1;
-    indicator.textContent = `${factor.toFixed(1)}\xD7`;
-    indicator.toggleAttribute("data-active", factor > 1.01);
-  }
-  function applyCamera() {
-    const svg = currentSvg();
-    if (!svg || !camera) return;
-    svg.setAttribute("viewBox", formatViewBox(camera));
-    renderIndicator();
-  }
-  var driver = new ProgressDriver();
-  var animController = null;
-  function cancelAnim() {
-    animController?.abort();
-    animController = null;
-  }
-  function animateCameraTo(target, ms, onDone) {
-    cancelAnim();
-    if (!camera) {
-      camera = { ...target };
-      applyCamera();
-      onDone?.();
-      return;
-    }
-    const start = { ...camera };
-    const controller2 = new AbortController();
-    animController = controller2;
-    driver.value = 0;
-    driver.animateTo(1, ms / 1e3, controller2.signal, (p) => {
-      camera = p >= 1 ? { ...target } : lerpViewBox(start, target, EASE(p));
-      applyCamera();
-    }).then(() => {
-      if (animController === controller2) animController = null;
-      if (!controller2.signal.aborted) onDone?.();
-    });
-  }
-  function endDrag() {
-    dragStartCamera = null;
-    dragStartInverse = null;
-    document.body.classList.remove("zoom-grabbing");
-  }
-  function resetCamera() {
-    cancelAnim();
-    const svg = currentSvg();
-    if (svg && baseViewBox) {
-      svg.setAttribute("viewBox", formatViewBox(baseViewBox));
-    }
-    baseViewBox = null;
-    camera = null;
-    endDrag();
-    renderIndicator();
-  }
-  function cameraIsZoomed() {
-    return !!camera && !!baseViewBox && isZoomedIn(camera, baseViewBox);
-  }
-  function runNavReset() {
-    const fn = navReset;
-    navReset = null;
-    fn?.();
-  }
-  function resetCameraThen(after) {
-    if (!cameraIsZoomed() || !baseViewBox) {
-      navReset = null;
-      after();
-      return;
-    }
-    navReset = after;
-    animateCameraTo({ ...baseViewBox }, NAV_RESET_MS, runNavReset);
-  }
-  function hasPendingNav() {
-    return navReset !== null;
-  }
-  function cancelPendingNav() {
-    navReset = null;
-  }
-  function takeCamera() {
-    if (navReset) runNavReset();
-    beforeGesture();
-  }
-  function smoothResetCamera() {
-    takeCamera();
-    if (!ensureBase() || !camera || !baseViewBox) return;
-    if (!isZoomedIn(camera, baseViewBox)) return;
-    animateCameraTo({ ...baseViewBox }, RESET_ANIM_MS);
-  }
-  function keyZoom(direction) {
-    takeCamera();
-    if (!ensureBase() || !camera || !baseViewBox) return;
-    const factor = direction === "in" ? KEY_ZOOM_STEP : 1 / KEY_ZOOM_STEP;
-    const target = zoomAt(
-      camera,
-      baseViewBox,
-      factor,
-      { ux: camera.x + camera.w / 2, uy: camera.y + camera.h / 2 },
-      LIMITS
-    );
-    animateCameraTo(target, KEY_ANIM_MS);
-  }
-  function overGrid(target) {
-    return Boolean(target?.closest?.("#overview"));
-  }
-  function isCameraGesture(e) {
-    return e.ctrlKey;
-  }
-  function setArmed(on) {
-    document.body.classList.toggle("camera-armed", on);
-  }
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Control") setArmed(true);
-  });
-  document.addEventListener("keyup", (e) => {
-    if (e.key === "Control") setArmed(false);
-  });
-  window.addEventListener("blur", () => setArmed(false));
-  if (stageWrap) {
-    const wrap = stageWrap;
-    wrap.addEventListener(
-      "wheel",
-      (e) => {
-        if (!isCameraGesture(e) || overGrid(e.target)) return;
-        e.preventDefault();
-        takeCamera();
-        cancelAnim();
-        if (!ensureBase() || !camera || !baseViewBox) return;
-        const focus = clientToUser(e.clientX, e.clientY);
-        if (!focus) return;
-        const factor = Math.min(Math.max(WHEEL_STEP ** -e.deltaY, 0.2), 5);
-        camera = zoomAt(camera, baseViewBox, factor, focus, LIMITS);
-        applyCamera();
-      },
-      { passive: false }
-    );
-    wrap.addEventListener("pointerdown", (e) => {
-      if (!isCameraGesture(e) || overGrid(e.target)) return;
-      takeCamera();
-      cancelAnim();
-      if (!ensureBase() || !camera) return;
-      const inverse = currentSvg()?.getScreenCTM()?.inverse();
-      if (!inverse) return;
-      wrap.setPointerCapture(e.pointerId);
-      dragStartCamera = { ...camera };
-      dragStartInverse = inverse;
-      dragStartClientX = e.clientX;
-      dragStartClientY = e.clientY;
-      document.body.classList.add("zoom-grabbing");
-    });
-    wrap.addEventListener("pointermove", (e) => {
-      if (!dragStartCamera || !dragStartInverse || !baseViewBox) return;
-      const from = clientToUser(
-        dragStartClientX,
-        dragStartClientY,
-        dragStartInverse
-      );
-      const to = clientToUser(e.clientX, e.clientY, dragStartInverse);
-      if (!from || !to) return;
-      camera = panBy(
-        dragStartCamera,
-        baseViewBox,
-        from.ux - to.ux,
-        from.uy - to.uy
-      );
-      applyCamera();
-    });
-    wrap.addEventListener("pointerup", endDrag);
-    wrap.addEventListener("pointercancel", endDrag);
-    wrap.addEventListener("dblclick", smoothResetCamera);
-  }
-
-  // src/ts/presenter/status.ts
-  var stage2 = document.getElementById("stage");
-  var slideInfo = document.getElementById("slide-info");
-  var stepInfo = document.getElementById("step-info");
-  var mhudSlideInfo = document.getElementById("mhud-slide-info");
-  var mhudStepRing = document.getElementById("mhud-step-ring");
-  var maxStepSlides = null;
-  var maxStepIndex = -1;
-  var maxStepValue = 0;
-  function maxStep2() {
-    if (maxStepSlides === state.slides && maxStepIndex === state.slideIndex)
-      return maxStepValue;
-    const scratch = document.createElement("div");
-    scratch.innerHTML = state.slides[state.slideIndex]?.svg ?? "";
-    maxStepValue = maxStep(scratch);
-    maxStepSlides = state.slides;
-    maxStepIndex = state.slideIndex;
-    return maxStepValue;
-  }
-  var runController = null;
-  var runDriver = null;
-  var runRun = null;
-  var runTo = 0;
-  var runForward = true;
-  function inflightStepDirection() {
-    if (!runController) return null;
-    return runForward ? "forward" : "backward";
-  }
-  function driveRun() {
-    const ctrl = new AbortController();
-    runController = ctrl;
-    const driver2 = runDriver;
-    const run = runRun;
-    const to = runTo;
-    void driver2.animateTo(
-      runForward ? 1 : 0,
-      run.totalMs / 1e3,
-      ctrl.signal,
-      (v) => seekStepRun(run, v)
-    ).then(() => {
-      if (ctrl.signal.aborted) return;
-      if (runController === ctrl) {
-        runController = null;
-        runDriver = null;
-        runRun = null;
-      }
-      applyStepInstant(stage2, to);
-      updateStatus();
-    });
-  }
-  function landRun() {
-    if (!runController) return;
-    runController.abort();
-    runController = null;
-    runDriver = null;
-    runRun = null;
-    applyStepInstant(stage2, runTo);
-    syncVideos(stage2, runTo);
-  }
-  function snapStepRun() {
-    if (!runController) return;
-    landRun();
-    updateStatus();
-  }
-  function reverseStepRun() {
-    if (!runController || !runDriver || !runRun) return false;
-    const nextTo = runForward ? runTo - 1 : runTo + 1;
-    if (nextTo < 0) return false;
-    runController.abort();
-    runForward = !runForward;
-    runTo = nextTo;
-    state.step = runTo;
-    applyCodeHighlights(stage2, runTo);
-    syncVideos(stage2, runTo);
-    updateStatus();
-    driveRun();
-    return true;
-  }
-  function settleStepRun() {
-    landRun();
-  }
-  setBeforeCameraGesture(snapStepRun);
-  function applyCurrentStep() {
-    if (hasPendingNav()) return;
-    if (cameraIsZoomed()) {
-      resetCameraThen(() => {
-        resetCamera();
-        runCurrentStep();
-      });
-    } else {
-      cancelPendingNav();
-      resetCamera();
-      runCurrentStep();
-    }
-  }
-  function runCurrentStep() {
-    landRun();
-    const from = appliedStep(stage2);
-    const to = state.step;
-    applyCodeHighlights(stage2, to);
-    syncVideos(stage2, to);
-    const run = buildStepRun(stage2, from, to);
-    if (run.totalMs <= 0 || from === to) {
-      applyStepInstant(stage2, to);
-      updateStatus();
-      return;
-    }
-    runRun = run;
-    runDriver = new ProgressDriver();
-    runDriver.value = run.forward ? 0 : 1;
-    runTo = to;
-    runForward = run.forward;
-    updateStatus();
-    driveRun();
-  }
-  function applyCurrentStepInstant() {
-    resetCamera();
-    landRun();
-    applyStepInstant(stage2, state.step);
-    syncVideos(stage2, state.step);
-    updateStatus();
-  }
-  function syncURL() {
-    const href = positionHref(
-      new URL(window.location.href),
-      state.slideIndex,
-      state.step
-    );
-    try {
-      history.replaceState(null, "", href);
-    } catch (_) {
-    }
-  }
-  function readURL() {
-    const { slideIndex, step } = readPosition(
-      new URL(window.location.href),
-      state.slides.length
-    );
-    if (slideIndex !== null) state.slideIndex = slideIndex;
-    state.step = step;
-    return slideIndex !== null;
-  }
-  function updateStatus() {
-    const infoHtml = `<span class="slide-current">${state.slideIndex + 1}</span> / ${state.slides.length}`;
-    const at = sectionPosition(state.slides, state.slideIndex);
-    slideInfo.title = at ? `${at.name}: ${at.at} of ${at.of}` : "";
-    const ringHtml = buildStepRing(state.step, maxStep2());
-    slideInfo.innerHTML = infoHtml;
-    stepInfo.innerHTML = ringHtml;
-    mhudSlideInfo.innerHTML = infoHtml;
-    mhudStepRing.innerHTML = ringHtml;
-    syncURL();
-  }
-
-  // src/ts/presenter/pv.ts
-  var pvPanel = document.getElementById("pv");
-  var pvResizeHandle = document.getElementById("pv-resize-handle");
-  var pvStrip = document.getElementById("pv-strip");
-  var pvClock = document.getElementById("pv-clock");
-  var pvElapsed = document.getElementById("pv-elapsed");
-  var pvTimerToggle = document.getElementById("pv-timer-toggle");
-  var pvTimerReset = document.getElementById("pv-timer-reset");
-  var pvSlideInfo = document.getElementById("pv-slide-info");
-  var pvSection = document.getElementById("pv-section");
-  var pvStepRing = document.getElementById("pv-step-ring");
-  var pvNextInner = document.getElementById("pv-next-inner");
-  var pvNotes = document.getElementById("pv-notes");
-  var _elapsedAccumMs = 0;
-  var _runningSince = Date.now();
-  function _elapsedMs() {
-    const running = _runningSince === null ? 0 : Date.now() - _runningSince;
-    return _elapsedAccumMs + running;
-  }
-  function _setTimerPaused(paused) {
-    if (paused === (_runningSince === null)) return;
-    if (paused) {
-      _elapsedAccumMs = _elapsedMs();
-      _runningSince = null;
-    } else {
-      _runningSince = Date.now();
-    }
-    pvStrip.classList.toggle("timer-paused", paused);
-    const label = paused ? "Resume timer" : "Pause timer";
-    pvTimerToggle.title = label;
-    pvTimerToggle.setAttribute("aria-label", label);
-    updatePvClock();
-  }
-  function _resetTimer() {
-    _elapsedAccumMs = 0;
-    if (_runningSince !== null) _runningSince = Date.now();
-    updatePvClock();
-  }
-  pvTimerToggle.addEventListener("click", () => {
-    _setTimerPaused(_runningSince !== null);
-  });
-  pvTimerReset.addEventListener("click", _resetTimer);
-  function _pad2(n) {
-    return String(n).padStart(2, "0");
-  }
-  function updatePvClock() {
-    const now = /* @__PURE__ */ new Date();
-    pvClock.textContent = `${_pad2(now.getHours())}:${_pad2(now.getMinutes())}:${_pad2(now.getSeconds())}`;
-    const secs = Math.floor(_elapsedMs() / 1e3);
-    const h = Math.floor(secs / 3600);
-    const m = Math.floor(secs % 3600 / 60);
-    const s = secs % 60;
-    pvElapsed.textContent = h > 0 ? `${_pad2(h)}:${_pad2(m)}:${_pad2(s)}` : `${_pad2(m)}:${_pad2(s)}`;
-  }
-  function updatePvInfo() {
-    const total = state.slides.length;
-    pvSlideInfo.innerHTML = `<span class="slide-current">${total ? state.slideIndex + 1 : "\u2013"}</span> / ${total || "\u2013"}`;
-    pvStepRing.innerHTML = buildStepRing(state.step, maxStep2());
-    if (pvSection) {
-      const at = sectionPosition(state.slides, state.slideIndex);
-      pvSection.hidden = !at;
-      pvSection.textContent = at ? `\xA7 ${at.name} \xB7 ${at.at}/${at.of}` : "";
-      pvSection.title = at ? `Section \u201C${at.name}\u201D: slide ${at.at} of ${at.of}` : "";
-    }
-  }
-  function _scalePvNext() {
-    const svg = pvNextInner.querySelector("svg");
-    if (!svg) return;
-    const vb = parseViewBox(svg.getAttribute("viewBox"));
-    svg.setAttribute("width", String(vb.w));
-    svg.setAttribute("height", String(vb.h));
-    svg.style.width = `${vb.w}px`;
-    svg.style.height = `${vb.h}px`;
-    const scale = Math.min(
-      pvNextInner.clientWidth / vb.w,
-      pvNextInner.clientHeight / vb.h
-    );
-    const tx = (pvNextInner.clientWidth - vb.w * scale) / 2;
-    const ty = (pvNextInner.clientHeight - vb.h * scale) / 2;
-    svg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
-  }
-  function renderPvNext() {
-    const curMax = maxStep2();
-    let previewSvg = null;
-    let revealStep = 0;
-    if (state.step < curMax) {
-      previewSvg = state.slides[state.slideIndex]?.svg ?? null;
-      revealStep = state.step + 1;
-    } else if (state.slideIndex + 1 < state.slides.length) {
-      previewSvg = state.slides[state.slideIndex + 1].svg;
-    }
-    if (previewSvg === null) {
-      pvNextInner.innerHTML = '<div id="pv-next-empty">END</div>';
-      return;
-    }
-    pvNextInner.innerHTML = previewSvg;
-    const svg = pvNextInner.querySelector("svg");
-    if (svg) applyStepInstant(svg, revealStep);
-    requestAnimationFrame(_scalePvNext);
-  }
-  function renderPvNotes() {
-    pvNotes.innerHTML = state.slides[state.slideIndex]?.notes ?? "";
-    pvNotes.scrollTop = 0;
-  }
-  function renderPv() {
-    updatePvInfo();
-    renderPvNext();
-    renderPvNotes();
-    renderEditButton();
-  }
-  function togglePv() {
-    const opening = document.body.classList.toggle("pv-open");
-    pvPanel.addEventListener(
-      "transitionend",
-      opening ? renderPvNext : _scalePvNext,
-      { once: true }
-    );
-  }
-  window.addEventListener("resize", _scalePvNext);
-  function _onPvResizeMove(e) {
-    pvPanel.style.setProperty(
-      "--pv-width",
-      `${window.innerWidth - e.clientX}px`
-    );
-    _scalePvNext();
-  }
-  function _onPvResizeUp(e) {
-    pvResizeHandle.releasePointerCapture(e.pointerId);
-    pvResizeHandle.removeEventListener("pointermove", _onPvResizeMove);
-    pvResizeHandle.removeEventListener("pointerup", _onPvResizeUp);
-    pvPanel.style.transition = "";
-  }
-  pvResizeHandle.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    pvPanel.style.transition = "none";
-    pvResizeHandle.setPointerCapture(e.pointerId);
-    pvResizeHandle.addEventListener("pointermove", _onPvResizeMove);
-    pvResizeHandle.addEventListener("pointerup", _onPvResizeUp);
-  });
-
-  // src/ts/shared/deck-styles.ts
-  function applyDeckStyles(msg) {
-    if (msg.styles !== void 0) {
-      const el = document.getElementById("deck-styles");
-      if (el) el.textContent = msg.styles;
-    }
-    if (msg.mode !== void 0)
-      document.documentElement.dataset.theme = msg.mode;
-  }
-
-  // src/ts/shared/patch.ts
-  function isWhole(sent) {
-    return !sent.some((item) => typeof item === "string");
-  }
-  function applyPatch(held, sent) {
-    if (isWhole(sent)) return sent;
-    const byKey = /* @__PURE__ */ new Map();
-    for (const item of held) {
-      if (item.key != null) byKey.set(item.key, item);
-    }
-    const out = [];
-    for (const item of sent) {
-      if (typeof item !== "string") {
-        out.push(item);
-        continue;
-      }
-      const mine = byKey.get(item);
-      if (!mine) return null;
-      out.push(mine);
-    }
-    return out;
-  }
-  function sameItems(a, b) {
-    return a.length === b.length && a.every((item, i) => item === b[i]);
-  }
-
-  // src/ts/shared/wsurl.ts
-  var WS_PATH = "/_inkflow/ws";
-  function socketUrl(loc) {
-    const scheme = loc.protocol === "https:" ? "wss" : "ws";
-    return `${scheme}://${loc.host || "localhost"}${WS_PATH}`;
-  }
-  var SENT_AWAY = 4001;
-  function openSocket() {
-    return new WebSocket(socketUrl(location));
-  }
-
-  // src/ts/presenter/toeditor.ts
-  var editorPath = null;
-  function backToEditor() {
-    if (editorPath === null) return;
-    const hash = `#slide=${state.slideIndex + 1}`;
-    const opener = window.opener;
-    try {
-      if (opener && !opener.closed && opener.location.origin === location.origin && opener.location.pathname.startsWith(editorPath)) {
-        opener.location.hash = hash;
-        opener.focus();
-        window.close();
-        if (window.closed) return;
-      }
-    } catch {
-    }
-    location.href = `${editorPath}${hash}`;
-  }
-  function setEditor(path) {
-    editorPath = path?.startsWith("/") ? path : null;
-    const button = document.getElementById("btn-to-editor");
-    if (button) button.style.display = editorPath === null ? "none" : "";
-  }
-  function initToEditor() {
-    const button = document.getElementById("btn-to-editor");
-    if (!button) return;
-    button.style.display = "none";
-    button.addEventListener("click", backToEditor);
   }
 
   // src/ts/shared/morph-math.ts
@@ -2225,6 +1589,41 @@
     }));
   }
 
+  // src/ts/presenter/progress-driver.ts
+  var ProgressDriver = class {
+    value = 0;
+    // The end the most recent animateTo is travelling toward. Callers read this to
+    // decide which way a reversal should go.
+    heading = 1;
+    animateTo(target, durationSeconds, signal, onFrame) {
+      this.heading = target;
+      const ratePerMillisecond = 1 / (durationSeconds * 1e3);
+      return new Promise((resolve) => {
+        let lastTimestamp = null;
+        const step = (timestamp) => {
+          if (signal.aborted) {
+            resolve();
+            return;
+          }
+          if (lastTimestamp === null) lastTimestamp = timestamp;
+          const direction = target >= this.value ? 1 : -1;
+          this.value += direction * ratePerMillisecond * (timestamp - lastTimestamp);
+          lastTimestamp = timestamp;
+          const reachedTarget = direction === 1 && this.value >= target || direction === -1 && this.value <= target;
+          if (reachedTarget) {
+            this.value = target;
+            onFrame(this.value);
+            resolve();
+            return;
+          }
+          onFrame(this.value);
+          requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      });
+    }
+  };
+
   // src/ts/presenter/morph.ts
   var LEAF_SELECTOR = "rect, circle, ellipse, line, polyline, polygon, path, text, image, foreignObject";
   var DEFINITION_SUBTREE_SELECTOR = "defs, marker, symbol, clipPath, mask, pattern";
@@ -2304,8 +1703,8 @@
     );
   }
   function readFontSize(node) {
-    const px = parseFloat(getComputedStyle(node).fontSize);
-    return Number.isFinite(px) ? px : 0;
+    const px2 = parseFloat(getComputedStyle(node).fontSize);
+    return Number.isFinite(px2) ? px2 : 0;
   }
   function textAnchorLocal(node) {
     return {
@@ -2944,6 +2343,531 @@
     }
   };
 
+  // src/ts/shared/ring.ts
+  function buildStepRing(current, total) {
+    const size = 20, cx = 10, cy = 10, ro = 9, ri = 5;
+    if (total === 0) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:middle"><circle cx="${cx}" cy="${cy}" r="${(ro + ri) / 2}" fill="none" stroke="var(--overlay)" stroke-width="${ro - ri}" opacity="0.2"/></svg>`;
+    }
+    const gap = total > 1 ? 0.15 : 0;
+    const sweep = 2 * Math.PI / total;
+    let paths = "";
+    for (let i = 0; i < total; i++) {
+      const a1 = -Math.PI / 2 + i * sweep + gap / 2;
+      const a2 = -Math.PI / 2 + (i + 1) * sweep - gap / 2;
+      const ox1 = (cx + ro * Math.cos(a1)).toFixed(2), oy1 = (cy + ro * Math.sin(a1)).toFixed(2);
+      const ox2 = (cx + ro * Math.cos(a2)).toFixed(2), oy2 = (cy + ro * Math.sin(a2)).toFixed(2);
+      const ix1 = (cx + ri * Math.cos(a1)).toFixed(2), iy1 = (cy + ri * Math.sin(a1)).toFixed(2);
+      const ix2 = (cx + ri * Math.cos(a2)).toFixed(2), iy2 = (cy + ri * Math.sin(a2)).toFixed(2);
+      const large = a2 - a1 > Math.PI ? 1 : 0;
+      const active = i < current;
+      const d = `M${ox1},${oy1}A${ro},${ro},0,${large},1,${ox2},${oy2}L${ix2},${iy2}A${ri},${ri},0,${large},0,${ix1},${iy1}Z`;
+      paths += `<path d="${d}" fill="${active ? "var(--text)" : "var(--overlay)"}" opacity="${active ? 1 : 0.3}"/>`;
+    }
+    return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:middle" aria-label="Step ${current} of ${total}">${paths}</svg>`;
+  }
+
+  // src/ts/shared/sections.ts
+  function sectionRuns(slides) {
+    const runs = [];
+    slides.forEach((s, i) => {
+      const section = s.section ?? null;
+      const last = runs[runs.length - 1];
+      if (last && (last.section?.index ?? -1) === (section?.index ?? -1)) {
+        last.end = i + 1;
+      } else {
+        runs.push({ section, start: i, end: i + 1 });
+      }
+    });
+    return runs;
+  }
+  function sectionPosition(slides, i) {
+    const run = sectionRuns(slides).find((r) => i >= r.start && i < r.end);
+    if (!run?.section) return null;
+    return {
+      name: run.section.name,
+      at: i - run.start + 1,
+      of: run.end - run.start
+    };
+  }
+  function gridRows(runs, cols) {
+    return runs.reduce((n, r) => n + Math.ceil((r.end - r.start) / cols), 0);
+  }
+  function verticalNeighbor(boxes, i, dir) {
+    const me = boxes[i];
+    if (!me) return i;
+    const tops = [...new Set(boxes.map((b) => b.top))].sort((a, b) => a - b);
+    const row = tops.indexOf(me.top) + dir;
+    if (row < 0 || row >= tops.length) return i;
+    const center = me.left + me.width / 2;
+    let best = i;
+    let bestD = Number.POSITIVE_INFINITY;
+    boxes.forEach((b, j) => {
+      if (b.top !== tops[row]) return;
+      const d = Math.abs(b.left + b.width / 2 - center);
+      if (d < bestD) {
+        best = j;
+        bestD = d;
+      }
+    });
+    return best;
+  }
+
+  // src/ts/presenter/deck-url.ts
+  var SLIDE = "slide";
+  var STEPS = "steps";
+  function hashParams(url) {
+    return new URLSearchParams(url.hash.slice(1));
+  }
+  function positionHref(url, slideIndex, step) {
+    const next = new URL(url.href);
+    const params = hashParams(next);
+    params.set(SLIDE, String(slideIndex + 1));
+    if (step > 0) params.set(STEPS, String(step));
+    else params.delete(STEPS);
+    next.hash = params.toString();
+    return next.href;
+  }
+  function readPosition(url, slideCount) {
+    const params = hashParams(url);
+    const slide = parseInt(params.get(SLIDE) ?? "", 10);
+    const inDeck = !Number.isNaN(slide) && slide >= 1 && slide <= slideCount;
+    const step = parseInt(params.get(STEPS) ?? "0", 10);
+    return {
+      slideIndex: inDeck ? slide - 1 : null,
+      step: !Number.isNaN(step) && step >= 0 ? step : 0
+    };
+  }
+
+  // src/ts/presenter/video.ts
+  var armed = /* @__PURE__ */ new WeakSet();
+  var activeState = /* @__PURE__ */ new WeakMap();
+  function readSpec(v) {
+    const step = v.getAttribute("data-play-on-step");
+    const start = v.getAttribute("data-start");
+    const end = v.getAttribute("data-end");
+    return {
+      autoplay: v.hasAttribute("data-autoplay"),
+      loop: v.hasAttribute("data-loop"),
+      playOnStep: step === null ? null : Number(step),
+      start: start === null ? 0 : Number(start),
+      end: end === null ? null : Number(end)
+    };
+  }
+  function arm(v, spec) {
+    if (armed.has(v)) return;
+    armed.add(v);
+    if (spec.start > 0) {
+      const seek = () => {
+        if (v.currentTime < spec.start) v.currentTime = spec.start;
+      };
+      if (v.readyState >= 1) seek();
+      else v.addEventListener("loadedmetadata", seek, { once: true });
+    }
+    if (spec.end !== null || spec.loop) {
+      v.addEventListener("timeupdate", () => {
+        if (spec.end !== null && v.currentTime >= spec.end) {
+          if (spec.loop) v.currentTime = spec.start;
+          else v.pause();
+        }
+      });
+    }
+    if (spec.loop) {
+      v.addEventListener("ended", () => playFrom(v, spec.start));
+    }
+  }
+  function playFrom(v, start) {
+    const go = () => {
+      v.currentTime = start;
+      void v.play().catch(() => {
+      });
+    };
+    if (start > 0 && v.readyState < 1) {
+      v.addEventListener("loadedmetadata", go, { once: true });
+    } else {
+      go();
+    }
+  }
+  function syncVideos(root, step) {
+    root.querySelectorAll("video").forEach((v) => {
+      const spec = readSpec(v);
+      arm(v, spec);
+      const shouldPlay = spec.autoplay || spec.playOnStep !== null && step >= spec.playOnStep;
+      const wasActive = activeState.get(v) ?? false;
+      if (shouldPlay && !wasActive) {
+        playFrom(v, spec.start);
+      } else if (!shouldPlay && wasActive) {
+        v.pause();
+        v.currentTime = spec.start;
+      }
+      activeState.set(v, shouldPlay);
+    });
+  }
+
+  // src/ts/presenter/zoom.ts
+  var stage = document.getElementById("stage");
+  var stageWrap = document.getElementById("stage-wrap");
+  var indicator = document.getElementById("zoom-indicator");
+  var LIMITS = { minScale: 1, maxScale: 8 };
+  var WHEEL_STEP = 1.0015;
+  var KEY_ZOOM_STEP = 1.4;
+  var KEY_ANIM_MS = 140;
+  var RESET_ANIM_MS = 240;
+  var NAV_RESET_MS = 150;
+  var EASE = cubicBezierEasing("cubic-bezier(0.22, 1, 0.36, 1)");
+  var baseViewBox = null;
+  var camera = null;
+  var navReset = null;
+  var beforeGesture = () => {
+  };
+  function setBeforeCameraGesture(fn) {
+    beforeGesture = fn;
+  }
+  var dragStartCamera = null;
+  var dragStartInverse = null;
+  var dragStartClientX = 0;
+  var dragStartClientY = 0;
+  function currentSvg() {
+    return stage?.querySelector("svg") ?? null;
+  }
+  function clientToUser(clientX, clientY, inverse) {
+    const inv = inverse ?? currentSvg()?.getScreenCTM()?.inverse();
+    if (!inv) return null;
+    const p = new DOMPoint(clientX, clientY).matrixTransform(inv);
+    return { ux: p.x, uy: p.y };
+  }
+  function ensureBase() {
+    if (camera && baseViewBox) return true;
+    const svg = currentSvg();
+    if (!svg) return false;
+    baseViewBox = parseViewBox(svg.getAttribute("viewBox"));
+    camera = { ...baseViewBox };
+    return true;
+  }
+  function renderIndicator() {
+    if (!indicator) return;
+    const factor = camera && baseViewBox ? scaleOf(camera, baseViewBox) : 1;
+    indicator.textContent = `${factor.toFixed(1)}\xD7`;
+    indicator.toggleAttribute("data-active", factor > 1.01);
+  }
+  function applyCamera() {
+    const svg = currentSvg();
+    if (!svg || !camera) return;
+    svg.setAttribute("viewBox", formatViewBox(camera));
+    renderIndicator();
+  }
+  var driver = new ProgressDriver();
+  var animController = null;
+  function cancelAnim() {
+    animController?.abort();
+    animController = null;
+  }
+  function animateCameraTo(target, ms, onDone) {
+    cancelAnim();
+    if (!camera) {
+      camera = { ...target };
+      applyCamera();
+      onDone?.();
+      return;
+    }
+    const start = { ...camera };
+    const controller2 = new AbortController();
+    animController = controller2;
+    driver.value = 0;
+    driver.animateTo(1, ms / 1e3, controller2.signal, (p) => {
+      camera = p >= 1 ? { ...target } : lerpViewBox(start, target, EASE(p));
+      applyCamera();
+    }).then(() => {
+      if (animController === controller2) animController = null;
+      if (!controller2.signal.aborted) onDone?.();
+    });
+  }
+  function endDrag() {
+    dragStartCamera = null;
+    dragStartInverse = null;
+    document.body.classList.remove("zoom-grabbing");
+  }
+  function resetCamera() {
+    cancelAnim();
+    const svg = currentSvg();
+    if (svg && baseViewBox) {
+      svg.setAttribute("viewBox", formatViewBox(baseViewBox));
+    }
+    baseViewBox = null;
+    camera = null;
+    endDrag();
+    renderIndicator();
+  }
+  function cameraIsZoomed() {
+    return !!camera && !!baseViewBox && isZoomedIn(camera, baseViewBox);
+  }
+  function runNavReset() {
+    const fn = navReset;
+    navReset = null;
+    fn?.();
+  }
+  function resetCameraThen(after) {
+    if (!cameraIsZoomed() || !baseViewBox) {
+      navReset = null;
+      after();
+      return;
+    }
+    navReset = after;
+    animateCameraTo({ ...baseViewBox }, NAV_RESET_MS, runNavReset);
+  }
+  function hasPendingNav() {
+    return navReset !== null;
+  }
+  function cancelPendingNav() {
+    navReset = null;
+  }
+  function takeCamera() {
+    if (navReset) runNavReset();
+    beforeGesture();
+  }
+  function smoothResetCamera() {
+    takeCamera();
+    if (!ensureBase() || !camera || !baseViewBox) return;
+    if (!isZoomedIn(camera, baseViewBox)) return;
+    animateCameraTo({ ...baseViewBox }, RESET_ANIM_MS);
+  }
+  function keyZoom(direction) {
+    takeCamera();
+    if (!ensureBase() || !camera || !baseViewBox) return;
+    const factor = direction === "in" ? KEY_ZOOM_STEP : 1 / KEY_ZOOM_STEP;
+    const target = zoomAt(
+      camera,
+      baseViewBox,
+      factor,
+      { ux: camera.x + camera.w / 2, uy: camera.y + camera.h / 2 },
+      LIMITS
+    );
+    animateCameraTo(target, KEY_ANIM_MS);
+  }
+  function overGrid(target) {
+    return Boolean(target?.closest?.("#overview"));
+  }
+  function isCameraGesture(e) {
+    return e.ctrlKey;
+  }
+  function setArmed(on) {
+    document.body.classList.toggle("camera-armed", on);
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Control") setArmed(true);
+  });
+  document.addEventListener("keyup", (e) => {
+    if (e.key === "Control") setArmed(false);
+  });
+  window.addEventListener("blur", () => setArmed(false));
+  if (stageWrap) {
+    const wrap = stageWrap;
+    wrap.addEventListener(
+      "wheel",
+      (e) => {
+        if (!isCameraGesture(e) || overGrid(e.target)) return;
+        e.preventDefault();
+        takeCamera();
+        cancelAnim();
+        if (!ensureBase() || !camera || !baseViewBox) return;
+        const focus = clientToUser(e.clientX, e.clientY);
+        if (!focus) return;
+        const factor = Math.min(Math.max(WHEEL_STEP ** -e.deltaY, 0.2), 5);
+        camera = zoomAt(camera, baseViewBox, factor, focus, LIMITS);
+        applyCamera();
+      },
+      { passive: false }
+    );
+    wrap.addEventListener("pointerdown", (e) => {
+      if (!isCameraGesture(e) || overGrid(e.target)) return;
+      takeCamera();
+      cancelAnim();
+      if (!ensureBase() || !camera) return;
+      const inverse = currentSvg()?.getScreenCTM()?.inverse();
+      if (!inverse) return;
+      wrap.setPointerCapture(e.pointerId);
+      dragStartCamera = { ...camera };
+      dragStartInverse = inverse;
+      dragStartClientX = e.clientX;
+      dragStartClientY = e.clientY;
+      document.body.classList.add("zoom-grabbing");
+    });
+    wrap.addEventListener("pointermove", (e) => {
+      if (!dragStartCamera || !dragStartInverse || !baseViewBox) return;
+      const from = clientToUser(
+        dragStartClientX,
+        dragStartClientY,
+        dragStartInverse
+      );
+      const to = clientToUser(e.clientX, e.clientY, dragStartInverse);
+      if (!from || !to) return;
+      camera = panBy(
+        dragStartCamera,
+        baseViewBox,
+        from.ux - to.ux,
+        from.uy - to.uy
+      );
+      applyCamera();
+    });
+    wrap.addEventListener("pointerup", endDrag);
+    wrap.addEventListener("pointercancel", endDrag);
+    wrap.addEventListener("dblclick", smoothResetCamera);
+  }
+
+  // src/ts/presenter/status.ts
+  var stage2 = document.getElementById("stage");
+  var slideInfo = document.getElementById("slide-info");
+  var stepInfo = document.getElementById("step-info");
+  var mhudSlideInfo = document.getElementById("mhud-slide-info");
+  var mhudStepRing = document.getElementById("mhud-step-ring");
+  var maxStepSlides = null;
+  var maxStepIndex = -1;
+  var maxStepValue = 0;
+  function maxStep2() {
+    if (maxStepSlides === state.slides && maxStepIndex === state.slideIndex)
+      return maxStepValue;
+    const scratch = document.createElement("div");
+    scratch.innerHTML = state.slides[state.slideIndex]?.svg ?? "";
+    maxStepValue = maxStep(scratch);
+    maxStepSlides = state.slides;
+    maxStepIndex = state.slideIndex;
+    return maxStepValue;
+  }
+  var runController = null;
+  var runDriver = null;
+  var runRun = null;
+  var runTo = 0;
+  var runForward = true;
+  function inflightStepDirection() {
+    if (!runController) return null;
+    return runForward ? "forward" : "backward";
+  }
+  function driveRun() {
+    const ctrl = new AbortController();
+    runController = ctrl;
+    const driver2 = runDriver;
+    const run = runRun;
+    const to = runTo;
+    void driver2.animateTo(
+      runForward ? 1 : 0,
+      run.totalMs / 1e3,
+      ctrl.signal,
+      (v) => seekStepRun(run, v)
+    ).then(() => {
+      if (ctrl.signal.aborted) return;
+      if (runController === ctrl) {
+        runController = null;
+        runDriver = null;
+        runRun = null;
+      }
+      applyStepInstant(stage2, to);
+      updateStatus();
+    });
+  }
+  function landRun() {
+    if (!runController) return;
+    runController.abort();
+    runController = null;
+    runDriver = null;
+    runRun = null;
+    applyStepInstant(stage2, runTo);
+    syncVideos(stage2, runTo);
+  }
+  function snapStepRun() {
+    if (!runController) return;
+    landRun();
+    updateStatus();
+  }
+  function reverseStepRun() {
+    if (!runController || !runDriver || !runRun) return false;
+    const nextTo = runForward ? runTo - 1 : runTo + 1;
+    if (nextTo < 0) return false;
+    runController.abort();
+    runForward = !runForward;
+    runTo = nextTo;
+    state.step = runTo;
+    applyCodeHighlights(stage2, runTo);
+    syncVideos(stage2, runTo);
+    updateStatus();
+    driveRun();
+    return true;
+  }
+  function settleStepRun() {
+    landRun();
+  }
+  setBeforeCameraGesture(snapStepRun);
+  function applyCurrentStep() {
+    if (hasPendingNav()) return;
+    if (cameraIsZoomed()) {
+      resetCameraThen(() => {
+        resetCamera();
+        runCurrentStep();
+      });
+    } else {
+      cancelPendingNav();
+      resetCamera();
+      runCurrentStep();
+    }
+  }
+  function runCurrentStep() {
+    landRun();
+    const from = appliedStep(stage2);
+    const to = state.step;
+    applyCodeHighlights(stage2, to);
+    syncVideos(stage2, to);
+    const run = buildStepRun(stage2, from, to);
+    if (run.totalMs <= 0 || from === to) {
+      applyStepInstant(stage2, to);
+      updateStatus();
+      return;
+    }
+    runRun = run;
+    runDriver = new ProgressDriver();
+    runDriver.value = run.forward ? 0 : 1;
+    runTo = to;
+    runForward = run.forward;
+    updateStatus();
+    driveRun();
+  }
+  function applyCurrentStepInstant() {
+    resetCamera();
+    landRun();
+    applyStepInstant(stage2, state.step);
+    syncVideos(stage2, state.step);
+    updateStatus();
+  }
+  function syncURL() {
+    const href = positionHref(
+      new URL(window.location.href),
+      state.slideIndex,
+      state.step
+    );
+    try {
+      history.replaceState(null, "", href);
+    } catch (_) {
+    }
+  }
+  function readURL() {
+    const { slideIndex, step } = readPosition(
+      new URL(window.location.href),
+      state.slides.length
+    );
+    if (slideIndex !== null) state.slideIndex = slideIndex;
+    state.step = step;
+    return slideIndex !== null;
+  }
+  function updateStatus() {
+    const infoHtml = `<span class="slide-current">${state.slideIndex + 1}</span> / ${state.slides.length}`;
+    const at = sectionPosition(state.slides, state.slideIndex);
+    slideInfo.title = at ? `${at.name}: ${at.at} of ${at.of}` : "";
+    const ringHtml = buildStepRing(state.step, maxStep2());
+    slideInfo.innerHTML = infoHtml;
+    stepInfo.innerHTML = ringHtml;
+    mhudSlideInfo.innerHTML = infoHtml;
+    mhudStepRing.innerHTML = ringHtml;
+    syncURL();
+  }
+
   // src/ts/presenter/transitions.ts
   var stage3 = document.getElementById("stage");
   var CUT = { type: "cut", duration: 0 };
@@ -2980,6 +2904,7 @@
     cancelInflight(true);
     stage3.innerHTML = state.slides.length ? state.slides[state.slideIndex].svg : '<p style="color:var(--accent);padding:2rem">No slides.</p>';
     fitSlideToStage(stage3.firstElementChild);
+    slideMounted();
     applyCurrentStepInstant();
     updateStatus();
   }
@@ -3150,15 +3075,15 @@
     }
   };
   var SVG_NS = "http://www.w3.org/2000/svg";
-  function makeFadeBackdrop(slideSvg, color) {
+  function makeFadeBackdrop(slideSvg2, color) {
     const layer = makeLayer();
     layer.dataset.fadeBackdrop = "1";
-    const vb = parseViewBox(slideSvg?.getAttribute("viewBox") ?? null);
+    const vb = parseViewBox(slideSvg2?.getAttribute("viewBox") ?? null);
     const svg = document.createElementNS(SVG_NS, "svg");
     svg.setAttribute("viewBox", formatViewBox(vb));
     svg.setAttribute(
       "preserveAspectRatio",
-      slideSvg?.getAttribute("preserveAspectRatio") ?? "xMidYMid meet"
+      slideSvg2?.getAttribute("preserveAspectRatio") ?? "xMidYMid meet"
     );
     const rect = document.createElementNS(SVG_NS, "rect");
     rect.setAttribute("width", String(vb.w));
@@ -3225,6 +3150,7 @@
     const swap = () => {
       stage3.innerHTML = state.slides.length ? state.slides[state.slideIndex].svg : '<p style="color:var(--accent);padding:2rem">No slides.</p>';
       fitSlideToStage(stage3.firstElementChild);
+      slideMounted();
       initialLand();
     };
     const canReverse = liveInstance?.reverse != null && liveParams != null && liveParams.type === params.type && Boolean(liveParams.reverse) !== Boolean(params.reverse);
@@ -3256,7 +3182,10 @@
       liveParams = params;
       liveSettle = settle2;
       inst2.reverse({ stage: stage3, params, signal: newCtrl.signal }).then(() => {
-        if (!newCtrl.signal.aborted) settleContent();
+        if (!newCtrl.signal.aborted) {
+          slideMounted();
+          settleContent();
+        }
         settle2(true);
       }).catch((error) => {
         reportTransitionFailure(error);
@@ -3300,6 +3229,235 @@
       reportTransitionFailure(error);
       settle(false);
     });
+  }
+
+  // src/ts/presenter/fit.ts
+  function initFit() {
+    const stage5 = document.getElementById("stage");
+    if (!stage5) return;
+    onSlideMounted(() => fitSlide(stage5.firstElementChild));
+    onFontsLoaded(() => {
+      if (!inflightDirection()) fitSlide(stage5.firstElementChild);
+    });
+  }
+
+  // src/ts/presenter/pv.ts
+  var pvPanel = document.getElementById("pv");
+  var pvResizeHandle = document.getElementById("pv-resize-handle");
+  var pvStrip = document.getElementById("pv-strip");
+  var pvClock = document.getElementById("pv-clock");
+  var pvElapsed = document.getElementById("pv-elapsed");
+  var pvTimerToggle = document.getElementById("pv-timer-toggle");
+  var pvTimerReset = document.getElementById("pv-timer-reset");
+  var pvSlideInfo = document.getElementById("pv-slide-info");
+  var pvSection = document.getElementById("pv-section");
+  var pvStepRing = document.getElementById("pv-step-ring");
+  var pvNextInner = document.getElementById("pv-next-inner");
+  var pvNotes = document.getElementById("pv-notes");
+  var _elapsedAccumMs = 0;
+  var _runningSince = Date.now();
+  function _elapsedMs() {
+    const running = _runningSince === null ? 0 : Date.now() - _runningSince;
+    return _elapsedAccumMs + running;
+  }
+  function _setTimerPaused(paused) {
+    if (paused === (_runningSince === null)) return;
+    if (paused) {
+      _elapsedAccumMs = _elapsedMs();
+      _runningSince = null;
+    } else {
+      _runningSince = Date.now();
+    }
+    pvStrip.classList.toggle("timer-paused", paused);
+    const label = paused ? "Resume timer" : "Pause timer";
+    pvTimerToggle.title = label;
+    pvTimerToggle.setAttribute("aria-label", label);
+    updatePvClock();
+  }
+  function _resetTimer() {
+    _elapsedAccumMs = 0;
+    if (_runningSince !== null) _runningSince = Date.now();
+    updatePvClock();
+  }
+  pvTimerToggle.addEventListener("click", () => {
+    _setTimerPaused(_runningSince !== null);
+  });
+  pvTimerReset.addEventListener("click", _resetTimer);
+  function _pad2(n) {
+    return String(n).padStart(2, "0");
+  }
+  function updatePvClock() {
+    const now = /* @__PURE__ */ new Date();
+    pvClock.textContent = `${_pad2(now.getHours())}:${_pad2(now.getMinutes())}:${_pad2(now.getSeconds())}`;
+    const secs = Math.floor(_elapsedMs() / 1e3);
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor(secs % 3600 / 60);
+    const s = secs % 60;
+    pvElapsed.textContent = h > 0 ? `${_pad2(h)}:${_pad2(m)}:${_pad2(s)}` : `${_pad2(m)}:${_pad2(s)}`;
+  }
+  function updatePvInfo() {
+    const total = state.slides.length;
+    pvSlideInfo.innerHTML = `<span class="slide-current">${total ? state.slideIndex + 1 : "\u2013"}</span> / ${total || "\u2013"}`;
+    pvStepRing.innerHTML = buildStepRing(state.step, maxStep2());
+    if (pvSection) {
+      const at = sectionPosition(state.slides, state.slideIndex);
+      pvSection.hidden = !at;
+      pvSection.textContent = at ? `\xA7 ${at.name} \xB7 ${at.at}/${at.of}` : "";
+      pvSection.title = at ? `Section \u201C${at.name}\u201D: slide ${at.at} of ${at.of}` : "";
+    }
+  }
+  function _scalePvNext() {
+    const svg = pvNextInner.querySelector("svg");
+    if (!svg) return;
+    const vb = parseViewBox(svg.getAttribute("viewBox"));
+    svg.setAttribute("width", String(vb.w));
+    svg.setAttribute("height", String(vb.h));
+    svg.style.width = `${vb.w}px`;
+    svg.style.height = `${vb.h}px`;
+    const scale = Math.min(
+      pvNextInner.clientWidth / vb.w,
+      pvNextInner.clientHeight / vb.h
+    );
+    const tx = (pvNextInner.clientWidth - vb.w * scale) / 2;
+    const ty = (pvNextInner.clientHeight - vb.h * scale) / 2;
+    svg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  }
+  function renderPvNext() {
+    const curMax = maxStep2();
+    let previewSvg = null;
+    let revealStep = 0;
+    if (state.step < curMax) {
+      previewSvg = state.slides[state.slideIndex]?.svg ?? null;
+      revealStep = state.step + 1;
+    } else if (state.slideIndex + 1 < state.slides.length) {
+      previewSvg = state.slides[state.slideIndex + 1].svg;
+    }
+    if (previewSvg === null) {
+      pvNextInner.innerHTML = '<div id="pv-next-empty">END</div>';
+      return;
+    }
+    pvNextInner.innerHTML = previewSvg;
+    const svg = pvNextInner.querySelector("svg");
+    if (svg) {
+      fitSlide(svg);
+      applyStepInstant(svg, revealStep);
+    }
+    requestAnimationFrame(_scalePvNext);
+  }
+  function renderPvNotes() {
+    pvNotes.innerHTML = state.slides[state.slideIndex]?.notes ?? "";
+    pvNotes.scrollTop = 0;
+  }
+  function renderPv() {
+    updatePvInfo();
+    renderPvNext();
+    renderPvNotes();
+    renderEditButton();
+  }
+  function togglePv() {
+    const opening = document.body.classList.toggle("pv-open");
+    pvPanel.addEventListener(
+      "transitionend",
+      opening ? renderPvNext : _scalePvNext,
+      { once: true }
+    );
+  }
+  window.addEventListener("resize", _scalePvNext);
+  function _onPvResizeMove(e) {
+    pvPanel.style.setProperty(
+      "--pv-width",
+      `${window.innerWidth - e.clientX}px`
+    );
+    _scalePvNext();
+  }
+  function _onPvResizeUp(e) {
+    pvResizeHandle.releasePointerCapture(e.pointerId);
+    pvResizeHandle.removeEventListener("pointermove", _onPvResizeMove);
+    pvResizeHandle.removeEventListener("pointerup", _onPvResizeUp);
+    pvPanel.style.transition = "";
+  }
+  pvResizeHandle.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    pvPanel.style.transition = "none";
+    pvResizeHandle.setPointerCapture(e.pointerId);
+    pvResizeHandle.addEventListener("pointermove", _onPvResizeMove);
+    pvResizeHandle.addEventListener("pointerup", _onPvResizeUp);
+  });
+
+  // src/ts/shared/deck-styles.ts
+  function applyDeckStyles(msg) {
+    if (msg.styles !== void 0) {
+      const el = document.getElementById("deck-styles");
+      if (el) el.textContent = msg.styles;
+    }
+    if (msg.mode !== void 0)
+      document.documentElement.dataset.theme = msg.mode;
+  }
+
+  // src/ts/shared/patch.ts
+  function isWhole(sent) {
+    return !sent.some((item) => typeof item === "string");
+  }
+  function applyPatch(held, sent) {
+    if (isWhole(sent)) return sent;
+    const byKey = /* @__PURE__ */ new Map();
+    for (const item of held) {
+      if (item.key != null) byKey.set(item.key, item);
+    }
+    const out = [];
+    for (const item of sent) {
+      if (typeof item !== "string") {
+        out.push(item);
+        continue;
+      }
+      const mine = byKey.get(item);
+      if (!mine) return null;
+      out.push(mine);
+    }
+    return out;
+  }
+  function sameItems(a, b) {
+    return a.length === b.length && a.every((item, i) => item === b[i]);
+  }
+
+  // src/ts/shared/wsurl.ts
+  var WS_PATH = "/_inkflow/ws";
+  function socketUrl(loc) {
+    const scheme = loc.protocol === "https:" ? "wss" : "ws";
+    return `${scheme}://${loc.host || "localhost"}${WS_PATH}`;
+  }
+  var SENT_AWAY = 4001;
+  function openSocket() {
+    return new WebSocket(socketUrl(location));
+  }
+
+  // src/ts/presenter/toeditor.ts
+  var editorPath = null;
+  function backToEditor() {
+    if (editorPath === null) return;
+    const hash = `#slide=${state.slideIndex + 1}`;
+    const opener = window.opener;
+    try {
+      if (opener && !opener.closed && opener.location.origin === location.origin && opener.location.pathname.startsWith(editorPath)) {
+        opener.location.hash = hash;
+        opener.focus();
+        window.close();
+        if (window.closed) return;
+      }
+    } catch {
+    }
+    location.href = `${editorPath}${hash}`;
+  }
+  function setEditor(path) {
+    editorPath = path?.startsWith("/") ? path : null;
+    const button = document.getElementById("btn-to-editor");
+    if (button) button.style.display = editorPath === null ? "none" : "";
+  }
+  function initToEditor() {
+    const button = document.getElementById("btn-to-editor");
+    if (!button) return;
+    button.style.display = "none";
+    button.addEventListener("click", backToEditor);
   }
 
   // src/ts/presenter/websocket.ts
@@ -3989,6 +4147,7 @@
     }
     state._overviewActive = state.slideIndex;
     overviewGrid.querySelectorAll(".overview-thumb").forEach((thumb) => {
+      fitSlide(thumb);
       applyStepInstant(thumb, maxStep(thumb));
     });
     await nextFrame();
@@ -4396,6 +4555,7 @@
   initWindowSync(WS_PORT);
   initEditMenu(EDIT_COMMANDS, WS_PORT);
   initToEditor();
+  initFit();
   var deepLinked = readURL();
   loadSlide();
   renderPv();

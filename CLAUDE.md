@@ -73,7 +73,10 @@ src/
                                A0's canvas (3179x4494 at 1 unit = 1 CSS px) so a
                                poster prints at any A size; other sheets are 1 unit
                                = 1 CSS px. `same_aspect` (1%), `parse_view_box`,
-                               `physical_length_pt` (an SVG root's 841mm)
+                               `physical_length_pt` (an SVG root's 841mm),
+                               `print_min_text` (`PRINT_MIN_TEXT` of the sheet's
+                               body size, in slide units: shrink-to-fit's floor on
+                               a printed slide)
     enums.py          shared enums (Direction, Align, VAlign, MediaFit, MediaAlign,
                                ColorMode, Muted, Trigger, AnimationKind, ChartKind,
                                FrameTarget);
@@ -130,7 +133,9 @@ src/
                                a zone shape's own `--inkflow-*` style properties reach its
                                text, and one marked `inkflow:show-shape` paints the text's
                                box (`zone_shape_css`: fill, border, radius) and is kept
-                               when empty (`unreferenced_zones` = what is pruned)
+                               when empty (`unreferenced_zones` = what is pruned);
+                               `TextBox.size`/`.fit` go on the wrapper's inline style
+                               (`--inkflow-font-scale`, `--inkflow-fit`)
     charts.py         charts from data: `Table` read from CSV/TSV/JSON/a Markdown table
                                (`read_table`, cell text kept as typed by `read_text_rows` /
                                `serialize_rows`), `resolve` (a Chart's data, its path against
@@ -180,7 +185,11 @@ src/
                                Trigger.at) shared by pipeline.py (the animations=[...] list)
                                and zones.py (markdown reveals)
     zones.py          ::zone:: / ::step:: marker grammar, zone param extraction, and slide
-                               assembly (parsed markdown -> per-zone TextBox/Media)
+                               assembly (parsed markdown -> per-zone TextBox/Media);
+                               marker `size=80%`/`fit=none` -> `TextBox.size`/`.fit`,
+                               `set_zone_params` (a marker's params changed in place;
+                               auto-extracted zones get explicit markers, an unnamed
+                               zone an empty one at the end), `zone_params`
     server.py         the server `inkflow serve` runs: HTTP and the WebSocket on one
                                port (`/_inkflow/ws`), file watcher, build pipeline; the door
                                (`_share`: `Access` + `People`, `allowed(role, msg)`: the core's
@@ -249,7 +258,8 @@ src/
                                named `@page` the slide's box selects (`page:`), so
                                mixed sizes print each on its own sheet; `--bleed`
                                (`extend_backgrounds`: canvas-covering rects/images
-                               grown into it) and `--crop-marks`; `find_chromium`
+                               grown into it) and `--crop-marks`; `find_chromium`;
+                               the PDF page inlines bundles/fit.js (shrink-to-fit)
     pdfboxes.py       `set_page_boxes`: Chromium writes page sizes on a ~1/75 in grid, so
                                each page's MediaBox is rewritten to the exact size
                                (aligned with the content hung from the top-left),
@@ -413,6 +423,7 @@ src/
     bundles/          pre-built JS/CSS output (committed; no Node needed at install time)
       presenter.js    navigation, transitions, WebSocket, presenter panel
       presenter.css   all presenter styles including the sidebar panel
+      fit.js          shrink-to-fit for the PDF export page (src/ts/fit, pdf.html)
     theme/            built-in theme: layouts/*.svg (the 16:9 ones: cover, section, title,
                                content, center, two-cols, three-cols, comparison, quad,
                                three-cards, agenda, fact, quote, media-left/-right,
@@ -459,11 +470,18 @@ src/
                       lacks, the page sends `resync`; tested); deck-styles.ts
                       (`applyDeckStyles`: an `update`'s `styles`/`mode`);
                       viewbox.ts (a missing viewBox falls back to the deck
-                      canvas, which a frontend sets with `setDeckCanvas`)
+                      canvas, which a frontend sets with `setDeckCanvas`);
+                      fit.ts (text size steps + shrink-to-fit: pure `searchScale`
+                      bisection, `floorScale`, `neededHeight`, `nextTextSize`,
+                      `parseTextSize`, `MIN_TEXT_FRACTION`; DOM
+                      `fitSlide`/`fitZone`/`scheduleFit`/`neededBoxHeight`,
+                      `onFontsLoaded`; tested)
     presenter/        main presenter modules — navigation, transitions (progress-driven
                       via progress-driver.ts), overview, picker, websocket, status bar,
                       keyboard, syncmenu.ts (sync-mode status-bar control),
-                      pv.ts (presenter panel sidebar; current section under the
+                      fit.ts (shared/fit.ts on each mounted slide, through
+                      slidehooks.ts; refit when fonts load unless a transition
+                      is in flight), pv.ts (presenter panel sidebar; current section under the
                       strip), overview.ts (grid with a heading per section, up/down
                       by geometry), picker.ts (sections match too), video.ts (step-driven
                       <video> playback, wired in via status.ts), toeditor.ts (back
@@ -472,6 +490,9 @@ src/
                       one; hidden in a static build), and deck-url.ts
                       (pure position<->fragment codec behind syncURL/readURL; the
                       only module reading location.pathname/search/hash)
+    fit/              main.ts: the PDF export page's script (bundles/fit.js, inlined
+                      into pdf.html by export.py): `fitSlide` on every slide, again
+                      on load and once fonts are ready
   css/                CSS source
     shared/           theme variables, animation keyframes
     presenter/        presenter partials including pv.css (sidebar panel)
@@ -587,7 +608,7 @@ Typography and color come from the CSS cascade (`contract.css` + theme tokens + 
 ```
 ::content align=center valign=center padding=60::
 ```
-`align`, `valign`, and `padding` are the supported keys. `valign` accepts `top`/`center`/`bottom` (mapped to flexbox `start`/`center`/`end`). `padding` is in SVG user units. These translate to inline `style` attributes on the generated `<foreignObject>` wrapper and content divs, overriding CSS variables.
+`align`, `valign`, and `padding` are the alignment keys (`size` and `fit`: text size, below). `valign` accepts `top`/`center`/`bottom` (mapped to flexbox `start`/`center`/`end`). `padding` is in SVG user units. These translate to inline `style` attributes on the generated `<foreignObject>` wrapper and content divs, overriding CSS variables.
 
 *3. Python `TextBox` explicit params* — in `deck.py`:
 ```python
@@ -615,6 +636,9 @@ The target zone is the `zones` dict key (`"content"` → `zone-content`); `TextB
 </foreignObject>
 ```
 Inline styles are only emitted when the corresponding param is non-`None`; CSS variables handle layout-level defaults without touching the element's `style`.
+
+**Text size and shrink-to-fit are source; the fitted size is the browser's.**
+A zone's text size is a factor, `--inkflow-font-scale`, and whether it shrinks to fit is `--inkflow-fit` (`none` = never; anything else, the default, shrinks). Both follow the alignment layers: `TextBox(size=, fit=)` or a marker's `size=80%`/`fit=none` go on the wrapper's inline style (`content.py`), which beats the zone shape's own style (carried onto the foreignObject like `--inkflow-padding`, so a text box of the slide or a layout's zone for all its slides), which beats layout/theme CSS (a deck-wide `:root { --inkflow-fit: none }` in styles.css works because custom properties inherit). contract.css sizes `.inkflow-wrapper` as `calc(1em * var(--inkflow-font-scale, 1) * var(--inkflow-fit-scale, 1))`; everything inside is in em. Fitting needs real text layout (fonts, line breaks, formulas), so it runs in the browser, in every page that shows a slide, with one module (`src/ts/shared/fit.ts`): the presenter on `slideMounted` (before a transition takes the slide; refit on fonts loaded only when no transition is in flight) and its overview/next preview, so the static build too; the PDF page (`fit.js` in pdf.html, at parse, on load and on fonts ready); and any frontend's canvas (`scheduleFit`, a frame later once attached). `fitZone` bisects the factor (to 1 %) between 1 and the floor, measuring with every step shown (reveals are transparent, not removed, so the wrapper children's layout heights count them; `display: none` content does not take room) plus code blocks that scroll and tables wider than the box; the floor is the larger of a third of the box's own text size and the readable minimum: 1/80 of the slide's height (`MIN_TEXT_FRACTION`) or, on a printed slide, `data-inkflow-min-text` that the pipeline stamps on the root (`sizes.print_min_text`: `PRINT_MIN_TEXT` of the sheet's body size). The result is an inline `--inkflow-fit-scale` on the wrapper and `data-inkflow-fit`/`data-inkflow-overflow` on the foreignObject, for a page to show. Nothing fitted is ever written to a file. contract.css also resets margins and padding inside `.inkflow-wrapper` (`:where()`, as weak as the presenter's `*` reset), so an editor and the PDF page lay text out exactly as the presenter does and fit it to the same size.
 
 **Charts are drawn at build time from data files, in theme tokens.**
 A `Chart` zone value or a ```` ```chart ```` Markdown fence is turned into plain SVG by `charts.py` while the deck builds, so serve, the static build, the PDF export and an editor's thumbnails show the same chart and nothing runs in the browser. The data is a CSV/TSV/JSON file (or inline `data={...}` / a Markdown table), its path resolving against the file it is written in like any asset; it is inlined into the slide, so nothing is copied or versioned, and the watcher's rebuild on any project file is what redraws a chart when its data changes. `zones.build_slide_content` resolves a deck chart to a `ResolvedChart` (data read, or the error to draw in its place) and expands fence placeholders with the Markdown file's `AssetSource`; `content.py` swaps the zone shape for a nested `<svg>` with the zone's box and user units (provenance carried, so an editor moves and resizes it as the zone rect). `y_min`/`y_max` fix the value axis's ends (`_bounded`: the fixed end is the first/last tick, round ticks too close to it dropped) and `y2` puts columns on a second axis on the right (`_Series.axis`, with `y2_min`/`y2_max`; refused for stacked or horizontal bars); with any end fixed the marks are clipped to the plot (`<id>-clip`). Marks are painted with the palette tokens (`charts.PALETTE`, the chromatic part of `colors.SVG_TOKENS` in a fixed order) in `style` (never presentation attributes, where `var()` is invalid) and text with the text tokens, so charts follow the theme and colour mode. Chart text is `PageSize.chart_text_scale` of the body size (0.6 on a screen, 1.0 on paper; `DeckContext.chart_scale`, `charts.fence_font` for a fence). Every series is a `<g id="<zone>-series-<slug>">` holding its marks, value labels and legend entry (pie slices `-slice-`), which is what `animations=[...]` targets to reveal them one by one (`verify` draws a slide's charts to know those ids, and reports unreadable data). A fence chart is inline SVG inside a zone's HTML: `html_fragment_to_xml` restores the camelCase names lxml's HTML parser lowercases, and `_replace_with_foreignobject` attaches the foreignObject before its content because lxml otherwise drops the inline `<svg>`'s xmlns as "redundant" with the slide root's.

@@ -15,10 +15,11 @@ What a slide's result depends on, and how each part is watched:
   (time, size, inode; "not there" included) at the next build. A layout or an
   overlay edited is thus every slide built on it, and nothing else.
 - **What deck.py says of it** (`Slide(...)`, every field) **and of the deck**
-  (theme, mode, font size, overlays, deck style, the chart text scale its
-  size gives) **and of the machine** (the PDF converter installed): compared
-  by value (`_frozen`). A class deck.py defines itself (a custom animation) is new on
-  every load, so slides using one are processed every time.
+  (theme, mode, font size, overlays, deck style, the chart text scale and
+  the printed sheet its size gives) **and of the machine** (the PDF
+  converter installed): compared by value (`_frozen`). A class deck.py
+  defines itself (a custom animation) is new on every load, so slides using
+  one are processed every time.
 - **Its id**: entries are kept by id, and the id is part of the key.
 - **Its number and the deck's slide count**: *not* part of the key. They
   only ever reach the output as the root's ``inkflow-slide-N`` id (and the
@@ -147,6 +148,8 @@ def _context_key(ctx: DeckContext, deck_path: Path) -> object:
         ctx.pdf_pages.tool,
         ctx.chart_scale,
         ctx.editor,
+        ctx.print_page,
+        ctx.sized,
     )
 
 

@@ -1,5 +1,6 @@
 import { cubicBezierEasing } from "../shared/easing";
 import { escapeHtml } from "../shared/escape";
+import { fitSlide } from "../shared/fit";
 import { gridRows, sectionRuns, verticalNeighbor } from "../shared/sections";
 import { applyStepInstant, maxStep as computeMaxStep } from "../shared/step";
 import { parseViewBox } from "../shared/viewbox";
@@ -221,6 +222,7 @@ export async function openOverview(): Promise<void> {
     // preserves dimensions). The overlay is revealed only once the FLIP snap is
     // committed, so there is no black flash and no grid-at-full-scale flicker.
     overviewGrid.querySelectorAll(".overview-thumb").forEach((thumb) => {
+        fitSlide(thumb);
         applyStepInstant(thumb, computeMaxStep(thumb));
     });
     await nextFrame();

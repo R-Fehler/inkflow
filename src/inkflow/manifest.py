@@ -75,6 +75,41 @@ class TextBox:
     """Vertical alignment of the content block. ``None`` defers to the CSS variable."""
     padding: float | None = None
     """Inner padding in SVG user units. ``None`` defers to the CSS variable."""
+    size: float | None = None
+    """Text size relative to the zone's own (``0.8`` = 80 %, between
+    ``TEXT_SCALE_MIN`` and ``TEXT_SCALE_MAX``). ``None`` defers to the zone
+    shape's ``--inkflow-font-scale`` and the layout CSS."""
+    fit: bool | None = None
+    """Shrink the text when it does not fit the zone (``True``), or never
+    (``False``). ``None`` defers to ``--inkflow-fit`` (on by default)."""
+
+    def __post_init__(self) -> None:
+        if self.size is not None and not (
+            TEXT_SCALE_MIN <= self.size <= TEXT_SCALE_MAX
+        ):
+            raise ValueError(
+                f"TextBox size must be between {TEXT_SCALE_MIN:g} and"
+                + f" {TEXT_SCALE_MAX:g} (a factor: 0.8 = 80 %), not {self.size:g}"
+            )
+
+
+TEXT_SCALE_MIN = 0.25
+"""The smallest relative text size a zone may be given (25 %)."""
+TEXT_SCALE_MAX = 3.0
+"""The largest relative text size a zone may be given (300 %)."""
+
+
+def parse_text_scale(value: str) -> float:
+    """A text size written as a percentage (``80%``) or a factor (``0.8``),
+    as a factor; ``ValueError`` when it is neither or out of range."""
+    text = value.strip()
+    scale = float(text[:-1]) / 100 if text.endswith("%") else float(text)
+    if not TEXT_SCALE_MIN <= scale <= TEXT_SCALE_MAX:
+        raise ValueError(
+            f"text size {value!r} is outside"
+            + f" {TEXT_SCALE_MIN:.0%} to {TEXT_SCALE_MAX:.0%}"
+        )
+    return scale
 
 
 @dataclass
