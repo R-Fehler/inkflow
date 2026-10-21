@@ -1,4 +1,5 @@
 import { applyDeckStyles } from "../shared/deck-styles";
+import { clientKey, storedName } from "../shared/identity";
 import { applyPatch, sameItems } from "../shared/patch";
 import type {
     InkMessage,
@@ -84,6 +85,28 @@ function welcome(msg: { role?: unknown; editor?: unknown }): void {
         requestSync();
     }
 }
+
+// This page's slide, for an extension's list of who is where (sent when it
+// changes; nothing about the page is stored). The core server ignores it.
+let presenceSent = -1;
+
+function sendPresence(force = false): void {
+    const ws = state.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!force && presenceSent === state.slideIndex) return;
+    presenceSent = state.slideIndex;
+    ws.send(
+        JSON.stringify({
+            type: "presence",
+            page: "presenter",
+            key: clientKey(),
+            ...(storedName() ? { name: storedName() } : {}),
+            slide: state.slideIndex,
+        }),
+    );
+}
+
+window.setInterval(() => sendPresence(), 1000);
 
 // Behavioural core of a mode change: update state, persist, and (when entering a
 // receiving mode) catch up to the presenter's current position immediately instead
@@ -237,6 +260,7 @@ export function connectWS(wsPort: number | null, authoritative: boolean): void {
         firstPositionPending = assert;
         if (assert && role !== "viewer") sendNav();
         requestInk();
+        sendPresence(true);
         // What this page is, for the server's list of who is connected;
         // rebuilds as what changed: the slides this page holds come by key.
         state.ws?.send(

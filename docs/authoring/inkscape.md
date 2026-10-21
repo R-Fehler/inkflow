@@ -183,12 +183,23 @@ so a custom theme exports its own colors.
 ## Checking a deck (`verify`)
 
 `inkflow verify` checks a deck before you present it,
-printing one line per slide:
+printing one line per slide and a count at the end:
 
 ```bash
 inkflow verify
 inkflow verify --strict   # exit 1 on warnings too
 ```
+
+```text
+ok      1 title
+ok      2 features (content)
+warn    3 demo  preview layers stale — run inkflow sync
+1 warning in 3 slides
+```
+
+Each line starts with the slide's number and id (what `inkflow render -s`
+takes), followed by the layout or file it is drawn from when the id does not
+say it.
 
 **Errors** are things that will not render:
 a missing SVG, `.md`, notes file or media file,

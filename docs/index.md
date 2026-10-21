@@ -65,7 +65,8 @@ reusable layouts that inherit from each other like master slides,
 Markdown-filled zones for text-heavy slides,
 camera moves that tour a diagram or lay out a whole talk on one canvas,
 a presenter view with speaker notes,
-[charts from data](authoring/charts.md),
+[charts from data](authoring/charts.md) and [PDF figures](authoring/pdf-figures.md),
+[drawing with a pen](presenting/ink.md) while you present,
 one-command export to static HTML or PDF,
 and more.
 Start with [Authoring slides](authoring/slides.md), or read [Concepts](concepts.md) for the full picture.

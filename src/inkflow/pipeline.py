@@ -53,6 +53,7 @@ from inkflow.svg import (
     compose_overlays,
     compose_with_ancestors,
     duplicate_zone_ids,
+    resolve_links,
     theme_generic_fonts,
 )
 from inkflow.svgio import SvgElement, serialize_svg
@@ -141,20 +142,30 @@ def _infer_slide_id(slide: Slide) -> str:
 
 
 def _deduplicate_ids(raw_ids: list[str]) -> list[str]:
+    """Number repeated ids ``-2``, ``-3``…, skipping any number that is already
+    some other slide's own id (``content``, ``content-2``, ``content`` must not
+    give two ``content-2``)."""
+    taken = set(raw_ids)
     seen: dict[str, int] = {}
+    used: set[str] = set()
     result: list[str] = []
     for raw in raw_ids:
-        if raw not in seen:
-            seen[raw] = 1
+        if raw not in used:
+            seen.setdefault(raw, 1)
+            used.add(raw)
             result.append(raw)
-        else:
-            seen[raw] += 1
-            result.append(f"{raw}-{seen[raw]}")
+            continue
+        n = seen.get(raw, 1) + 1
+        while f"{raw}-{n}" in taken or f"{raw}-{n}" in used:
+            n += 1
+        seen[raw] = n
+        used.add(f"{raw}-{n}")
+        result.append(f"{raw}-{n}")
     return result
 
 
 def slide_ids(slides: list[Slide]) -> list[str]:
-    """The id each slide is known by, in order."""
+    """The id each slide is known by (``slide:<id>`` links), in order."""
     return _deduplicate_ids([_infer_slide_id(s) for s in slides])
 
 
@@ -715,6 +726,9 @@ class SlideSvg:
     def prune_zones(self) -> None:
         self.root = remove_unreferenced_zones(self.root)
 
+    def resolve_links(self) -> None:
+        self.root = resolve_links(self.root)
+
     def theme_generic_fonts(self) -> None:
         self.root = theme_generic_fonts(self.root)
 
@@ -911,6 +925,7 @@ def process_slide(
         doc.add_style(zone_placeholder_css(doc.root))
     else:
         doc.prune_zones()
+    doc.resolve_links()
     doc.mark_min_text(ctx)
     doc.scope_styles(slide_number)
     return ProcessedSlide(doc.to_svg(), md_notes, edit)

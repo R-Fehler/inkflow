@@ -76,7 +76,9 @@ DEP002 = ["brotli", "pymupdf"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/inkflow"]
 artifacts = ["src/inkflow/theme/**", "src/inkflow/templates/**"]
-exclude = ["src/inkflow/theme/showcase/**", "src/inkflow/theme/**/__pycache__/**"]
+# theme/showcase/ (a deck of every built-in layout) ships too: a frontend can
+# start a new deck from it.
+exclude = ["src/inkflow/theme/**/__pycache__/**"]
 
 [tool.pyright]
 reportUnusedCallResult = "none"

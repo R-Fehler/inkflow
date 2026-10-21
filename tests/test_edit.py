@@ -108,3 +108,16 @@ def test_open_in_editor_launch_failure_warns_and_returns_message(
     assert any("failed to launch edit command" in w.message for w in warnings)
     assert result is not None
     assert "failed to launch edit command" in result
+
+
+def test_per_extension_and_kind_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    from inkflow.edit import configured_suffixes
+
+    monkeypatch.setenv("INKFLOW_EDIT_CMD", "nano {path}")
+    monkeypatch.setenv("INKFLOW_EDIT_CMD_IMAGE", "gimp {path}")
+    monkeypatch.setenv("INKFLOW_EDIT_CMD_PNG", "krita {path}")
+    commands = resolve_edit_commands()
+    assert command_for(Path("a.png"), commands) == "krita {path}"
+    assert command_for(Path("a.jpg"), commands) == "gimp {path}"
+    assert command_for(Path("a.md"), commands) == "nano {path}"
+    assert "png" in configured_suffixes(commands)

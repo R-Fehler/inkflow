@@ -25,6 +25,7 @@ from inkflow.sizes import PRINT_MIN_TEXT, PageSize, print_body_pt
 from inkflow.svgio import SvgElement, parse_svg
 from inkflow.zones import (
     parse_markdown_zones,
+    replace_zone_text,
     set_zone_params,
     zone_params,
 )
@@ -85,6 +86,10 @@ class TestMarkers:
         assert out == "Just text\n\n::body fit=none::\n"
         assert parse_markdown_zones(out).params["body"] == {"fit": "none"}
         assert set_zone_params("x\n", "body", {"size": None}) == "x\n"
+
+    def test_writing_text_keeps_the_marker_params(self) -> None:
+        md = "::content size=80%::\nOld\n"
+        assert replace_zone_text(md, "content", "New") == "::content size=80%::\nNew\n"
 
 
 ZONE_SVG = textwrap.dedent("""\
@@ -288,3 +293,12 @@ def test_render_measures_text_after_fitting(tmp_path: Path) -> None:
     # Shrinking off: overflows at its own size.
     assert overflow["#zone-off"].size == 0
     assert not any(f.kind == "small-text" for f in result.findings)
+
+
+def test_a_text_size_is_written_as_its_marker_reads_it() -> None:
+    from inkflow.manifest import format_text_scale, parse_text_scale
+
+    assert format_text_scale(0.8) == "80%"
+    assert format_text_scale(0.67) == "67%"
+    assert format_text_scale(1.125) == "112.5%"
+    assert parse_text_scale(format_text_scale(1.125)) == 1.125

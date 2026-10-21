@@ -151,6 +151,46 @@ It will inject the Markdown and media files into the SVGs,
 apply the transitions and animations,
 and serve the result to your browser.
 
+## What else it does
+
+- **Charts from data.** Bar, line, area, scatter and pie charts plotted from a CSV,
+  TSV or JSON file kept in the deck (or a Markdown table), drawn as SVG in the theme's
+  colours when the deck builds, with fixed axis ranges and a second axis when you
+  need them.
+- **Figures from papers and diagrams.** A PDF page goes on a slide as it is (vector,
+  with its own fonts), and a [draw.io](https://www.drawio.com) diagram kept as editable
+  SVG can be drawn into the slide in the theme's font and colours; a paper backing
+  keeps a black-on-white plot readable on a dark slide.
+- **Draw with a pen while presenting.** Pressure-sensitive ink, highlighter and eraser,
+  relayed to every window, kept as plain vector paths in the deck or gone when you
+  move on. Pinch and Ctrl+wheel zoom into the slide.
+- **Any size, posters too.** 16:9, 4:3, phone-shaped 9:16, or paper from A0 to letter:
+  poster layouts with a print type scale, and a PDF at the exact printed size, with
+  bleed and crop marks when a print shop asks.
+- **Layouts and themes.** Eighteen built-in layouts, three built-in themes (the
+  Catppuccin default, quiet white *Paper*, big-type *Stage*), sections that head the
+  overview, and text that shrinks to fit its box.
+- **Check before you present.** `inkflow verify` finds missing files and ids, and
+  `inkflow render --check` reports text that overflows its box, objects off the slide,
+  text too small or too faint to read; `inkflow render` writes PNGs (`--sheet`: every
+  slide on one image) for you or a coding agent to look at.
+- **Share and publish.** `inkflow serve --share` gives view links on your network (or
+  through SSH); `inkflow build` writes the whole deck into one HTML file, a handout
+  with the speaker notes comes as a PDF, and `inkflow setup-pages` publishes the deck
+  on GitHub or GitLab Pages at every push.
+- **The same everywhere.** `inkflow fonts` says where each font comes from, and a new
+  deck pins its inkflow version and sets up git (LFS for media) so a clone looks the same.
+- **Plugins.** Installed packages add commands, `verify` checks and pages on the deck's
+  server; a visual editor such as inkflow-editor is one.
+  [Extending inkflow](https://ll-nick.github.io/inkflow/reference/extending/) shows how.
+
+**PDF figures** need a converter. The easiest is the `pdf` extra, one install on any
+system: `pip install "inkflow[pdf]"` (or `uv add "inkflow[pdf]"` in a deck's folder).
+It brings in PyMuPDF, which is AGPL-3.0 (or commercially licensed by Artifex);
+Inkflow itself stays MIT and never requires it. Poppler's `pdftocairo`, MuPDF's
+`mutool` or Inkscape work instead, with nothing to add.
+See [PDF figures](https://ll-nick.github.io/inkflow/authoring/pdf-figures/).
+
 ## Quick start
 
 ```bash

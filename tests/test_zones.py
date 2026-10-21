@@ -24,7 +24,12 @@ from inkflow.zones import (
     _StepsBlock,  # pyright: ignore[reportPrivateUsage]
     chunks_to_html,
     parse_markdown_zones,
+    remove_zone_section,
+    rename_zone,
+    replace_zone_text,
     steps_wrap_content,
+    zone_names,
+    zone_spans,
 )
 from inkflow.zones import build_slide_content as _build_slide_content_parsed
 
@@ -699,6 +704,73 @@ class TestRerouteZones:
         # Without available_zones, no rerouting — no ValueError even without default
         result = build_slide_content(md.read_text(encoding="utf-8"), {})
         assert "zone-content" in result.content
+
+
+def test_deck_zone_strings_reveal_like_markdown_sections() -> None:
+    """A zones={...} string is Markdown like a .md section: ::step:: reveals,
+    numbered on after the slide's Markdown reveals (one timeline)."""
+    result = build_slide_content(
+        "# T\n\none\n\n::step::\n\ntwo\n",
+        {"text": "First\n\n::step::\n\nSecond"},
+    )
+    text = result.content["zone-text"]
+    assert isinstance(text, TextBox) and "::step::" not in (text.text or "")
+    assert _steps(result.animations) == [1, 2]
+    assert result.max_step == 2
+
+
+class TestZoneSpans:
+    """Where each zone's text is in its Markdown, for writing one zone back
+    and leaving every other byte alone."""
+
+    def test_auto_extracted_heading_and_body(self) -> None:
+        text = "# Title\n\n## Sub\n\nbody\nmore\n"
+        spans = zone_spans(text)
+        assert {k: text[a:b] for k, (a, b) in spans.items()} == {
+            "title": "# Title",
+            "subtitle": "## Sub",
+            "content": "body\nmore",
+        }
+
+    def test_markers_override_auto_content(self) -> None:
+        text = "intro\n::title::\nHello\n\n::content align=center::\n- a\n"
+        spans = zone_spans(text)
+        assert text[slice(*spans["content"])] == "- a"
+        assert text[slice(*spans["title"])] == "Hello"
+
+    def test_replace_keeps_other_sections(self) -> None:
+        text = "# T\n\nBody\n\n::aside::\nSide\n"
+        out = replace_zone_text(text, "aside", "New side")
+        assert out == "# T\n\nBody\n\n::aside::\nNew side\n"
+
+    def test_replace_title_keeps_it_a_heading(self) -> None:
+        assert (
+            replace_zone_text("# T\n\nBody\n", "title", "Fresh") == "# Fresh\n\nBody\n"
+        )
+
+    def test_new_zones_are_appended_or_prepended(self) -> None:
+        assert replace_zone_text("Body\n", "title", "T") == "# T\n\nBody\n"
+        assert replace_zone_text("# T\n", "media", "x") == "# T\n\n::media::\nx\n"
+        assert replace_zone_text("", "content", "x") == "x\n"
+
+    def test_remove_takes_the_marker_and_its_section(self) -> None:
+        text = "# T\n\n::aside::\nSide\n\n::foot::\nF\n"
+        assert remove_zone_section(text, "aside") == "# T\n\n::foot::\nF\n"
+        # Auto-extracted text has no marker: it is cleared.
+        assert remove_zone_section("# T\n\nBody\n", "content") == "# T\n\n\n"
+
+    def test_rename_keeps_params_and_auto_zones(self) -> None:
+        text = "# T\n\n::code lang=py::\nx\n"
+        assert rename_zone(text, "code", "sample") == "# T\n\n::sample lang=py::\nx\n"
+        # An auto-extracted body gets a marker of its own.
+        assert rename_zone("# T\n\n- one\n", "content", "body") == (
+            "# T\n\n::body::\n- one\n"
+        )
+        # A renamed title: what followed it keeps its zone through a marker.
+        renamed = rename_zone("# T\n\n- one\n", "title", "heading")
+        assert renamed == "::heading::\n# T\n\n::content::\n- one\n"
+        assert zone_names(renamed) == {"heading", "content"}
+        assert rename_zone("# T\n", "other", "x") == "# T\n"
 
 
 def test_shown_zone_shape_paints_the_text_box() -> None:

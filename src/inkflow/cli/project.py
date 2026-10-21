@@ -149,8 +149,8 @@ def init_cmd(
 
     `--poster` scaffolds a conference poster instead: `Deck(size="a0")` (or
     `--size`), one slide on a built-in poster layout with its sections in
-    `slides/poster.md`, and a figure and a logo placeholder in `figures/`.
-    `inkflow export` prints it as a PDF at its size.
+    `slides/poster.md`, a chart from `data/results.csv` and a figure and a logo
+    placeholder in `figures/`. `inkflow export` prints it as a PDF at its size.
 
     `--theme paper` (a quiet white document look) or `--theme stage` (big bold
     type on black, keynote-style) starts the deck on one of the themes inkflow
@@ -178,7 +178,7 @@ def init_cmd(
             sheet = init.scaffold_poster(target, size or "a0", theme)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
-        report("Created", "slides/poster.md, figures/ (method.svg, logo.svg)")
+        report("Created", "slides/poster.md, figures/, data/results.csv")
         report("Created", f"deck.py (a poster, {sheet.label})")
     else:
         init.scaffold(target, theme)

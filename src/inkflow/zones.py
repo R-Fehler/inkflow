@@ -550,10 +550,10 @@ def set_zone_params(source: str, zone: str, updates: dict[str, str | None]) -> s
     parameter and every byte outside the marker kept.
 
     A zone without a marker gets one: text auto-extracted into it (a leading
-    ``#`` heading, the text after the headings) gets an explicit marker, and
-    so do the auto-extracted zones after it, so each keeps its text; a zone
-    the file does not name (filled from the whole file, or not at all) gets
-    an empty marker at the end, which carries the parameters and no text."""
+    ``#`` heading, the text after the headings) gets explicit markers, as
+    `rename_zone` writes them; a zone the file does not name (filled from
+    the whole file, or not at all) gets an empty marker at the end, which
+    carries the parameters and no text."""
     markers = list(_ZONE_PATTERN.finditer(source))
     own = [m for m in markers if m.group(1) == zone]
     if own:
@@ -672,9 +672,13 @@ def build_slide_content(
 
     for key, val in extra.items():
         if isinstance(val, str):
-            result[f"zone-{key}"] = TextBox(
-                text=finish(markdown_to_html(val), deck_source)
+            # A zones={...} string is Markdown like a .md section, reveals
+            # included; its steps continue the slide's count.
+            html, base_step, zone_anims = chunks_to_html(
+                _split_steps(val), base_step, ids
             )
+            animations.extend(zone_anims)
+            result[f"zone-{key}"] = TextBox(text=finish(html, deck_source))
         else:
             result[f"zone-{key}"] = _resolve_zone_assets(val, deck_source)
 
@@ -686,6 +690,28 @@ def build_slide_content(
 
 
 # ── Source spans (for a frontend writing back) ───────────────────────────────
+
+
+def zone_spans(source: str) -> dict[str, tuple[int, int]]:
+    """Where each zone's text sits in ``source``, as ``(start, end)`` offsets.
+
+    Mirrors ``parse_markdown_zones`` exactly (the same markers, the same
+    auto-extraction of a leading ``#``/``##``), but keeps positions instead of
+    content, so a frontend can replace one zone's section and leave every other
+    byte of the file alone. A span covers the section's stripped text; an empty
+    zone has no span.
+    """
+    spans: dict[str, tuple[int, int]] = {}
+    markers = list(_ZONE_PATTERN.finditer(source))
+    head_end = markers[0].start() if markers else len(source)
+    spans.update(_auto_spans(source, 0, head_end))
+    for idx, m in enumerate(markers):
+        start = m.end()
+        end = markers[idx + 1].start() if idx + 1 < len(markers) else len(source)
+        span = _strip_span(source, start, end)
+        if span is not None:
+            spans[m.group(1)] = span
+    return spans
 
 
 def _strip_span(text: str, start: int, end: int) -> tuple[int, int] | None:
@@ -728,3 +754,87 @@ def _auto_spans(text: str, start: int, end: int) -> dict[str, tuple[int, int]]:
     if rest is not None:
         spans["content"] = rest
     return spans
+
+
+def replace_zone_text(source: str, zone: str, text: str) -> str:
+    """``source`` with zone ``zone``'s section replaced by ``text``.
+
+    A zone the file does not mention yet is added: a title as a leading ``#``
+    heading when the file has none, anything else as a new ``::zone::`` section
+    at the end. Empty ``text`` clears the section but keeps its marker.
+    """
+    text = text.strip()
+    spans = zone_spans(source)
+    if zone in spans:
+        start, end = spans[zone]
+        if zone in ("title", "subtitle") and not _ZONE_PATTERN.search(source[:start]):
+            # An auto-extracted heading: keep it a heading of the same level.
+            prefix = "# " if zone == "title" else "## "
+            if text and not text.startswith("#"):
+                text = prefix + text
+        return source[:start] + text + source[end:]
+    if not text:
+        return source
+    has_markers = _ZONE_PATTERN.search(source) is not None
+    if zone == "title" and "title" not in spans and not has_markers:
+        heading = text if text.startswith("#") else f"# {text}"
+        body = source.lstrip("\n")
+        return f"{heading}\n\n{body}" if body.strip() else f"{heading}\n"
+    gap = "\n\n" if source.strip() else ""
+    if zone == "content" and not has_markers and "content" not in spans:
+        return source.rstrip() + gap + text + "\n"
+    return source.rstrip() + gap + f"::{zone}::\n{text}\n"
+
+
+def remove_zone_section(source: str, zone: str) -> str:
+    """``source`` without zone ``zone``'s ``::zone::`` marker and section.
+
+    Only an explicit marker is removed; an auto-extracted heading or leading
+    content has no marker of its own and is cleared instead.
+    """
+    markers = list(_ZONE_PATTERN.finditer(source))
+    for idx, m in enumerate(markers):
+        if m.group(1) != zone:
+            continue
+        end = markers[idx + 1].start() if idx + 1 < len(markers) else len(source)
+        before = source[: m.start()].rstrip()
+        after = source[end:].lstrip("\n")
+        if not after:
+            return before + "\n" if before else ""
+        return (before + "\n\n" if before else "") + after
+    return replace_zone_text(source, zone, "")
+
+
+def zone_names(source: str) -> set[str]:
+    """Every zone ``source`` names: its ``::zone::`` markers (an empty one
+    too) and the zones its leading text is auto-extracted into."""
+    markers = list(_ZONE_PATTERN.finditer(source))
+    head_end = markers[0].start() if markers else len(source)
+    return set(_auto_spans(source, 0, head_end)) | {m.group(1) for m in markers}
+
+
+def rename_zone(source: str, old: str, new: str) -> str:
+    """``source`` with zone ``old`` called ``new``: each ``::old …::`` marker
+    renamed (its parameters kept). Text auto-extracted into ``old`` (a leading
+    ``#`` heading for ``title``, the text after the headings for ``content``)
+    gets a ``::new::`` marker of its own, and the auto-extracted zones after it
+    explicit markers too, so they keep their text. The caller checks that
+    ``new`` is free (`zone_names`)."""
+    markers = list(_ZONE_PATTERN.finditer(source))
+    out = source
+    # From the last, so earlier offsets hold.
+    for m in reversed(markers):
+        if m.group(1) == old:
+            out = out[: m.start(1)] + new + out[m.end(1) :]
+    if any(m.group(1) == old for m in markers):
+        return out
+    head_end = markers[0].start() if markers else len(source)
+    auto = _auto_spans(source, 0, head_end)
+    if old not in auto:
+        return source
+    order = [z for z in ("title", "subtitle", "content") if z in auto]
+    for zone in reversed(order[order.index(old) :]):
+        start = auto[zone][0]
+        name = new if zone == old else zone
+        out = out[:start] + f"::{name}::\n" + out[start:]
+    return out

@@ -54,7 +54,12 @@ def clean_inkscape_tree(
     root = parse_svg_file(src)
     if before_clean is not None:
         before_clean(root)
+    return clean_inkscape_root(root, keep_preview)
 
+
+def clean_inkscape_root(root: SvgElement, keep_preview: bool = False) -> SvgElement:
+    """``clean_inkscape_tree`` for a tree already parsed (from bytes not yet
+    written, say): the same cleaning, in place."""
     # Before the namespace cleanup, not after: the injected layers are the only
     # users of the inkscape/sodipodi prefixes in an otherwise clean file, so
     # dropping them afterwards would leave the declarations stranded on the root

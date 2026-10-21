@@ -68,6 +68,12 @@ with `{path}` substituted (appended as a final argument if the template has no
 if you want a different command there
 (Inkscape instead of a text editor, say) without losing the general one
 for content, notes, and the deck script itself.
+Any other extension works the same way (`INKFLOW_EDIT_CMD_PNG`,
+`INKFLOW_EDIT_CMD_MD`), and so does a kind of file:
+`INKFLOW_EDIT_CMD_IMAGE` (PNG, JPEG, WebP, GIF…), `INKFLOW_EDIT_CMD_TEXT`
+(Markdown, Python, CSS…), `INKFLOW_EDIT_CMD_VIDEO`, `INKFLOW_EDIT_CMD_PDF`
+(a PDF figure) and `INKFLOW_EDIT_CMD_DATA` (a chart's CSV or TSV).
+The most specific one set wins: extension, then kind, then `INKFLOW_EDIT_CMD`.
 
 ```bash
 INKFLOW_EDIT_CMD="code -r --goto {path}" inkflow serve deck.py
