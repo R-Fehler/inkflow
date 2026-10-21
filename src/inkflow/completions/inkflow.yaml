@@ -25,7 +25,10 @@ commands:
       --force: Scaffold even into a non-empty directory
       --poster: A conference poster instead of a talk
       --size=: The poster's paper size (a0, a1, a0-landscape, letter)
+      --theme=: The deck's theme (default, paper, stage)
     completion:
+      flag:
+        theme: ["default", "paper", "stage"]
       positional:
         - ["$directories"]
 

@@ -89,7 +89,7 @@ nav:
     - Overlays: design/overlays.md
     - Themes: design/themes.md
     - Fonts: design/fonts.md
-    - Built-in theme: built-in-theme/index.md
+    - Built-in themes: built-in-theme/index.md
   - Presenting:
     - Presenting a deck: presenting/index.md
     - Presenter panel: presenting/presenter-panel.md
