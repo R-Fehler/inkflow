@@ -28,6 +28,9 @@ class Client:
     online: bool = False
     """Came another way than this server's port (``serve_connection``: a
     relay), so sharing on the network and the other way stop separately."""
+    patches: bool = False
+    """The page takes a rebuild as what changed (``hello`` with ``patch``):
+    slides it holds are named by key instead of sent again."""
 
     def public(self) -> dict[str, object]:
         return {

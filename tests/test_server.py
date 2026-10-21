@@ -16,6 +16,8 @@ from inkflow.server import (
     _coerce_nav_position,  # pyright: ignore[reportPrivateUsage]
     _resolve_asset,  # pyright: ignore[reportPrivateUsage]
     _resolve_edit_request,  # pyright: ignore[reportPrivateUsage]
+    _versioned,  # pyright: ignore[reportPrivateUsage]
+    _WatchFilter,  # pyright: ignore[reportPrivateUsage]
     build_html,
 )
 
@@ -139,6 +141,36 @@ def test_build_html_logs_json_embedded() -> None:
 
 
 # ── _resolve_asset ────────────────────────────────────────────────────────────
+
+
+def test_served_slides_name_each_asset_with_its_version(tmp_path: Path) -> None:
+    import os
+
+    (tmp_path / "assets").mkdir()
+    picture = tmp_path / "assets" / "flow.svg"
+    picture.write_text("<svg/>", encoding="utf-8")
+    roots = AssetRoots(tmp_path)
+    slide: SlideData = {
+        "id": "s",
+        "svg": '<svg><image href="assets/flow.svg"/>'
+        + '<image href="missing.png"/><image href="https://x.org/a.png"/></svg>',
+        "title": "",
+        "notes": '<img src="assets/flow.svg">',
+        "editableFiles": [],
+    }
+    first = _versioned(slide, roots)
+    assert 'href="assets/flow.svg?v=' in first["svg"]
+    assert 'href="missing.png"' in first["svg"]  # nothing to version
+    assert 'href="https://x.org/a.png"' in first["svg"]
+    assert 'src="assets/flow.svg?v=' in first["notes"]
+    assert _versioned(slide, roots) == first  # same file, same slide
+    # The file changes (Inkscape, GIMP): the slide changes with it.
+    stat = picture.stat()
+    os.utime(picture, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    assert _versioned(slide, roots)["svg"] != first["svg"]
+    # The version is not part of the file's name when it is served.
+    stamped = first["svg"].split('href="')[1].split('"')[0]
+    assert _resolve_asset(roots, "/" + stamped) == picture.resolve()
 
 
 def test_resolve_asset_path_traversal(tmp_path: Path) -> None:
@@ -298,3 +330,18 @@ def test_resolve_edit_request_no_command_configured_dropped() -> None:
     ]
     commands = EditCommands(svg=None, default=None)
     assert _resolve_edit_request({"path": "/deck/slide.svg"}, slides, commands) is None
+
+
+# ── File watcher ──────────────────────────────────────────────────────────────
+
+
+def test_the_watcher_skips_what_inkflow_writes_below_the_deck(tmp_path: Path) -> None:
+    from watchfiles import Change
+
+    deck = tmp_path / ".inkflow" / "worktrees" / "talk"
+    watch = _WatchFilter(deck)
+    assert watch(Change.modified, str(deck / "slides" / "one.svg"))
+    assert not watch(Change.modified, str(deck / ".inkflow" / "context.json"))
+    assert not watch(Change.added, str(deck / "build" / "index.html"))
+    # A deck living below some .inkflow/ folder is watched like any other.
+    assert watch(Change.modified, str(deck / "deck.py"))

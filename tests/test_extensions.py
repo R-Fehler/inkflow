@@ -60,6 +60,7 @@ class Recorder(ServerExtension):
         self.events: list[str] = []
         self.builds: list[Build] = []
         self.hellos: list[dict[str, object]] = []
+        self.resyncs: list[bool] = []
         self.pressed: int = 0
 
     @override
@@ -110,6 +111,7 @@ class Recorder(ServerExtension):
         resync: bool,
     ) -> None:
         self.hellos.append(msg)
+        self.resyncs.append(resync)
 
     @override
     async def message(
@@ -247,6 +249,36 @@ def test_the_extension_hears_a_page_leave(served: tuple[Recorder, int]) -> None:
             break
         threading.Event().wait(0.05)
     assert "gone presenter" in recorder.events
+
+
+def test_a_page_that_takes_patches_and_asks_again(
+    served: tuple[Recorder, int],
+) -> None:
+    recorder, port = served
+    with open_ws(port) as ws:
+        _ = until(ws, "welcome")
+        ws.send(json.dumps({"type": "hello", "role": "presenter", "patch": True}))
+        # The slides its HTML came with, named by key.
+        held = until(ws, "update")["slides"]
+        assert all(isinstance(s, str) for s in cast("list[object]", held))
+        # It missed a build: everything again, and the extensions hear it.
+        ws.send(json.dumps({"type": "resync"}))
+        whole = until(ws, "update")["slides"]
+        assert all(isinstance(s, dict) for s in cast("list[object]", whole))
+        ws.send(json.dumps({"type": "build-status"}))
+        _ = until(ws, "build-status")
+    assert recorder.resyncs == [False, True]
+
+
+def test_a_rebuild_keeps_what_it_can_unless_asked_for_everything(
+    served: tuple[Recorder, int], project: Path
+) -> None:
+    recorder, _ = served
+    ui = cast("LiveUI", cast("object", UI()))
+    asyncio.run(server.rebuild(project / "deck.py", ui, resolve_levels()))
+    assert not recorder.builds[-1].fresh
+    asyncio.run(server.rebuild(project / "deck.py", ui, resolve_levels(), full=True))
+    assert recorder.builds[-1].fresh
 
 
 def test_a_failed_build_is_said(served: tuple[Recorder, int], project: Path) -> None:

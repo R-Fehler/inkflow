@@ -1,6 +1,7 @@
 """The server ``inkflow serve`` runs: one port for the presenter's pages, the
 deck's assets, and the WebSocket (``/_inkflow/ws``) that pushes every rebuild
-and relays positions between windows.
+(only what changed, ``inkflow.incremental``) and relays positions between
+windows.
 
 Who may connect, and as whom, is decided at the door (``inkflow.access``):
 the owner (this machine), or a share link's editor or viewer.
@@ -17,7 +18,6 @@ import base64
 import contextlib
 import errno
 import functools
-import hashlib
 import importlib.resources
 import importlib.util
 import json
@@ -29,7 +29,13 @@ import sys
 import time
 import traceback
 import webbrowser
-from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Collection,
+    Sequence,
+)
 from dataclasses import dataclass, field
 from html import escape as escape_html
 from pathlib import Path
@@ -39,7 +45,12 @@ from urllib.parse import unquote
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
-from watchfiles import awatch  # pyright: ignore[reportUnknownVariableType]
+from typing_extensions import override
+from watchfiles import (
+    Change,
+    DefaultFilter,
+    awatch,  # pyright: ignore[reportUnknownVariableType]
+)
 from websockets.asyncio.server import ServerConnection
 from websockets.asyncio.server import serve as ws_serve
 from websockets.http11 import Request as WsRequest
@@ -63,8 +74,9 @@ from inkflow.access import (
     split_host,
 )
 from inkflow.access import Request as AccessRequest
-from inkflow.assets import MIME_TYPES, AssetRoots
+from inkflow.assets import MIME_TYPES, AssetRoots, is_local_ref, rewrite_references
 from inkflow.collab import Client, People
+from inkflow.deps import file_hash
 from inkflow.edit import (
     NO_EDIT_COMMANDS,
     EditCommands,
@@ -83,6 +95,7 @@ from inkflow.extensions import (
     VirtualConnection,
 )
 from inkflow.fonts import embed_fonts_css
+from inkflow.incremental import SlideCache, as_patch, keys_of, set_keys
 from inkflow.loaders import load_deck_scripts, load_deck_styles
 from inkflow.logging import Levels, collect_logs, logger, report, resolve_levels
 from inkflow.manifest import Deck
@@ -95,6 +108,15 @@ from inkflow.wsbridge import Bridge
 DEFAULT_PORT = 7777
 
 # ── Shared mutable state ──────────────────────────────────────────────────────
+
+
+@dataclass
+class Kept:
+    """One deck's builds, slide by slide: a rebuild processes the slides a
+    change touched and takes the others from here (`inkflow.incremental`)."""
+
+    deck_path: Path
+    slides: SlideCache
 
 
 _state: State = {
@@ -124,13 +146,15 @@ class _Served:
     failed_hash: str | None = None
     """Hash of the deck.py whose build failed last (None after a good build),
     so a program waiting for its edit to build learns that it never will."""
+    kept: Kept | None = None
+    """What is kept from one build of the served deck to the next."""
     extensions: list[ServerExtension] = field(default_factory=list)
     """The server's extensions (``inkflow.extensions``)."""
     edit_commands: EditCommands = NO_EDIT_COMMANDS
     address: dict[str, object] = field(default_factory=dict)
     """Where this machine's own pages and programs reach the server."""
     shutdown: asyncio.Event | None = None
-    rebuild: Callable[[], Awaitable[None]] | None = None
+    rebuild: Callable[[bool], Awaitable[None]] | None = None
     """Build the served deck again (set while serving)."""
 
 
@@ -167,12 +191,6 @@ class _Share:
 _share = _Share()
 
 
-def file_hash(data: bytes) -> str:
-    """A short digest of a file's bytes: which version of deck.py a build ran
-    (``build-status``, ``Build.deck_hash``)."""
-    return hashlib.sha256(data).hexdigest()[:16]
-
-
 # ── Deck loader ───────────────────────────────────────────────────────────────
 
 
@@ -197,6 +215,31 @@ def load_deck(deck_path: Path) -> Deck:
 # ── Build pipeline ────────────────────────────────────────────────────────────
 
 
+def _kept_for(deck_path: Path, full: bool) -> tuple[Kept, bool]:
+    """The served deck's kept builds, and whether they start empty (after
+    ``full``, for another deck than the last, or the first build)."""
+    kept = _served.kept
+    if kept is None or kept.deck_path != deck_path or full:
+        kept = Kept(deck_path, SlideCache())
+        _served.kept = kept
+        return kept, True
+    return kept, False
+
+
+def _update_message(
+    slides: Sequence[object], changed: dict[str, object] | None = None
+) -> str:
+    return json.dumps(
+        {
+            "type": "update",
+            "slides": slides,
+            "transitions": _state["transitions"],
+            "logs": _state["logs"],
+            **(changed or {}),
+        }
+    )
+
+
 async def _each_extension(
     what: str, call: Callable[[ServerExtension], Awaitable[None]]
 ) -> None:
@@ -209,7 +252,13 @@ async def _each_extension(
             logger.exception(f"{ext.name}: {what} failed")
 
 
-async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
+async def rebuild(
+    deck_path: Path, ui: LiveUI, levels: Levels, *, full: bool = False
+) -> None:
+    """Build the deck and tell the pages. Slides whose files and settings
+    are as the last build read them are not processed again, and a page is
+    sent only the slides that changed; ``full`` forgets the last builds (the
+    terminal's ``r``)."""
     ui.set_building()
 
     async def _animate() -> None:
@@ -231,20 +280,25 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
             deck_hash = file_hash(deck_path.read_bytes())
             deck = await asyncio.to_thread(load_deck, deck_path)
             project_dir = deck_path.parent
+            kept, fresh = _kept_for(deck_path, full)
             # An extension may ask for source locators on every element; the
             # presenter ignores them, so one build serves every page.
             built = await asyncio.to_thread(
                 functools.partial(
-                    process_deck, editor=any(ext.provenance for ext in extensions)
+                    process_deck,
+                    editor=any(ext.provenance for ext in extensions),
+                    cache=kept.slides,
                 ),
                 deck,
                 project_dir,
                 deck_path,
             )
-            build = Build(deck, deck_path, deck_hash, built)
+            build = Build(deck, deck_path, deck_hash, built, fresh=fresh)
             for ext in extensions:
                 await asyncio.to_thread(ext.build, build)
-            slides = [_without_edit(s) for s in built]
+            roots = AssetRoots(project_dir, deck.theme.asset_dir())
+            slides = [_versioned(_without_edit(s), roots) for s in built]
+            set_keys(slides)
             build.served = slides
             transitions = resolve_transitions(deck)
             styles_css = await asyncio.to_thread(load_deck_styles, deck, project_dir)
@@ -263,6 +317,15 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
             for e in entries
             if e.levelno >= levels.browser
         ]
+        # Styles and colour mode change rarely (a theme edit) and can be large
+        # (embedded fonts): they ride along only when they changed.
+        changed: dict[str, object] = {}
+        if styles_css != _state["styles_css"]:
+            changed["styles"] = styles_css
+        if deck.effective_mode != _state["mode"]:
+            changed["mode"] = "" if deck.effective_mode == ColorMode.DARK else "light"
+        # What a page that saw the last build holds: named, not sent again.
+        held = keys_of(_state["slides"])
         _state["slides"] = slides
         _state["transitions"] = transitions
         _state["styles_css"] = styles_css
@@ -279,17 +342,23 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
         else:
             _state["position"]["slideIndex"] = 0
         _state["position"]["step"] = 0
-        ui.set_ok(len(slides), time.monotonic() - t0, logs=tui_logs)
-        await broadcast(
-            json.dumps(
-                {
-                    "type": "update",
-                    "slides": slides,
-                    "transitions": transitions,
-                    "logs": browser_logs,
-                }
-            )
+        ui.set_ok(
+            len(slides),
+            time.monotonic() - t0,
+            logs=tui_logs,
+            processed=len(kept.slides.processed),
         )
+        patching = {
+            ws
+            for ws in _state["ws_clients"]
+            if (c := _share.people.get(ws)) is not None and c.patches
+        }
+        if patching:
+            patch = _update_message(as_patch(slides, held), changed)
+            await broadcast(patch, skip=_state["ws_clients"] - patching)
+        if _state["ws_clients"] - patching:
+            # A page of an older inkflow (a tab left open across an update).
+            await broadcast(_update_message(slides, changed), skip=patching)
     except Exception:
         # Outside collect_logs, so a fatal error reaches only the file sink. The overlay
         # and TUI error phase show it instead, never the banner.
@@ -319,10 +388,8 @@ async def rebuild(deck_path: Path, ui: LiveUI, levels: Levels) -> None:
 
 def _without_edit(slide: SlideData) -> SlideData:
     """The pages' copy of a slide: the editor facts stay with the extensions."""
-    if "edit" not in slide:
-        return slide
     data = slide.copy()
-    del data["edit"]
+    data.pop("edit", None)
     return data
 
 
@@ -340,10 +407,15 @@ def build_status() -> dict[str, object]:
 # ── WebSocket broadcast ───────────────────────────────────────────────────────
 
 
-async def broadcast(msg: str, sender: ServerConnection | None = None) -> None:
+async def broadcast(
+    msg: str,
+    sender: ServerConnection | None = None,
+    *,
+    skip: Collection[ServerConnection] = (),
+) -> None:
     dead: set[ServerConnection] = set()
     for ws in list(_state["ws_clients"]):
-        if ws is sender:
+        if ws is sender or ws in skip:
             continue
         try:
             await ws.send(msg)
@@ -641,15 +713,31 @@ def make_ws_handler(
                         await handled[0].message(websocket, client, msg)
                     except Exception:
                         logger.exception(f"{handled[0].name}: {msg_type} failed")
-                elif msg_type == "hello":
-                    # A page says what it is (``presenter``, ``editor``…).
-                    if not client.page and isinstance(msg.get("role"), str):
-                        client.page = str(msg.get("role"))
+                elif msg_type in ("hello", "resync"):
+                    # A page says what it is (``presenter``, ``editor``…) and
+                    # which rebuilds it takes (``patch``: what changed), and
+                    # is told which slides the deck has now: by key when it
+                    # may hold them (the ones its HTML came with), whole when
+                    # it found it does not (``resync``).
+                    if msg_type == "hello":
+                        client.patches = bool(msg.get("patch"))
+                        if not client.page and isinstance(msg.get("role"), str):
+                            client.page = str(msg.get("role"))
+                    if client.patches and _state["error"] is None:
+                        whole = msg_type == "resync"
+                        slides = _state["slides"]
+                        await websocket.send(
+                            _update_message(
+                                slides if whole else as_patch(slides, keys_of(slides))
+                            )
+                        )
                     for ext in list(_served.extensions):
                         try:
-                            await ext.hello(websocket, client, msg, resync=False)
+                            await ext.hello(
+                                websocket, client, msg, resync=msg_type == "resync"
+                            )
                         except Exception:
-                            logger.exception(f"{ext.name}: hello failed")
+                            logger.exception(f"{ext.name}: {msg_type} failed")
                 elif msg_type == "build-status":
                     await websocket.send(json.dumps(build_status()))
                 elif msg_type == "sync-request":
@@ -763,14 +851,44 @@ def build_html(
 _SERVED_SUFFIXES = set(MIME_TYPES)
 
 
+def _versioned(slide: SlideData, roots: AssetRoots) -> SlideData:
+    """The slide with each local asset reference stamped with its file's
+    modification time (``assets/x.png?v=…``), for serving only.
+
+    A page keeps the pictures it has loaded by URL, so a diagram or picture
+    changed on disk (Inkscape, GIMP) would stay as it was on screen: with the
+    stamp, the changed file is a changed slide (pushed as usual) at a new URL.
+    The slide cache never reads pictures (`inkflow.incremental`): this runs
+    on every build, outside it. ``_resolve_asset`` ignores the query; build
+    and export never stamp, and a frontend that writes references back drops
+    it first.
+    """
+
+    def stamp(ref: str) -> str | None:
+        if not is_local_ref(ref) or "?" in ref:
+            return None
+        located = roots.locate(unquote(ref))
+        try:
+            mtime = located.stat().st_mtime_ns if located is not None else None
+        except OSError:
+            return None
+        return f"{ref}?v={mtime:x}" if mtime else None
+
+    out = slide.copy()
+    out["svg"] = rewrite_references(slide["svg"], stamp)
+    out["notes"] = rewrite_references(slide["notes"], stamp)
+    return out
+
+
 def _resolve_asset(roots: AssetRoots, request_path: str) -> Path | None:
     """Map a request path to a file, or ``None`` if it names nothing servable.
 
     The request path is a canonical asset reference: the pipeline wrote it into
     the slide SVG, so ``AssetRoots.locate`` is the same answer ``build`` copies
-    to, and containment against the allowed roots is enforced there.
+    to, and containment against the allowed roots is enforced there. A query
+    (the version stamp ``_versioned`` adds) is not part of the name.
     """
-    decoded = unquote(request_path).lstrip("/")
+    decoded = unquote(request_path.split("?", 1)[0]).lstrip("/")
     located = roots.locate(decoded)
     if located is None:
         return None
@@ -1099,10 +1217,32 @@ def make_http_handler(
 # ── File watcher ──────────────────────────────────────────────────────────────
 
 
+class _WatchFilter(DefaultFilter):
+    """The default ignores, plus ``.inkflow/`` (what inkflow and its plugins
+    write for themselves) and ``build/`` (where ``inkflow build`` writes),
+    both matched below the watched folder only: a deck that itself lives
+    somewhere under a ``.inkflow/`` (a worktree kept there) is watched like
+    any other."""
+
+    ignore_dirs: Sequence[str] = (*DefaultFilter.ignore_dirs, ".inkflow", "build")
+
+    def __init__(self, root: Path) -> None:
+        super().__init__()
+        self._root: str = str(root)
+
+    @override
+    def __call__(self, change: Change, path: str) -> bool:
+        rel = os.path.relpath(path, self._root)
+        if rel == os.curdir or rel.startswith(os.pardir):
+            return super().__call__(change, path)
+        return super().__call__(change, rel)
+
+
 async def _watch(
     deck_path: Path, ui: LiveUI, lock: asyncio.Lock, levels: Levels
 ) -> None:
-    async for changes in awatch(str(deck_path.parent)):
+    root = deck_path.parent
+    async for changes in awatch(str(root), watch_filter=_WatchFilter(root)):
         logger.debug(f"change detected in {len(changes)} file(s), rebuilding")
         async with lock:
             await rebuild(deck_path, ui, levels)
@@ -1162,8 +1302,9 @@ async def _read_keys(
             elif ch == "o":
                 _open_browser(f"{base}:{http_port}{_share.access.owner_path('/')}")
             elif ch == "r":
+                # Asked for by hand: every slide again, whatever is kept.
                 async with lock:
-                    await rebuild(deck_path, ui, levels)
+                    await rebuild(deck_path, ui, levels, full=True)
             elif ch == "t":
                 ui.toggle_trace()
             elif ch in extra:
@@ -1388,9 +1529,9 @@ class _Context:
     ) -> None:
         await notify(conn, message, style=cast("NotifyStyle", style))
 
-    async def rebuild(self) -> None:
+    async def rebuild(self, *, full: bool = False) -> None:
         if _served.rebuild is not None:
-            await _served.rebuild()
+            await _served.rebuild(full)
 
     def shutdown(self) -> None:
         if _served.shutdown is not None:
@@ -1563,9 +1704,9 @@ async def listening(
     _served.address = _address("127.0.0.1", actual, None, None)
     lock = asyncio.Lock()
 
-    async def again() -> None:
+    async def again(full: bool) -> None:
         async with lock:
-            await rebuild(deck_path, ui, resolve_levels())
+            await rebuild(deck_path, ui, resolve_levels(), full=full)
 
     _served.rebuild = again
     try:
@@ -1586,6 +1727,7 @@ async def listening(
         _served.deck = None
         _served.built_hash = None
         _served.failed_hash = None
+        _served.kept = None
 
 
 class Listener:
@@ -1780,9 +1922,9 @@ async def _serve_deck(
             ui_ref.append(ui)
             _share.on_change = lambda: ui.set_share(share_lines(access, http_port))
 
-            async def again() -> None:
+            async def again(full: bool) -> None:
                 async with rebuild_lock:
-                    await rebuild(deck_path, ui, levels)
+                    await rebuild(deck_path, ui, levels, full=full)
 
             _served.rebuild = again
             try:

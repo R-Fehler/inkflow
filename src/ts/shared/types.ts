@@ -1,3 +1,5 @@
+import type { Patch } from "./patch";
+
 // Every field is always emitted by the Python side (pipeline.py process_deck),
 // so all are required here. Consumers that still guard with `|| ""` are being
 // defensive, not handling a real absent case.
@@ -13,6 +15,9 @@ export interface SlideData {
     title: string;
     notes: string;
     editableFiles: EditableFile[];
+    // A served slide's digest, by which a rebuild names the slides a page
+    // already holds (patch.ts); absent in a static build.
+    key?: string;
 }
 
 // Whether the server has a configured edit command for each file kind (env vars
@@ -70,9 +75,14 @@ export type NotifyStyle = "green" | "yellow" | "red";
 export type WsMessage =
     | {
           type: "update";
-          slides: SlideData[];
+          // As a patch (patch.ts) for a page that said `hello` with `patch`.
+          slides: Patch<SlideData>;
           transitions: TransitionData[];
           logs: LogEntry[];
+          // Sent only when they changed (a theme edit): the deck's stylesheet
+          // and its colour mode ("" dark, "light").
+          styles?: string;
+          mode?: string;
       }
     | { type: "error"; message: string }
     | { type: "notify"; message: string; style: NotifyStyle }
