@@ -11,57 +11,60 @@ are `claude/upstream-NN-<topic>`. Each is opened here against `upstream-main`
 (or the branch it stacks on) for review first; re-target to `ll-nick/inkflow`
 when ready.
 
-## Order
+## The series
 
-### A. What frontends build on (needed by inkflow-editor)
+Twenty-two stacked PRs, each opened against the one before it (PR 1 against
+`upstream-main`):
 
-| # | PR | Contents | Stacks on |
+| # | Branch | PR | Title |
 |---|---|---|---|
-| 1 | Plugins | `plugins.py`: entry-point plugins add CLI commands, `verify` checks (`--no-deck-checks`), completions | main |
-| 2 | Server extensions | `extensions.py`: `ServerExtension` (start/stop, build hooks, own messages and pages, terminal keys, welcome fields), `ServerContext`; minimal `collab.Client`; `Plugin.server_extensions`/`serve_options` | 1 |
-| 3 | Source locators | `provenance.py`, `process_deck(editor=True)`, `SlideData.edit`, `ServerExtension.provenance`; presenter copies drop `edit` | 2 |
-| 4 | One port and the door | WebSocket on the HTTP port (`wsbridge.py`), `access.py` (Host/Origin checks against DNS rebinding and cross-site sockets, owner by loopback, share links with editor/viewer roles), messages gated by role, `--share`, `--tls`, `instances.py` (one server per deck) | 2 |
-| 5 | Incremental rebuilds | `deps.py` + `incremental.py`: a served deck processes only the slides a change touched; pages get patches (`shared/patch.ts`) | 3 |
-| 6 | Deck switching | `ServerContext.open_deck`, serving without a deck (`serves_without_deck`), `home` | 4 |
+| 1 | `claude/upstream-01-plugins` | R-Fehler/inkflow#3 | Add plugins: installed packages add commands, verify checks, completions |
+| 2 | `claude/upstream-02-server-extensions` | R-Fehler/inkflow#4 | Add server extensions: frontends plug into the deck's server |
+| 3 | `claude/upstream-03-source-locators` | R-Fehler/inkflow#5 | Add source locators: the editor build says where each element came from |
+| 4 | `claude/upstream-04-one-port-door` | R-Fehler/inkflow#6 | Serve everything on one port, behind a door that decides who is who |
+| 5 | `claude/upstream-05-incremental` | R-Fehler/inkflow#7 | Rebuild only what a change touched, and send pages what changed |
+| 6 | `claude/upstream-06-deck-switching` | R-Fehler/inkflow#8 | Switch decks on one server, serve without a deck, send the owner home |
+| 7 | `claude/upstream-07-sizes` | R-Fehler/inkflow#9 | Page sizes and posters: Deck(size=), print-size PDFs, poster layouts |
+| 8 | `claude/upstream-08-layouts` | R-Fehler/inkflow#10 | More built-in layouts, and which slides use each |
+| 9 | `claude/upstream-09-layout-copies` | R-Fehler/inkflow#11 | A theme's layout is copied on write; placeholders |
+| 10 | `claude/upstream-10-charts` | R-Fehler/inkflow#12 | Charts from data, drawn at build time in theme tokens |
+| 11 | `claude/upstream-11-pdf-figures` | R-Fehler/inkflow#13 | PDF figures: a page of a PDF shown as vector SVG |
+| 12 | `claude/upstream-12-drawio` | R-Fehler/inkflow#14 | draw.io diagrams drawn into the slide; backgrounds behind pictures |
+| 13 | `claude/upstream-13-fonts` | R-Fehler/inkflow#15 | The default fonts ship with inkflow |
+| 14 | `claude/upstream-14-themes` | R-Fehler/inkflow#16 | Two more built-in themes: Paper and Stage |
+| 15 | `claude/upstream-15-sections` | R-Fehler/inkflow#17 | Sections: named groups of consecutive slides |
+| 16 | `claude/upstream-16-text-fit` | R-Fehler/inkflow#18 | Text size and shrink-to-fit |
+| 17 | `claude/upstream-17-ink` | R-Fehler/inkflow#19 | Pen ink in the presenter |
+| 18 | `claude/upstream-18-gestures` | R-Fehler/inkflow#20 | Zoom gestures: one shared layer, a pinch never leaves a trace |
+| 19 | `claude/upstream-19-render` | R-Fehler/inkflow#21 | inkflow render and the handout |
+| 20 | `claude/upstream-20-portable` | R-Fehler/inkflow#22 | A portable deck: fonts report, LFS, pinned inkflow, Pages publishing |
+| 21 | `claude/upstream-21-single-file` | R-Fehler/inkflow#23 | One-file static build by default |
+| 22 | `claude/upstream-22-rest` | R-Fehler/inkflow#24 | The rest of the core: what frontends need, and leftovers |
 
-### B. Core features (independent of each other; any order after A, most also before)
-
-| # | PR | Contents |
-|---|---|---|
-| 7 | Page sizes and posters | `sizes.py` (`Deck(size=)`), A-series canvas, poster layouts/templates, PDF page boxes (`pdfboxes.py`), `--bleed`/`--crop-marks` |
-| 8 | Charts | `charts.py`, `Chart` zone value, ```` ```chart ```` fence, verify of chart ids |
-| 9 | PDF figures | `pdf.py`, `_pdf/` asset root, committed pages |
-| 10 | draw.io | `drawio.py`, `drawio_inline.py` (diagrams drawn into the slide, themed), `backgrounds.py` |
-| 11 | Shipped fonts | `theme/fonts/` (Inter, JetBrains Mono, STIX Two Math, Twemoji), subsetting cache, interface fonts |
-| 12 | Built-in themes | `builtin_themes/` Paper and Stage, `init --theme` |
-| 13 | Sections | `Section(...)` in `slides=`, presenter overview/picker headings |
-| 14 | Text size and fit | `TextBox(size=, fit=)`, marker params, `shared/fit.ts` everywhere a slide shows |
-| 15 | Ink | `ink.py`, pen strokes in the presenter (`shared/ink*.ts`), saved per slide |
-| 16 | Zoom gestures | `shared/gestures.ts`, `gesturepad.ts`, presenter camera |
-| 17 | Render and checks | `cdp.py`, `render.py` (`inkflow render`, `--check`, contrast, `--boxes`), `handout.py` |
-| 18 | Portability | `fontreport.py`, `lfs.py`, `pack.py`, `publish.py` (Pages CI), `init` pins inkflow |
-| 19 | Online sharing | `online/` relay, end-to-end encryption (optional extra) — could also stay a plugin |
-
-Each B PR may need small parts of another (verify lines, CLI options, the
-completion spec); those are carried in whichever PR lands first.
+PRs 1–6 are what frontends build on (plugins, server extensions, source
+locators, one port and the door, incremental rebuilds, deck switching);
+7–21 are core features; 22 is what frontends still needed from the core
+(`max_message_size`, `Instance.home`, neutral wording) and leftovers.
 
 ## What does not go upstream
 
-Everything in `inkflow-editor/` (the visual editor, agent CLI, compare view,
-presence, Share via SSH): it is a plugin over the API of part A.
+Everything in `inkflow-editor/` (the visual editor and its editing session,
+the agent CLI, the compare view, presence, online sharing through a relay):
+it is a plugin over the core's plugin and server-extension API.
 
 ## Status
 
-- PR 1 (plugins): `claude/upstream-01-plugins`, R-Fehler/inkflow#3.
-- PR 2 (server extensions): `claude/upstream-02-server-extensions`,
-  R-Fehler/inkflow#4. Interim owner rule: loopback peer through a loopback
-  Host/Origin (PR 4 replaces it with `access.py`). `Role` lives in
-  `collab.py` until then. Not yet in it: `provenance` (PR 3), `access`,
-  `send_owners`, `share_*`, `serve_connection`/`serve_request` (PR 4),
-  `open_deck`, `serves_without_deck`, `home` (PR 6), `resync` and patches
-  (PR 5), `HttpRequest.token`/ranged `send_file` (PR 4).
-- PR 3 (source locators): `claude/upstream-03-source-locators`,
-  R-Fehler/inkflow#5. Not yet in it: `inkflow:hint` prompts and
-  `show-shape` zones (slide master), the `ink` path in `SlideEditInfo`
-  (PR 15).
-- Next: PR 4 (one port and the door).
+All 22 PRs are open (R-Fehler/inkflow#3–#24). The fork's core is now exactly
+`claude/upstream-22-rest`'s: `git diff claude/upstream-22-rest -- . ':!inkflow-editor'`
+lists only the fork's own files (this one, the workspace config, CI and mise
+tasks, `docs/editor/`, the README's and the guides' editor parts), so
+inkflow-editor runs on the core that goes upstream.
+
+After merge: the PRs are re-targeted to `ll-nick/inkflow` and merged in
+order. Then `upstream-main` is synced with upstream main, which then holds
+the whole core, and the fork is merged with it: its core diff against
+upstream is only the fork's own files listed above. From then on a change the
+editor needs from the core goes upstream as a PR of its own first (a hook any
+frontend could use), and the fork takes the core from upstream instead of
+diverging again; once released, inkflow-editor can depend on the published
+inkflow instead of the workspace copy.
