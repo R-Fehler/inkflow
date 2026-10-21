@@ -266,6 +266,15 @@ def test_sheet_defaults_to_every_slide(
     assert spy.calls[0]["numbers"] == [2, 1]
 
 
+def test_a_slide_goes_by_its_number_or_its_id(
+    monkeypatch: pytest.MonkeyPatch, tiny: Path
+) -> None:
+    spy, _, _ = _run(monkeypatch, tiny, ["-s", "b", "-s", "1"], [])
+    assert spy.calls[0]["numbers"] == [2, 1]
+    _, code, out = _run(monkeypatch, tiny, ["-s", "nope"], [])
+    assert code == 2 and "no slide with id 'nope'" in out
+
+
 def test_check_and_sheet_exclude_each_other(
     monkeypatch: pytest.MonkeyPatch, tiny: Path
 ) -> None:

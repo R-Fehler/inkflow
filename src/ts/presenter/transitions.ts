@@ -557,8 +557,9 @@ function loadSlideBody(
             ? state.slides[state.slideIndex].svg
             : '<p style="color:var(--accent);padding:2rem">No slides.</p>';
         fitSlideToStage(stage.firstElementChild);
-        // Before a transition takes the new slide into its layer, so what
-        // is put into it (the slide's ink) travels in with it.
+        // Before a transition takes the new slide into its layer, so what is
+        // done to it (its text fitted, the slide's ink put in) travels in
+        // with it.
         slideMounted();
         initialLand();
     };

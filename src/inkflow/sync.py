@@ -264,7 +264,7 @@ class PreviewPlan(NamedTuple):
         ``verify`` may call it stale). A bare slide is left alone: only a style
         block would be written, which is worth it for a file named explicitly,
         not for every raw SVG in the deck. Once it carries that block (an
-        explicit sync, the editor's Open ▾) the sweep keeps it current, or a
+        explicit sync, or an editor's) the sweep keeps it current, or a
         mode or theme change would leave it stale with no way to fix it. An
         overlay file is always swept, since the block is all it gets until it
         names a backdrop."""

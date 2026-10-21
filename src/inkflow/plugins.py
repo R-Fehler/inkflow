@@ -6,7 +6,7 @@ agent, another kind of frontend) is a plugin: an installed package that names
 a ``Plugin`` under the ``inkflow.plugins`` entry-point group::
 
     [project.entry-points."inkflow.plugins"]
-    editor = "inkflow_editor.plugin:plugin"
+    wordcount = "inkflow_wordcount:plugin"
 
 The entry point names a ``Plugin`` instance (or a callable returning one).
 Every method has a do-nothing default, so a plugin overrides only what it
@@ -95,8 +95,8 @@ class Plugin:
 
     def requirement(self) -> str | None:
         """What a deck's ``pyproject.toml`` should depend on for this plugin's
-        commands to work in a clone of it (``inkflow-editor~=0.1.0``): ``init``
-        and ``pack`` pin it beside inkflow."""
+        commands to work in a clone of it (``inkflow-wordcount~=0.1.0``): a new
+        deck pins it beside inkflow."""
         return None
 
     def current_slide(self, project_dir: Path) -> int | None:

@@ -1,9 +1,9 @@
 """The project's ``.inkflow/`` folder: inkflow's own working files.
 
 Caches (converted PDF pages), and whatever tools built on inkflow keep beside
-a deck (an editor's context for agents, its starred slides, staged uploads),
-live here. The folder ignores itself in git and the server's file watcher
-never looks inside it, so nothing written here is ever a deck change.
+a deck (a plugin's own files), live here. The folder ignores itself in git and
+the server's file watcher never looks inside it, so nothing written here is
+ever a deck change.
 """
 
 from __future__ import annotations

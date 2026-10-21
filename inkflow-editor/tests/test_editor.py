@@ -1813,12 +1813,12 @@ def test_math_preview(project: Path) -> None:
 def test_open_file_lists_programs_and_launches_only_locally(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from inkflow.edit import App
+    from inkflow_editor.openwith import App
 
     def which(binary: str) -> str:
         return f"/usr/bin/{binary}"
 
-    monkeypatch.setattr("inkflow.edit.shutil.which", which)
+    monkeypatch.setattr("inkflow_editor.openwith.shutil.which", which)
     launched: list[tuple[Path, App]] = []
 
     def fake_open(path: Path, app: App) -> str | None:

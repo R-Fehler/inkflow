@@ -34,13 +34,7 @@ from inkflow.layout import (
     resolve_parent_path,
     zone_placeholder_css,
 )
-from inkflow.loaders import (
-    LoadedText,
-    load_md,
-    load_notes,
-    load_style,
-    notes_path,
-)
+from inkflow.loaders import LoadedText, load_md, load_notes, load_style, notes_path
 from inkflow.logging import logger
 from inkflow.manifest import (
     Deck,
@@ -83,11 +77,12 @@ class EditableFile(TypedDict):
 
 
 class EmptyZone(TypedDict):
-    """A zone nothing filled. Pruned from the slide, so the editor draws its
+    """A zone nothing filled. Pruned from the slide, so a frontend draws its
     placeholder from this instead."""
 
     zone: str
     locator: str
+    """The zone shape's ``data-ink`` locator (see ``inkflow.provenance``)."""
     x: float
     y: float
     width: float
@@ -98,7 +93,7 @@ class EmptyZone(TypedDict):
 
 
 class SlideEditInfo(TypedDict):
-    """Pipeline facts only the visual editor needs (``process_deck(editor=True)``)."""
+    """Facts a frontend that writes back needs (``process_deck(editor=True)``)."""
 
     sources: list[str]
     """Absolute source paths; a ``data-ink`` locator's key indexes this list."""
@@ -108,7 +103,7 @@ class SlideEditInfo(TypedDict):
     ``zones=``), ``md`` (that zone's own section of the Markdown file) or
     ``md-file`` (several Markdown sections merged into a default zone)."""
     ink: str
-    """Absolute path of the slide's ink file, where the editor's pen writes;
+    """Absolute path of the slide's ink file, where a frontend's pen writes;
     it need not exist yet."""
 
 
@@ -128,6 +123,7 @@ class SlideData(TypedDict):
     section: NotRequired[SlideSection]
     """The section the slide is in; absent before the first section."""
     edit: NotRequired[SlideEditInfo]
+    """Only in an editor build, and never in what the pages are sent."""
     key: NotRequired[str]
     """Served slides only: a digest of the slide as sent, by which a page
     names the slides it already holds (`inkflow.incremental.set_keys`)."""
@@ -500,7 +496,7 @@ def _extract_keyframes(css: str) -> tuple[str, str]:
     and the step engine discovers custom ``@keyframes`` (from ``Deck(style=...)``) by
     name, so they must stay unscoped — wrapping them in ``@scope`` would hide or
     invalidate them. An ``@font-face`` (an SVG that carries its own font, such as
-    the demo's logo) is not allowed inside ``@scope`` either. The rest of the CSS
+    the demo's title) is not allowed inside ``@scope`` either. The rest of the CSS
     is still scoped by the caller.
     """
     keyframes: list[str] = []
@@ -575,7 +571,7 @@ def _add_layout_classes(
 class SourceTable:
     """The files one slide is composed from, in first-read order.
 
-    A file's position is the key its ``data-ink`` locators carry, so the editor
+    A file's position is the key its ``data-ink`` locators carry, so a frontend
     can name a file with a small integer on every element.
     """
 
@@ -607,7 +603,7 @@ class SlideSvg:
     the tree resolves against it, and because the layout tagging needs it later."""
 
     sources: SourceTable | None = None
-    """Set when the editor needs provenance: every file read is stamped."""
+    """Set for the editor build: every file read is stamped with locators."""
 
     @classmethod
     def read(
@@ -659,7 +655,7 @@ class SlideSvg:
 
     def pop_hints(self) -> dict[str, str]:
         """The layouts' placeholder prompts (``<inkflow:hint zone=…>``), by
-        zone name, taken out of the slide: they are for the editor only. The
+        zone name, taken out of the slide: they are for an editor only. The
         nearest layout's wins (ancestors are composed first)."""
         hints: dict[str, str] = {}
         for el in list(self.root.iter(INKFLOW_HINT)):
@@ -775,7 +771,7 @@ class DeckContext:
     chart_scale: float = ZONE_TEXT_SCALE
     """A chart's text size relative to the body text (`PageSize.chart_text_scale`)."""
     editor: bool = False
-    """Stamp provenance and collect ``SlideEditInfo`` for the visual editor."""
+    """Stamp source locators and collect ``SlideEditInfo`` (the editor build)."""
     print_page: tuple[float, float] | None = None
     """A print deck's sheet in points (every slide is printed on it)."""
     sized: bool = False
@@ -832,20 +828,6 @@ def zone_origin(
     return "md-file" if displaced and name == default_zone else "md"
 
 
-def _zone_origins(
-    filled: set[str],
-    slide: Slide,
-    parsed: ParsedMarkdown | None,
-    zone_ids: set[str],
-    default_zone: str,
-) -> dict[str, str]:
-    """Where each filled zone's content was written (see ``SlideEditInfo``)."""
-    return {
-        name: zone_origin(name, slide, parsed, zone_ids, default_zone)
-        for name in (zone_id.removeprefix("zone-") for zone_id in filled)
-    }
-
-
 def process_slide(
     slide: Slide,
     ctx: DeckContext,
@@ -855,10 +837,11 @@ def process_slide(
     slide_id: str,
     keep_zones: bool = False,
 ) -> ProcessedSlide:
-    """Return the processed SVG string, markdown-derived notes and editor facts.
+    """Return the processed SVG string, the slide's markdown-derived notes and,
+    in an editor build, its editor facts.
 
     ``keep_zones`` leaves the unfilled zones in, drawn as dashed placeholders
-    (the editor's slide master shows a layout's zones as objects)."""
+    (a slide-master view showing a layout's zones as objects)."""
     src = resolve_slide_src(slide.src, ctx.project_dir, ctx.theme)
     chain = resolve_chain(src, ctx.project_dir, ctx.theme)
     overlays = slide.overlays if slide.overlays is not None else ctx.overlays
@@ -889,10 +872,10 @@ def process_slide(
     md_notes = ""
     reveal_pairs: list[tuple[Cue, int]] = []
     reveal_max = 0
-    font_size = slide.font_size if slide.font_size is not None else ctx.font_size
     if parsed is not None or slide.zones:
         zone_ids = doc.zone_ids()
         default_zone = resolve_default_zone(doc.root, zone_ids)
+        font_size = slide.font_size if slide.font_size is not None else ctx.font_size
         result = build_slide_content(
             parsed,
             slide.zones,
@@ -906,9 +889,10 @@ def process_slide(
         reveal_pairs = [(anim, step) for anim, step in result.animations]
         reveal_max = result.max_step
         if sources is not None:
-            zone_origins = _zone_origins(
-                set(result.content), slide, parsed, zone_ids, default_zone
-            )
+            zone_origins = {
+                name: zone_origin(name, slide, parsed, zone_ids, default_zone)
+                for name in (z.removeprefix("zone-") for z in result.content)
+            }
         if result.content:
             content = _resolve_autoplay_conflicts(result.content, slide.animations)
             doc.inject_content(
@@ -1068,7 +1052,7 @@ def build_slide(
 
 def slide_notes(slide: Slide, ctx: DeckContext) -> str:
     """The slide's notes file (or inline notes) as HTML. Apart from
-    `build_slide`: a note typed in the editor changes no slide."""
+    `build_slide`: a note typed changes no slide."""
     loaded = load_notes(slide.notes, ctx.project_dir)
     return _source_for(ctx.assets, loaded.path).html(loaded.text)
 
@@ -1097,9 +1081,12 @@ def process_deck(
     editor: bool = False,
     cache: SlideStore | None = None,
 ) -> list[SlideData]:
-    """Every visible slide of ``deck``, built. With ``cache`` (a server
-    rebuilding on every change), a slide none of whose inputs changed since
-    the last build is taken from it instead of being built again."""
+    """Build every visible slide. ``editor`` is the editor build: every element
+    read from a source file carries its locator (``inkflow.provenance``) and
+    each slide its ``edit`` facts, for a frontend that writes changes back.
+    With ``cache`` (a server rebuilding on every change), a slide none of
+    whose inputs changed since the last build is taken from it instead of
+    being built again."""
     visible_slides = [s for s in deck.slides if s.visible]
     ctx = deck_context(deck, project_dir, len(visible_slides), editor=editor)
     ids = slide_ids(visible_slides)

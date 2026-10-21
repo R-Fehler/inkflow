@@ -22,6 +22,7 @@ from inkflow.layout import (
     layout_zones,
     resolve_chain,
     resolve_parent_path,
+    theme_ref,
     zone_placeholder_css,
 )
 from inkflow.svgio import parse_svg
@@ -539,3 +540,18 @@ def test_unstyled_zone_shapes_preview_as_dashed_outlines(tmp_path: Path) -> None
     assert inject_preview_layers(path, layers)
     assert "#zone-title {" in path.read_text()
     assert are_preview_layers_current(path, layers)
+    # Without theme colours there is no preview style at all.
+    bare = tmp_path / "bare.svg"
+    bare.write_text(svg, encoding="utf-8")
+    assert not inject_preview_layers(bare, PreviewLayers())
+    assert "zone-title {" not in bare.read_text()
+
+
+def test_theme_ref_names_a_theme_file(tmp_path: Path) -> None:
+    builtin = discover_layouts(None, None)
+    agenda = next(p for _, p in builtin if p.stem == "agenda")
+    assert theme_ref(agenda, None) == "builtin:agenda"
+    own = tmp_path / "layouts" / "agenda.svg"
+    own.parent.mkdir()
+    own.write_text(_SIMPLE_SVG, encoding="utf-8")
+    assert theme_ref(own, None) is None

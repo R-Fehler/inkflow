@@ -1,8 +1,9 @@
 """``inkflow fonts``: where each font the deck uses comes from
 (``fontreport``), so a deck looks the same on every machine.
 
-Plugins add subcommands to the group (inkflow-editor: ``fonts bundle`` and
-``fonts set``, which change the deck).
+Plugins add subcommands to the group (``fonts bundle``, say, to copy the
+machine's fonts into the deck); ``group_deck`` gives them the group's
+``--deck``.
 """
 
 from __future__ import annotations
@@ -62,8 +63,8 @@ def fonts_group(ctx: click.Context, deck_path: Path, as_json: bool) -> None:
     with inkflow or the deck's theme), `machine` (this computer's font
     folders only: other machines show another font), `missing` (nowhere), or
     `generic` (a stack starting with sans-serif/serif/monospace: each OS
-    picks its own). `inkflow fonts bundle` copies the `machine` ones into
-    fonts/.
+    picks its own). Copy the `machine` ones into fonts/ (with their
+    licences) to make the deck look the same everywhere.
     """
     if ctx.invoked_subcommand is not None:
         ctx.obj = {"deck": deck_path}
@@ -92,6 +93,8 @@ def fonts_group(ctx: click.Context, deck_path: Path, as_json: bool) -> None:
 
 
 def group_deck(ctx: click.Context, deck_path: Path | None) -> Path:
+    """The deck a plugin's ``fonts`` subcommand works on: its own ``--deck``
+    when given, else the group's (``inkflow fonts --deck x/deck.py bundle``)."""
     if deck_path is not None and deck_path != Path("deck.py"):
         return deck_path
     parent = cast("dict[str, object] | None", ctx.obj)

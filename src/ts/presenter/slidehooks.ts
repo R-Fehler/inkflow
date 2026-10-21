@@ -1,7 +1,8 @@
 // What happens around a slide change besides the slide itself. A module that
-// keeps something of its own in the mounted slide (ink: presenter/ink.ts)
-// registers here, so transitions.ts, which calls these, needs none of those
-// modules, nor its unit tests their part of the page.
+// works on the mounted slide (shrink-to-fit: presenter/fit.ts) or keeps
+// something of its own in it (ink: presenter/ink.ts) registers here, so
+// transitions.ts, which calls these, needs none of those modules, nor its
+// unit tests their part of the page.
 
 const mounted: (() => void)[] = [];
 const leaving: (() => void)[] = [];

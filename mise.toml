@@ -32,7 +32,10 @@ run = "uv run deptry src"
 run = "uv lock --check"
 
 # Each package's suite in its own session (both are a package named `tests`).
+# The core's tests describe the core alone, so installed plugins (this
+# workspace's inkflow-editor) are turned off for them.
 [tasks.test]
+env = { INKFLOW_NO_PLUGINS = "1" }
 run = "uv run pytest"
 
 [tasks.test-editor]

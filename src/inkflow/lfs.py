@@ -3,9 +3,9 @@ says so.
 
 A deck collects videos, screenshots, fonts and exported PDFs, files git keeps
 whole in every version, so a repository grows by their full size with each
-change. Git LFS stores them outside the history instead. ``inkflow init`` and the
-editor's new deck write the rules below into the deck's ``.gitattributes``; the
-editor's git menu warns about media that no rule covers.
+change. Git LFS stores them outside the history instead. ``inkflow init``
+writes the rules below into the deck's ``.gitattributes``, and a frontend's
+git view can warn about media that no rule covers.
 
 A deck can opt out ("git only", for a small repository or a host without LFS):
 its ``.gitattributes`` then carries the ``OFF_MARKER`` comment, which is

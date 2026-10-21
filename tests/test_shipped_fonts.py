@@ -12,7 +12,7 @@ import io
 import re
 import textwrap
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -26,7 +26,6 @@ from inkflow.fonts import (
     SHIPPED_FONTS_DIR,
     embed_fonts_css,
     embed_fonts_css_subsetted,
-    font_sources,
     is_shipped,
     shipped_font_file,
     shipped_font_url,
@@ -39,6 +38,7 @@ from inkflow.server import load_deck
 from inkflow.svg import theme_generic_fonts
 from inkflow.svgio import parse_svg, serialize_svg
 from inkflow.themes import Builtin, Theme, Typography
+from tests.serving import GUEST, fetch, make_project, serve_on_a_thread
 
 SHIPPED = {
     "InterVariable.woff2": "Inter",
@@ -284,8 +284,9 @@ def test_serve_links_the_shipped_fonts_instead_of_inlining_them(tmp_path: Path) 
     )
     assert 'url("/_inkflow/fonts/InterVariable.woff2") format("woff2")' in css
     assert "base64" not in css
-    for family, path in font_sources(slides, tmp_path, None, styles_css=styles):
-        assert path is not None and is_shipped(path), family
+    index = fonts._build_index(tmp_path, None)
+    for match in fonts._matches(fonts.extract_font_specs(slides), index):
+        assert is_shipped(match.record.path), match.family
 
 
 def test_the_font_route_reaches_only_shipped_fonts() -> None:
@@ -299,6 +300,29 @@ def test_the_font_route_reaches_only_shipped_fonts() -> None:
         "/assets/x.woff2",
     ):
         assert shipped_font_file(bad) is None, bad
+
+
+@pytest.fixture
+def served(tmp_path: Path) -> Iterator[int]:
+    yield from serve_on_a_thread(make_project(tmp_path) / "deck.py", [])
+
+
+def test_the_server_serves_shipped_fonts_behind_the_door(served: int) -> None:
+    status, headers, body = fetch(served, "/_inkflow/fonts/InterVariable.woff2")
+    assert status == 200
+    assert headers["content-type"] == "font/woff2"
+    assert "max-age" in headers["cache-control"]
+    assert body == (SHIPPED_FONTS_DIR / "InterVariable.woff2").read_bytes()
+    # A guest with no share link gets nothing, fonts included.
+    status, _, _ = fetch(served, "/_inkflow/fonts/InterVariable.woff2", GUEST)
+    assert status == 401
+    # Anything else in the folder is not a font: the presenter answers.
+    status, headers, body = fetch(served, "/_inkflow/fonts/README.md")
+    assert headers["content-type"].startswith("text/html")
+    assert b"Fonts shipped with inkflow" not in body
+    # The page names the interface fonts by their URL.
+    _, _, page = fetch(served, "/")
+    assert b'"Inkflow UI Mono"' in page and b"/_inkflow/fonts/" in page
 
 
 # ── Generic families in slides ────────────────────────────────────────────────
@@ -398,6 +422,7 @@ def _external_refs(html: str) -> list[str]:
     return [r for r in refs if r and not r.startswith(("data:", "#", "javascript:"))]
 
 
+@pytest.mark.usefixtures("no_system_fonts")
 def test_the_default_build_is_one_file_with_nothing_outside(tmp_path: Path) -> None:
     deck = _media_deck(tmp_path)
     out = tmp_path / "out"
@@ -438,3 +463,15 @@ def test_a_large_single_file_names_its_largest_assets(
         build_static_html(deck, tmp_path / "out")
     text = " ".join(w.message for w in warnings)
     assert "--assets-folder" in text and "assets/cat.png" in text
+
+
+@pytest.mark.usefixtures("no_system_fonts")
+def test_the_font_index_lists_every_family_by_its_files(tmp_path: Path) -> None:
+    from inkflow.fonts import font_index
+
+    families = font_index(tmp_path)
+    by_file = {record.path.name: group for group in families for record in group}
+    assert set(SHIPPED) <= set(by_file)
+    # One family per entry: Inter's upright and italic files are one family.
+    inter = by_file["InterVariable.woff2"]
+    assert by_file["InterVariable-Italic.woff2"] is inter

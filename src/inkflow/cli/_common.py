@@ -22,7 +22,7 @@ _level_choice = click.Choice(inkflow_logging.LEVEL_NAMES)
 
 class _Group(click.Group):
     """Reports a deck.py that does not load as one line, not a traceback: the
-    reader (often an agent) needs the file, line and error to fix it."""
+    reader needs the file, line and error to fix it."""
 
     @override
     def invoke(self, ctx: click.Context) -> object:
@@ -86,9 +86,7 @@ def main(
         browser=log_level_browser,
         log_file=log_file,
     )
-    inkflow_logging.configure(
-        levels, attach_console=ctx.invoked_subcommand not in ("serve", "edit")
-    )
+    inkflow_logging.configure(levels, attach_console=ctx.invoked_subcommand != "serve")
     # `serve` reads the resolved levels back to filter its per-rebuild log collection
     # for the TUI and browser sinks.
     ctx.obj = levels
@@ -232,6 +230,8 @@ class DeckSlides:
     deck: Deck
     path: Path
     hash: str
+    """deck.py's content hash when it was loaded (a command that changes it
+    can tell whether someone else did meanwhile)."""
     ids: list[str]
     numbers: list[int | None]
     """Presentation number per deck index; None for a hidden slide."""
@@ -312,9 +312,12 @@ class DeckSlides:
         )
 
     def section_name(self, k: int) -> str:
+        """Section ``k``'s name as messages quote it."""
         return repr(self.deck.sections[k].name)
 
     def name(self, index: int) -> str:
+        """The slide at deck ``index`` as messages name it: ``slide 3 (intro)``,
+        or ``hidden slide x``."""
         number = self.numbers[index]
         if number is None:
             return f"hidden slide {self.ids[index]}"

@@ -155,7 +155,7 @@ class FamilyReport:
                 f"text set in {what} looks different on each machine (used by "
                 + f"{', '.join(self.used_by[:2])}"
                 + (" …" if len(self.used_by) > 2 else "")
-                + "): name a font first (inkflow fonts set, or the Theme dialog)"
+                + "): name a font first (the theme's font tokens in styles.css)"
             )
         if self.where is Where.MISSING:
             hint = f", e.g. {self.alternative}" if self.alternative else ""
@@ -176,7 +176,7 @@ class FamilyReport:
                 )
             return (
                 f'font "{self.family}" comes from this machine{where}: '
-                + "inkflow fonts bundle, or pick an open font"
+                + "copy its files into fonts/, or pick an open font"
             )
         return ""
 
@@ -946,7 +946,8 @@ _IDENT = re.compile(r"^-?[A-Za-z_][\w-]*$")
 
 
 def token_value(role: str, family: str) -> str:
-    """The token value ``inkflow fonts set ROLE FAMILY`` writes: the family
+    """The value a font token (``--inkflow-<role>-font``) gets for a font
+    chosen by name, as a frontend setting it writes it: the family
     (quoted when CSS needs it) with the role's generic fallback, or a whole
     stack as given. Refuses a generic family first."""
     if role not in ROLES:
@@ -961,8 +962,8 @@ def token_value(role: str, family: str) -> str:
     if generic:
         raise FontSetError(
             f"{name} is a generic family: each machine shows its own font. Name a "
-            + f"font first, e.g. inkflow fonts set {role} Inter (open, ships with "
-            + f"most systems) - {name} is added as the fallback"
+            + f"font first, e.g. Inter (open, ships with inkflow) - {name} is "
+            + "added as the fallback"
         )
     if "," in family:
         return family

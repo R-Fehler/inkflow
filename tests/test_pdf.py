@@ -12,7 +12,7 @@ import pytest
 
 from inkflow import Deck, Image, Slide, pdf
 from inkflow.assets import AssetRoots
-from inkflow.export import build_static_html
+from inkflow.export import build_pdf, build_static_html, find_chromium
 from inkflow.logging import collect_logs
 from inkflow.pipeline import process_deck
 from inkflow.server import (
@@ -486,3 +486,59 @@ def test_verify_reports_pages_and_a_missing_converter(
     _only(monkeypatch)
     issues = verify_slide(deck.slides[0], project, deck.theme, preview)
     assert any(level == "warn" and "poppler-utils" in m for level, m in issues)
+
+
+def test_a_committed_page_stands_in_while_the_pdf_is_unchanged(
+    tmp_path: Path,
+) -> None:
+    figure = tmp_path / "figure.pdf"
+    figure.write_bytes(b"%PDF-1.4 fake")
+    page = pdf.committed_path(figure, 1)
+    assert page.name == "figure.pdf.p1.svg"
+    page.write_text(
+        f'<svg xmlns="{_SVG}" {pdf.DIGEST_ATTR}="{pdf.digest(figure)}"/>',
+        encoding="utf-8",
+    )
+    assert pdf.committed_page(figure, 1) == page
+    assert pdf.committed_page(figure, 2) is None
+    # Used even with no converter on the machine.
+    pages = pdf.PdfPages(AssetRoots(tmp_path), tool=None)
+    assert pages.page("figure.pdf#page=1") == ("figure.pdf.p1.svg", "")
+    assert not pages.unconverted
+    figure.write_bytes(b"%PDF-1.4 changed")
+    assert pdf.committed_page(figure, 1) is None
+
+
+def test_a_page_for_commit_carries_its_pdfs_hash(
+    tmp_path: Path, fake_tool: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _only(monkeypatch, "fake")
+    monkeypatch.setattr("inkflow.pdf.converter", lambda: "fake")
+    project = _project(tmp_path)
+    source = project / "figures" / "plot.pdf"
+    text = pdf.page_for_commit(source, 1, project)
+    assert f'{pdf.DIGEST_ATTR}="{pdf.digest(source)}"' in text
+    _ = pdf.committed_path(source, 1).write_text(text, encoding="utf-8")
+    assert pdf.committed_page(source, 1) == pdf.committed_path(source, 1)
+    assert len(fake_tool) == 1
+
+
+@needs_pdftocairo
+@pytest.mark.skipif(find_chromium() is None, reason="chromium not available")
+def test_export_draws_the_page_into_the_deck_pdf_as_vectors(tmp_path: Path) -> None:
+    import subprocess
+
+    project = _project(tmp_path)
+    _slide_svg(project, '<image href="../figures/plot.pdf#page=2" width="400"/>')
+    (project / "deck.py").write_text(
+        "from inkflow import Deck, Slide\n\n\ndef main() -> Deck:\n"
+        + '    return Deck(slides=[Slide("slides/s.svg")], embed_fonts=False)\n',
+        encoding="utf-8",
+    )
+    out = tmp_path / "deck.pdf"
+    build_pdf(project / "deck.py", out, no_sandbox=True)
+    back = tmp_path / "back.svg"
+    subprocess.run(["pdftocairo", "-svg", str(out), str(back)], check=True)
+    drawn = back.read_text(encoding="utf-8")
+    # Page 2's red square, as a vector path rather than a picture.
+    assert "rgb(79.99" in drawn and "<image" not in drawn

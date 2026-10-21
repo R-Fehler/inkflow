@@ -306,11 +306,12 @@ def test_a_copied_slide_brings_its_data(project: Path) -> None:
 def test_data_files_open_in_a_spreadsheet(monkeypatch: pytest.MonkeyPatch) -> None:
     from inkflow import edit
     from inkflow.edit import EditCommands
+    from inkflow_editor import openwith
 
     def which(name: str) -> str | None:
         return f"/usr/bin/{name}" if name in ("localc", "code") else None
 
-    monkeypatch.setattr("inkflow.edit.shutil.which", which)
-    choices = edit.open_choices(Path("a.csv"), EditCommands(default=None, svg=None))
+    monkeypatch.setattr("inkflow_editor.openwith.shutil.which", which)
+    choices = openwith.open_choices(Path("a.csv"), EditCommands(default=None, svg=None))
     assert [c.id for c in choices] == ["localc", "code", "system"]
     assert edit.KINDS["tsv"] == "DATA"

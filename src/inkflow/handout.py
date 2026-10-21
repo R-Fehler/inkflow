@@ -2,9 +2,9 @@
 
 One page builder serves both ways of getting one: the server's ``/handout``
 view (the served slides and stylesheet, a bar to pick the layout and paper
-and to print; editors only, since it shows the notes) and the PDF export
-(``inkflow export --handout``, the editor's Export dialog), which prints the
-same page with Chromium as `export.build_pdf` prints the slides.
+and to print; not for a view link, since it shows the notes) and the PDF
+export (``inkflow export --handout``), which prints the same page with
+Chromium as `export.build_pdf` prints the slides.
 
 Layouts: ``notes``, one slide per page with its notes under it; ``compact``,
 three slides per page, each with its notes beside it. Every build step is

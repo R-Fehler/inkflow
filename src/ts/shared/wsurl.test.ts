@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { socketUrl } from "./wsurl";
+// @vitest-environment happy-dom
+import { afterEach, describe, expect, it } from "vitest";
+import { openSocket, socketUrl } from "./wsurl";
 
 describe("socketUrl", () => {
     it("uses the page's own host and port", () => {
@@ -24,5 +25,24 @@ describe("socketUrl", () => {
         expect(
             socketUrl({ protocol: "https:", host: "box.tail1234.ts.net" }),
         ).toBe("wss://box.tail1234.ts.net/_inkflow/ws");
+    });
+});
+
+describe("openSocket", () => {
+    afterEach(() => {
+        // The stand-in parent goes; the window is its own parent again.
+        delete (window as { parent?: unknown }).parent;
+    });
+
+    it("takes the relay's channel when the frame's top window offers one", () => {
+        const closed: number[] = [];
+        const sock = { close: (code: number) => closed.push(code) };
+        Object.defineProperty(window, "parent", {
+            configurable: true,
+            value: { __inkflowRelay: { openSocket: () => sock } },
+        });
+        expect(openSocket()).toBe(sock as unknown as WebSocket);
+        window.dispatchEvent(new Event("pagehide"));
+        expect(closed).toEqual([1001]);
     });
 });

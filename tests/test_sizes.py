@@ -245,3 +245,17 @@ def test_verify_warns_about_a_slide_of_another_shape(poster: Path) -> None:
     unsized = PreviewContext(deck=Deck(slides=[]), project_dir=poster, theme=None)
     issues = verify_slide(Slide("slides/wide.svg"), poster, None, unsized)
     assert not any("letterboxed" in msg for _, msg in issues)
+
+
+def test_cli_layouts_lists_the_layouts_of_the_deck_size(poster: Path) -> None:
+    from click.testing import CliRunner
+
+    from inkflow.cli import main
+
+    deck = str(poster / "deck.py")
+    result = CliRunner().invoke(main, ["layouts", "--deck", deck])
+    assert result.exit_code == 0, result.output
+    assert "poster-3col" in result.output
+    assert "two-cols" not in result.output
+    screen = CliRunner().invoke(main, ["layouts", "--no-deck"])
+    assert "two-cols" in screen.output

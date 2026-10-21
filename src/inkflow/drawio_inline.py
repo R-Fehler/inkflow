@@ -17,7 +17,7 @@ become theme tokens (draw.io's standard palette by name, any other colour by
 hue and lightness) and all text uses the deck's fonts.
 
 The diagram file stays the source and is never changed; the slide's
-``<image>`` keeps its place and size, which is what the editor moves.
+``<image>`` keeps its place and size, which is what an editor moves.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ class DiagramMode(StrEnum):
 
 _HREFS = ("href", f"{{{ns.XLINK}}}href")
 DRAWN_GEOMETRY = "data-drawn-geometry"
-"""On a shape of the diagram's picture moved by the editor before draw.io
+"""On a shape of the diagram's picture that a frontend moved before draw.io
 redrew it: the box its drawing shows (it is under a transform until then)."""
 
 
@@ -72,9 +72,11 @@ def inline_diagrams(
 ) -> SvgElement:
     """Replace each draw.io picture asked to be drawn inline (see module doc).
 
-    ``register`` (the editor's source table) numbers the diagram file, and its
-    shapes get locators into it (``<key>:#<cell id>``): the editor edits them
-    there, in the diagram's source (editor/drawioedit.py).
+    ``register`` (an editor build's source table, ``pipeline.SourceTable``)
+    numbers the diagram file, and its shapes and layers get locators into it
+    (``<key>:#<cell id>``), naming the cell in the diagram's source, for a
+    frontend that edits them there (``provenance.locate`` does not resolve
+    them: they name a draw.io cell, not an SVG element).
     """
     taken = {i for el in root.iter() if (i := el.get("id"))}
     for image in list(root.iter(f"{{{ns.SVG}}}image")):
@@ -129,7 +131,7 @@ def _drawn(
         if name not in _HREFS and name != ns.INKFLOW_DRAWIO:
             svg.set(name, value)
     if image.get(INK) is not None and INK_TAG not in image.attrib:
-        # The editor moves and resizes it as the <image> it is in the file.
+        # An editor moves and resizes it as the <image> it is in the file.
         svg.set(INK_TAG, "image")
     measured = _size(diagram)
     if measured is not None:
@@ -165,11 +167,11 @@ def _drawn(
 
 
 def _mark_cells(svg: SvgElement, content: str | None, key: int | None) -> None:
-    """``data-cell-kind`` on each cell: the editor attaches arrows to shapes
-    (vertices), never to draw.io's own arrows, their labels or the layers.
+    """``data-cell-kind`` on each cell, so an editor can tell shapes
+    (vertices) from draw.io's own arrows, their labels and the layers.
 
     A shape also gets ``data-cell-geometry``, the box (in the source's page
-    coordinates) its drawing shows: the editor measures where draw.io put
+    coordinates) its drawing shows: an editor measures where draw.io put
     the page on the picture from it. With ``key``, shapes get locators.
     """
     try:
@@ -182,14 +184,14 @@ def _mark_cells(svg: SvgElement, content: str | None, key: int | None) -> None:
         cell = known.get(cell_id)
         el.set("data-cell-kind", cell.kind if cell else "other")
         if cell is not None and cell.kind == "other" and cell.parent is not None:
-            # A layer: the group the editor enters to edit the shapes on it.
+            # A layer: the group an editor enters to edit the shapes on it.
             if key is not None:
                 el.set(INK, f"{key}:#{cell_id}")
             continue
         if cell is None or cell.kind != "vertex" or cell.box is None:
             continue
         # A shape moved on the slide but not yet redrawn by draw.io still
-        # shows its old box, under a transform (editor/drawioedit.py).
+        # shows its old box, under a transform (DRAWN_GEOMETRY).
         drawn = el.get(DRAWN_GEOMETRY) or " ".join(f"{v:g}" for v in cell.box)
         el.set("data-cell-geometry", drawn)
         if key is not None:

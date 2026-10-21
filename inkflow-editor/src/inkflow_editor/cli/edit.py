@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 import click
 
+from inkflow import logging as inkflow_logging
 from inkflow.cli._common import deck_option, main, resolve_deck_path
 from inkflow.cli.present import (
     already_served,
@@ -150,6 +151,10 @@ def edit(
     Keyboard shortcuts in the terminal are those of `serve`, plus `e` to open the
     editor again.
     """
+    # The server owns the terminal, as under `serve`: records are collected
+    # per rebuild instead of printed (the core detaches the console for
+    # `serve` only).
+    inkflow_logging.configure(levels, attach_console=False)
     resolved: Path | None
     page = "/edit"
     if compare_with:

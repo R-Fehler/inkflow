@@ -192,8 +192,9 @@ def test_page_picker_actions(tmp_path: Path) -> None:
 
 
 def test_pdfs_upload_and_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from inkflow.edit import open_choices, resolve_edit_commands
+    from inkflow.edit import resolve_edit_commands
     from inkflow_editor import media
+    from inkflow_editor.openwith import open_choices
 
     project = _project(tmp_path)
     staged = project / "upload.part"
@@ -202,7 +203,7 @@ def test_pdfs_upload_and_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         "figure-3.pdf"
     )
     monkeypatch.setattr(
-        "inkflow.edit.shutil.which",
+        "inkflow_editor.openwith.shutil.which",
         _installed("okular", "inkscape"),
     )
     apps = open_choices(project / "figures" / "plot.pdf", resolve_edit_commands())

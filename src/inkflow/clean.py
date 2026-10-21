@@ -48,8 +48,8 @@ def clean_inkscape_tree(
     that content for Inkscape editing (used by the clean CLI and pre-commit hook).
 
     ``before_clean`` sees the tree exactly as parsed from disk, before anything is
-    removed. The editor stamps source locators there, so they index the file the
-    way it will be re-parsed when an edit is written back.
+    removed. Source locators are stamped there (``inkflow.provenance``), so they
+    index the file the way it is parsed again when an edit is written back.
     """
     root = parse_svg_file(src)
     if before_clean is not None:

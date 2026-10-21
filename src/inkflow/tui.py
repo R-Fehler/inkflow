@@ -78,23 +78,26 @@ class LiveUI:
             *(Text(line, style="dim", overflow="fold") for line in self._owner[1:]),
             *(Text(line, style="dim", overflow="fold") for line in self._share),
             Text(""),
-            Text.assemble(
-                *(
-                    part
-                    for i, (key, label) in enumerate(
-                        [("o", "open"), *self._keys, ("r", "rebuild"), ("q", "quit")]
-                    )
-                    for part in (
-                        *((("  ·  ", "dim"),) if i else ()),
-                        (key, "bold"),
-                        (f"  {label}", "dim"),
-                    )
-                )
-            ),
+            self._key_line(),
         )
         return Panel(
             content, title=title, title_align="left", expand=False, padding=(0, 2)
         )
+
+    def _key_line(self) -> Text:
+        keys = [("o", "open"), *self._keys, ("r", "rebuild"), ("q", "quit")]
+        line = Text()
+        for n, (key, label) in enumerate(keys):
+            if n:
+                line.append("  ·  ", "dim")
+            line.append(key, "bold")
+            line.append(f"  {label}", "dim")
+        return line
+
+    def set_keys(self, keys: list[tuple[str, str]]) -> None:
+        """The keys server extensions add to the help line (``e  edit``)."""
+        self._keys = keys
+        self.refresh()
 
     def _renderable(self) -> RenderableType:
         parts: list[RenderableType] = [Text(""), self._header(), Text("")]
@@ -135,10 +138,6 @@ class LiveUI:
                 parts.append(Text("[t] show trace", style="dim"))
 
         return Group(*parts)
-
-    def set_keys(self, keys: list[tuple[str, str]]) -> None:
-        """The keys extensions add to the help line (``e  edit``)."""
-        self._keys = keys
 
     def refresh(self) -> None:
         self._live.update(self._renderable())

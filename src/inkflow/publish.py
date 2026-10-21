@@ -11,8 +11,8 @@ handled in the workflow itself: Git LFS files are fetched, and a PDF converter
 is installed when the deck has PDF figures. Fonts are the one thing a workflow
 cannot fetch, so ``font_warnings`` names the ones only this computer has.
 
-Used by ``inkflow setup-pages``, ``inkflow init --pages`` and the editor's
-Git menu ("Publish…", the session's ``publish`` action).
+Used by ``inkflow setup-pages`` and ``inkflow init --pages``; a frontend can
+offer the same through ``plan`` and ``setup_pages``.
 """
 
 from __future__ import annotations
@@ -471,7 +471,7 @@ README = """\
 # {title}
 {link}
 Made with [Inkflow](https://github.com/ll-nick/inkflow). To present or edit
-the slides on your own computer: `uv run inkflow serve` or `uv run inkflow edit`.
+the slides on your own computer: `uv run inkflow serve`.
 """
 
 

@@ -8,8 +8,9 @@
 // By default ink lasts for the talk: it is held in memory (inkstore.ts) and
 // relayed to the other windows like the position, so the projector shows what
 // is drawn in the presenter-panel window. With "Keep" on, each finished
-// stroke is also written to the slide's ink file through the server's editor
-// session (only for a page on this machine; the server checks), and the
+// stroke is also written to the slide's ink file through the server (an
+// editor extension's session when there is one, else the server itself; only
+// for a page on this machine, and the server checks who asks), and the
 // rebuild then shows it from the file. A static build has no server: its ink
 // is never saved, and travels only to the window it opened.
 

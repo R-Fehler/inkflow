@@ -1,6 +1,6 @@
 """Rebuilding only what changed: a served deck's slides, kept between builds.
 
-`inkflow serve` and `edit` rebuild on every change of any file in the project.
+`inkflow serve` rebuilds on every change of any file in the project.
 `SlideCache` makes that rebuild cost what the change touched: `process_deck`
 asks it for each slide, and it hands back the last build's result unless one
 of the slide's inputs changed. One-shot commands (`build`, `export`,
@@ -15,9 +15,11 @@ What a slide's result depends on, and how each part is watched:
   (time, size, inode; "not there" included) at the next build. A layout or an
   overlay edited is thus every slide built on it, and nothing else.
 - **What deck.py says of it** (`Slide(...)`, every field) **and of the deck**
-  (theme, mode, font size, overlays, deck style, size): compared by value
-  (`_frozen`). A class deck.py defines itself (a custom animation) is new on
-  every load, so slides using one are processed every time.
+  (theme, mode, font size, overlays, deck style, the chart text scale and
+  the printed sheet its size gives) **and of the machine** (the PDF
+  converter installed): compared by value (`_frozen`). A class deck.py
+  defines itself (a custom animation) is new on every load, so slides using
+  one are processed every time.
 - **Its id**: entries are kept by id, and the id is part of the key.
 - **Its number and the deck's slide count**: *not* part of the key. They
   only ever reach the output as the root's ``inkflow-slide-N`` id (and the
@@ -36,10 +38,11 @@ build (`server._versioned`).
 
 Warnings logged while a slide was processed are logged again when it is
 taken from the cache, so the banner and the terminal show what a full build
-would.
+would. The one "no PDF converter" warning a build says is said by
+`Build.finish`, whichever slide (processed or kept) wanted it first.
 
-The pages are sent what changed, the same way: every slide (and every slide's
-entry in the editor's model) carries a ``key``, a digest of its content
+The pages are sent what changed, the same way: every slide (and any list a
+frontend keys the same way) carries a ``key``, a digest of its content
 (`set_keys`), and a rebuild's message names by key what the last build already
 had (`as_patch`). A page that does not hold a key it is sent asks for
 everything again (``resync``), so a patch never has to be right about what a
@@ -334,8 +337,8 @@ class Build:
 
 
 def set_keys(items: Sequence[Mapping[str, object]]) -> None:
-    """Give each item (a served slide, a slide's entry in the editor's model)
-    its ``key``: a digest of everything else it holds."""
+    """Give each item (a served slide, or any list item a frontend sends the
+    same way) its ``key``: a digest of everything else it holds."""
     for item in items:
         data = cast("dict[str, object]", item)
         _ = data.pop("key", None)

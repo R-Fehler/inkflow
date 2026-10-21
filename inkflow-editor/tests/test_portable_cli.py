@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false
 """The editor's CLI part of the core's tests (moved with the commands)."""
 
 from __future__ import annotations
@@ -224,12 +225,12 @@ def test_verify_names_what_ties_the_deck_to_this_machine(
     out = CliRunner().invoke(main, ["verify", "--deck", str(scattered / "deck.py")])
     text = " ".join(out.output.split())
     assert 'font "Hereface" comes from this machine' in text
-    assert "inkflow fonts bundle" in text
+    assert "copy its files into fonts/" in text
     assert "3 file(s) outside the deck or behind a symlink" in text
     assert "picture(s) read from the web" in text
     assert "no uv.lock" in text
     assert "no line-ending rules" in text
     quiet = CliRunner().invoke(
-        main, ["verify", "--no-portable", "--deck", str(scattered / "deck.py")]
+        main, ["verify", "--no-deck-checks", "--deck", str(scattered / "deck.py")]
     )
     assert "comes from this machine" not in quiet.output

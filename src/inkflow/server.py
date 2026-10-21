@@ -1,10 +1,14 @@
 """The server ``inkflow serve`` runs: one port for the presenter's pages, the
 deck's assets and fonts, and the WebSocket (``/_inkflow/ws``) that pushes
-every rebuild and relays positions and ink between windows.
+every rebuild (only what changed, ``inkflow.incremental``) and relays
+positions and ink between windows.
 
-Frontends plug in as extensions (``inkflow.extensions``): they get the
-builds, their own WebSocket messages and pages, and a ``ServerContext`` to
-act through. The core never knows what they are.
+Who may connect, and as whom, is decided at the door (``inkflow.access``):
+the owner (this machine), or a share link's editor or viewer.
+
+Frontends plug in as server extensions (``inkflow.extensions``): they get the
+builds, their own WebSocket messages and pages, terminal keys and a
+``ServerContext`` to act through. The core never knows what they are.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ from collections.abc import (
     Awaitable,
     Callable,
     Collection,
+    Iterable,
     Sequence,
 )
 from dataclasses import dataclass, field
@@ -45,7 +50,7 @@ from typing_extensions import override
 from watchfiles import (
     Change,
     DefaultFilter,
-    awatch,
+    awatch,  # pyright: ignore[reportUnknownVariableType]
 )
 from websockets.asyncio.server import ServerConnection
 from websockets.asyncio.server import serve as ws_serve
@@ -156,7 +161,7 @@ class _Served:
     """deck.py's hash in the last good build (``build-status``)."""
     failed_hash: str | None = None
     """Hash of the deck.py whose build failed last (None after a good build),
-    so an agent waiting for its edit to build learns that it never will."""
+    so a program waiting for its edit to build learns that it never will."""
     kept: Kept | None = None
     """What is kept from one build of the served deck to the next."""
     extensions: list[ServerExtension] = field(default_factory=list)
@@ -235,8 +240,8 @@ def load_deck(deck_path: Path, module: str = "_inkflow_deck") -> Deck:
     """Run deck.py's ``main()``; any failure in it is a ``DeckError``.
 
     ``module`` names the module it runs as: another deck loaded beside the one
-    being served (a compare view's other side) takes its own name, so the
-    served deck's custom animation classes stay the ones the editor finds."""
+    being served (to compare two versions, say) takes a name of its own, so
+    the served deck's custom animation classes stay the ones found by name."""
     try:
         return _load_deck(deck_path, module)
     except DeckError:
@@ -259,8 +264,8 @@ def _load_deck(deck_path: Path, module: str = "_inkflow_deck") -> Deck:
     sys.modules[spec.name] = mod
     # Compiled from source every time rather than through the loader: the
     # bytecode cache validates by mtime (whole seconds) and size, so an edit
-    # that keeps the size (the editor reordering slides) within the same second
-    # would load the stale cached code.
+    # that keeps the size (two slides swapped) within the same second would
+    # load the stale cached code.
     code = compile(deck_path.read_bytes(), str(deck_path), "exec")
     exec(code, mod.__dict__)
     if not hasattr(mod, "main"):
@@ -326,6 +331,7 @@ async def rebuild(
     t0 = time.monotonic()
     deck_hash: str | None = None
     extensions = list(_served.extensions)
+    build: Build | None = None
     try:
         # Collected, not printed, so records reach the TUI/browser without racing the
         # Live display. Floored at the lower surface level, then filtered per surface.
@@ -434,11 +440,11 @@ async def rebuild(
             "build_failed", lambda ext: ext.build_failed(deck_hash, tb)
         )
     else:
-        await _each_extension("built", lambda ext: ext.built(build))
+        done = build
+        await _each_extension("built", lambda ext: ext.built(done))
         # Said only now, once the extensions hold this build too: a program
         # waiting for its edit to build (``build-status``) then finds every
-        # part of the server on it (an editor session checks requests
-        # against the deck.py it last built).
+        # part of the server on it.
         _served.built_hash = deck_hash
         _served.failed_hash = None
     finally:
@@ -448,22 +454,22 @@ async def rebuild(
         ui.refresh()
 
 
+def _without_edit(slide: SlideData) -> SlideData:
+    """The pages' copy of a slide: the editor facts stay with the extensions."""
+    data = slide.copy()
+    data.pop("edit", None)
+    return data
+
+
 def build_status() -> dict[str, object]:
     """Which deck.py the server last built (or failed to): a program that
-    changed it (an agent's command) waits for the build of its own edit."""
+    changed it waits for the build of its own edit."""
     return {
         "type": "build-status",
         "deckHash": _served.built_hash,
         "failedHash": _served.failed_hash,
         "error": _state["error"],
     }
-
-
-def _without_edit(slide: SlideData) -> SlideData:
-    """The presenter's copy of a slide: the editor facts stay with extensions."""
-    data = slide.copy()
-    data.pop("edit", None)
-    return data
 
 
 # ── WebSocket broadcast ───────────────────────────────────────────────────────
@@ -487,8 +493,8 @@ async def broadcast(
 
 
 async def send_owners(payload: dict[str, object]) -> None:
-    """To the owner's pages other than the presenter's (where the Share
-    dialog lives); never to a program (an agent's socket says no page)."""
+    """To the owner's pages other than the presenter's (where a Share dialog
+    lives); never to a program (a command's socket says no page)."""
     msg = json.dumps(payload)
     for conn, client in _share.people.items():
         if client.role == "owner" and client.page not in ("", "presenter"):
@@ -551,8 +557,13 @@ def share_status() -> dict[str, object]:
     return status
 
 
+SENT_AWAY = 4001
+"""Close code of a guest connection sent away (the page says why and does
+not reconnect: its link stopped working, or the owner disconnected it)."""
+
+
 async def _disconnect(
-    which: Callable[[Client], bool], reason: str, code: int = 4001
+    which: Callable[[Client], bool], reason: str, code: int = SENT_AWAY
 ) -> int:
     """Close every guest connection ``which`` picks (one the owner sent away,
     or every guest of links that stopped working); their pages say why and
@@ -724,7 +735,7 @@ async def _save_ink(websocket: ServerConnection, msg: dict[str, object]) -> None
     await websocket.send(json.dumps(reply))
 
 
-_ROLE_RANK: dict[str, int] = {"viewer": 0, "editor": 1, "owner": 2}
+_ROLE_RANK: dict[Role, int] = {"viewer": 0, "editor": 1, "owner": 2}
 
 _OWNER_ONLY = frozenset({"edit", "share"})
 """Messages only the owner's pages and programs send: opening a program on
@@ -744,7 +755,8 @@ def _extension_for(kind: object) -> tuple[ServerExtension, Role] | None:
 
 
 def allowed(role: Role, msg: dict[str, object]) -> bool:
-    """Whether ``role`` may send this message at all."""
+    """Whether ``role`` may send this message at all: the core's own by its
+    rules, an extension's by the least role it names."""
     kind = msg.get("type")
     if kind in _OWNER_ONLY:
         return role == "owner"
@@ -767,11 +779,7 @@ def allowed(role: Role, msg: dict[str, object]) -> bool:
 
 
 def _welcome(client: Client) -> dict[str, object]:
-    msg: dict[str, object] = {
-        "type": "welcome",
-        "id": client.id,
-        "role": client.role,
-    }
+    msg: dict[str, object] = {"type": "welcome", "id": client.id, "role": client.role}
     for ext in _served.extensions:
         try:
             msg.update(ext.welcome(client))
@@ -780,10 +788,24 @@ def _welcome(client: Client) -> dict[str, object]:
     return msg
 
 
+DEFAULT_MAX_MESSAGE = 2**20
+"""The largest WebSocket message a page may send (websockets' own default),
+unless an extension asks for more (``ServerExtension.max_message_size``)."""
+
+
+def max_message_size(extensions: Iterable[ServerExtension]) -> int:
+    """The largest message the server accepts: the most any of
+    ``extensions`` asks for, at least ``DEFAULT_MAX_MESSAGE``."""
+    sizes = [e.max_message_size or 0 for e in extensions]
+    return max([DEFAULT_MAX_MESSAGE, *sizes])
+
+
 def make_ws_handler(
-    ui: LiveUI,
-    edit_commands: EditCommands,
+    ui: LiveUI, edit_commands: EditCommands
 ) -> Callable[[ServerConnection], Awaitable[None]]:
+    """The handler of every page connection, once the door let it in (its
+    ``Client`` joined ``People`` with its role)."""
+
     async def handler(websocket: ServerConnection) -> None:
         client = _share.people.get(websocket)
         if client is None:
@@ -833,6 +855,33 @@ def make_ws_handler(
                         await handled[0].message(websocket, client, msg)
                     except Exception:
                         logger.exception(f"{handled[0].name}: {msg_type} failed")
+                elif msg_type in ("hello", "resync"):
+                    # A page says what it is (``presenter``, ``editor``…) and
+                    # which rebuilds it takes (``patch``: what changed), and
+                    # is told which slides the deck has now: by key when it
+                    # may hold them (the ones its HTML came with), whole when
+                    # it found it does not (``resync``).
+                    if msg_type == "hello":
+                        client.patches = bool(msg.get("patch"))
+                        if not client.page and isinstance(msg.get("role"), str):
+                            client.page = str(msg.get("role"))
+                    if client.patches and _state["error"] is None:
+                        whole = msg_type == "resync"
+                        slides = _state["slides"]
+                        await websocket.send(
+                            _update_message(
+                                slides if whole else as_patch(slides, keys_of(slides))
+                            )
+                        )
+                    for ext in list(_served.extensions):
+                        try:
+                            await ext.hello(
+                                websocket, client, msg, resync=msg_type == "resync"
+                            )
+                        except Exception:
+                            logger.exception(f"{ext.name}: {msg_type} failed")
+                elif msg_type == "build-status":
+                    await websocket.send(json.dumps(build_status()))
                 elif msg_type == "sync-request":
                     # A client that just switched into a receiving sync mode asks
                     # for the current position. Reply to it alone, not a broadcast.
@@ -865,36 +914,10 @@ def make_ws_handler(
                 elif msg_type == "ink":
                     # Ink drawn without "Keep" is relayed like a position: the
                     # server holds none of it, every other window draws it.
-                    # Saving is an ``edit-op`` (the editor's, else _save_ink).
+                    # Saving is an ``edit-op`` (an extension's, else _save_ink).
                     await broadcast(json.dumps(msg), sender=websocket)
-                elif msg_type in ("hello", "resync"):
-                    # A page says which rebuilds it takes (``patch``: what
-                    # changed), and is told which slides the deck has now:
-                    # by key when it may hold them (the ones its HTML came
-                    # with), whole when it found it does not (``resync``).
-                    if msg_type == "hello":
-                        client.patches = bool(msg.get("patch"))
-                        if not client.page and isinstance(msg.get("role"), str):
-                            client.page = str(msg.get("role"))
-                    if client.patches and _state["error"] is None:
-                        whole = msg_type == "resync"
-                        slides = _state["slides"]
-                        await websocket.send(
-                            _update_message(
-                                slides if whole else as_patch(slides, keys_of(slides))
-                            )
-                        )
-                    for ext in list(_served.extensions):
-                        try:
-                            await ext.hello(
-                                websocket, client, msg, resync=msg_type == "resync"
-                            )
-                        except Exception:
-                            logger.exception(f"{ext.name}: {msg_type} failed")
                 elif msg_type == "edit-op":
                     await _save_ink(websocket, msg)
-                elif msg_type == "build-status":
-                    await websocket.send(json.dumps(build_status()))
                 elif msg_type == "share":
                     await _handle_share(websocket, msg)
                 elif msg_type == "edit":
@@ -908,7 +931,7 @@ def make_ws_handler(
         finally:
             _state["ws_clients"].discard(websocket)
             # Gone from the registry first: what an extension says about who
-            # is left (presence) must not list this one.
+            # is left must not list this one.
             _ = _share.people.leave(websocket)
             await _each_extension(
                 "disconnected", lambda ext: ext.disconnected(websocket, client)
@@ -1011,10 +1034,12 @@ def _versioned(slide: SlideData, roots: AssetRoots) -> SlideData:
     modification time (``assets/x.png?v=…``), for serving only.
 
     A page keeps the pictures it has loaded by URL, so a diagram or picture
-    changed on disk (draw.io, Inkscape, GIMP) would stay as it was on screen:
-    with the stamp, the changed file is a changed slide (pushed as usual) at a
-    new URL. ``_resolve_asset`` ignores the query; build and export never
-    stamp, and the editor strips it before anything is written back.
+    changed on disk (Inkscape, GIMP) would stay as it was on screen: with the
+    stamp, the changed file is a changed slide (pushed as usual) at a new URL.
+    The slide cache never reads pictures (`inkflow.incremental`): this runs
+    on every build, outside it. ``_resolve_asset`` ignores the query; build
+    and export never stamp, and a frontend that writes references back drops
+    it first.
     """
 
     def stamp(ref: str) -> str | None:
@@ -1096,7 +1121,7 @@ async def _send_file(
     """Stream a file, or the byte range asked for (206): a video seeks and
     plays in every browser (Safari asks for ranges), and a large file is never
     read into memory whole."""
-    mime = MIME_TYPES[path.suffix.lower()]
+    mime = MIME_TYPES.get(path.suffix.lower(), "application/octet-stream")
     size = path.stat().st_size
     try:
         span = byte_range(size, wanted)
@@ -1137,8 +1162,8 @@ async def _send_file(
 
 _HTML_HEADERS = (
     b"Cache-Control: no-store\r\n"
-    # Never inside another site's frame (a click on the editor that its user
-    # did not mean), and no share token in a Referer.
+    # Never inside another site's frame (a click on a page that its user did
+    # not mean), and no share token in a Referer.
     + b"X-Frame-Options: SAMEORIGIN\r\n"
     + b"Content-Security-Policy: frame-ancestors 'self'\r\n"
     + b"Referrer-Policy: no-referrer\r\n"
@@ -1170,15 +1195,15 @@ async def _refuse(writer: ResponseWriter, status: str, title: str, text: str) ->
 
 _SSH_401 = (
     "This inkflow server runs on a machine other people can log in to, so "
-    + "being on it is not enough to edit. If you started it, open the owner "
+    + "being on it is not enough. If you started it, open the owner "
     + "link it printed in its terminal (http://localhost:<port>/…?k=…, "
     + "with your tunnel's local port if you forwarded another one). If someone "
     + "shared the deck with you, open the link they sent."
 )
 
 _VIEW_ONLY = (
-    "This link shows the presentation only. Ask the person sharing the deck "
-    + "for an editor link to change it."
+    "This link shows the presentation only: the handout, with the speaker "
+    + "notes, is for the people presenting it."
 )
 
 
@@ -1221,7 +1246,8 @@ def make_http_route(
     and the share ``token`` that admitted them): pages, pictures, fonts,
     and whatever the extensions answer. A request that came another way
     (``ServerContext.serve_request``) is answered by this too, so what each
-    role may fetch is decided here once."""
+    role may fetch is decided here once. Without a ``project_dir`` (serving
+    no deck) only the extensions' pages are there."""
 
     async def route(
         request: AccessRequest,
@@ -1231,7 +1257,6 @@ def make_http_route(
         writer: ResponseWriter,
     ) -> None:
         access = _share.access
-        request_path = request.target
         path = request.path
         if token is not None and TOKEN_PARAM in request.query:
             # A share link (or the owner link): the cookie keeps them in;
@@ -1256,7 +1281,7 @@ def make_http_route(
             await _respond(writer, "200 OK", _probe_body(), "application/json")
             return
 
-        font = shipped_font_file(request_path)
+        font = shipped_font_file(path)
         if font is not None:
             # A font inkflow ships (the deck's and the interface's): the
             # same bytes for as long as this inkflow is installed.
@@ -1273,21 +1298,22 @@ def make_http_route(
             await writer.drain()
             return
 
-        if project_dir is not None and request_path != "/":
+        if project_dir is not None and path != "/":
             roots = AssetRoots(project_dir, _state["theme_dir"])
-            asset_path = _resolve_asset(roots, request_path)
+            asset_path = _resolve_asset(roots, path)
             if asset_path is not None:
                 await _send_file(writer, asset_path, _range_header(raw))
                 return
 
         extension_request = _http_request(request, raw, role, token, writer)
-        for ext in _served.extensions:
+        for ext in list(_served.extensions):
             if await ext.http(extension_request):
                 return
 
-        if _served.deck_path is None:
+        if project_dir is None:
+            # Serving without a deck: only the extensions' pages exist.
             await _refuse(
-                writer, "404 Not Found", "No deck open", "Nothing is shared yet."
+                writer, "404 Not Found", "No deck open", "This server has no deck open."
             )
             return
         if path == "/handout":
@@ -1295,7 +1321,7 @@ def make_http_route(
             if role == "viewer":
                 await _refuse(writer, "403 Forbidden", "View-only link", _VIEW_ONLY)
                 return
-            body = build_handout_html(_state, request_path)
+            body = build_handout_html(_state, request.target)
         else:
             # Opening a source file in a program is the owner's alone.
             body = build_html(
@@ -1314,10 +1340,10 @@ def make_http_handler(
     edit_commands: EditCommands = NO_EDIT_COMMANDS,
     bridge: Bridge | None = None,
 ) -> _StreamHandler:
-    """The server's one port: pages, pictures, downloads, and (handed to
-    ``bridge``) the WebSocket at ``/_inkflow/ws``. ``ws_port`` is what the
-    pages are told (they connect to their own address; it only says the
-    deck is served)."""
+    """The server's one port: pages, pictures, and (handed to ``bridge``)
+    the WebSocket at ``/_inkflow/ws``, each behind the door. ``ws_port`` is
+    what the pages are told (they connect to their own address; it only says
+    the deck is served)."""
     route = make_http_route(ws_port, project_dir, edit_commands)
 
     async def handler(
@@ -1408,12 +1434,12 @@ def make_http_handler(
 
 
 class _WatchFilter(DefaultFilter):
-    """The default ignores, plus ``.inkflow/`` (editor context the server
-    writes, and the worktrees agents work in) and ``build/``, all matched
-    below the watched folder only: a deck that itself lives in a worktree
-    under some ``.inkflow/worktrees/`` is watched like any other."""
+    """The default ignores, plus ``.inkflow/`` (what inkflow and its plugins
+    write for themselves) and ``build/`` (where ``inkflow build`` writes),
+    both matched below the watched folder only: a deck that itself lives
+    somewhere under a ``.inkflow/`` (a worktree kept there) is watched like
+    any other."""
 
-    # build/ is where `inkflow build` and the editor's export write: never input.
     ignore_dirs: Sequence[str] = (*DefaultFilter.ignore_dirs, ".inkflow", "build")
 
     def __init__(self, root: Path) -> None:
@@ -1442,6 +1468,8 @@ async def _watch(
 
 
 def open_browser(url: str) -> None:
+    """Open ``url`` in the browser without its startup noise reaching the
+    terminal."""
     _open_browser(url)
 
 
@@ -1493,7 +1521,9 @@ async def _read_keys(
                 shutdown.set()
                 return
             elif ch == "o":
-                _open_browser(f"{base}:{http_port}{_share.access.owner_path('/')}")
+                _open_browser(
+                    f"{base}:{http_port}{_share.access.owner_path(owner_page())}"
+                )
             elif ch == "r" and deck_path is not None:
                 # Asked for by hand: every slide again, whatever is kept.
                 async with lock:
@@ -1541,18 +1571,18 @@ def _port_free(host: str, port: int) -> bool:
     return True
 
 
-# ── Public entry point ────────────────────────────────────────────────────────
-
-
 def pick_port(host: str, port: int | None) -> int:
     """The port to serve on: as given, else the first free one from 7777 up,
-    so a second ``inkflow edit`` for another deck comes up next to the first."""
+    so a second server for another deck comes up next to the first."""
     if port is not None:
         return port
     for candidate in range(DEFAULT_PORT, DEFAULT_PORT + 200):
         if _port_free(host, candidate):
             return candidate
     return DEFAULT_PORT
+
+
+# ── Sharing: where the server listens, what the terminal says ─────────────────
 
 
 @dataclass(frozen=True)
@@ -1606,8 +1636,8 @@ def _shares(host: str) -> bool:
 
 def editor_page() -> str | None:
     """Where an editor link leads, when an extension takes editors (one of its
-    messages is for editors): its ``home``, else the presenter. None: no
-    extension edits, so the server offers view links only."""
+    messages is for editors): its ``home``, else the presenter. None: nothing
+    on this server edits, so it offers view links only."""
     for ext in _served.extensions:
         if "editor" in ext.messages.values():
             return ext.home or "/"
@@ -1616,7 +1646,7 @@ def editor_page() -> str | None:
 
 def owner_page() -> str:
     """The page the owner opens: the first extension's ``home`` (an editor's
-    ``/edit``), else the presenter."""
+    page), else the presenter."""
     return next((e.home for e in _served.extensions if e.home), "/")
 
 
@@ -1644,10 +1674,10 @@ def _extension_lines() -> list[str]:
 
 
 def share_lines(access: Access, port: int) -> list[str]:
-    """What the terminal says about sharing: the two links per address, the
-    mDNS name, and how to reach the server through SSH instead; then what
-    the extensions add (an online relay's links). In SSH mode the links name
-    ``localhost``, for each guest's own tunnel."""
+    """What the terminal says about sharing: the links per address, the mDNS
+    name, and how to reach the server through SSH instead; then what the
+    extensions add. In SSH mode the links name ``localhost``, for each
+    guest's own tunnel."""
     if not access.sharing:
         return _extension_lines()
     lines: list[str] = []
@@ -1659,7 +1689,7 @@ def share_lines(access: Access, port: int) -> list[str]:
     if access.ssh:
         lines.append(
             f"guests: ssh -N -L {port}:localhost:{port} <their login>@<this "
-            + "server>, then their link (Share → Share via SSH writes it out)"
+            + "server>, then their link"
         )
         return lines + _extension_lines()
     names = {n for n in access.names if n.endswith(".local")} | access.allow_hosts
@@ -1672,6 +1702,9 @@ def share_lines(access: Access, port: int) -> list[str]:
         + f"then http://localhost:{port}{owner_page()} (as the owner)"
     )
     return lines + _extension_lines()
+
+
+# ── Extensions ────────────────────────────────────────────────────────────────
 
 
 class _Context:
@@ -1779,6 +1812,9 @@ def extensions_for(config: ServeConfig) -> list[ServerExtension]:
     return found
 
 
+# ── Public entry point ────────────────────────────────────────────────────────
+
+
 async def serve(
     deck_path: Path | None,
     host: str,
@@ -1791,29 +1827,30 @@ async def serve(
     sharing: Sharing | None = None,
     extensions: Sequence[ServerExtension] | None = None,
 ) -> None:
-    """Run the server until quit. ``open_path`` (e.g. ``"/"``) opens a
-    browser on that page once the first build is done. With
+    """Serve ``deck_path`` (or no deck) until quit. ``open_path`` (``"/"``)
+    opens a browser on that page once the first build is done. With
     ``quit_when_idle`` (seconds) it stops once no page has been connected for
     that long (a server started without a terminal to stop it from).
-
-    ``extensions`` add to the server (``inkflow.extensions``); by default the
-    installed plugins' (``extensions_for``). Without a deck (``None``) only
-    an extension that ``serves_without_deck`` can answer the pages.
 
     One port carries everything: pages, pictures and the WebSocket
     (``/_inkflow/ws``). ``ws_port`` additionally opens the old separate
     WebSocket port (deprecated; for scripts that still use it).
 
     ``auto_ports``: the port came from ``pick_port``, not the user, so one
-    taken in the meantime (another inkflow starting at the same moment, say
-    an agent's server for its worktree) means picking the next free one.
+    taken in the meantime (another inkflow starting at the same moment) means
+    picking the next free one.
 
     ``sharing``: share links (``--share``); a non-loopback ``host`` shares
     too, since other machines can reach it.
 
+    ``extensions`` add to the server (``inkflow.extensions``); by default the
+    installed plugins' (``extensions_for``). Without a deck (``None``) only
+    an extension that ``serves_without_deck`` can answer the pages.
+
     When an extension opens another deck (``ServerContext.open_deck``), the
-    server closes and starts again on the same port for that deck; open pages
-    reconnect to it."""
+    server closes this one and starts again on the same port for that deck;
+    open pages reconnect to it.
+    """
     sharing = sharing or Sharing()
     _share.access = Access(
         http_port,
@@ -1824,16 +1861,19 @@ async def serve(
     )
     if extensions is None:
         extensions = extensions_for(ServeConfig(deck_path, host, http_port))
-    _served.extensions = list(extensions)
     if deck_path is None and not any(e.serves_without_deck for e in extensions):
         report("Error", "no deck to serve", style="red")
         return
+    _served.extensions = list(extensions)
     _served.address = _address(_local_host(host), http_port, ws_port, sharing.tls)
     started: list[ServerExtension] = []
     try:
         for ext in list(_served.extensions):
-            await ext.start(context)
-            started.append(ext)
+            try:
+                await ext.start(context)
+                started.append(ext)
+            except Exception:
+                logger.exception(f"{ext.name}: start failed")
         await _serve_decks(
             deck_path,
             host,
@@ -1844,6 +1884,7 @@ async def serve(
             quit_when_idle,
             auto_ports,
             sharing,
+            started,
         )
     finally:
         _served.extensions = started
@@ -1873,10 +1914,14 @@ async def _serve_decks(
     quit_when_idle: float | None,
     auto_ports: bool,
     sharing: Sharing,
+    extensions: Sequence[ServerExtension],
 ) -> None:
     """``serve``'s loop: one deck after another, as extensions open them."""
     retries = 5 if auto_ports else 0
     while True:
+        # Each deck is opened by every extension that started (one whose
+        # ``open`` failed for the last deck gets this one all the same).
+        _served.extensions = list(extensions)
         try:
             next_deck = await _serve_deck(
                 deck_path,
@@ -1884,9 +1929,9 @@ async def _serve_decks(
                 http_port,
                 ws_port,
                 levels,
+                sharing,
                 open_path,
                 quit_when_idle,
-                sharing.tls,
             )
         except _PortBusy as busy:
             if retries <= 0:
@@ -1902,6 +1947,8 @@ async def _serve_decks(
         if next_deck is None:
             return
         report("Opening", str(next_deck))
+        # The new deck starts from nothing: no slides, position or error of
+        # the last one reach its pages.
         deck_path, open_path = next_deck, None
         _state["slides"] = []
         _state["position"] = {"slideIndex": 0, "step": 0}
@@ -1923,7 +1970,7 @@ async def _quit_when_idle(shutdown: asyncio.Event, delay: float) -> None:
     """Stop once no page has been connected for ``delay`` seconds.
 
     The delay covers a reload, and the moment a deck switch restarts the
-    servers, so only closing the last tab (or never opening one) stops it.
+    server, so only closing the last tab (or never opening one) stops it.
     """
     idle = 0.0
     while True:
@@ -1945,12 +1992,15 @@ async def listening(
     edit_commands: EditCommands = NO_EDIT_COMMANDS,
 ) -> AsyncGenerator[int]:
     """The one port as ``serve`` opens it (pages, files, the WebSocket at
-    ``/_inkflow/ws``), without the terminal UI, watcher or keyboard, serving
-    ``deck_path`` with ``extensions`` (started and opened; nothing built yet): for
-    tests and for embedding. Yields the port it listens on."""
+    ``/_inkflow/ws``, behind the door), without the terminal UI, watcher or
+    keyboard, serving ``deck_path`` (or no deck) with ``extensions`` (started
+    and opened; nothing built yet): for tests and for embedding. Yields the
+    port it listens on."""
     project_dir = deck_path.parent if deck_path is not None else None
     handler = make_ws_handler(ui, edit_commands)
-    bridge = Bridge(handler, max_size=80 * 1024 * 1024, forget=_share.people.leave)
+    bridge = Bridge(
+        handler, max_size=max_message_size(extensions), forget=_share.people.leave
+    )
     handlers: list[_StreamHandler] = []
 
     async def http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -2074,23 +2124,24 @@ async def _serve_deck(
     http_port: int,
     ws_port: int | None,
     levels: Levels,
-    open_path: str | None,
+    sharing: Sharing,
+    open_path: str | None = None,
     quit_when_idle: float | None = None,
-    tls: tuple[Path, Path] | None = None,
 ) -> Path | None:
     """Serve one deck until quit (None) or until an extension opens another
-    (its deck.py). Without a deck, only the extensions' pages are served:
-    nothing is built or watched, and no files are served."""
+    (its deck.py, returned). Without a deck only the extensions' pages are
+    served: nothing is built or watched, and no files are served."""
     console = Console()
     rebuild_lock = asyncio.Lock()
     shutdown = asyncio.Event()
     switch = asyncio.Event()
     _served.switch = switch
-    _served.shutdown = shutdown
     _served.switch_to = None
+    _served.shutdown = shutdown
     _served.deck_path = deck_path
     access = _share.access
     scheme = access.scheme
+    tls = sharing.tls
     local_host = _local_host(host)
     # Where this machine's own pages and commands reach it (as the owner).
     browse_host = local_host
@@ -2100,32 +2151,33 @@ async def _serve_deck(
     bridge: Bridge | None = None
     listener: Listener | None = None
     opened: list[ServerExtension] = []
+    registered = False
 
     try:
         edit_commands = resolve_edit_commands()
         _served.edit_commands = edit_commands
-        project_dir = deck_path.parent if deck_path else None
+        project_dir = deck_path.parent if deck_path is not None else None
         if deck_path is None:
             _state["title"] = "Inkflow"
         ui_ref: list[LiveUI] = []
 
-        def handler_for_ws() -> Callable[[ServerConnection], Awaitable[None]]:
-            return make_ws_handler(ui_ref[0], edit_commands)
-
         async def ws_entry(connection: ServerConnection) -> None:
-            await handler_for_ws()(connection)
+            await make_ws_handler(ui_ref[0], edit_commands)(connection)
 
-        # Pictures pasted into an editor page may arrive as base64 frames.
-        bridge = Bridge(ws_entry, max_size=80 * 1024 * 1024, forget=_share.people.leave)
+        bridge = Bridge(
+            ws_entry,
+            max_size=max_message_size(_served.extensions),
+            forget=_share.people.leave,
+        )
         http_handler = make_http_handler(http_port, project_dir, edit_commands, bridge)
         _share.ws_handler = ws_entry
         _share.route = make_http_route(http_port, project_dir, edit_commands)
         listener = Listener(http_handler, http_port, _tls_context(tls))
 
-        # Bind before the Live UI so port conflicts fail fast with a clean message
         def listen_on(shared: bool) -> Hosts:
             return _listen_hosts(host, shared=shared, ssh=access.ssh)
 
+        # Bind before the Live UI so port conflicts fail fast with a clean message
         try:
             await listener.open(listen_on(access.sharing))
         except OSError as e:
@@ -2141,9 +2193,13 @@ async def _serve_deck(
             ui_ref[0].set_share(share_lines(access, http_port))
 
         _share.rebind = rebind
-        for ext in _served.extensions:
-            await ext.open(deck_path)
-            opened.append(ext)
+        for ext in list(_served.extensions):
+            try:
+                await ext.open(deck_path)
+                opened.append(ext)
+            except Exception:
+                logger.exception(f"{ext.name}: open failed")
+        _served.extensions = list(opened)
         # Other inkflow processes find this server (and its deck) here; in
         # SSH mode with the owner token, which only this user can read.
         instances.register(
@@ -2152,16 +2208,18 @@ async def _serve_deck(
                 host=browse_host,
                 port=http_port,
                 ws_port=ws_port if ws_port is not None else http_port,
-                deck=str(deck_path.resolve()) if deck_path else None,
+                deck=str(deck_path.resolve()) if deck_path is not None else None,
                 tls=tls is not None,
                 owner_token=access.owner_token if access.ssh else None,
+                home=owner_page(),
             )
         )
+        registered = True
         owner = owner_lines(access, http_port)
         if owner:
             console.print(
-                "[bold]SSH mode[/bold]  being on this machine is not enough to "
-                + "edit: open the owner link, through your SSH tunnel",
+                "[bold]SSH mode[/bold]  being on this machine is not enough: "
+                + "open the owner link, through your SSH tunnel",
                 highlight=False,
             )
             console.print(
@@ -2207,7 +2265,7 @@ async def _serve_deck(
                                 local_host,
                                 ws_port,
                                 process_request=_ws_check(http_port),
-                                max_size=80 * 1024 * 1024,
+                                max_size=max_message_size(_served.extensions),
                                 ssl=_tls_context(tls),
                             )
                         )
@@ -2218,25 +2276,20 @@ async def _serve_deck(
                             f"{scheme}://{browse_host}:{http_port}"
                             + access.owner_path(open_path)
                         )
-                    tasks = [
-                        *(
-                            [
-                                asyncio.create_task(
-                                    _watch(deck_path, ui, rebuild_lock, levels)
-                                )
-                            ]
-                            if deck_path is not None
-                            else []
-                        ),
-                        *(
-                            [
-                                asyncio.create_task(
-                                    _quit_when_idle(shutdown, quit_when_idle)
-                                )
-                            ]
-                            if quit_when_idle is not None
-                            else []
-                        ),
+                    tasks: list[asyncio.Task[None]] = []
+                    if deck_path is not None:
+                        tasks.append(
+                            asyncio.create_task(
+                                _watch(deck_path, ui, rebuild_lock, levels)
+                            )
+                        )
+                    if quit_when_idle is not None:
+                        tasks.append(
+                            asyncio.create_task(
+                                _quit_when_idle(shutdown, quit_when_idle)
+                            )
+                        )
+                    tasks.append(
                         asyncio.create_task(
                             _read_keys(
                                 deck_path,
@@ -2247,8 +2300,8 @@ async def _serve_deck(
                                 shutdown,
                                 levels,
                             )
-                        ),
-                    ]
+                        )
+                    )
                     waits = [
                         asyncio.create_task(shutdown.wait()),
                         asyncio.create_task(switch.wait()),
@@ -2276,6 +2329,7 @@ async def _serve_deck(
         _share.ws_handler = None
         _share.route = None
         _served.rebuild = None
+        # Another deck follows (``open_deck``), unless the server stops.
         switching = switch.is_set() and not shutdown.is_set()
         for ext in opened:
             try:
@@ -2284,7 +2338,8 @@ async def _serve_deck(
                 logger.exception(f"{ext.name}: close failed")
         _served.switch = None
         _served.shutdown = None
-        instances.unregister(os.getpid())
+        if registered:
+            instances.unregister(os.getpid())
     if switch.is_set() and not shutdown.is_set():
         return _served.switch_to
     return None

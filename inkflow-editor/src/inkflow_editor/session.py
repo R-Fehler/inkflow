@@ -45,7 +45,7 @@ from inkflow.charts import (
     serialize_rows,
 )
 from inkflow.deps import file_hash
-from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands, open_choices, open_with
+from inkflow.edit import KINDS, NO_EDIT_COMMANDS, EditCommands
 from inkflow.enums import ColorMode, FrameTarget, MediaFit, Muted
 from inkflow.fontreport import (
     BundlePlan,
@@ -121,6 +121,7 @@ from inkflow.zones import (
 from inkflow_editor import (
     chartedit,
     comments,
+    drawioedit,
     gitops,
     media,
     nativedialog,
@@ -180,6 +181,7 @@ from inkflow_editor.master import (
     with_inkflow,
 )
 from inkflow_editor.model import MEDIA_HIDDEN_FIELDS, source_infos
+from inkflow_editor.openwith import open_choices, open_with
 from inkflow_editor.previews import layout_previews
 from inkflow_editor.svgops import (
     SvgFile,
@@ -2854,7 +2856,7 @@ class EditorSession:
     def _drawio_load(self, msg: dict[str, object]) -> dict[str, object]:
         """The diagram's source for the draw.io editor, and where draw.io is
         loaded from (``INKFLOW_DRAWIO_URL``, e.g. a self-hosted copy)."""
-        url = os.environ.get("INKFLOW_DRAWIO_URL") or drawio.DEFAULT_URL
+        url = os.environ.get("INKFLOW_DRAWIO_URL") or drawioedit.DEFAULT_URL
         if not msg.get("path"):
             return {"ok": True, "xml": "", "url": url, "name": "New diagram"}
         path = self._diagram_path(msg.get("path"))
@@ -2937,8 +2939,8 @@ class EditorSession:
         while (folder / f"diagram-{n}{drawio.SUFFIX}").exists():
             n += 1
         path = folder / f"diagram-{n}{drawio.SUFFIX}"
-        txn.write(path, drawio.blank())
-        width, height = drawio.BLANK_SIZE
+        txn.write(path, drawioedit.blank())
+        width, height = drawioedit.BLANK_SIZE
         extra.update(
             path=str(path.resolve()),
             rel=self._deck_rel(path),

@@ -491,3 +491,19 @@ class TestInjectStyle:
         svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
         result = inject_style(svg, "")
         assert result == svg
+
+
+def test_a_zones_connection_points_reach_its_text_box() -> None:
+    """``inkflow:sites`` (how many connection points a shape offers) stays on
+    the foreignObject that replaces a zone shape."""
+    root = etree.fromstring(
+        b'<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkflow="urn:inkflow">'
+        + b'<rect id="zone-a" x="0" y="0" width="100" height="50" inkflow:sites="3"/>'
+        + b'<rect id="zone-b" x="0" y="60" width="100" height="50"/></svg>'
+    )
+    _ = _substitute_content_el(
+        root, {"zone-a": TextBox(text="<p>A</p>"), "zone-b": TextBox(text="<p>B</p>")}
+    )
+    boxes = {fo.get("id"): fo for fo in root.iter(f"{{{ns.SVG}}}foreignObject")}
+    assert boxes["zone-a"].get(ns.INKFLOW_SITES) == "3"
+    assert boxes["zone-b"].get(ns.INKFLOW_SITES) is None

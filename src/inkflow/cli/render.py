@@ -38,9 +38,9 @@ def current_slide(project_dir: Path) -> int:
     "-s",
     "slides",
     multiple=True,
-    help="Slide number (1-based) or id; repeatable. Default: the slide open in"
-    + " the editor, when one reports it, else the first (every slide with"
-    + " --sheet or --check).",
+    help="Slide number (1-based) or id; repeatable. Default: the slide a plugin"
+    + " reports open (an editor's), else the first (every slide with --sheet"
+    + " or --check).",
 )
 @click.option("--all", "all_slides", is_flag=True, help="Render every slide.")
 @click.option(
@@ -117,13 +117,13 @@ def render(
 ) -> None:
     """Render slides to PNG images and report layout problems.
 
-    Uses headless Chromium, like `export`. Without `--slide`, renders the slide
-    open in the visual editor (or the first). Prints the path of every image
-    written, which is what an agent reads back to check its own edits, then
-    one line per layout problem: text that overflows its zone, a code block cut
-    off, an object outside the slide, text too small to read (a hint), text
-    whose contrast with what is behind it is below 3:1 (between 3:1 and 4.5:1
-    for text under 24px on a 1080px slide: a hint).
+    Uses headless Chromium, like `export`. Without `--slide`, renders the
+    slide a plugin reports open (an editor's), or the first. Prints the path
+    of every image written, which is what an agent reads back to check its
+    own edits, then one line per layout problem: text that overflows its
+    zone, a code block cut off, an object outside the slide, text too small
+    to read (a hint), text whose contrast with what is behind it is below 3:1
+    (between 3:1 and 4.5:1 for text under 24px on a 1080px slide: a hint).
 
     `--sheet` puts the slides on one contact sheet (16 per image at most).
     `--check` measures without writing images and exits 1 if anything other

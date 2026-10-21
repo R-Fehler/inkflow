@@ -2,8 +2,8 @@
 // anchor maths that keeps a point under the fingers, and the touch state
 // machine deciding when one finger's action gives way to a two-finger pinch.
 // The DOM half (gesturepad.ts) feeds it events and applies what it decides;
-// the presenter (presenter/zoom.ts) and the editor (editor/touchzoom.ts) each
-// say what a zoom, a pan and a cancelled finger mean on their page.
+// each page using it (the presenter: presenter/zoom.ts; an editor frontend)
+// says what a zoom, a pan and a cancelled finger mean there.
 
 export interface Pt {
     x: number;
@@ -53,9 +53,10 @@ export function wheelZoomFactor(deltaY: number, deltaMode: number): number {
 
 // ── Anchoring ───────────────────────────────────────────────────────────────
 
-// How far content sits from where it belongs: the editor lays the zoomed
-// paper out, finds where the anchored point landed (`now`) and scrolls the
-// canvas by the difference to where it should be (`want`).
+// How far content sits from where it belongs: a page that zooms by layout
+// (an editor's canvas) lays the zoomed content out, finds where the anchored
+// point landed (`now`) and scrolls by the difference to where it should be
+// (`want`).
 export function scrollCorrection(now: Pt, want: Pt): Pt {
     return { x: now.x - want.x, y: now.y - want.y };
 }

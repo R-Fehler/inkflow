@@ -3,7 +3,7 @@
 import os
 import sys
 
-# Started without a console (the desktop launcher's pythonw on Windows), the
+# Started without a console (pythonw on Windows, a desktop launcher), the
 # standard streams are None; the terminal UI and logging need somewhere to go.
 for _name in ("stdout", "stderr"):
     if getattr(sys, _name) is None:

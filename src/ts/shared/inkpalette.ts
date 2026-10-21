@@ -1,5 +1,5 @@
 // The floating ink palette: tool, colour, width, undo / clear, and who draws.
-// One component for the presenter and the editor; each page says what undo,
+// One component for the presenter and an editor; each page says what undo,
 // clear and close do, and where its settings are remembered.
 
 import { type InkTool, type PenTool, SWATCHES } from "./ink";

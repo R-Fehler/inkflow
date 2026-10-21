@@ -225,6 +225,7 @@ def read_resolved_svg(
     composition merges files into a tree that no longer remembers where each part
     came from. Authoring paths (preview injection, `verify`) read the file plainly
     with `clean_inkscape_tree` instead, so the author's own paths survive.
+    ``before_clean`` is `clean_inkscape_tree`'s (source locators).
     """
     root = clean_inkscape_tree(path, before_clean=before_clean)
     return AssetSource.for_file(roots, path).svg(root)

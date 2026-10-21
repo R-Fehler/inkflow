@@ -79,7 +79,7 @@ def inkflow_requirement() -> str:
 
 def plugin_requirements() -> list[str]:
     """What the installed plugins need a deck to depend on, so their commands
-    work in a clone too (``uv run inkflow edit`` with inkflow-editor)."""
+    work in a clone too (an editor plugin's ``uv run inkflow edit``)."""
     from inkflow import plugins
 
     found: list[str] = []
@@ -211,7 +211,9 @@ def scaffold_poster(target: Path, size: str = "a0", theme: str = "default") -> P
     for name, dest in _POSTER_FILES.items():
         path = target / dest
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(templates.joinpath(name).read_text(encoding="utf-8"))
+        path.write_text(
+            templates.joinpath(name).read_text(encoding="utf-8"), encoding="utf-8"
+        )
     (target / "deck.py").write_text(deck_py, encoding="utf-8")
     write_pyproject(target)
     return sheet

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import textwrap
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import cast
 
@@ -30,6 +30,7 @@ from inkflow.pipeline import process_deck
 from inkflow.server import load_deck
 from inkflow.svgio import parse_svg
 from inkflow.tui import LiveUI
+from tests.serving import GUEST, make_project, open_ws, serve_on_a_thread, until
 
 SVG_NS = "http://www.w3.org/2000/svg"
 
@@ -137,6 +138,25 @@ def test_ink_is_painted_on_top_after_the_overlays(project: Path) -> None:
 def test_a_slide_without_an_ink_file_has_no_ink_group(project: Path) -> None:
     _, slides = _build(project)
     assert all(INK_CLASS not in s["svg"] for s in slides)
+
+
+def test_an_editor_build_names_the_ink_file_and_locates_each_stroke(
+    project: Path,
+) -> None:
+    """A frontend writing back gets where the pen writes (the file need not
+    exist yet) and, once it does, each stroke's place in it."""
+    _, slides = _build(project, editor=True)
+    edit = slides[1].get("edit")
+    assert edit is not None and edit["ink"] == str(project / "ink" / "plain.svg")
+    _write_ink(project / "ink" / "drawn.svg", "ink-a1")
+    _, slides = _build(project, editor=True)
+    edit = slides[0].get("edit")
+    assert edit is not None
+    stroke = next(
+        el for el in parse_svg(slides[0]["svg"]).iter() if el.get("id") == "ink-a1"
+    )
+    key = int(stroke.get("data-ink", "").split(":")[0])
+    assert edit["sources"][key] == str(project / "ink" / "drawn.svg")
 
 
 def test_ink_follows_the_deduplicated_slide_id(project: Path) -> None:
@@ -327,3 +347,83 @@ def test_a_deck_with_ink_round_trips_through_load(project: Path) -> None:
     deck = load_deck(project / "deck.py")
     assert isinstance(deck, Deck)
     assert deck.slides[3].ink == "notes/named-ink.svg"
+
+
+# ── Saving without an editor ─────────────────────────────────────────────────
+
+
+def test_the_door_lets_a_viewer_only_ask_for_ink() -> None:
+    draw: dict[str, object] = {"type": "ink", "op": "draw", "slide": "one"}
+    assert server.allowed("owner", draw) and server.allowed("editor", draw)
+    assert not server.allowed("viewer", draw)
+    assert server.allowed("viewer", {"type": "ink", "op": "request"})
+    keep: dict[str, object] = {"type": "edit-op", "action": "ink"}
+    assert server.allowed("editor", keep) and not server.allowed("viewer", keep)
+
+
+@pytest.fixture
+def served(tmp_path: Path) -> Iterator[tuple[Path, int]]:
+    project = make_project(tmp_path)
+    for port in serve_on_a_thread(project / "deck.py", []):
+        yield project, port
+
+
+def _keep(slide_id: str, op_id: str = "k1") -> dict[str, object]:
+    return {
+        "type": "edit-op",
+        "id": op_id,
+        "action": "ink",
+        "op": "add",
+        "slideId": slide_id,
+        "strokes": [_stroke("ink-b2", fill="#00ff00")],
+    }
+
+
+def test_without_an_editor_keep_writes_the_ink_file(
+    served: tuple[Path, int],
+) -> None:
+    project, port = served
+    with open_ws(port) as ws:
+        _ = until(ws, "welcome")
+        ws.send(json.dumps(_keep("two")))
+        reply = until(ws, "edit-result")
+        assert reply == {
+            "type": "edit-result",
+            "id": "k1",
+            "ok": True,
+            "ink": "ink/two.svg",
+        }
+        # Nothing else is an edit this server makes.
+        ws.send(json.dumps({"type": "edit-op", "id": "k2", "action": "slide"}))
+        refused = until(ws, "edit-result")
+        assert refused["ok"] is False and "edits the deck" in str(refused["error"])
+        ws.send(json.dumps({**_keep("nope"), "id": "k3"}))
+        assert until(ws, "edit-result")["ok"] is False
+    assert stroke_ids((project / "ink" / "two.svg").read_bytes()) == ["ink-b2"]
+
+
+def test_a_view_link_is_told_it_cannot_keep_ink(served: tuple[Path, int]) -> None:
+    project, port = served
+    viewer = {
+        **GUEST,
+        "Cookie": f"inkflow-{port}={server._share.access.viewer_token}",  # pyright: ignore[reportPrivateUsage]
+    }
+    with open_ws(port, viewer) as ws:
+        assert until(ws, "welcome")["role"] == "viewer"
+        ws.send(json.dumps(_keep("two")))
+        reply = until(ws, "edit-result")
+        assert reply["ok"] is False and reply["error"] == "this link is view-only"
+    assert not (project / "ink").exists()
+
+
+def test_a_share_links_editor_keeps_ink(served: tuple[Path, int]) -> None:
+    project, port = served
+    editor = {
+        **GUEST,
+        "Cookie": f"inkflow-{port}={server._share.access.editor_token}",  # pyright: ignore[reportPrivateUsage]
+    }
+    with open_ws(port, editor) as ws:
+        assert until(ws, "welcome")["role"] == "editor"
+        ws.send(json.dumps(_keep("one")))
+        assert until(ws, "edit-result")["ok"] is True
+    assert (project / "ink" / "one.svg").is_file()

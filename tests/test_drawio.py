@@ -1,5 +1,5 @@
 """draw.io diagrams (*.drawio.svg): the source inside, stored uncompressed;
-the editor's load/save; git's view of them; opening them elsewhere."""
+git's view of them."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from click.testing import CliRunner
 
 from inkflow import drawio
 from inkflow.cli import main
-from inkflow.edit import EditCommands, open_choices
 
 MODEL = (
     '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>'
@@ -90,12 +89,3 @@ def test_clean_leaves_diagrams_alone_and_diffs_show_the_source(
     result = runner.invoke(main, ["clean", "--stdout", str(diagram)])
     assert result.exit_code == 0 and "<mxfile" in result.output
     assert 'value="Client"' in result.output
-
-
-def test_open_with_offers_draw_io(monkeypatch: pytest.MonkeyPatch) -> None:
-    def which(name: str) -> str | None:
-        return f"/usr/bin/{name}" if name in ("drawio", "inkscape") else None
-
-    monkeypatch.setattr("inkflow.edit.shutil.which", which)
-    choices = open_choices(Path("flow.drawio.svg"), EditCommands(None, None))
-    assert [c.id for c in choices][:2] == ["drawio", "inkscape"]

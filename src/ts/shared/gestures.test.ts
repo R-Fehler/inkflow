@@ -58,8 +58,8 @@ describe("wheel", () => {
     });
 });
 
-// A 1-D model of the editor's canvas: the paper is laid out in whole pixels
-// and scrolled in whole pixels, as a browser does.
+// A 1-D model of a canvas zoomed by layout (an editor's): the paper is laid
+// out in whole pixels and scrolled in whole pixels, as a browser does.
 function simulate(useAnchor: boolean): number {
     const W = 1920; // slide units
     let width = 730; // paper width in px

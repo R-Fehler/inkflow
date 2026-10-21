@@ -1,4 +1,4 @@
-/* Ink palette (shared/inkpalette.ts), the same in the presenter and the
+/* Ink palette (shared/inkpalette.ts), the same in the presenter and an
    editor; each page places it. Chrome colours come from theme-vars. */
 
 .ink-palette {

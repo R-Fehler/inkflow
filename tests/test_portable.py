@@ -1,11 +1,12 @@
+# pyright: reportUnknownMemberType=false
 """A deck that looks the same everywhere: where its fonts come from
-(``inkflow fonts``), bringing them into the deck (``fonts bundle``/``set``),
-and packing the rest (``inkflow pack``): files from outside the deck, the
-pinned project and lock, git rules, committed PDF pages, a zip, and the checks
-``verify`` and a commit make from it."""
+(``inkflow fonts``), the plan for bringing them into the deck, and the other
+building blocks (``pack.py``): the pinned project and lock, git rules,
+committed PDF pages, a zip, and what a new deck starts with."""
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import textwrap
@@ -309,6 +310,32 @@ def _no_server(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr(instances, "serving", serving)
+
+
+def _cli(project: Path, *args: str) -> str:
+    result = CliRunner().invoke(main, [*args, "--deck", str(project / "deck.py")])
+    assert result.exit_code == 0, result.output
+    return result.output
+
+
+def test_cli_report(project: Path, machine: Path) -> None:
+    _machine_family(machine)
+    _styles(project, body="Hereface, sans-serif")
+    report = cast(
+        "dict[str, list[dict[str, object]]]",
+        json.loads(_cli(project, "fonts", "--json")),
+    )
+    by_family = {str(f["family"]): f for f in report["families"]}
+    assert by_family["Hereface"]["where"] == "machine"
+    licence = cast("dict[str, str]", by_family["Hereface"]["licence"])
+    assert licence["status"] == "open"
+    out = _cli(project, "fonts")
+    assert "machine" in out and "Hereface" in out
+    assert "depend on this machine" in " ".join(out.split())
+    pack.bundle_fonts_now(load_deck(project / "deck.py"), project)
+    assert (project / "fonts" / "hereface" / "Hereface-Regular.ttf").is_file()
+    out = _cli(project, "fonts")
+    assert "every font travels with the deck" in " ".join(out.split())
 
 
 def test_gitattributes_are_merged_once_and_respect_the_lfs_opt_out(

@@ -1783,9 +1783,9 @@
     return void 0;
   }
   function openSocket() {
-    const online = relay();
-    if (!online) return new WebSocket(socketUrl(location));
-    const sock = online.openSocket();
+    const relayed = relay();
+    if (!relayed) return new WebSocket(socketUrl(location));
+    const sock = relayed.openSocket();
     window.addEventListener("pagehide", () => sock.close(1001, "page left"));
     return sock;
   }

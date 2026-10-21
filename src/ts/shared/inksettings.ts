@@ -26,7 +26,7 @@ export interface InkSettings {
     // swipes keep navigating (and a palm resting on a tablet draws nothing).
     fingers: boolean;
     // Strokes are saved into the slide's ink file instead of kept for the
-    // talk only (the presenter's "Keep"; the editor always saves).
+    // talk only (the presenter's "Keep"; an editor may always save).
     keep: boolean;
 }
 

@@ -182,8 +182,8 @@ class Stage(_Shipped):
 
 
 THEMES: dict[str, type[Theme]] = {"default": Builtin, "paper": Paper, "stage": Stage}
-"""The themes inkflow ships, by the name ``inkflow init --theme`` and the
-editor know them by."""
+"""The themes inkflow ships, by the name ``inkflow init --theme`` (and a
+frontend offering a choice of theme) knows them by."""
 
 
 def theme_id(theme: Theme) -> str | None:

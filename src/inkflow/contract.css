@@ -244,9 +244,9 @@ math {
 }
 
 /* A zone's HTML starts from no margins and padding, as the presenter's own
- * reset gives it, in every page that shows a slide (the editor, the PDF
- * export, the compare view), so text lays out (and fits) the same in each.
- * :where() keeps it as weak as that reset: every rule below still wins. */
+ * reset gives it, in every page that shows a slide (an editor, the PDF
+ * export), so text lays out (and fits) the same in each. :where() keeps it
+ * as weak as that reset: every rule below still wins. */
 :where(.inkflow-wrapper) *,
 :where(.inkflow-wrapper) *::before,
 :where(.inkflow-wrapper) *::after {

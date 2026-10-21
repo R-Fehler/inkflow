@@ -1,6 +1,7 @@
-// Who this browser is to the people it edits with: a display name chosen
-// once, and a private key that ties its undo history together across reloads.
-// Both live in this browser's storage only; the key is never shown to anyone.
+// Who this browser is to the people it works with: a display name chosen
+// once, and a private key that tells its connections apart from others' across
+// reloads (an editor ties its undo history to it). Both live in this
+// browser's storage only; the key is never shown to anyone.
 
 const NAME_KEY = "inkflow-name";
 const ID_KEY = "inkflow-key";

@@ -689,7 +689,7 @@ def build_slide_content(
     )
 
 
-# ── Source spans (for the visual editor) ──────────────────────────────────────
+# ── Source spans (for a frontend writing back) ───────────────────────────────
 
 
 def zone_spans(source: str) -> dict[str, tuple[int, int]]:
@@ -697,7 +697,7 @@ def zone_spans(source: str) -> dict[str, tuple[int, int]]:
 
     Mirrors ``parse_markdown_zones`` exactly (the same markers, the same
     auto-extraction of a leading ``#``/``##``), but keeps positions instead of
-    content, so the editor can replace one zone's section and leave every other
+    content, so a frontend can replace one zone's section and leave every other
     byte of the file alone. A span covers the section's stripped text; an empty
     zone has no span.
     """

@@ -14,8 +14,8 @@ from click.testing import CliRunner
 from inkflow.cli import main
 from inkflow.export import (
     PdfPage,
-    _crop_marks,
-    _page_css,
+    _crop_marks,  # pyright: ignore[reportPrivateUsage]
+    _page_css,  # pyright: ignore[reportPrivateUsage]
     build_pdf,
     extend_backgrounds,
     find_chromium,

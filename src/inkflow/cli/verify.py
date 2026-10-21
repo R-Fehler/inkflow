@@ -22,18 +22,15 @@ from inkflow.verify import verify_deck, verify_slide
 )
 @click.option(
     "--no-deck-checks",
-    "--no-portable",
-    "no_portable",
     is_flag=True,
-    help="Skip the deck-wide checks (plugins': with inkflow-editor, what ties "
-    + "the deck to this machine).",
+    help="Skip the plugins' checks of the deck as a whole.",
 )
 def verify_cmd(
     files: tuple[Path, ...],
     deck_path: Path,
     include_hidden: bool,
     strict: bool,
-    no_portable: bool,
+    no_deck_checks: bool,
 ) -> None:
     """Check slides for authoring errors before presenting or building.
 
@@ -47,10 +44,8 @@ def verify_cmd(
     hide the slide. Warnings: animation steps are not contiguous from 1, a zone id is
     declared twice after composition, or layout layers are stale (run `inkflow sync`).
 
-    Plugins add their own checks (per slide, and for the whole deck unless
-    FILES or `--no-deck-checks`): inkflow-editor warns about arrows whose
-    shapes moved, and about what ties the deck to this machine (fonts, files
-    outside the deck, no pinned inkflow or uv.lock; `inkflow pack`).
+    Installed plugins add checks of their own: per slide, and for the whole
+    deck (one `deck` line; not with FILES or `--no-deck-checks`).
 
     Exits 1 on any error, or on any warning when `--strict` is set. Hidden slides
     (`visible=False`) are skipped unless `--all` is passed.
@@ -84,11 +79,11 @@ def verify_cmd(
         warnings += sum(1 for level, _ in issues if level != "error")
         _print_slide_issues(names[id(slide)], issues)
 
-    if not files and not no_portable:
-        deck_file = resolve_deck_path(deck_path)
-        deck_issues = verify_deck(deck_obj, project_dir, deck_file)
+    if not files and not no_deck_checks:
+        deck_issues = verify_deck(deck_obj, project_dir, resolve_deck_path(deck_path))
+        errors += sum(1 for level, _ in deck_issues if level == "error")
+        warnings += sum(1 for level, _ in deck_issues if level != "error")
         if deck_issues:
-            warnings += len(deck_issues)
             _print_slide_issues("deck", deck_issues)
 
     console.print(verify_summary(len(slides), errors, warnings))
@@ -98,9 +93,8 @@ def verify_cmd(
 
 def _slide_names(deck: Deck) -> dict[int, str]:
     """What each slide's lines start with: its number in the presentation
-    and its id (what `outline`, `render -s` and `slide` take), then the
-    layout or file it is drawn from when the id does not say. A hidden slide
-    has no number."""
+    and its id (what `render -s` takes), then the layout or file it is drawn
+    from when the id does not say. A hidden slide has no number."""
     visible = [s for s in deck.slides if s.visible]
     shown = dict(zip(map(id, visible), slide_ids(visible), strict=True))
     width = len(str(len(visible)))

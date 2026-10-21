@@ -108,6 +108,9 @@ class EditorExtension(ServerExtension):
     provenance: bool = True
     serves_without_deck: bool = True
     home: str | None = "/edit"
+    # Pictures and files pasted or dropped into the editor arrive as base64
+    # inside an edit-op (big files go in chunks: media.Uploads).
+    max_message_size: int | None = 80 * 1024 * 1024
     messages: Mapping[str, Role] = {
         "edit-op": "editor",
         "compare-open": "editor",

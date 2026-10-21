@@ -113,7 +113,8 @@ def parse_text_scale(value: str) -> float:
 
 
 def format_text_scale(scale: float) -> str:
-    """A text size as its marker writes it: ``80%``, ``67%``, ``112.5%``."""
+    """A text size as its marker writes it: ``80%``, ``67%``, ``112.5%``
+    (what `parse_text_scale` reads back)."""
     percent = round(scale * 100, 1)
     return f"{percent:g}%"
 
@@ -398,8 +399,8 @@ class Section:
     """
 
     name: str
-    """Shown above the section's slides in the editor and the overview, and in
-    the presenter panel; two sections may share a name."""
+    """Shown above the section's slides in the overview (and an editor's slide
+    list), and in the presenter panel; two sections may share a name."""
     slides: list[Slide] = field(default_factory=list)
     """The section's slides, in order."""
 

@@ -9,8 +9,9 @@ import { showNotify } from "./ui";
 // Default action is copying the resolved path to the clipboard — universal,
 // works with any editor via paste-navigate. INKFLOW_EDIT_CMD and its
 // per-extension / per-kind forms (server env vars, baked into
-// EditCommandsConfig at page load) override that. When configured *and* there's a live server connection,
-// the path is sent to the server to launch instead. The live-connection check
+// EditCommandsConfig at page load) override that. When configured *and*
+// there's a live server connection, the path is sent to the server to launch
+// instead. The live-connection check
 // (not just the boot-time config flag) mirrors websocket.ts's postToPeer
 // reasoning — check the real transport, not a static flag — so a disconnected
 // server degrades to clipboard-copy instead of silently dropping the click.

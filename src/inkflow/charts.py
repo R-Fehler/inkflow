@@ -4,8 +4,8 @@ A chart's data lives in a file that diffs well in git (CSV, TSV, JSON) or is
 written inline: ``Chart(data={...})`` in deck.py, or a Markdown table in a
 ```` ```chart ```` fence. This module reads those into one `Table`, and draws
 the table as plain SVG into the slide, so ``serve``, the static build, the PDF
-export, the editor's thumbnails and ``inkflow render`` all show the same chart
-and no script runs in the browser.
+export and an editor's thumbnails all show the same chart and no script runs
+in the browser.
 
 Nothing here hard-codes a colour or a font: marks are painted with the theme's
 palette tokens (``var(--inkflow-blue)``…) and text with its text tokens, so a
@@ -221,7 +221,8 @@ def parse_markdown_table(text: str) -> Table:
 
 
 def read_text_rows(path: Path) -> tuple[list[str], list[list[str]]]:
-    """A data file's columns and rows as text, as the editor's grid shows them."""
+    """A data file's columns and rows as text, cells as typed (what an editor's
+    grid shows and `serialize_rows` writes back)."""
     suffix = path.suffix.lower()
     text = path.read_text(encoding="utf-8")
     if suffix in DELIMITERS:

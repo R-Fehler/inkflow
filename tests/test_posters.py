@@ -84,7 +84,12 @@ def test_scaffold_poster(poster: Path) -> None:
     deck = load_deck(poster / "deck.py")
     assert deck.size == "a0"
     assert deck.slides[0].src == "poster-3col"
-    for rel in ("slides/poster.md", "figures/method.svg", "data/results.csv"):
+    for rel in (
+        "slides/poster.md",
+        "figures/method.svg",
+        "figures/logo.svg",
+        "data/results.csv",
+    ):
         assert (poster / rel).is_file()
     slides = process_deck(deck, poster, poster / "deck.py")
     svg = slides[0]["svg"]

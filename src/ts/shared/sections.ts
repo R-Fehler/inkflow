@@ -1,7 +1,7 @@
 // Sections in the presented slide list (Section(...) in deck.py): each slide
 // carries the section it is in (pipeline.py `SlideData.section`), and the
 // slides of a section are consecutive. Pure, shared by the presenter's
-// overview, picker and panel, and by the editor's grid.
+// overview, picker and panel, and by any frontend listing the slides.
 
 export interface SectionRef {
     name: string;

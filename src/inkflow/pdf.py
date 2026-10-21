@@ -17,7 +17,8 @@ cache under ``.inkflow/cache/pdf/`` (ignored by git, unwatched), named by the
 PDF's content hash and page, so a changed PDF converts again and an unchanged
 one never does. The pipeline points each picture at its converted page, under
 the ``_pdf/`` asset prefix (see `AssetRoots`), and keeps the PDF reference
-beside it in ``data-inkflow-pdf``: what the editor shows and writes back.
+beside it in ``data-inkflow-pdf``: what a frontend that writes back (an
+editor) shows and writes, never the cache.
 """
 
 from __future__ import annotations
@@ -287,7 +288,8 @@ def convert(pdf: Path, page: int, project_dir: Path, tool: str | None = None) ->
         return target
     _ = work_dir(project_dir)  # ignoring itself before anything lands in it
     cache.mkdir(parents=True, exist_ok=True)
-    # Into a file of its own first: a build and the editor may convert at once.
+    # Into a file of its own first: two builds (a server's, a command's) may
+    # convert at once.
     partial = cache / f".{secrets.token_hex(6)}.svg"
     try:
         _converted(tool, pdf, page, partial)
@@ -305,7 +307,7 @@ _DIGEST_RE = re.compile(DIGEST_ATTR + r'="([0-9a-f]{64})"')
 
 
 def committed_path(pdf: Path, page: int) -> Path:
-    """Where ``inkflow pack --with-pdf-pages`` commits a page beside its PDF:
+    """Where a page is committed beside its PDF (its text: `page_for_commit`):
     ``figure.pdf`` page 1 is ``figure.pdf.p1.svg``. References keep naming
     the PDF; the build shows this file while the PDF is the one it was drawn
     from, so a clone needs no converter and every machine shows the same."""

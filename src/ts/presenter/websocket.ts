@@ -67,7 +67,8 @@ function storedSyncMode(): boolean {
 }
 
 // Who the server says this page is (its "welcome"): a view link follows the
-// presenter (it may still look around alone, in solo mode) and has no editor.
+// presenter (it may still look around alone, in solo mode), opens no source
+// files and has no editor.
 let role = "owner";
 
 function welcome(msg: { role?: unknown; editor?: unknown }): void {
@@ -85,8 +86,8 @@ function welcome(msg: { role?: unknown; editor?: unknown }): void {
     }
 }
 
-// This page's slide, for the others' list of who is where (sent when it
-// changes; nothing about the page is stored).
+// This page's slide, for an extension's list of who is where (sent when it
+// changes; nothing about the page is stored). The core server ignores it.
 let presenceSent = -1;
 
 function sendPresence(force = false): void {
@@ -260,7 +261,8 @@ export function connectWS(wsPort: number | null, authoritative: boolean): void {
         if (assert && role !== "viewer") sendNav();
         requestInk();
         sendPresence(true);
-        // Rebuilds as what changed: the slides this page holds come by key.
+        // What this page is, for the server's list of who is connected;
+        // rebuilds as what changed: the slides this page holds come by key.
         state.ws?.send(
             JSON.stringify({ type: "hello", role: "presenter", patch: true }),
         );
@@ -280,7 +282,8 @@ export function connectWS(wsPort: number | null, authoritative: boolean): void {
                 state.ws?.send(JSON.stringify({ type: "resync" }));
                 return;
             }
-            // A new stylesheet or colour mode lays text out anew (its fit).
+            // A new stylesheet or colour mode restyles every slide: the one
+            // on screen is loaded again.
             const restyled = msg.styles !== undefined || msg.mode !== undefined;
             const shown = restyled ? null : state.slides[state.slideIndex];
             const unchanged = !restyled && sameItems(slides, state.slides);

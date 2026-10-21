@@ -1,9 +1,10 @@
 // Text size per box and shrink-to-fit, shared by every page that shows a
-// slide: the presenter (and so the static build), the editor's canvas and
-// thumbnails, the PDF export page and `inkflow render`. Fitting needs the
-// browser's own text layout (fonts, line breaks, formulas), so it runs where
-// the slide is shown, on the same rule everywhere; nothing it finds is ever
-// written to a file. What the author sets is source:
+// slide: the presenter (and so the static build), its overview and next
+// preview, the PDF export page, `inkflow render`, and any editor's canvas.
+// Fitting needs the browser's own text layout (fonts, line breaks,
+// formulas), so it runs where the slide is shown, on the same rule
+// everywhere; nothing it finds is ever written to a file. What the author
+// sets is source:
 //
 //   --inkflow-font-scale  a factor on the zone's text (0.8 = 80 %): the zone
 //                         shape's style, layout CSS, a marker's `size=`,
@@ -16,7 +17,7 @@
 // so every size inside (headings, code, tables, formulas: all in em) follows.
 // The foreignObject gets `data-inkflow-fit` (the factor, when shrunk) and
 // `data-inkflow-overflow` (it does not fit even at the floor, or fitting is
-// off), which the editor shows and `inkflow render` reports.
+// off), for a page to show and `inkflow render` to report.
 
 import { parseViewBox } from "./viewbox";
 
@@ -27,7 +28,7 @@ export const MIN_TEXT_FRACTION = 1 / 80;
 /** Shrinking never goes below this share of the box's own text size. */
 export const FIT_FLOOR = 0.33;
 
-/** The A− / A+ steps of a box's text size. */
+/** The steps an editor's smaller / larger text buttons move a box's size by. */
 export const TEXT_SIZE_STEPS = [
     0.5, 0.67, 0.8, 0.9, 1, 1.15, 1.3, 1.5, 2,
 ] as const;
@@ -194,7 +195,7 @@ function overflows(wrapper: HTMLElement, content: HTMLElement): boolean {
 }
 
 /** The height `fo`'s box needs (in its own units) to hold its text at the
- * text's own size, not shrunk: what "Make box taller" sets. */
+ * text's own size, not shrunk: what an editor makes a box that does not fit. */
 export function neededBoxHeight(fo: Element): number | null {
     const wrapper = fo.querySelector(
         ":scope > .inkflow-wrapper",

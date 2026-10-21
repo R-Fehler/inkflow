@@ -1,6 +1,6 @@
-"""One server per deck: the registry of running servers (instances.py), the
-editor sending you to the server that has a deck open, quitting, and the
-hidden server stopping once no page is open."""
+"""One server per deck: the registry of running servers (instances.py), a
+second ``inkflow serve`` of a deck pointing at the server that has it, and a
+server stopping once no page is open."""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ def test_a_deck_open_in_another_server_is_found(
     record, deck = other_server
     found = instances.serving(deck)
     assert found is not None and found.port == record.port
-    assert found.url() == f"http://127.0.0.1:{record.port}/edit"
+    assert found.url() == f"http://127.0.0.1:{record.port}/"
     assert instances.serving(deck, exclude_pid=record.pid) is None
     assert instances.serving(tmp_path / "other" / "deck.py") is None
 
@@ -83,6 +83,53 @@ def test_stale_records_are_dropped(tmp_path: Path) -> None:
     assert list((tmp_path / "servers").iterdir()) == []
 
 
+def test_serve_points_at_the_server_that_has_the_deck(
+    other_server: tuple[instances.Instance, Path],
+) -> None:
+    from click.testing import CliRunner
+
+    from inkflow.cli import main
+
+    record, deck = other_server
+    result = CliRunner().invoke(main, ["serve", "--deck", str(deck)])
+    assert result.exit_code == 0, result.output
+    assert "Already open" in result.output
+    assert f"http://127.0.0.1:{record.port}/" in result.output
+
+
+def test_a_record_is_this_users_alone(tmp_path: Path) -> None:
+    import stat
+
+    instances.register(
+        instances.Instance(7, "localhost", 7777, 7777, None, owner_token="secret")
+    )
+    folder = tmp_path / "servers"
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+    assert stat.S_IMODE((folder / "7.json").stat().st_mode) == 0o600
+    record = instances.Instance(7, "localhost", 7777, 7777, None, owner_token="t+k")
+    assert record.owner_url("/") == "http://localhost:7777/?k=t%2Bk"
+    assert record.ws_url() == "ws://localhost:7777/_inkflow/ws?k=t%2Bk"
+    assert record.url() == "http://localhost:7777/"  # never the token
+    assert record.cookie() == "inkflow-owner-7777=t+k"
+    instances.unregister(7)
+    assert not (folder / "7.json").exists()
+
+
+def test_a_record_leads_to_the_page_its_owner_opens() -> None:
+    """A server whose extension has a ``home`` records it: another inkflow
+    pointing there opens that page, not the presenter."""
+    for port in _answering(4243, None):
+        instances.register(
+            instances.Instance(4243, "127.0.0.1", port, port, None, home="/start")
+        )
+        (found,) = instances.running()
+        assert found.home == "/start"
+        assert found.url() == f"http://127.0.0.1:{port}/start"
+        assert found.url("/") == f"http://127.0.0.1:{port}/"
+    # An older record (no home) leads to the presenter.
+    assert instances.Instance(1, "localhost", 7777, 7777, None).url().endswith("/")
+
+
 def test_an_idle_server_stops_and_a_watched_one_does_not() -> None:
     async def run(clients: set[object]) -> bool:
         server._state["ws_clients"] = cast("set[ServerConnection]", clients)  # pyright: ignore[reportPrivateUsage]
@@ -90,7 +137,7 @@ def test_an_idle_server_stops_and_a_watched_one_does_not() -> None:
         task = asyncio.create_task(server._quit_when_idle(shutdown, 2))  # pyright: ignore[reportPrivateUsage]
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(shutdown.wait(), timeout=3.5)
-        task.cancel()
+        _ = task.cancel()
         return shutdown.is_set()
 
     try:

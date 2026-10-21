@@ -471,6 +471,16 @@ class TestBuildInlinesAssets:
         assert "https://example.com/x.png" in index
         assert "data:image/png;base64,AAAA" in index
 
+    def test_a_picture_on_the_web_is_named_once(self, tmp_path: Path) -> None:
+        _write_slide(tmp_path, _PLAIN_SLIDE_SVG)
+        deck_path = _write_deck(tmp_path, _REMOTE_DECK)
+
+        with collect_logs(logging.WARNING) as warnings:
+            build_static_html(deck_path, tmp_path / "out")
+
+        named = [w.message for w in warnings if "is on the web" in w.message]
+        assert len(named) == 1 and "https://example.com/x.png" in named[0]
+
     def test_cli_flag_produces_a_lone_index_html(self, tmp_path: Path) -> None:
         _write_slide(tmp_path, _ASSET_SLIDE_SVG)
         for rel in ("slides/assets/pic.png", "slides/assets/pic2.png"):
@@ -665,6 +675,31 @@ class TestPdfThroughConfinedBrowser:
             build_pdf(deck_path, out, chromium=_fake_chromium(tmp_path, "silent"))
 
 
+def _nowhere(_name: str) -> None:
+    return None
+
+
+class TestFindChromium:
+    def test_a_playwright_download_is_found_when_path_has_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        exe = tmp_path / "chromium-1194" / "chrome-linux" / "chrome"
+        exe.parent.mkdir(parents=True)
+        exe.write_text("")
+        monkeypatch.setattr("inkflow.export.shutil.which", _nowhere)
+        monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        assert find_chromium() == str(exe)
+
+    def test_none_without_any(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("inkflow.export.shutil.which", _nowhere)
+        monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        assert find_chromium() is None
+
+
 _MALFORMED_SVG = "<svg><rect></svg>"
 
 
@@ -686,3 +721,25 @@ class TestMalformedSvg:
         # rather than letting a raw XMLSyntaxError traceback escape
         assert "invalid SVG" in result.output
         assert not isinstance(result.exception, ValueError)
+
+
+def test_export_as_root_passes_no_sandbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_slide(tmp_path, _PLAIN_SLIDE_SVG)
+    deck_path = _write_deck(tmp_path, _ONE_SLIDE_DECK)
+    seen: list[bool] = []
+
+    def fake_build_pdf(
+        _deck: Path, _out: Path, _exe: object, no_sandbox: bool, **_kw: object
+    ) -> None:
+        seen.append(no_sandbox)
+
+    monkeypatch.setattr("inkflow.cli.present.build_pdf", fake_build_pdf)
+    monkeypatch.setattr(os, "geteuid", lambda: 0, raising=False)
+    result = CliRunner().invoke(main, ["export", "--deck", str(deck_path)])
+    assert result.exit_code == 0, result.output
+    monkeypatch.setattr(os, "geteuid", lambda: 1000, raising=False)
+    result = CliRunner().invoke(main, ["export", "--deck", str(deck_path)])
+    assert result.exit_code == 0, result.output
+    assert seen == [True, False]

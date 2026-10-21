@@ -7,23 +7,29 @@ processed."""
 
 from __future__ import annotations
 
+import asyncio
 import gc
+import json
 import os
+import subprocess
 import sys
 import textwrap
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import cast
 
 import pytest
+from websockets.asyncio.server import ServerConnection
 
-from inkflow import deps, pdf
+from inkflow import deps, pdf, server
+from inkflow.edit import NO_EDIT_COMMANDS
 from inkflow.incremental import SlideCache, as_patch, frozen, keys_of, set_keys
 from inkflow.layout import builtin_theme_dir
-from inkflow.logging import collect_logs
+from inkflow.logging import collect_logs, resolve_levels
 from inkflow.manifest import Inline, Slide
 from inkflow.pipeline import SlideData, process_deck
 from inkflow.server import load_deck
+from inkflow.tui import LiveUI
 
 LAYOUT = textwrap.dedent("""\
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">
@@ -217,11 +223,11 @@ def test_ink_appearing_and_going_rebuilds_its_slide(project: Project) -> None:
     ink = DRAWING.replace(
         '<text id="label"', '<path id="s1" d="M0 0L9 9"/><text id="t"'
     )
-    _ = project.write("ink/one.svg", ink)
-    assert project.rebuilt() == ["one"]
-    assert 'id="s1"' in _by_id(project.full())["one"]["svg"]
-    (project.root / "ink" / "one.svg").unlink()
-    assert project.rebuilt() == ["one"]
+    _ = project.write("ink/drawing.svg", ink)
+    assert project.rebuilt() == ["drawing"]
+    assert 'id="s1"' in _by_id(project.full())["drawing"]["svg"]
+    (project.root / "ink" / "drawing.svg").unlink()
+    assert project.rebuilt() == ["drawing"]
 
 
 def test_a_layout_rebuilds_the_slides_built_on_it(project: Project) -> None:
@@ -547,6 +553,30 @@ def test_a_page_committed_beside_its_pdf_rebuilds_the_slide(
     assert "plot.pdf.p1.svg" not in _by_id(project.full())["drawing"]["svg"]
 
 
+DIAGRAM = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="40px" height="20px"'
+    + ' viewBox="0 0 40 20" content="&lt;mxfile/&gt;">'
+    + '<g data-cell-id="a"><rect width="10" height="10" fill="#dae8fc"/></g></svg>'
+)
+
+
+def test_a_drawn_in_diagram_rebuilds_the_slide_drawing_it(project: Project) -> None:
+    """A diagram drawn into its slide is read by the build (a picture is only
+    an address): the slide follows the diagram's file."""
+    _ = project.write("diagrams/flow.drawio.svg", DIAGRAM)
+    project.edit(
+        "slides/drawing.svg",
+        "<text",
+        '<image xmlns:inkflow="urn:inkflow" id="flow" inkflow:drawio="inline"'
+        + ' href="../diagrams/flow.drawio.svg" width="40" height="20"/><text',
+    )
+    assert project.rebuilt() == ["drawing"]
+    assert 'id="flow-a"' in _by_id(project.full())["drawing"]["svg"]
+    project.edit("diagrams/flow.drawio.svg", 'width="10"', 'width="30"')
+    assert project.rebuilt() == ["drawing"]
+    assert project.rebuilt() == []
+
+
 def test_a_page_that_could_not_be_converted_is_tried_again(
     project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -592,15 +622,14 @@ def test_a_notes_warning_is_said_again_and_its_pictures_follow_the_theme(
 
 
 def test_a_kept_slides_warnings_are_said_again(project: Project) -> None:
-    project.edit("data/sales.csv", "year,revenue", "year,revenue\nbroken,row,too,long")
-    (project.root / "data" / "sales.csv").unlink()
+    project.edit("slides/one.md", "Body one", "Body one ![far](../../outside.png)")
     with collect_logs(0) as first:
-        assert project.rebuilt() == ["two-2"]
+        assert project.rebuilt() == ["one"]
     with collect_logs(0) as second:
         assert project.rebuilt() == []
 
     def warnings(entries: list[object]) -> list[str]:
-        return sorted(str(e) for e in entries if "chart data not found" in str(e))
+        return sorted(str(e) for e in entries if "outside the project" in str(e))
 
     assert warnings(cast("list[object]", first))
     assert warnings(cast("list[object]", first)) == warnings(
@@ -633,13 +662,17 @@ def test_a_file_replaced_by_one_of_the_same_size_and_time(project: Project) -> N
 
 @pytest.fixture
 def opened(project: Project) -> Iterator[set[str]]:
-    """Every file under the project Python opens while the fixture is live."""
+    """Every file under the project Python opens to read while the fixture is
+    live (a file written, such as a converted PDF page, is not read)."""
     seen: set[str] = set()
     root = str(project.root)
     live = [True]
 
     def hook(event: str, args: tuple[object, ...]) -> None:
         if live[0] and event == "open" and isinstance(args[0], str | bytes):
+            mode = args[1]
+            if isinstance(mode, str) and set(mode) & set("wax"):
+                return
             name = os.fsdecode(args[0])
             if name.startswith(root):
                 seen.add(name)
@@ -676,6 +709,51 @@ def test_every_file_a_slide_opens_is_one_it_depends_on(
         assert str(project.root / name) in noted
 
 
+def test_every_file_a_pdf_picture_opens_is_one_it_depends_on(
+    project: Project, opened: set[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The PDF, the page committed beside it (not there) and the converted
+    page in the cache are all the slide's."""
+
+    def run(command: list[str]) -> subprocess.CompletedProcess[str]:
+        _ = Path(command[-1]).write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg"/>', encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(pdf, "_pymupdf", lambda: None)
+    monkeypatch.setattr("shutil.which", _somewhere)
+    monkeypatch.setattr(pdf, "_run", run)
+    _ = project.write("figures/plot.pdf", b"%PDF-1.4 one")
+    project.edit(
+        "slides/drawing.svg",
+        "<text",
+        '<image id="fig" href="../figures/plot.pdf" width="300" height="160"/><text',
+    )
+    project.cache.clear()
+    opened.clear()
+    deck = load_deck(project.deck_path)
+    seen_before = set(opened)
+    _ = process_deck(
+        deck, project.root, project.deck_path, editor=True, cache=project.cache
+    )
+    noted: set[str] = set()
+    for kept in (project.cache.slides, project.cache.notes):
+        for entry in kept.values():
+            noted |= set(entry.deps)
+    cache = str(project.root / ".inkflow" / "cache" / "pdf")
+    # The converter's scratch folder is opened to be removed: not an input.
+    read = {
+        n for n in opened - seen_before if not n.startswith(cache) or Path(n).is_file()
+    }
+    figure = str(project.root / "figures" / "plot.pdf")
+    assert figure in read
+    assert read <= noted, f"read but not noted: {sorted(read - noted)}"
+    drawing = set(project.cache.slides["drawing"].deps)
+    assert {figure, figure + ".p1.svg"} <= drawing
+    assert any(n.startswith(cache) for n in drawing)
+
+
 def test_keys_name_content_and_patches_name_what_is_held(project: Project) -> None:
     before = project.full()
     set_keys(before)
@@ -698,3 +776,211 @@ def test_keys_name_content_and_patches_name_what_is_held(project: Project) -> No
     assert patch[1] is after[1]
     # A page holding nothing is sent everything.
     assert as_patch(after, frozenset()) == after
+
+
+# ── What the server sends the pages ──────────────────────────────────────────
+
+
+class _Peer:
+    """A WebSocket peer: what it sends, and what the server sends it."""
+
+    remote_address: tuple[str, int] = ("127.0.0.1", 5000)
+
+    def __init__(self, inbox: list[dict[str, object]] | None = None) -> None:
+        self.sent: list[dict[str, object]] = []
+        self.inbox: list[dict[str, object]] = inbox or []
+
+    async def send(self, msg: str) -> None:
+        self.sent.append(cast("dict[str, object]", json.loads(msg)))
+
+    def __aiter__(self) -> AsyncIterator[str]:
+        return self._messages()
+
+    async def _messages(self) -> AsyncIterator[str]:
+        for msg in self.inbox:
+            yield json.dumps(msg)
+
+    def last(self, kind: str) -> dict[str, object]:
+        return [m for m in self.sent if m["type"] == kind][-1]
+
+
+class _UI:
+    def refresh(self) -> None:
+        pass
+
+    def set_building(self) -> None:
+        pass
+
+    def set_ok(self, *_args: object, **_kwargs: object) -> None:
+        pass
+
+    def set_error(self, trace: str) -> None:
+        raise AssertionError(trace)
+
+
+def _ui() -> LiveUI:
+    return cast("LiveUI", cast("object", _UI()))
+
+
+def _kinds(items: object) -> list[str]:
+    """Each item of a sent list: named by key, or sent whole."""
+    return [
+        "key" if isinstance(item, str) else "whole"
+        for item in cast("list[object]", items)
+    ]
+
+
+def _rebuild(project: Project, *, full: bool = False) -> None:
+    asyncio.run(server.rebuild(project.deck_path, _ui(), resolve_levels(), full=full))
+
+
+@pytest.fixture
+def served(project: Project) -> Iterator[tuple[Project, _Peer, _Peer]]:
+    """The deck built by the server, with two owner's pages connected: one
+    that takes patches and one of an older inkflow that does not."""
+    people = server._share.people  # pyright: ignore[reportPrivateUsage]
+    state = server._state  # pyright: ignore[reportPrivateUsage]
+    served = server._served  # pyright: ignore[reportPrivateUsage]
+    served.deck_path = project.deck_path
+    patching, plain = _Peer(), _Peer()
+    sockets = [cast("ServerConnection", cast("object", p)) for p in (patching, plain)]
+    for ws in sockets:
+        _ = people.join(ws, "owner", None, "127.0.0.1")
+        state["ws_clients"].add(ws)
+    client = people.get(sockets[0])
+    assert client is not None
+    client.patches = True
+    try:
+        _rebuild(project)
+        yield project, patching, plain
+    finally:
+        served.deck_path = None
+        served.kept = None
+        state["slides"] = []
+        state["styles_css"] = ""
+        for ws in sockets:
+            state["ws_clients"].discard(ws)
+            _ = people.leave(ws)
+
+
+def test_a_rebuild_sends_a_page_the_slides_that_changed(
+    served: tuple[Project, _Peer, _Peer],
+) -> None:
+    project, patching, plain = served
+    project.edit("slides/one.md", "Body one", "Body one, edited")
+    _rebuild(project)
+    update = patching.last("update")
+    assert _kinds(update["slides"]) == ["key", "whole", "key", "key", "key"]
+    changed = cast("list[dict[str, str]]", update["slides"])[1]
+    assert changed["id"] == "one" and "Body one, edited" in changed["svg"]
+    # A page that never asked for patches gets every slide, as it always did.
+    assert _kinds(plain.last("update")["slides"]) == ["whole"] * 5
+    # The keys a patch names are the ones the last build sent.
+    held = cast("list[dict[str, str]]", plain.sent[0]["slides"])
+    assert cast("list[object]", update["slides"])[0] == held[0]["key"]
+
+
+def test_a_note_sends_its_slide_and_processes_none(
+    served: tuple[Project, _Peer, _Peer],
+) -> None:
+    project, patching, _plain = served
+    project.edit("notes/two.md", "Second", "Second, longer")
+    _rebuild(project)
+    kept = server._served.kept  # pyright: ignore[reportPrivateUsage]
+    assert kept is not None and kept.slides.processed == []
+    update = patching.last("update")
+    assert _kinds(update["slides"]) == ["key", "key", "whole", "key", "key"]
+    sent = cast("list[dict[str, str]]", update["slides"])[2]
+    assert "Second, longer" in sent["notes"]
+
+
+def test_the_stylesheet_is_sent_and_no_slide_with_it(
+    served: tuple[Project, _Peer, _Peer],
+) -> None:
+    project, patching, _plain = served
+    project.edit("styles.css", "--x: 1", "--x: 2")
+    _rebuild(project)
+    update = patching.last("update")
+    assert "--x: 2" in str(update["styles"])
+    assert _kinds(update["slides"]) == ["key"] * 5
+    project.edit("slides/one.md", "Body one", "Body 1")
+    _rebuild(project)
+    assert "styles" not in patching.last("update")  # only when it changed
+
+
+def test_a_changed_picture_is_a_changed_slide_at_a_new_address(
+    served: tuple[Project, _Peer, _Peer],
+) -> None:
+    project, patching, _plain = served
+    _ = project.write("assets/p.png", b"\x89PNG one")
+    project.edit(
+        "slides/drawing.svg",
+        "<text",
+        '<image id="pic" href="../assets/p.png" width="10" height="10"/><text',
+    )
+    _rebuild(project)
+    first = cast("list[dict[str, str]]", patching.last("update")["slides"])[0]
+    assert 'href="assets/p.png?v=' in first["svg"]
+    _ = project.write("assets/p.png", b"\x89PNG two")
+    _rebuild(project)
+    kept = server._served.kept  # pyright: ignore[reportPrivateUsage]
+    assert kept is not None and kept.slides.processed == []
+    update = patching.last("update")
+    assert _kinds(update["slides"]) == ["whole", "key", "key", "key", "key"]
+    again = cast("list[dict[str, str]]", update["slides"])[0]
+    assert 'href="assets/p.png?v=' in again["svg"] and again["svg"] != first["svg"]
+
+
+def test_a_full_rebuild_processes_every_slide_again(
+    served: tuple[Project, _Peer, _Peer],
+) -> None:
+    project, patching, _plain = served
+    _rebuild(project, full=True)
+    kept = server._served.kept  # pyright: ignore[reportPrivateUsage]
+    assert kept is not None and kept.slides.processed == IDS
+    # The slides are what they were: a page holding them is sent their keys.
+    assert _kinds(patching.last("update")["slides"]) == ["key"] * 5
+
+
+def _talk(page: _Peer) -> None:
+    """Run the server's handler for one page's messages."""
+    ws = cast("ServerConnection", cast("object", page))
+    people = server._share.people  # pyright: ignore[reportPrivateUsage]
+    _ = people.join(ws, "owner", None, "127.0.0.1")
+    handler = server.make_ws_handler(_ui(), NO_EDIT_COMMANDS)
+
+    async def talk() -> None:
+        await handler(ws)
+
+    try:
+        asyncio.run(talk())
+    finally:
+        _ = people.leave(ws)
+
+
+def test_a_page_says_hello_and_asks_again_when_it_missed_a_build(
+    served: tuple[Project, _Peer, _Peer],
+) -> None:
+    del served
+    page = _Peer(
+        [
+            {"type": "hello", "role": "presenter", "patch": True},
+            {"type": "resync"},
+        ]
+    )
+    _talk(page)
+    sent = [m for m in page.sent if m["type"] == "update"]
+    assert len(sent) == 2
+    # On hello: the slides by key (its HTML came with them).
+    assert _kinds(sent[0]["slides"]) == ["key"] * 5
+    # Asked again: everything whole.
+    assert _kinds(sent[1]["slides"]) == ["whole"] * 5
+
+
+def test_a_page_that_takes_no_patches_is_not_sent_the_slides_on_hello(
+    served: tuple[Project, _Peer, _Peer],
+) -> None:
+    del served
+    page = _Peer([{"type": "hello", "role": "presenter"}])
+    _talk(page)
+    assert [m for m in page.sent if m["type"] == "update"] == []

@@ -237,7 +237,8 @@ def _lookup(index: dict[str, list[_FontRecord]], family: str) -> list[_FontRecor
 def font_index(
     project_dir: Path, theme_fonts_dir: Path | None = None
 ) -> list[list[_FontRecord]]:
-    """Every font family that can be embedded, each as its font files."""
+    """Every font family that can be embedded, each as its font files (in the
+    search order: the project's, the theme's, inkflow's, the machine's)."""
     return list(_build_index(project_dir, theme_fonts_dir).values())
 
 

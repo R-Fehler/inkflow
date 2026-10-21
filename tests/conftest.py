@@ -39,8 +39,8 @@ def dir_theme() -> Callable[[Path], Theme]:
 
 @pytest.fixture(autouse=True)
 def _no_uv_lock(monkeypatch: pytest.MonkeyPatch) -> None:
-    """New decks and `inkflow pack` run `uv lock`, which resolves over the
-    network: tests that want it patch `inkflow.pack.run_uv_lock` themselves."""
+    """New decks run `uv lock`, which resolves over the network: tests that
+    want it patch `inkflow.pack.run_uv_lock` themselves."""
 
     def skipped(_project_dir: Path, timeout: float = 0) -> tuple[bool, str]:
         del timeout
@@ -54,6 +54,6 @@ def _no_running_servers(
     tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Running servers are recorded in a folder of the test's own, never
-    the user's state dir (where a real `inkflow edit` would be found)."""
+    the user's state dir (where a real server of the user's would be found)."""
     folder = tmp_path_factory.mktemp("servers") / "servers"
     monkeypatch.setattr("inkflow.instances._dir", lambda: folder)

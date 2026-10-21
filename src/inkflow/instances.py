@@ -1,10 +1,10 @@
 """Running inkflow servers on this machine, one per deck.
 
 Every server records itself in the per-user state directory: its process,
-address and the deck it has open (none on the start page). Before a deck is
-opened anywhere (``inkflow edit``/``serve``, or the editor's deck menu), the
-running servers are asked; one that already has the deck is reused, so two
-servers never write the same files.
+address, the deck it has open (if any) and the page its owner opens. Before a
+deck is served (``inkflow serve``, or a plugin's command that starts a
+server), the running servers are asked; one that already has the deck is
+reused, so two servers never write the same files.
 
 A record is trusted only when its server answers ``/_inkflow/instance`` with
 the same process id: a crashed server's record, or its port since taken by
@@ -12,8 +12,8 @@ another program, is dropped on the way.
 
 A server in SSH mode (``--ssh``) records its owner token too, which this
 machine's other users must not read: the directory is the user's own
-(``0700``) and each record ``0600``. Commands (``inkflow slide``, ``goto``…)
-send it with every request, as the owner's page sends its cookie.
+(``0700``) and each record ``0600``. Commands of the same user that talk to
+the server send it with every request, as the owner's page sends its cookie.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import json
 import os
 import ssl
 import urllib.request
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from http.client import HTTPResponse
 from pathlib import Path
 from typing import cast
@@ -45,11 +45,14 @@ class Instance:
     """The WebSocket's port: the HTTP port, unless an old separate one was
     asked for (``--ws-port``)."""
     deck: str | None
-    """The open deck.py (resolved), or None on the start page."""
+    """The open deck.py (resolved), or None: serving without a deck."""
     tls: bool = False
     """Served over HTTPS (``--tls``)."""
     owner_token: str | None = None
     """SSH mode: what makes a request from this machine the owner."""
+    home: str = "/"
+    """The page the owner opens (``server.owner_page``): the presenter, or a
+    server extension's ``home``."""
 
     @property
     def address(self) -> str:
@@ -57,13 +60,16 @@ class Instance:
         host = "localhost" if self.host in ("", "0.0.0.0", "::") else self.host
         return f"[{host}]" if ":" in host else host
 
-    def url(self, path: str = "/edit") -> str:
-        """A page's address (without the owner token: to show)."""
+    def url(self, path: str | None = None) -> str:
+        """A page's address (without the owner token: to show); by default
+        the owner's page (``home``)."""
+        path = self.home if path is None else path
         return f"{'https' if self.tls else 'http'}://{self.address}:{self.port}{path}"
 
-    def owner_url(self, path: str = "/edit") -> str:
+    def owner_url(self, path: str | None = None) -> str:
         """A page's address as the owner opens it: with the owner token in
-        SSH mode (the owner link)."""
+        SSH mode (the owner link); by default the owner's page (``home``)."""
+        path = self.home if path is None else path
         if not self.owner_token:
             return self.url(path)
         joiner = "&" if "?" in path else "?"
@@ -137,6 +143,7 @@ def _read(path: Path) -> Instance | None:
         data = cast("dict[str, object]", raw)
         deck = data.get("deck")
         token = data.get("owner_token")
+        home = data.get("home")
         return Instance(
             pid=int(cast("int", data["pid"])),
             host=str(data["host"]),
@@ -145,6 +152,7 @@ def _read(path: Path) -> Instance | None:
             deck=str(deck) if isinstance(deck, str) else None,
             tls=data.get("tls") is True,
             owner_token=token if isinstance(token, str) and token else None,
+            home=home if isinstance(home, str) and home.startswith("/") else "/",
         )
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -190,15 +198,7 @@ def running(exclude_pid: int | None = None) -> list[Instance]:
             continue
         deck = answer.get("deck")
         found.append(
-            Instance(
-                pid=instance.pid,
-                host=instance.host,
-                port=instance.port,
-                ws_port=instance.ws_port,
-                deck=str(deck) if isinstance(deck, str) else None,
-                tls=instance.tls,
-                owner_token=instance.owner_token,
-            )
+            replace(instance, deck=str(deck) if isinstance(deck, str) else None)
         )
     return found
 

@@ -682,8 +682,8 @@ def check_built(
 ) -> dict[int, list[Finding]]:
     """The layout findings of the already built ``slides`` at ``indices``
     (0-based), as `render_slides` measures them, without writing a picture:
-    what the editor's problem marks show (editor/problems.py). Contrast
-    only with ``contrast``."""
+    what an editor can mark its slides with. Contrast only with
+    ``contrast``."""
     exe = chromium or find_chromium()
     if exe is None:
         raise RuntimeError("Chromium not found: install chromium or google-chrome")

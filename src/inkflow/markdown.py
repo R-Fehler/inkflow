@@ -66,8 +66,8 @@ class _MathOpts(TypedDict, total=False):
 def _math_to_mathml(content: str, options: _MathOpts) -> str:
     display = "block" if options.get("display_mode") else "inline"
     mathml = _latex_to_mathml(content, display=display)
-    # The LaTeX travels with its rendering: the visual editor edits a formula
-    # in place and writes this back as Markdown.
+    # The LaTeX travels with its rendering, so a page can show (or an editor
+    # edit) a formula's source.
     latex = quoteattr(content.strip())
     return mathml.replace("<math ", f"<math data-latex={latex} ", 1)
 
@@ -167,8 +167,9 @@ def _render_codeblock(
 
 # ── Step-aware markdown rendering ─────────────────────────────────────────────
 
-# Module-level fence render queue, one render at a time: a build renders on
-# a worker thread while the editor's requests render on others (`_rendering`).
+# Module-level fence render queue, one render at a time (`_rendering`): a
+# build renders on a worker thread while a server extension may render on
+# others.
 _fence_queue: list[_FenceEntry] = []
 _fence_pos = [0]
 _rendering = threading.RLock()

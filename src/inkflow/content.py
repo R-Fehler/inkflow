@@ -312,7 +312,7 @@ def zone_shape_css(el: SvgElement) -> list[str]:
     placeholder (Inkscape gives every rect a style) and draws nothing. The fill
     becomes the background, the stroke a border, ``rx``/``ry`` (or an ellipse)
     the corner radius, so the text and its box stay one element for animations,
-    transitions and the editor."""
+    transitions and an editor."""
     if el.get(ns.INKFLOW_SHOW_SHAPE) != "true":
         return []
     props = _style_props(el)
@@ -371,7 +371,7 @@ def _replace_with_foreignobject(
     shape_css = zone_shape_css(el)
     if shape_css:
         # The shape's classes and style ride along (they paint nothing on a
-        # foreignObject) so the editor reads the box's look from the element.
+        # foreignObject), so a frontend reads the box's look from the element.
         for attr in ("class", "style", "rx", "ry"):
             if el.get(attr) is not None:
                 fo.set(attr, el.get(attr, ""))
@@ -384,7 +384,7 @@ def _replace_with_foreignobject(
         if variables:
             fo.set("style", variables)
     if el.get(ns.INKFLOW_SITES) is not None:
-        # How many connection points the box offers (the editor's arrows).
+        # How many connection points the box offers (an editor's connectors).
         fo.set(ns.INKFLOW_SITES, el.get(ns.INKFLOW_SITES, ""))
 
     wrapper_style_parts: list[str] = list(shape_css)
@@ -639,7 +639,7 @@ def unreferenced_zones(root: SvgElement) -> list[SvgElement]:
 
 
 def empty_zone_shapes(root: SvgElement) -> list[SvgElement]:
-    """Zone shapes nothing filled, as the editor offers them to fill: the
+    """Zone shapes nothing filled, as an editor offers them to fill: the
     placeholders pruned before rendering, and the shapes shown as boxes
     (``inkflow:show-shape``: a placeholder made from a drawn shape), which
     stay."""

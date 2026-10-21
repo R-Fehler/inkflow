@@ -2,7 +2,7 @@
 
 A rendered slide is a composition: the slide's own SVG, its layout chain and its
 overlays merged into one tree, cleaned of editor metadata. To write an edit back,
-the editor has to know which file an element came from and where in that file it
+a frontend has to know which file an element came from and where in that file it
 sits. Every element read from a source file is stamped with
 
     data-ink="<source index>:<child path>"
@@ -11,7 +11,7 @@ where the source index points into the slide's own ``sources`` list and the chil
 path is the chain of child indices from the file's root, counted on the tree
 *as parsed from disk* (before cleaning removes anything). ``locate`` walks the same
 path in a freshly parsed copy, so a locator stays valid until the file's structure
-changes, which the file hash in the editor model guards.
+changes (a frontend guards that with a hash of the file it built from).
 """
 
 from __future__ import annotations

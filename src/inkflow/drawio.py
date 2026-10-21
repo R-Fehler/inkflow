@@ -3,12 +3,12 @@
 draw.io's "editable SVG" is an ordinary SVG picture of the diagram whose root
 carries the diagram's source, an ``<mxfile>``, in its ``content`` attribute.
 GitHub and GitLab show the picture; draw.io (desktop, the VS Code extension,
-the inkflow editor) opens the source. A slide shows one as an ``<image>``.
+an editor embedding it) opens the source. A slide shows one as an ``<image>``.
 
 draw.io usually compresses each page of the source (deflate + base64), which
-makes every change one unreadable line in a diff. Saving through inkflow
-stores the pages uncompressed, and ``textconv`` gives git's diff the source,
-pretty-printed, compressed or not.
+makes every change one unreadable line in a diff. ``normalize`` stores the
+pages uncompressed (what a frontend saving a diagram writes), and ``textconv``
+gives git's diff the source, pretty-printed, compressed or not.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ from lxml import etree
 from inkflow.svgio import SvgElement, parse_svg, serialize_svg, svg_parser
 
 SUFFIX = ".drawio.svg"
-DEFAULT_URL = "https://embed.diagrams.net/"
 
 
 class DrawioError(ValueError):
@@ -206,35 +205,6 @@ def size(data: bytes) -> tuple[float, float] | None:
     if len(box) == 4:
         return float(box[2]), float(box[3])
     return None
-
-
-_EMPTY = (
-    '<mxfile compressed="false"><diagram id="page-1" name="Page-1">'
-    + '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root>'
-    + "</mxGraphModel></diagram></mxfile>"
-)
-
-BLANK_SIZE = (640, 360)
-
-
-def blank() -> bytes:
-    """A new, empty diagram for draw.io desktop to open (no internet needed).
-
-    Its picture is a placeholder saying so, until the first save in draw.io
-    replaces it with the drawing; the source inside is an empty page.
-    """
-    w, h = BLANK_SIZE
-    root = parse_svg(
-        f'<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="{w}px"'
-        + f' height="{h}px" viewBox="0 0 {w} {h}">'
-        + f'<rect x="2" y="2" width="{w - 4}" height="{h - 4}" rx="12"'
-        + ' fill="none" stroke="#888" stroke-width="3" stroke-dasharray="12 8"/>'
-        + f'<text x="{w / 2}" y="{h / 2}" text-anchor="middle" fill="#888"'
-        + ' font-family="sans-serif" font-size="28">New diagram: draw it in'
-        + " draw.io and save</text></svg>"
-    )
-    root.set("content", _EMPTY)
-    return serialize_svg(root).encode("utf-8")
 
 
 def textconv(data: bytes) -> str:

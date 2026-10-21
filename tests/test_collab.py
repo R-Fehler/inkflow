@@ -1,30 +1,43 @@
-"""Editing together: who may reach the server and as whom (access.py), the
-one port (pages and WebSocket), sharing, presence, undo per person, and
-writes refused when the page was behind someone else's edit."""
+"""Who may reach the server and as whom (access.py: DNS rebinding, cross-site
+WebSockets, share links and their roles, SSH mode), the one port (pages and
+WebSocket), and sharing (on/off, new links, sending a guest away)."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import socket
+import threading
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import cast
 
 import pytest
+from typing_extensions import override
+from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 from inkflow import server
 from inkflow.access import (
     Access,
     Request,
+    Role,
     enter_page,
     lan_addresses,
     parse_request,
     split_host,
 )
-
-GUEST = {"X-Forwarded-For": "192.0.2.50"}
-
-
-"""A request relayed from elsewhere: whatever its socket, not the owner's."""
+from inkflow.extensions import ServerExtension
+from tests.serving import (
+    GUEST,
+    UI,
+    fetch,
+    guest,
+    make_project,
+    open_ws,
+    serve_on_a_thread,
+    until,
+    upgrade,
+)
 
 
 def _req(target: str = "/", **headers: str) -> Request:
@@ -391,3 +404,360 @@ def test_ssh_mode_never_listens_on_the_network() -> None:
         "100.101.102.103",
         "localhost",
     ]
+
+
+# ── The door, end to end ──────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def shared(tmp_path: Path) -> Iterator[int]:
+    """A deck served on the one port by the core alone, shared with links."""
+    project = make_project(tmp_path)
+    yield from serve_on_a_thread(project / "deck.py", [])
+
+
+def _closed_with(ws: object) -> int | None:
+    """Read until the server closes the connection; its close code."""
+    from websockets.sync.client import ClientConnection
+
+    conn = cast("ClientConnection", ws)
+    with pytest.raises(ConnectionClosed) as closed:
+        while True:
+            _ = conn.recv(timeout=5)
+    return closed.value.rcvd.code if closed.value.rcvd is not None else None
+
+
+def test_pages_and_websocket_share_one_port(shared: int) -> None:
+    port = shared
+    status, headers, body = fetch(port, "/")
+    # The page opens the socket on its own address, never a fixed host.
+    assert status == 200 and b"<svg" in body and b"ws://localhost" not in body
+    assert headers["x-frame-options"] == "SAMEORIGIN"
+    assert headers["referrer-policy"] == "no-referrer"
+    with open_ws(port) as ws:
+        assert until(ws, "welcome")["role"] == "owner"
+        ws.send(json.dumps({"type": "build-status"}))
+        assert until(ws, "build-status")["deckHash"]
+    # A deck's file, whole and by byte range (Safari's video).
+    status, headers, body = fetch(port, "/slides/one.svg")
+    assert status == 200 and headers["accept-ranges"] == "bytes"
+    status, headers, part = fetch(port, "/slides/one.svg", {"Range": "bytes=5-9"})
+    assert status == 206 and part == body[5:10]
+    assert headers["content-range"] == f"bytes 5-9/{len(body)}"
+    status, _, _ = fetch(port, "/slides/one.svg", {"Range": "bytes=99999-"})
+    assert status == 416
+
+
+def test_a_foreign_host_name_is_refused(shared: int) -> None:
+    """DNS rebinding: a page on evil.example whose name now points at this
+    machine still says ``Host: evil.example``."""
+    port = shared
+    evil = f"evil.example:{port}"
+    for path in ("/", "/slides/one.svg", "/_inkflow/instance"):
+        status, _, body = fetch(port, path, {"Host": evil})
+        assert status == 403 and b"Unknown host" in body
+    assert upgrade(port, evil, f"http://{evil}") == 403
+    # The same handshake by the server's own name is taken.
+    assert upgrade(port, f"localhost:{port}", f"http://localhost:{port}") == 101
+
+
+def test_another_sites_page_cannot_open_the_websocket(shared: int) -> None:
+    port = shared
+    for origin in ("http://evil.example", "null", f"http://localhost:{port + 1}"):
+        with pytest.raises(InvalidStatus) as refused:
+            _ = open_ws(port, origin=origin)
+        assert refused.value.response.status_code == 403
+    with open_ws(port, origin=None) as ws:  # a program (a command)
+        assert until(ws, "welcome")["role"] == "owner"
+
+
+def test_guests_need_a_link(shared: int) -> None:
+    port = shared
+    access = server._share.access  # pyright: ignore[reportPrivateUsage]
+    for path in ("/", "/slides/one.svg", "/_inkflow/instance"):
+        assert fetch(port, path, GUEST)[0] == 401
+    with pytest.raises(InvalidStatus) as refused:
+        _ = open_ws(port, GUEST)
+    assert refused.value.response.status_code == 401
+    assert fetch(port, "/", guest(port, "not-a-token"))[0] == 401
+    # The link sets the cookie and moves on without the token.
+    status, headers, body = fetch(port, f"/?k={access.viewer_token}&x=1", GUEST)
+    assert status == 200
+    assert headers["set-cookie"] == (
+        f"inkflow-{port}={access.viewer_token}; Path=/; HttpOnly; SameSite=Strict"
+    )
+    assert access.viewer_token not in body.decode() and "/?x=1" in body.decode()
+    assert headers["referrer-policy"] == "no-referrer"
+
+
+def test_a_viewer_follows_and_moves_no_one(shared: int) -> None:
+    port = shared
+    viewer = guest(port, server._share.access.viewer_token)  # pyright: ignore[reportPrivateUsage]
+    assert fetch(port, "/", viewer)[0] == 200
+    assert fetch(port, "/slides/one.svg", viewer)[0] == 200
+    assert fetch(port, "/_inkflow/instance", viewer)[0] == 404  # the owner's
+    # The handout shows the speaker notes: not for a view link.
+    status, _, body = fetch(port, "/handout", viewer)
+    assert status == 403 and b"View-only" in body
+    status, _, body = fetch(port, "/handout?layout=compact&paper=letter")
+    assert status == 200 and b"layout-compact" in body and b"8.5in 11in" in body
+    status, _, body = fetch(port, "/_inkflow/instance")
+    probe = cast("dict[str, object]", json.loads(body))
+    assert status == 200 and str(probe["deck"]).endswith("deck.py")
+    with open_ws(port, viewer) as ws, open_ws(port) as owner:
+        assert until(ws, "welcome")["role"] == "viewer"
+        _ = until(owner, "welcome")
+        _ = until(owner, "position")  # where everyone is, on connecting
+        # Its navigation moves no one; the owner's reaches it.
+        ws.send(json.dumps({"type": "nav", "slideIndex": 1, "step": 0}))
+        ws.send(json.dumps({"type": "share", "op": "rotate"}))  # the owner's
+        owner.send(json.dumps({"type": "sync-request"}))
+        assert until(owner, "position")["slideIndex"] == 0
+        owner.send(json.dumps({"type": "nav", "slideIndex": 1, "step": 0}))
+        while until(ws, "position")["slideIndex"] != 1:
+            pass
+    assert fetch(port, "/", viewer)[0] == 200  # the links still work
+
+
+def test_the_owner_sees_and_sends_guests_away(shared: int) -> None:
+    port = shared
+    access = server._share.access  # pyright: ignore[reportPrivateUsage]
+    with open_ws(port) as owner, open_ws(port, guest(port, access.viewer_token)) as ws:
+        me = until(ws, "welcome")
+        ws.send(json.dumps({"type": "hello", "role": "presenter"}))
+        _ = until(owner, "welcome")
+        while True:
+            owner.send(json.dumps({"type": "share", "op": "status"}))
+            status = until(owner, "share-status")
+            people = cast("list[dict[str, object]]", status["people"])
+            if any(p["id"] == me["id"] for p in people):
+                break
+        assert status["sharing"] is True and status["ssh"] is False
+        links = cast("list[dict[str, str]]", status["links"])
+        # Nothing on this server edits: view links only.
+        assert all("editor" not in link for link in links)
+        owner.send(json.dumps({"type": "share", "op": "kick", "id": me["id"]}))
+        assert _closed_with(ws) == server.SENT_AWAY
+
+
+def test_new_links_and_stopping_disconnect_guests(shared: int) -> None:
+    port = shared
+    access = server._share.access  # pyright: ignore[reportPrivateUsage]
+    old = guest(port, access.viewer_token)
+    with open_ws(port) as owner, open_ws(port, old) as ws:
+        _ = until(ws, "welcome")
+        owner.send(json.dumps({"type": "share", "op": "rotate"}))
+        assert until(owner, "share-status")["sharing"] is True
+        assert _closed_with(ws) == server.SENT_AWAY
+    assert fetch(port, "/", old)[0] == 401
+    fresh = guest(port, access.viewer_token)
+    assert fetch(port, "/", fresh)[0] == 200
+    with open_ws(port) as owner, open_ws(port, fresh) as ws:
+        _ = until(ws, "welcome")
+        owner.send(json.dumps({"type": "share", "op": "off"}))
+        assert until(owner, "share-status")["sharing"] is False
+        assert _closed_with(ws) == server.SENT_AWAY
+    assert fetch(port, "/", fresh)[0] == 401
+    assert fetch(port, "/")[0] == 200  # the owner, as ever
+
+
+class _Editing(ServerExtension):
+    """An extension that takes editors (one of its messages is theirs)."""
+
+    name: str = "editing"
+    messages: Mapping[str, Role] = {"change": "editor"}
+
+    def __init__(self) -> None:
+        self.extra_ops: list[str] = []
+
+    @override
+    async def share_op(self, op: str, msg: dict[str, object]) -> str | bool | None:
+        del msg
+        if op != "relay-on":
+            return False
+        self.extra_ops.append(op)
+        return None
+
+    @override
+    def share_status(self) -> dict[str, object]:
+        return {"relay": len(self.extra_ops)}
+
+    @override
+    def share_lines(self) -> list[str]:
+        return ["relay  off"]
+
+
+def test_editor_links_only_when_an_extension_edits(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    editing = _Editing()
+    for port in serve_on_a_thread(project / "deck.py", [editing]):
+        access = server._share.access  # pyright: ignore[reportPrivateUsage]
+        editor = guest(port, access.editor_token)
+        assert fetch(port, "/", editor)[0] == 200
+        with open_ws(port, editor) as ws, open_ws(port) as owner:
+            assert until(ws, "welcome")["role"] == "editor"
+            # An editor may say it is an editor page; it may not share.
+            ws.send(json.dumps({"type": "share", "op": "rotate"}))
+            owner.send(json.dumps({"type": "hello", "role": "dialog"}))
+            owner.send(json.dumps({"type": "share", "op": "relay-on"}))
+            status = until(owner, "share-status")
+            assert status["relay"] == 1 and editing.extra_ops == ["relay-on"]
+            links = cast("list[dict[str, str]]", status["links"])
+            assert all(
+                link["editor"].endswith(f"/?k={access.editor_token}") for link in links
+            )
+        assert fetch(port, "/", editor)[0] == 200  # not rotated by the editor
+        lines = server.share_lines(access, port)
+        assert lines[-1] == "relay  off"
+        assert any(line.startswith("edit  ") for line in lines) or not links
+
+
+def test_ssh_mode_asks_this_machine_for_the_owner_link(shared: int) -> None:
+    port = shared
+    access = Access(port, names=set(), ssh=True)
+    server._share.access = access  # pyright: ignore[reportPrivateUsage]
+    status, _, body = fetch(port, "/")
+    assert status == 401 and b"Open the owner link" in body
+    with pytest.raises(InvalidStatus) as refused:
+        _ = open_ws(port)
+    assert refused.value.response.status_code == 401
+    status, headers, _ = fetch(port, f"/?k={access.owner_token}")
+    assert status == 200
+    cookie = headers["set-cookie"].split(";")[0]
+    assert cookie == f"inkflow-owner-{port}={access.owner_token}"
+    assert fetch(port, "/", {"Cookie": cookie})[0] == 200
+    with open_ws(port, {"Cookie": cookie}) as ws:
+        assert until(ws, "welcome")["role"] == "owner"
+    # Never from another machine, whatever it carries.
+    assert fetch(port, "/", {**GUEST, "Cookie": cookie})[0] == 401
+    assert server.owner_lines(access, port)[0] == (
+        f"http://localhost:{port}/?k={access.owner_token}"
+    )
+
+
+def test_the_old_websocket_port_has_the_same_door(shared: int) -> None:
+    from websockets.asyncio.server import serve as ws_serve
+    from websockets.sync.client import connect
+
+    from inkflow.edit import NO_EDIT_COMMANDS
+    from inkflow.tui import LiveUI
+
+    port = shared
+    ready = threading.Event()
+    loop = asyncio.new_event_loop()
+    stop = asyncio.Event()
+    legacy: list[int] = []
+
+    async def run() -> None:
+        ui = cast("LiveUI", cast("object", UI()))
+        handler = server.make_ws_handler(ui, NO_EDIT_COMMANDS)
+        check = server._ws_check(port)  # pyright: ignore[reportPrivateUsage]
+        async with ws_serve(handler, "127.0.0.1", 0, process_request=check) as ws:
+            legacy.append(
+                cast("tuple[str, int]", next(iter(ws.sockets)).getsockname())[1]
+            )
+            ready.set()
+            await stop.wait()
+
+    thread = threading.Thread(target=lambda: loop.run_until_complete(run()))
+    thread.start()
+    assert ready.wait(10)
+    url = f"ws://127.0.0.1:{legacy[0]}"
+    try:
+        with pytest.raises(InvalidStatus):
+            _ = connect(url, proxy=None, origin=cast("object", "http://evil.example"))  # pyright: ignore[reportArgumentType]
+        page = cast("object", f"http://localhost:{port}")
+        with connect(url, proxy=None, origin=page) as ws:  # pyright: ignore[reportArgumentType]
+            assert until(ws, "welcome")["role"] == "owner"
+    finally:
+        loop.call_soon_threadsafe(stop.set)
+        thread.join(10)
+        loop.close()
+
+
+class _Writer:
+    def __init__(self) -> None:
+        self.data: bytes = b""
+
+    def write(self, data: bytes) -> None:
+        self.data += data
+
+    async def drain(self) -> None:
+        pass
+
+
+class _Virtual:
+    """A page connection that came another way (a relay's), sending one
+    message and then going away."""
+
+    def __init__(self, messages: list[str]) -> None:
+        self.sent: list[dict[str, object]] = []
+        self._messages: list[str] = messages
+
+    async def send(self, message: str) -> None:
+        self.sent.append(cast("dict[str, object]", json.loads(message)))
+
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        del code, reason
+
+    def __aiter__(self) -> _Virtual:
+        return self
+
+    async def __anext__(self) -> str:
+        if not self._messages:
+            raise StopAsyncIteration
+        return self._messages.pop(0)
+
+
+def test_connections_and_requests_that_came_another_way(tmp_path: Path) -> None:
+    from inkflow.edit import NO_EDIT_COMMANDS
+    from inkflow.tui import LiveUI
+
+    project = make_project(tmp_path)
+    ui = cast("LiveUI", cast("object", UI()))
+    server._share.ws_handler = server.make_ws_handler(ui, NO_EDIT_COMMANDS)  # pyright: ignore[reportPrivateUsage]
+    server._share.route = server.make_http_route(7777, project)  # pyright: ignore[reportPrivateUsage]
+    server._state["position"] = {"slideIndex": 0, "step": 0}  # pyright: ignore[reportPrivateUsage]
+    try:
+        conn = _Virtual([json.dumps({"type": "nav", "slideIndex": 1, "step": 0})])
+        asyncio.run(server.context.serve_connection(conn, "viewer"))
+        assert conn.sent[0] == {
+            "type": "welcome",
+            "id": conn.sent[0]["id"],
+            "role": "viewer",
+        }
+        assert server._state["position"]["slideIndex"] == 0  # pyright: ignore[reportPrivateUsage]
+        assert server.context.people.get(conn) is None  # gone when it closed
+        writer = _Writer()
+        asyncio.run(
+            server.context.serve_request(
+                "/slides/one.svg", "bytes=0-4", "viewer", writer
+            )
+        )
+        assert writer.data.startswith(b"HTTP/1.1 206 Partial Content")
+        assert writer.data.endswith(b"<svg ")
+    finally:
+        server._share.ws_handler = None  # pyright: ignore[reportPrivateUsage]
+        server._share.route = None  # pyright: ignore[reportPrivateUsage]
+
+
+def test_ports_are_picked_from_7777_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    with socket.socket() as busy:
+        busy.bind(("localhost", 0))
+        busy.listen()
+        port = cast("int", busy.getsockname()[1])
+        # Given, a port is used as given (a clash is reported when binding).
+        assert server.pick_port("localhost", port) == port
+        assert not server._port_free("localhost", port)  # pyright: ignore[reportPrivateUsage]
+        monkeypatch.setattr(server, "DEFAULT_PORT", port)
+        assert server.pick_port("localhost", None) != port
+
+
+def test_byte_ranges() -> None:
+    assert server.byte_range(100, None) is None
+    assert server.byte_range(100, (0, None)) == (0, 99)
+    assert server.byte_range(100, (10, 19)) == (10, 19)
+    assert server.byte_range(100, (90, 500)) == (90, 99)
+    assert server.byte_range(100, (None, 10)) == (90, 99)
+    with pytest.raises(ValueError):
+        _ = server.byte_range(100, (100, None))

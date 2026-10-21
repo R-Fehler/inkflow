@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from lxml import etree
 
 from inkflow.animations import Animation, Bounce, FadeIn, SlideIn
 from inkflow.assets import AssetRoots, AssetSource
+from inkflow.content import remove_unreferenced_zones, substitute_content
 from inkflow.enums import Align, Direction, Easing, MediaAlign, MediaFit, VAlign
 from inkflow.manifest import Image, Media, TextBox, ZoneContent
 from inkflow.markdown import markdown_to_html
@@ -22,7 +24,12 @@ from inkflow.zones import (
     _StepsBlock,  # pyright: ignore[reportPrivateUsage]
     chunks_to_html,
     parse_markdown_zones,
+    remove_zone_section,
+    rename_zone,
+    replace_zone_text,
     steps_wrap_content,
+    zone_names,
+    zone_spans,
 )
 from inkflow.zones import build_slide_content as _build_slide_content_parsed
 
@@ -712,11 +719,61 @@ def test_deck_zone_strings_reveal_like_markdown_sections() -> None:
     assert result.max_step == 2
 
 
+class TestZoneSpans:
+    """Where each zone's text is in its Markdown, for writing one zone back
+    and leaving every other byte alone."""
+
+    def test_auto_extracted_heading_and_body(self) -> None:
+        text = "# Title\n\n## Sub\n\nbody\nmore\n"
+        spans = zone_spans(text)
+        assert {k: text[a:b] for k, (a, b) in spans.items()} == {
+            "title": "# Title",
+            "subtitle": "## Sub",
+            "content": "body\nmore",
+        }
+
+    def test_markers_override_auto_content(self) -> None:
+        text = "intro\n::title::\nHello\n\n::content align=center::\n- a\n"
+        spans = zone_spans(text)
+        assert text[slice(*spans["content"])] == "- a"
+        assert text[slice(*spans["title"])] == "Hello"
+
+    def test_replace_keeps_other_sections(self) -> None:
+        text = "# T\n\nBody\n\n::aside::\nSide\n"
+        out = replace_zone_text(text, "aside", "New side")
+        assert out == "# T\n\nBody\n\n::aside::\nNew side\n"
+
+    def test_replace_title_keeps_it_a_heading(self) -> None:
+        assert (
+            replace_zone_text("# T\n\nBody\n", "title", "Fresh") == "# Fresh\n\nBody\n"
+        )
+
+    def test_new_zones_are_appended_or_prepended(self) -> None:
+        assert replace_zone_text("Body\n", "title", "T") == "# T\n\nBody\n"
+        assert replace_zone_text("# T\n", "media", "x") == "# T\n\n::media::\nx\n"
+        assert replace_zone_text("", "content", "x") == "x\n"
+
+    def test_remove_takes_the_marker_and_its_section(self) -> None:
+        text = "# T\n\n::aside::\nSide\n\n::foot::\nF\n"
+        assert remove_zone_section(text, "aside") == "# T\n\n::foot::\nF\n"
+        # Auto-extracted text has no marker: it is cleared.
+        assert remove_zone_section("# T\n\nBody\n", "content") == "# T\n\n\n"
+
+    def test_rename_keeps_params_and_auto_zones(self) -> None:
+        text = "# T\n\n::code lang=py::\nx\n"
+        assert rename_zone(text, "code", "sample") == "# T\n\n::sample lang=py::\nx\n"
+        # An auto-extracted body gets a marker of its own.
+        assert rename_zone("# T\n\n- one\n", "content", "body") == (
+            "# T\n\n::body::\n- one\n"
+        )
+        # A renamed title: what followed it keeps its zone through a marker.
+        renamed = rename_zone("# T\n\n- one\n", "title", "heading")
+        assert renamed == "::heading::\n# T\n\n::content::\n- one\n"
+        assert zone_names(renamed) == {"heading", "content"}
+        assert rename_zone("# T\n", "other", "x") == "# T\n"
+
+
 def test_shown_zone_shape_paints_the_text_box() -> None:
-    from lxml import etree
-
-    from inkflow.content import substitute_content
-
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkflow="urn:inkflow">'
         '<rect id="zone-a" x="0" y="0" width="100" height="50" rx="8"'
@@ -728,6 +785,8 @@ def test_shown_zone_shape_paints_the_text_box() -> None:
         ' style="fill:#123456;--inkflow-valign:center"/>'
         '<rect id="zone-d" x="0" y="0" width="10" height="10"'
         ' inkflow:show-shape="true" style="fill:#abcdef"/>'
+        '<rect id="zone-e" x="0" y="0" width="10" height="10"'
+        ' class="inkflow-fill-accent" inkflow:show-shape="true"/>'
         "</svg>"
     )
     root = etree.fromstring(svg.encode())
@@ -737,6 +796,7 @@ def test_shown_zone_shape_paints_the_text_box() -> None:
             "zone-a": TextBox(text="<p>A</p>"),
             "zone-b": TextBox(text="<p>B</p>"),
             "zone-c": TextBox(text="<p>C</p>"),
+            "zone-e": TextBox(text="<p>E</p>"),
         },
     )
     out = etree.tostring(root).decode()
@@ -744,11 +804,10 @@ def test_shown_zone_shape_paints_the_text_box() -> None:
     assert "border:3px solid var(--inkflow-accent)" in out
     assert "border-radius:8px" in out
     assert "background:#ff0000;border-radius:50%" in out
-    assert "color:var(--inkflow-accent-fg)" not in out  # a surface is not vivid
+    # Text on an accent box takes the theme's colour for it; a surface is not vivid.
+    assert out.count("color:var(--inkflow-accent-fg)") == 1
     # An unmarked zone's paint stays a placeholder; its --inkflow-* vars apply.
     assert "#123456" not in out
     assert 'style="--inkflow-valign:center"' in out
     # A shown shape stays even while empty.
-    from inkflow.content import remove_unreferenced_zones
-
     assert remove_unreferenced_zones(root).find(".//*[@id='zone-d']") is not None

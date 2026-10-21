@@ -1,14 +1,10 @@
-"""The core's plugin and server-extension APIs, with a frontend of our own.
-
-inkflow-editor is the big user of these; the core keeps them working on its
-own: a server extension gets the builds (with source locators when it asks),
-its own messages (gated by role at the door), its own pages, and adds to the
-welcome; a plugin adds commands, verify lines and the current slide."""
+"""Server extensions: a frontend of our own gets the builds, its messages
+(gated by role at the door), its pages, terminal keys, and adds to the
+welcome."""
 
 from __future__ import annotations
 
 import asyncio
-import http.client
 import json
 import threading
 from collections.abc import Iterator, Mapping, Sequence
@@ -17,74 +13,55 @@ from typing import cast
 
 import click
 import pytest
-from click.testing import CliRunner
 from typing_extensions import override
 from websockets.asyncio.server import ServerConnection
-from websockets.sync.client import ClientConnection, connect
+from websockets.exceptions import InvalidStatus
 
-from inkflow import plugins, server
+from inkflow import instances, plugins, server
 from inkflow.access import Role
 from inkflow.collab import Client
 from inkflow.extensions import (
     Build,
     HttpRequest,
+    Key,
+    ServeConfig,
     ServerContext,
     ServerExtension,
 )
 from inkflow.logging import resolve_levels
-from inkflow.manifest import Deck, Slide
-from inkflow.plugins import DeckCheck, Issue, Plugin, SlideCheck
+from inkflow.plugins import Plugin
 from inkflow.tui import LiveUI
-
-DECK = """\
-from inkflow import Deck, Slide
-
-
-def main():
-    return Deck(slides=[Slide("slides/one.svg"), Slide("slides/two.svg")])
-"""
-
-SLIDE = (
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">'
-    '<rect id="box" x="10" y="10" width="100" height="100"/></svg>'
+from tests.serving import (
+    GUEST,
+    UI,
+    get,
+    make_project,
+    open_ws,
+    serve_on_a_thread,
+    until,
 )
 
 
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
-    (tmp_path / "slides").mkdir()
-    for name in ("one", "two"):
-        (tmp_path / "slides" / f"{name}.svg").write_text(SLIDE)
-    (tmp_path / "deck.py").write_text(DECK)
-    return tmp_path
-
-
-class _UI:
-    def refresh(self) -> None:
-        pass
-
-    def set_building(self) -> None:
-        pass
-
-    def set_ok(self, *_args: object, **_kwargs: object) -> None:
-        pass
-
-    def set_error(self, trace: str) -> None:
-        raise AssertionError(trace)
+    return make_project(tmp_path)
 
 
 class Recorder(ServerExtension):
-    """A frontend: says what it saw, answers ``/mine`` and ``ping``."""
+    """A frontend: says what it saw, answers ``/mine``, ``ping`` and
+    ``secret``."""
 
     name: str = "recorder"
     provenance: bool = True
-    messages: Mapping[str, Role] = {"ping": "editor", "secret": "owner"}
+    messages: Mapping[str, Role] = {"ping": "viewer", "secret": "owner"}
 
     def __init__(self) -> None:
         self.server: ServerContext | None = None
         self.events: list[str] = []
         self.builds: list[Build] = []
         self.hellos: list[dict[str, object]] = []
+        self.resyncs: list[bool] = []
+        self.pressed: int = 0
 
     @override
     async def start(self, server: ServerContext) -> None:
@@ -93,7 +70,15 @@ class Recorder(ServerExtension):
 
     @override
     async def open(self, deck_path: Path | None) -> None:
-        self.events.append(f"open {deck_path is not None}")
+        self.events.append(f"open {deck_path.name if deck_path else None}")
+
+    @override
+    async def close(self, *, switching: bool) -> None:
+        self.events.append("close")
+
+    @override
+    async def stop(self) -> None:
+        self.events.append("stop")
 
     @override
     def before_build(self) -> None:
@@ -109,6 +94,10 @@ class Recorder(ServerExtension):
         self.events.append(f"built {len(build.served)}")
 
     @override
+    async def build_failed(self, deck_hash: str | None, error: str) -> None:
+        self.events.append("failed")
+
+    @override
     def welcome(self, client: Client) -> dict[str, object]:
         return {"frontend": "recorder"}
 
@@ -122,74 +111,44 @@ class Recorder(ServerExtension):
         resync: bool,
     ) -> None:
         self.hellos.append(msg)
+        self.resyncs.append(resync)
 
     @override
     async def message(
         self, conn: ServerConnection, client: Client, msg: dict[str, object]
     ) -> None:
         assert self.server is not None
-        await self.server.send(conn, {"type": "pong", "role": client.role})
+        await self.server.send(
+            conn, {"type": "pong", "role": client.role, "asked": msg["type"]}
+        )
+
+    @override
+    async def disconnected(self, conn: ServerConnection, client: Client) -> None:
+        assert self.server is not None
+        assert self.server.people.get(conn) is None
+        self.events.append(f"gone {client.page}")
 
     @override
     async def http(self, request: HttpRequest) -> bool:
         if request.path != "/mine":
             return False
-        await request.respond("200 OK", b"mine", "text/plain", b"")
+        body = f"mine for the {request.role}".encode()
+        await request.respond("200 OK", body, "text/plain", b"")
         return True
+
+    @override
+    def keys(self) -> Mapping[str, Key]:
+        def press() -> None:
+            self.pressed += 1
+
+        return {"x": ("press", press)}
 
 
 @pytest.fixture
 def served(project: Path) -> Iterator[tuple[Recorder, int]]:
     recorder = Recorder()
-    ui = cast("LiveUI", cast("object", _UI()))
-    loop = asyncio.new_event_loop()
-    started = threading.Event()
-    stop = asyncio.Event()
-    port: list[int] = []
-
-    async def run() -> None:
-        deck_path = project / "deck.py"
-        async with server.listening(ui, deck_path, [recorder]) as bound:
-            port.append(bound)
-            await server.rebuild(deck_path, ui, resolve_levels())
-            started.set()
-            await stop.wait()
-
-    thread = threading.Thread(target=lambda: loop.run_until_complete(run()))
-    thread.start()
-    assert started.wait(20)
-    try:
-        yield recorder, port[0]
-    finally:
-        loop.call_soon_threadsafe(stop.set)
-        thread.join(10)
-        loop.close()
-        server._state["ws_clients"].clear()  # pyright: ignore[reportPrivateUsage]
-        server._state["error"] = None  # pyright: ignore[reportPrivateUsage]
-
-
-def _ws(port: int) -> ClientConnection:
-    return connect(
-        f"ws://localhost:{port}/_inkflow/ws",
-        proxy=None,
-        origin=cast("object", f"http://localhost:{port}"),  # pyright: ignore[reportArgumentType]
-    )
-
-
-def _until(ws: ClientConnection, kind: str) -> dict[str, object]:
-    while True:
-        msg = cast("dict[str, object]", json.loads(ws.recv(timeout=5)))
-        if msg.get("type") == kind:
-            return msg
-
-
-def _get(port: int, path: str) -> tuple[int, bytes]:
-    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-    conn.request("GET", path, headers={"Host": f"localhost:{port}"})
-    response = conn.getresponse()
-    body = response.read()
-    conn.close()
-    return response.status, body
+    for port in serve_on_a_thread(project / "deck.py", [recorder]):
+        yield recorder, port
 
 
 def test_an_extension_follows_the_server_and_its_builds(
@@ -198,40 +157,143 @@ def test_an_extension_follows_the_server_and_its_builds(
     recorder, _ = served
     assert recorder.events == [
         "start",
-        "open True",
+        "open deck.py",
         "before_build",
         "build",
         "built 2",
     ]
     build = recorder.builds[0]
     # It asked for provenance: every element carries its source locator, and
-    # each slide its edit facts (which stay with the extensions: the pages get
+    # each slide its edit facts, which stay with the extensions (the pages get
     # the slides without them; the locators, inert attributes, stay).
     assert 'data-ink="' in build.slides[0]["svg"]
     assert "edit" in build.slides[0]
     assert all("edit" not in s for s in build.served)
+    assert 'data-ink="' in build.served[0]["svg"]
     assert build.fresh and build.deck_hash
+    assert build.project_dir == build.deck_path.parent
     assert recorder.server is not None
     assert recorder.server.last_deck is build.deck
 
 
-def test_an_extension_gets_its_messages_its_pages_and_the_welcome(
+def test_an_extension_gets_its_messages_and_adds_to_the_welcome(
     served: tuple[Recorder, int],
 ) -> None:
     recorder, port = served
-    with _ws(port) as ws:
-        assert _until(ws, "welcome")["frontend"] == "recorder"
-        ws.send(json.dumps({"type": "hello", "role": "presenter", "patch": True}))
-        _ = _until(ws, "update")
-        ws.send(json.dumps({"type": "ping"}))
-        assert _until(ws, "pong")["role"] == "owner"
+    with open_ws(port) as ws:
+        assert until(ws, "welcome")["frontend"] == "recorder"
+        ws.send(json.dumps({"type": "hello", "role": "presenter"}))
+        ws.send(json.dumps({"type": "secret"}))
+        assert until(ws, "pong") == {
+            "type": "pong",
+            "role": "owner",
+            "asked": "secret",
+        }
         ws.send(json.dumps({"type": "build-status"}))
-        status = _until(ws, "build-status")
+        status = until(ws, "build-status")
         assert status["deckHash"] == recorder.builds[-1].deck_hash
+        assert status["failedHash"] is None
     assert recorder.hellos[0]["role"] == "presenter"
-    assert _get(port, "/mine") == (200, b"mine")
-    status, body = _get(port, "/")
+
+
+def test_another_sites_page_never_reaches_an_extension(
+    served: tuple[Recorder, int],
+) -> None:
+    """A page of another site in the owner's browser reaches the socket on
+    loopback too: its ``Origin`` says it is not this server's, and the door
+    refuses it before any extension sees it."""
+    _, port = served
+    with pytest.raises(InvalidStatus) as refused:
+        open_ws(port, origin="http://evil.example")
+    assert refused.value.response.status_code == 403
+
+
+def test_a_viewer_gets_only_the_messages_a_viewer_may_send(
+    served: tuple[Recorder, int],
+) -> None:
+    _, port = served
+    viewer = {
+        **GUEST,
+        "Cookie": f"inkflow-{port}={server._share.access.viewer_token}",  # pyright: ignore[reportPrivateUsage]
+    }
+    with open_ws(port, viewer) as ws:
+        assert until(ws, "welcome")["role"] == "viewer"
+        ws.send(json.dumps({"type": "secret"}))  # owner only: dropped
+        ws.send(json.dumps({"type": "ping"}))
+        assert until(ws, "pong")["asked"] == "ping"
+
+
+def test_an_extension_answers_its_pages(served: tuple[Recorder, int]) -> None:
+    _, port = served
+    assert get(port, "/mine") == (200, b"mine for the owner")
+    viewer = {
+        **GUEST,
+        "Cookie": f"inkflow-{port}={server._share.access.viewer_token}",  # pyright: ignore[reportPrivateUsage]
+    }
+    assert get(port, "/mine", viewer) == (200, b"mine for the viewer")
+    # A name that is not this machine's (DNS rebinding) never gets that far.
+    assert get(port, "/mine", {"Host": f"evil.example:{port}"})[0] == 403
+    status, body = get(port, "/")
     assert status == 200 and b"<svg" in body  # the presenter is still the core's
+
+
+def test_the_extension_hears_a_page_leave(served: tuple[Recorder, int]) -> None:
+    recorder, port = served
+    with open_ws(port) as ws:
+        _ = until(ws, "welcome")
+        ws.send(json.dumps({"type": "hello", "role": "presenter"}))
+        ws.send(json.dumps({"type": "ping"}))
+        _ = until(ws, "pong")
+    for _ in range(100):
+        if "gone presenter" in recorder.events:
+            break
+        threading.Event().wait(0.05)
+    assert "gone presenter" in recorder.events
+
+
+def test_a_page_that_takes_patches_and_asks_again(
+    served: tuple[Recorder, int],
+) -> None:
+    recorder, port = served
+    with open_ws(port) as ws:
+        _ = until(ws, "welcome")
+        ws.send(json.dumps({"type": "hello", "role": "presenter", "patch": True}))
+        # The slides its HTML came with, named by key.
+        held = until(ws, "update")["slides"]
+        assert all(isinstance(s, str) for s in cast("list[object]", held))
+        # It missed a build: everything again, and the extensions hear it.
+        ws.send(json.dumps({"type": "resync"}))
+        whole = until(ws, "update")["slides"]
+        assert all(isinstance(s, dict) for s in cast("list[object]", whole))
+        ws.send(json.dumps({"type": "build-status"}))
+        _ = until(ws, "build-status")
+    assert recorder.resyncs == [False, True]
+
+
+def test_a_rebuild_keeps_what_it_can_unless_asked_for_everything(
+    served: tuple[Recorder, int], project: Path
+) -> None:
+    recorder, _ = served
+    ui = cast("LiveUI", cast("object", UI()))
+    asyncio.run(server.rebuild(project / "deck.py", ui, resolve_levels()))
+    assert not recorder.builds[-1].fresh
+    asyncio.run(server.rebuild(project / "deck.py", ui, resolve_levels(), full=True))
+    assert recorder.builds[-1].fresh
+
+
+def test_a_failed_build_is_said(served: tuple[Recorder, int], project: Path) -> None:
+    recorder, _ = served
+    (project / "deck.py").write_text("raise RuntimeError('broken')\n")
+
+    class _Quiet(UI):
+        @override
+        def set_error(self, trace: str) -> None:
+            pass
+
+    quiet = cast("LiveUI", cast("object", _Quiet()))
+    asyncio.run(server.rebuild(project / "deck.py", quiet, resolve_levels()))
+    assert recorder.events[-1] == "failed"
+    assert server.build_status()["failedHash"] is not None
 
 
 def test_the_door_gates_an_extensions_messages_by_role() -> None:
@@ -240,194 +302,68 @@ def test_the_door_gates_an_extensions_messages_by_role() -> None:
     try:
         assert server.allowed("owner", {"type": "secret"})
         assert not server.allowed("editor", {"type": "secret"})
-        assert server.allowed("editor", {"type": "ping"})
-        assert not server.allowed("viewer", {"type": "ping"})
+        assert server.allowed("viewer", {"type": "ping"})
+        # The core's own: sharing and opening programs are the owner's, a
+        # viewer moves no one's slide, an editor page is an editor's.
+        assert not server.allowed("editor", {"type": "share", "op": "on"})
+        assert not server.allowed("editor", {"type": "edit", "path": "x"})
+        assert not server.allowed("viewer", {"type": "nav", "slideIndex": 1})
+        assert server.allowed("editor", {"type": "nav", "slideIndex": 1})
+        assert not server.allowed("viewer", {"type": "hello", "role": "editor"})
+        assert server.allowed("viewer", {"type": "hello", "role": "presenter"})
+        assert server.allowed("viewer", {"type": "sync-request"})
     finally:
         server._served.extensions = []  # pyright: ignore[reportPrivateUsage]
 
 
-def test_without_an_editor_the_presenter_keeps_its_ink(
-    project: Path,
-) -> None:
-    from inkflow import ink
-
-    deck_path = project / "deck.py"
-    box = (0.0, 0.0, 1920.0, 1080.0)
-    path = project / "ink" / "one.svg"
-    stroke = {
-        "id": "ink-a1",
-        "d": "M10 10L20 20Z",
-        "fill": "#ff0000",
-        "tool": "pen",
-        "size": 4,
-    }
-    ink.save_ink(path, {"op": "add", "strokes": [stroke]}, box)
-    assert ink.stroke_ids(path.read_bytes()) == ["ink-a1"]
-    ink.save_ink(path, {"op": "erase", "ids": ["ink-a1"]}, box)
-    assert not path.exists()  # no stroke left: no file
-    del deck_path
+# ── Plugins hand extensions to the server ─────────────────────────────────────
 
 
-# ── Plugins ──────────────────────────────────────────────────────────────────
+class Serving(Plugin):
+    name: str = "serving"
 
-
-class Checker(Plugin):
-    name: str = "checker"
+    def __init__(self) -> None:
+        self.config: ServeConfig | None = None
 
     @override
-    def register_cli(self, main: click.Group) -> None:
-        @click.command("hello-plugin")
-        def hello() -> None:
-            click.echo("hello from a plugin")
-
-        main.add_command(hello)
+    def serve_options(self) -> Sequence[click.Option]:
+        return (click.Option(["--shout"], is_flag=True, help="Shout."),)
 
     @override
-    def slide_checks(self) -> Sequence[SlideCheck]:
-        def no_two(slide: Slide, project_dir: Path, deck: Deck | None) -> list[Issue]:
-            del project_dir, deck
-            return [("warn", "two is here")] if "two" in slide.src else []
-
-        return (no_two,)
-
-    @override
-    def deck_checks(self) -> Sequence[DeckCheck]:
-        def whole(deck: Deck, project_dir: Path, deck_path: Path) -> list[Issue]:
-            del project_dir, deck_path
-            return [("warn", f"{len(deck.slides)} slides checked")]
-
-        return (whole,)
-
-    @override
-    def current_slide(self, project_dir: Path) -> int | None:
-        return 2
-
-
-@pytest.fixture
-def checker() -> Iterator[Checker]:
-    plugin = Checker()
-    plugins.register(plugin)
-    try:
-        yield plugin
-    finally:
-        plugins.unregister(plugin)
-
-
-def test_a_plugin_adds_verify_lines(
-    project: Path, checker: Checker, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from inkflow.cli import main
-
-    del checker
-    monkeypatch.chdir(project)
-    result = CliRunner().invoke(main, ["verify"])
-    assert "two is here" in result.output
-    assert "2 slides checked" in result.output
-    quiet = CliRunner().invoke(main, ["verify", "--no-deck-checks"])
-    assert "slides checked" not in quiet.output
-
-
-def test_a_plugin_adds_commands(checker: Checker) -> None:
-    cli = click.Group("inkflow")
-    checker.register_cli(cli)
-    result = CliRunner().invoke(cli, ["hello-plugin"])
-    assert result.output == "hello from a plugin\n"
-
-
-def test_render_defaults_to_the_slide_a_plugin_says_is_open(
-    project: Path, checker: Checker
-) -> None:
-    from inkflow.cli.render import current_slide
-
-    del checker
-    assert current_slide(project) == 2
-
-
-def test_no_plugins_when_turned_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("INKFLOW_NO_PLUGINS", "1")
-    assert not plugins.enabled()
-
-
-def test_an_ink_save_without_an_editor_writes_the_file(
-    served: tuple[Recorder, int], project: Path
-) -> None:
-    _, port = served
-    stroke = {"id": "ink-b2", "d": "M1 1L2 2Z", "fill": "#00ff00", "tool": "pen"}
-    with _ws(port) as ws:
-        _ = _until(ws, "welcome")
-        ws.send(
-            json.dumps(
-                {
-                    "type": "edit-op",
-                    "id": "k1",
-                    "action": "ink",
-                    "op": "add",
-                    "slideId": "two",
-                    "strokes": [stroke],
-                }
-            )
-        )
-        reply = _until(ws, "edit-result")
-        assert reply["ok"] is True and reply["ink"] == "ink/two.svg"
-        ws.send(json.dumps({"type": "edit-op", "id": "k2", "action": "slide"}))
-        refused = _until(ws, "edit-result")
-        assert refused["ok"] is False and "edits the deck" in str(refused["error"])
-    assert (project / "ink" / "two.svg").is_file()
-
-
-def test_the_owner_is_sent_to_an_extensions_home() -> None:
-    from inkflow.access import Access
-
-    class Home(ServerExtension):
-        home: str | None = "/mine"
-
-    access = Access(7777, names=set(), ssh=True)
-    assert server.owner_lines(access, 7777)[0].split("?")[0].endswith(":7777/")
-    server._served.extensions = [Home()]  # pyright: ignore[reportPrivateUsage]
-    try:
-        assert server.owner_page() == "/mine"
-        assert "/mine?k=" in server.owner_lines(access, 7777)[0]
-    finally:
-        server._served.extensions = []  # pyright: ignore[reportPrivateUsage]
+    def server_extensions(self, config: ServeConfig) -> Sequence[ServerExtension]:
+        self.config = config
+        return (Recorder(),)
 
 
 def test_a_plugins_serve_option_reaches_its_extensions(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from inkflow.cli import present
-    from inkflow.extensions import ServeConfig
+    from click.testing import CliRunner
 
-    seen: list[ServeConfig] = []
+    from inkflow.cli import main
+    from inkflow.cli.present import add_serve_options
 
-    class Loud(Plugin):
-        name: str = "loud"
-
-        @override
-        def serve_options(self) -> Sequence[click.Option]:
-            return (click.Option(["--loud"], is_flag=True),)
-
-        @override
-        def server_extensions(self, config: ServeConfig) -> Sequence[ServerExtension]:
-            seen.append(config)
-            return ()
-
-    plugin = Loud()
+    plugin = Serving()
     plugins.register(plugin)
-    # On a copy of serve's options, put back after the test.
-    monkeypatch.setattr(present.serve, "params", list(present.serve.params))
-    present.add_serve_options(plugin.serve_options())
+    seen: list[list[ServerExtension]] = []
 
-    async def no_server(*_args: object, **kwargs: object) -> None:
-        del kwargs
+    async def fake_serve(*args: object, **kwargs: object) -> None:
+        del args
+        seen.append(list(cast("Sequence[ServerExtension]", kwargs["extensions"])))
 
-    monkeypatch.setattr(present, "_serve", no_server)
+    monkeypatch.setattr("inkflow.cli.present._serve", fake_serve)
+    monkeypatch.setattr(instances, "_dir", lambda: project / "servers")
+    serve_cmd = main.commands["serve"]
+    before = list(serve_cmd.params)
     try:
+        add_serve_options(plugin.serve_options())
         result = CliRunner().invoke(
-            present.serve,
-            ["--deck", str(project / "deck.py"), "--port", "7899", "--loud"],
-            obj=resolve_levels(),
+            main, ["serve", "--deck", str(project / "deck.py"), "--shout"]
         )
         assert result.exit_code == 0, result.output
-        assert seen and seen[0].options["loud"] is True
     finally:
+        serve_cmd.params[:] = before
         plugins.unregister(plugin)
+    assert plugin.config is not None
+    assert plugin.config.options == {"shout": True}
+    assert [e.name for e in seen[0]] == ["recorder"]

@@ -11,7 +11,8 @@ import pytest
 
 from inkflow import drawio
 from inkflow.deps import file_hash
-from inkflow.edit import App
+from inkflow_editor.drawioedit import BLANK_SIZE, DEFAULT_URL
+from inkflow_editor.openwith import App
 from inkflow_editor.session import EditError, EditorSession
 from inkflow_editor.svgops import SvgFile
 
@@ -68,7 +69,7 @@ def test_load_and_save_through_the_session(
 ) -> None:
     session = EditorSession(project / "deck.py")
     fresh = session.apply({"action": "drawio-load"}, None)
-    assert fresh["xml"] == "" and fresh["url"] == drawio.DEFAULT_URL
+    assert fresh["xml"] == "" and fresh["url"] == DEFAULT_URL
     monkeypatch.setenv("INKFLOW_DRAWIO_URL", "http://localhost:8080/")
     # A new diagram gets its file on the first save.
     made = session.apply({"action": "drawio-save", "svg": COMPRESSED}, object())  # pyright: ignore[reportArgumentType]
@@ -117,7 +118,7 @@ def test_a_new_diagram_for_draw_io_desktop(
     session = EditorSession(project / "deck.py")
     made = session.apply({"action": "drawio-new"}, object())  # pyright: ignore[reportArgumentType]
     assert made["rel"] == "diagrams/diagram-1.drawio.svg"
-    assert (made["width"], made["height"]) == drawio.BLANK_SIZE
+    assert (made["width"], made["height"]) == BLANK_SIZE
     data = (project / "diagrams" / "diagram-1.drawio.svg").read_bytes()
     assert drawio.is_drawio_svg(data) and b"New diagram" in data  # placeholder
     assert "<mxCell" in drawio.source(data)
@@ -128,7 +129,7 @@ def test_a_new_diagram_for_draw_io_desktop(
     def which(name: str) -> str | None:
         return f"/usr/bin/{name}" if name == "drawio" else None
 
-    monkeypatch.setattr("inkflow.edit.shutil.which", which)
+    monkeypatch.setattr("inkflow_editor.openwith.shutil.which", which)
 
     def open_with(path: Path, app: App) -> None:
         launched.append(f"{app.id}:{path.name}")

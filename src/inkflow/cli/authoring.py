@@ -39,6 +39,7 @@ from inkflow.layout import (
     inject_preview_layers,
     label_of,
     layout_zones,
+    layouts_for,
     resolve_chain,
     resolve_parent_path,
     strip_parent,
@@ -436,7 +437,8 @@ def sync_cmd(
             plan = sync.plan_preview(target.path, ctx)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
-        # A file named explicitly is always written; a sweep follows `swept`.
+        # A file named explicitly is always written; a sweep follows `swept`
+        # (a bare slide only once it carries the preview style block).
         if not (files or no_deck or plan.swept(target.path)):
             continue
         label = _sync_label(target.label, plan)
@@ -479,10 +481,12 @@ def _asset_rows(
     deck: Deck | None = None,
 ) -> dict[str, list[_LayoutRow]]:
     """Group discovered layouts or overlays by source, with their chains and
-    zones, and (with a deck) how many slides use each and which the deck has
-    its own copy of."""
+    zones; with a deck, only the layouts offered to its size (`layouts_for`),
+    how many slides use each and which the deck has its own copy of."""
     discover = discover_layouts if kind is AssetKind.LAYOUT else discover_overlays
     found = discover(project_dir, theme)
+    if deck is not None and kind is AssetKind.LAYOUT:
+        found = layouts_for(found, deck.effective_size)
     uses: dict[Path, int] = {}
     if deck is not None and project_dir is not None:
         if kind is AssetKind.LAYOUT:
@@ -492,7 +496,7 @@ def _asset_rows(
             for overlay in overlay_entries(deck, project_dir):
                 if overlay.path is not None:
                     uses[overlay.path.resolve()] = len(overlay.slides)
-    local = {p.stem: p for label, p in found if label == "local"}
+    local = {p.stem for label, p in found if label == "local"}
     groups: dict[str, list[_LayoutRow]] = {}
     for source_label, path in found:
         try:
@@ -590,9 +594,12 @@ def layouts_cmd(deck_path: Path, no_deck: bool, plain: bool, as_json: bool) -> N
     overlays on top of it, and the two are separate namespaces. The overlay section
     is omitted when no overlays exist. Pass `--no-deck` to list only the built-ins.
 
-    With a deck, SLIDES counts the slides built directly on each, and NOTE
-    marks the deck's own copies of theme layouts (`inkflow layout copy`), the
-    theme layouts they replace, and a template's typed name.
+    With a deck, the built-in layouts listed are those drawn in its size's
+    shape (`Deck(size="a0")`: the poster layouts; a 16:9 deck: the 16:9 ones),
+    SLIDES counts the slides built directly on each, and NOTE marks the deck's
+    own copies of theme layouts (`inkflow:copy-of`), the theme layouts they
+    replace, one the deck's own of the same name only shadows, and a layout's
+    typed name (`inkflow:label`).
 
     `--plain` prints the same as one line per layout (`name  [source]
     parents: …  zones: …`, the default zone starred), and `--json` as

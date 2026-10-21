@@ -48,9 +48,9 @@ def share_options(f: Callable[..., None]) -> Callable[..., None]:
         "ssh",
         default=None,
         help="SSH mode, for a machine other people log in to: only the owner "
-        + "link inkflow prints edits as the owner (anyone else on this machine "
+        + "link inkflow prints is the owner (anyone else on this machine "
         + "would otherwise be the owner too), and share links name localhost, "
-        + "for each collaborator to open through their own `ssh -L` tunnel; "
+        + "for each guest to open through their own `ssh -L` tunnel; "
         + "nothing listens on the network. [default: on when started from an "
         + "SSH login (SSH_CONNECTION or SSH_CLIENT set)]",
     )(f)
@@ -75,9 +75,9 @@ def share_options(f: Callable[..., None]) -> Callable[..., None]:
         "--share",
         is_flag=True,
         help="Share on the local network (or VPN): listen on every interface "
-        + "(or --host) and print an editor link and a view link for each "
-        + "address. Without it only this machine can connect. In SSH mode: "
-        + "the links work from the start, through tunnels.",
+        + "(or --host) and print a view link (and an editor link, when a "
+        + "plugin edits) for each address. Without it only this machine can "
+        + "connect. In SSH mode: the links work from the start, through tunnels.",
     )(f)
 
 
@@ -123,11 +123,11 @@ def serve(
     """Start the presentation server with live reload.
 
     Serves the deck at `http://{host}:{port}` and pushes slide updates over a
-    WebSocket whenever a source file changes, swapping content in place without a
-    full page reload. Only this machine can connect, unless `--share`: then
-    the server also listens on the network and prints a view link (and an
-    editor link, for plugins that edit) for each address; other machines
-    need one of them.
+    WebSocket on the same port whenever a source file changes, swapping
+    content in place without a full page reload. Only this machine can
+    connect, unless `--share`: then the server also listens on the network
+    and prints a view link for each address (and an editor link, when a
+    plugin edits); other machines need one of them.
 
     On a machine other people log in to (SSH mode, the default from an SSH
     login; `--no-ssh` turns it off), being on the machine is not enough:
@@ -170,8 +170,7 @@ def add_serve_options(options: Sequence[click.Option]) -> None:
 
 def port_for(host: str, port: int | None) -> int:
     """The port to serve on; says so when the default one is taken (another
-    deck's server, such as the author's editor while an agent previews its
-    worktree), since the address is then not the usual one."""
+    deck's server), since the address is then not the usual one."""
     picked = pick_port(host, port)
     if port is None and picked != DEFAULT_PORT:
         report("Port", f"{DEFAULT_PORT} is taken: using {picked}")
@@ -319,14 +318,16 @@ def export_cmd(
     slide at its own: an SVG's `width`/`height` in mm, cm or inches (an Inkscape
     A0 page), else its viewBox at 1 unit = 1 px. `--size` prints every slide on
     one sheet instead, scaled to fit (a poster drawn for A0 prints on A1).
+    `--bleed 3mm --crop-marks` is what a print shop may ask for.
 
     Requires a Chromium-based browser on the system; point `--chromium` at it if
-    it is not auto-detected. Pass `--no-sandbox` when running as root or in
-    Docker. Defaults to `<deck-stem>.pdf` next to `deck.py`.
+    it is not auto-detected (a Playwright download is found too). Pass
+    `--no-sandbox` in Docker (as root it is passed already). Defaults to
+    `<deck-stem>.pdf` next to `deck.py`.
 
     With `--handout`, a handout instead: each shown slide with its speaker
     notes, one per page (`--layout notes`) or three per page (`compact`),
-    on A4 or Letter (`--paper`). The editor shows the same at /handout.
+    on A4 or Letter (`--paper`). The server shows the same at /handout.
     """
     resolved = resolve_deck_path(deck_path)
     if handout:

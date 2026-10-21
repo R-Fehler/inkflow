@@ -1,7 +1,7 @@
 """The layouts and overlays a deck offers, and which slides use each.
 
 What ``inkflow layouts`` lists with its slide counts, and what a slide-master
-view (inkflow-editor's) is built from: every layout in the deck's shape (the
+view (a frontend's) is built from: every layout in the deck's shape (the
 project's own winning over a theme's of the same name, a marked copy noted),
 its parent, the slides built on it directly and every slide whose chain goes
 through it; the deck's overlays, a slide's own, and overlay files nothing

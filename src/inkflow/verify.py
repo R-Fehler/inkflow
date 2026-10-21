@@ -31,7 +31,6 @@ from inkflow.sync import PreviewContext, plan_preview, slide_overlays
 from inkflow.zones import build_slide_content, parse_markdown_zones
 
 if TYPE_CHECKING:
-    from inkflow.manifest import Deck
     from inkflow.svgio import SvgElement
     from inkflow.themes import Theme
 
@@ -407,7 +406,10 @@ def verify_slide(
     issues += _check_sync(src, preview)
     for plugin in plugins.loaded():
         for check in plugin.slide_checks():
-            issues += check(slide, project_dir, preview.deck)
+            try:
+                issues += check(slide, project_dir, preview.deck)
+            except Exception as exc:
+                issues.append(("warn", f"{plugin.name}: check failed: {exc}"))
     return issues
 
 
@@ -416,8 +418,7 @@ def verify_slide(
 
 def verify_deck(deck: Deck, project_dir: Path, deck_path: Path) -> list[Issue]:
     """The plugins' checks of the deck as a whole (one ``deck`` line each in
-    ``inkflow verify``), such as whether it looks the same on another
-    machine."""
+    ``inkflow verify``)."""
     issues: list[Issue] = []
     for plugin in plugins.loaded():
         for check in plugin.deck_checks():

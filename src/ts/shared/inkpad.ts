@@ -1,5 +1,5 @@
 // Drawing with a pen on a slide: pointer input in, strokes out. Shared by the
-// presenter (presenter/ink.ts) and the editor (editor/ink.ts), which decide
+// presenter (presenter/ink.ts) and any editor frontend's pen, which decide
 // which pointers draw and what happens to a finished stroke.
 //
 // Latency is what makes ink feel like ink, so the pointer path stays small:
@@ -41,7 +41,7 @@ const SWALLOW_MS = 400;
 export interface PadHost {
     // Pointer events are taken from here (capture phase, before the page).
     surface: HTMLElement;
-    // Ink is on (the presenter's ink mode, the editor's pen tool).
+    // Ink is on (the presenter's ink mode, an editor's pen tool).
     active(): boolean;
     // A mouse and a finger draw too, not only a pen.
     fingers(): boolean;

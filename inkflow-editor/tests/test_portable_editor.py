@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false
 """The editor's part of test_portable.py: the tests that need inkflow-editor."""
 
 from __future__ import annotations

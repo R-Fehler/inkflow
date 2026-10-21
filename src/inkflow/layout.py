@@ -276,10 +276,11 @@ def deck_copy(
     """The project's own copy standing in for the theme's file ``path``.
 
     A copy is ``<project>/<kind>/<same name>.svg`` carrying `inkflow:copy-of`
-    that names ``path`` (``builtin:agenda``): what the editor's slide master
-    writes when a theme's layout is edited. Only marked copies stand in, so a
-    project layout that merely shares a name with a theme's (an own
-    ``title.svg`` drawn as a title slide) never slips into the theme's chains.
+    that names ``path`` (``builtin:agenda``): the theme's file copied with that
+    attribute added, by hand or by an editor's slide master. Only marked
+    copies stand in, so a project layout that merely shares a name with a
+    theme's (an own ``title.svg`` drawn as a title slide) never slips into the
+    theme's chains.
     """
     if project_root is None:
         return None

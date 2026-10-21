@@ -13,7 +13,7 @@
 // read in the capture phase on the window, ahead of every other handler, so
 // a finger that belongs to a pinch is never seen by the page at all; the
 // first finger, which the page did see, is taken back with `cancelSingle`.
-// A page that cannot take its one-finger action back (the editor: selection,
+// A page that cannot take its one-finger action back (an editor: selection,
 // drags, insert tools) asks for it to be deferred instead: the finger's
 // events are held until it commits (gestures.ts) and then replayed, or
 // dropped when it turns out to be half of a pinch.

@@ -1,8 +1,9 @@
 """A deck that looks the same everywhere: the building blocks.
 
-``inkflow pack`` (inkflow-editor) puts these together into one plan with the
-copy-in of outside files, which needs its reference-rewriting engine; ``init
---self-contained`` uses them directly. What each part is for:
+A frontend's "pack the deck" command can put these together into one plan
+(with copying in the files a deck names outside its folder, which needs a
+reference-rewriting engine of its own); ``inkflow init`` uses them directly
+for a new deck. What each part is for:
 
 A ``git clone`` of a deck should build and look identical on any machine and
 OS. What gets in the way, and what packing does about each:
@@ -11,14 +12,14 @@ OS. What gets in the way, and what packing does about each:
   (``fontreport.plan_bundle``); missing fonts and stacks that start with a
   generic family cannot be fixed by copying, and are reported;
 - files the deck names outside its folder, or through a symlink: copied in,
-  every reference rewritten (``filerename.plan_copy_in``);
+  every reference rewritten (by the frontend);
 - no ``pyproject.toml`` pinning inkflow (and a pip-installed theme), no
   ``uv.lock``: written, and ``uv lock`` run when uv is installed;
 - no line-ending rules (a Windows checkout would turn every SVG into CRLF),
   no SVG diff driver line, no Git LFS rules for media and fonts: added to the
   deck's ``.gitattributes`` (an ``# inkflow: lfs off`` opt-out is kept);
-- PDF figures (``with_pdf_pages``): each page converted once and committed
-  beside its PDF (``pdf.committed_path``), so a clone needs no converter.
+- PDF figures: each page converted once and committed beside its PDF
+  (``pdf.committed_path``), so a clone needs no converter.
 
 What remains machine-dependent afterwards is listed (`Item` with
 ``fixable=False``): pictures read from the web, emoji and formulas with no
@@ -314,11 +315,6 @@ def run_uv_lock(project_dir: Path, timeout: float = 180) -> tuple[bool, str]:
     return True, "uv.lock written"
 
 
-# ── What a build needs that the deck does not hold ──
-
-# ── The plan ──
-
-
 # ── New decks start self-contained ──
 
 
@@ -374,7 +370,7 @@ def tools_needed() -> list[str]:
     """What a machine needs to build the deck beyond inkflow (for the report)."""
     return [
         "`inkflow export` (PDF) needs Chromium or Chrome; `inkflow build` does not",
-        "ffmpeg is never needed to build (only to convert videos in the editor)",
+        "ffmpeg is never needed to build",
     ]
 
 

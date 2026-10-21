@@ -1,12 +1,12 @@
 // Back from presenting to an editor, at the slide on screen. Only a server
 // with an editor says where one is: its "welcome" names the page
-// (`{"editor": "/edit"}`, from a server extension such as inkflow-editor's).
-// A static build, a bare `inkflow serve` and a view link have none, and the
-// button stays hidden.
+// (`{"editor": "/edit"}`, added by a server extension). A static build, a
+// bare `inkflow serve` and a view link have none, and the button stays
+// hidden.
 //
-// The editor's Present button opens this page in a window of its own; when
-// that editor tab is still there, it is moved to this slide and brought back,
-// and this window closes. Otherwise this tab becomes the editor.
+// An editor may open this page in a window of its own; when that editor tab
+// is still there, it is moved to this slide and brought back, and this
+// window closes. Otherwise this tab becomes the editor.
 
 import { state } from "./state";
 

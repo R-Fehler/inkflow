@@ -411,7 +411,7 @@ class TestSyncBareSlides:
 
     @pytest.mark.usefixtures("project")
     def test_its_style_block_follows_a_mode_change(self, runner: CliRunner) -> None:
-        # Synced once by name (or by the editor's Open ▾), it carries the block.
+        # Synced once by name, it carries the block.
         assert runner.invoke(main, ["sync", "slides/01.svg"]).exit_code == 0
         Path("deck.py").write_text(
             _DECK_PY.replace(
@@ -440,7 +440,7 @@ class TestVerify:
             ),
             encoding="utf-8",
         )
-        result = runner.invoke(main, ["verify", "--no-portable", "--all"])
+        result = runner.invoke(main, ["verify", "--no-deck-checks", "--all"])
         assert result.exit_code == 0, result.output
         lines = [" ".join(line.split()) for line in result.output.splitlines()]
         # Number and id; the layout too when the id does not say it; a hidden
@@ -536,6 +536,15 @@ class TestLayouts:
     ) -> None:
         Path("layouts").mkdir()
         Path("layouts/mine.svg").write_text(_SLIDE_SVG, encoding="utf-8")
+        Path("layouts/agenda.svg").write_text(_SLIDE_SVG, encoding="utf-8")
+        Path("deck.py").write_text(
+            _DECK_PY.replace(
+                'Slide("slides/01.svg")',
+                'Slide("slides/01.svg"), Slide("content"), Slide("content"),'
+                + ' Slide("two-cols")',
+            ),
+            encoding="utf-8",
+        )
         result = runner.invoke(main, ["layouts", "--json"])
         assert result.exit_code == 0
         data = cast("dict[str, list[dict[str, object]]]", json.loads(result.output))
@@ -545,8 +554,28 @@ class TestLayouts:
         assert content["parents"] == ["base", "numbered", "title"]
         assert content["zones"] == ["content", "title"]
         assert content["defaultZone"] == "content" and content["numbered"] is True
+        assert content["slides"] == 2
+        assert by_name[("builtin", "two-cols")]["slides"] == 1
+        assert by_name[("builtin", "title")]["slides"] == 0
         mine = by_name[("local", "mine")]
         assert mine["parents"] == [] and mine["slides"] == 0
+        # The project's agenda shadows the built-in one, which is not counted.
+        shadowed = by_name[("builtin", "agenda")]
+        assert shadowed["slides"] is None
+        assert shadowed["note"] == "shadowed by the deck's"
+        assert by_name[("local", "agenda")]["slides"] == 0
+
+    @pytest.mark.usefixtures("project")
+    def test_table_counts_slides(self, runner: CliRunner) -> None:
+        Path("deck.py").write_text(
+            _DECK_PY.replace('Slide("slides/01.svg")', 'Slide("quad")'),
+            encoding="utf-8",
+        )
+        result = runner.invoke(main, ["layouts"])
+        assert result.exit_code == 0
+        assert "SLIDES" in result.output
+        quad = next(line for line in result.output.splitlines() if " quad " in line)
+        assert quad.rstrip(" │").endswith("1")
 
 
 class TestInitGit:
@@ -759,3 +788,43 @@ class TestBrokenDeck:
         assert result.exit_code == 1
         assert f"Error: {expected}" in result.output
         assert "Traceback" not in result.output
+
+
+class TestDeckSlides:
+    """What a command that names a slide or a section of the deck reads."""
+
+    _SECTIONED: str = textwrap.dedent("""\
+        from inkflow import Deck, Section, Slide
+
+        def main():
+            return Deck(slides=[
+                Slide("slides/01.svg"),
+                Section("Intro", slides=[Slide("slides/01.svg", id="hi")]),
+                Section("intro", slides=[Slide("slides/01.svg", visible=False)]),
+                Section("End", slides=[]),
+            ])
+    """)
+
+    def test_names_sections_and_slides(self, project: Path) -> None:
+        from inkflow.cli._common import DeckSlides
+        from inkflow.deps import file_hash
+
+        deck_py = project / "deck.py"
+        deck_py.write_text(self._SECTIONED, encoding="utf-8")
+        found = DeckSlides.load(deck_py)
+        assert found.hash == file_hash(deck_py.read_bytes())
+        assert found.name(0) == "slide 1 (01)"
+        assert found.name(1) == "slide 2 (hi)"
+        assert found.name(2).startswith("hidden slide ")
+        assert found.section("end") == 2 and found.section("3") == 2
+        assert found.section_name(2) == "'End'"
+        with pytest.raises(click.BadParameter, match="give its number"):
+            _ = found.section("intro")
+        with pytest.raises(click.BadParameter, match="sections: Intro, intro, End"):
+            _ = found.section("middle")
+
+    def test_a_deck_without_sections_says_so(self, project: Path) -> None:
+        from inkflow.cli._common import DeckSlides
+
+        with pytest.raises(click.BadParameter, match="no sections"):
+            _ = DeckSlides.load(project / "deck.py").section("1")

@@ -24,8 +24,8 @@ export interface SlideData {
 }
 
 // Whether the server has a configured edit command for each file kind (env vars
-// INKFLOW_EDIT_CMD, _SVG, _<EXT>, _IMAGE / _TEXT / _VIDEO), baked in at page
-// load — see edit.ts.
+// INKFLOW_EDIT_CMD, _SVG, _<EXT>, _IMAGE / _TEXT / _VIDEO / _PDF / _DATA),
+// baked in at page load — see edit.ts.
 export interface EditCommandsConfig {
     default: boolean;
     svg: boolean;
@@ -102,6 +102,7 @@ export type InkMessage =
 
 export type WsMessage =
     | InkMessage
+    // The answer to an `edit-op` (the presenter's ink "Keep").
     | {
           type: "edit-result";
           id: unknown;
@@ -122,15 +123,7 @@ export type WsMessage =
       }
     | { type: "error"; message: string }
     | { type: "notify"; message: string; style: NotifyStyle }
-    | {
-          type: "welcome";
-          id: string;
-          role: string;
-          // An extension's additions: an editor's colour and name for this
-          // person, and where its page is.
-          color?: string;
-          name?: string;
-          editor?: string;
-      }
-    | { type: "presence"; people: unknown[] }
+    // Who this page is at the server's door (`owner`, `editor`, `viewer`);
+    // server extensions may add fields: `editor`, where an editor's page is.
+    | { type: "welcome"; id: string; role: string; editor?: string }
     | ({ type: "position" } & SyncPosition);

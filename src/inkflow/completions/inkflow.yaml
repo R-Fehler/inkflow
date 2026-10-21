@@ -43,7 +43,7 @@ commands:
       --host=: Bind address (any but this machine's own shares the deck)
       --port=: Port
       --ws-port=: Also open the old separate WebSocket port (deprecated)
-      --share: Share on the network with editor and view links
+      --share: Share on the network with view links
       --allow-host=: Also answer to this host name
       --tls=: Serve HTTPS with this certificate and key
       --ssh: "SSH mode: only the owner link makes the owner, links for tunnels"
@@ -241,7 +241,7 @@ commands:
       -d, --deck=: Path to deck.py
       --all: Include hidden slides
       --strict: Treat warnings as errors
-      --no-deck-checks, --no-portable: Skip the deck-wide checks (plugins')
+      --no-deck-checks: Skip the plugins' checks of the deck as a whole
     completion:
       positionalany:
         - "$files([\".svg\"])"

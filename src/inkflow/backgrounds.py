@@ -86,7 +86,7 @@ def picture_backgrounds(root: SvgElement) -> SvgElement:
                 "height": f"{h + 2 * pad:g}",
                 "rx": f"{min(pad, 12):g}",
                 "class": "inkflow-picture-background",
-                # Clicks go to the picture, which is what the editor selects.
+                # Clicks go to the picture, which is what an editor selects.
                 "pointer-events": "none",
                 "style": f"fill: {paint}",
             },

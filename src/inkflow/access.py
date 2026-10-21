@@ -6,7 +6,7 @@ proxy, so an SSH tunnel counts and a reverse proxy does not); an **editor**
 and a **viewer** come with a share link, whose token sets a cookie.
 
 In **SSH mode** (a server other people log in to, or reach through their own
-SSH tunnels: ``inkflow edit --ssh``, the default from an SSH login) this
+SSH tunnels: ``inkflow serve --ssh``, the default from an SSH login) this
 machine's loopback is everyone's, so it is not enough: the owner is a loopback
 request carrying the **owner token** (the owner link inkflow prints, which
 sets a cookie of its own, ``inkflow-owner-<port>``, so opening a share link in
@@ -39,6 +39,9 @@ from typing import Literal, cast
 from urllib.parse import parse_qsl, quote, urlsplit
 
 Role = Literal["owner", "editor", "viewer"]
+"""Who a connection is: the owner (this machine's own user), or whoever came
+with a share link: an editor (may change the deck, through an extension that
+edits) or a viewer (follows the presentation)."""
 
 WS_PATH = "/_inkflow/ws"
 """Where pages open the server's WebSocket (on the HTTP port)."""
