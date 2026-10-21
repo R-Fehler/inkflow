@@ -182,3 +182,17 @@ run = [
   "uv run mkdocs build",
 ]
 ```
+
+## Handouts
+
+`inkflow export --handout` prints a handout instead: every shown slide with
+its speaker notes (rendered from their Markdown), one per page with the
+notes below (`--layout notes`, the default) or three per page with the notes
+beside (`--layout compact`), on A4 or Letter (`--paper`). It is written to
+`<deck>-handout.pdf` unless `-o` says otherwise. Every build step is shown,
+and text is shrunk to fit its box as on every page that shows a slide.
+
+While `inkflow serve` runs, the same handout is at `/handout`
+(`/handout?layout=compact&paper=letter`), with a bar to pick the layout and
+the paper and to print it from the browser. A [view link](sharing.md#who-is-who)
+does not get it, since it shows the notes.

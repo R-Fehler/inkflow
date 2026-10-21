@@ -95,7 +95,7 @@ is used as it is.
 
 - **`inkflow serve`** links the shipped fonts from the server
   (`/_inkflow/fonts/…`, fetched once and cached) and embeds any other font whole.
-- **`inkflow build` and `inkflow export` (PDF)** subset each
+- **`inkflow build`, `inkflow export` (PDF) and `inkflow render`** subset each
   font to the characters the deck uses, as WOFF2 data inside the page: typically
   20–80 KB a face. A subset keeps every OpenType feature (tabular figures in
   charts, a formula's script sizes) and the font's name table (its copyright and

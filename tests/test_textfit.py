@@ -1,8 +1,9 @@
 """A text zone's size (``--inkflow-font-scale``) and shrink-to-fit
 (``--inkflow-fit``): where each is written (the zone shape's style, a Markdown
 marker's ``size=``/``fit=``, ``TextBox(size=, fit=)``), how the build emits
-them, a marker's parameters written back, and the readable minimum a printed
-slide carries for the browser's fitting (src/ts/shared/fit.ts)."""
+them, a marker's parameters written back, the readable minimum a printed
+slide carries for the browser's fitting (src/ts/shared/fit.ts), and `inkflow
+render` measuring a zone after the browser fitted it."""
 
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from inkflow.content import substitute_content
 from inkflow.export import find_chromium
 from inkflow.manifest import TextBox
 from inkflow.pipeline import process_deck
+from inkflow.render import render_slides
 from inkflow.server import load_deck
 from inkflow.sizes import PRINT_MIN_TEXT, PageSize, print_body_pt
 from inkflow.svgio import SvgElement, parse_svg
@@ -229,3 +231,57 @@ def test_the_pdf_page_fits_text_to_its_box(
     off = zone("off")
     assert off.get("data-inkflow-fit") is None
     assert off.get("data-inkflow-overflow") == ""
+
+
+RENDER_SVG = textwrap.dedent("""\
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">
+      <rect width="1920" height="1080" fill="#fff"/>
+      <rect id="zone-shrinks" x="100" y="100" width="800" height="300"/>
+      <rect id="zone-floor" x="1000" y="100" width="800" height="120"/>
+      <rect id="zone-off" x="100" y="600" width="800" height="120"
+            style="--inkflow-fit:none"/>
+    </svg>
+""")
+
+
+RENDER_DECK = textwrap.dedent("""\
+    from inkflow import Deck, Slide
+
+
+    def main() -> Deck:
+        return Deck(
+            embed_fonts=False,
+            slides=[
+                Slide(
+                    "slide.svg",
+                    zones={
+                        "shrinks": "\\n\\n".join(["A paragraph of text."] * 8),
+                        "floor": "\\n\\n".join(["A paragraph of text."] * 30),
+                        "off": "\\n\\n".join(["A paragraph of text."] * 4),
+                    },
+                ),
+            ],
+        )
+""")
+
+
+@needs_chromium
+def test_render_measures_text_after_fitting(tmp_path: Path) -> None:
+    (tmp_path / "slides").mkdir()
+    (tmp_path / "slides" / "slide.svg").write_text(RENDER_SVG)
+    (tmp_path / "deck.py").write_text(RENDER_DECK)
+    result = render_slides(
+        tmp_path / "deck.py", None, None, no_sandbox=True, contrast=False
+    )
+    overflow = {f.target: f for f in result.findings if f.kind == "overflow"}
+    # Shrunk until it fits: nothing to report.
+    assert "#zone-shrinks" not in overflow
+    # At the floor and still too much: a problem saying how far it shrank,
+    # the readable minimum (1080/80 = 13.5 of 36: 37.5 %) above the 33 % floor.
+    floor = overflow["#zone-floor"]
+    assert floor.is_problem
+    assert floor.size == pytest.approx(0.375, abs=0.001)
+    assert "even shrunk to 38%" in floor.message()
+    # Shrinking off: overflows at its own size.
+    assert overflow["#zone-off"].size == 0
+    assert not any(f.kind == "small-text" for f in result.findings)

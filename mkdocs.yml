@@ -84,6 +84,7 @@ nav:
     - Charts: authoring/charts.md
     - Posters and page sizes: authoring/posters.md
     - Working in Inkscape: authoring/inkscape.md
+    - Checking slides: authoring/checking.md
   - Layouts and themes:
     - Layouts: design/layouts.md
     - Overlays: design/overlays.md

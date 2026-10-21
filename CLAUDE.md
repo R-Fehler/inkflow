@@ -76,7 +76,8 @@ src/
                                `physical_length_pt` (an SVG root's 841mm),
                                `print_min_text` (`PRINT_MIN_TEXT` of the sheet's
                                body size, in slide units: shrink-to-fit's floor on
-                               a printed slide)
+                               a printed slide, and `render`'s small-text hint;
+                               `PRINT_MIN_BODY` the body-text one)
     enums.py          shared enums (Direction, Align, VAlign, MediaFit, MediaAlign,
                                ColorMode, Muted, Trigger, AnimationKind, ChartKind,
                                FrameTarget);
@@ -261,13 +262,62 @@ src/
                                mixed sizes print each on its own sheet; `--bleed`
                                (`extend_backgrounds`: canvas-covering rects/images
                                grown into it) and `--crop-marks`; `find_chromium`;
-                               the PDF page inlines bundles/fit.js (shrink-to-fit)
+                               the PDF page inlines bundles/fit.js (shrink-to-fit);
+                               `build_handout_pdf` (`inkflow export --handout`), which
+                               reaches Chromium over a loopback HTTP server (`served`,
+                               also `render`'s), never file:// (a snap/Flatpak Chromium
+                               has a private /tmp), and `_run_chromium` checks the
+                               written file and reports Chromium's stderr
+                               (`cdp.chromium_said`); `is_paper_svg` (an SVG in mm)
     pdfboxes.py       `set_page_boxes`: Chromium writes page sizes on a ~1/75 in grid, so
                                each page's MediaBox is rewritten to the exact size
                                (aligned with the content hung from the top-left),
                                plus TrimBox/BleedBox with bleed; the file is
                                re-assembled from its xref table (left alone when
                                it is not a classic-xref PDF)
+    render.py         `inkflow render`: one headless Chromium for every slide (cdp.py),
+                               viewport set to the slide's exact size; each slide page
+                               resolves `window.inkflowRendered` to its layout findings
+                               (src/ts/render/measure.ts), parsed into `Finding`s
+                               (`message()`, `is_problem`: small text is a hint);
+                               a printed slide (`print_checks`: a print deck, or an
+                               SVG in mm without a deck size) gets `__RENDER_PRINT__`
+                               (`print_check`: pt per unit, text below 0.6 of the
+                               sheet's body size a hint, body text below 0.8) and
+                               raster pictures checked at their printed dpi
+                               (`low-res`: <150 hint, <100 problem);
+                               `check_built` = the same measurements of slides
+                               already built (no PNG, contrast only when asked),
+                               for a frontend's problem marks;
+                               `--check` = no output path; `--by-id` names the
+                               images `<id>.png` (`image_name`); the contact sheet
+                               (`sheet_layout`/`sheet_pages`/`sheet_html`: ≤1600 px wide,
+                               ≤16 slides per image) is one more page screenshot of the
+                               slide shots, each taken at its cell's size;
+                               `page_template`/`slide_page` (a slide on a page of its
+                               own deck, for a frontend to reuse)
+                               `--boxes`: `window.inkflowBoxes()` (src/ts/render/boxes.ts)
+                               read back as `SlideBoxes` of `ElementBox` (every element
+                               with an id, zones with content extent + `free` height,
+                               `zone-x/N` text blocks with their text's extent), no PNG
+                               unless `-o`; `render_json` is `--json`
+                               contrast (default on, `--no-contrast`): `_contrast` shoots
+                               the slide as shown and after `window.inkflowHideText()`
+                               (fast PNGs, `Page.screenshot_base64`), and
+                               `window.inkflowContrast(shown, hidden)` returns `contrast`
+                               findings (`ratio`/`needs`/`color`/`background`; below 3:1
+                               a problem, 3–4.5:1 for small text a hint)
+    cdp.py            minimal DevTools client over `websockets`: `Browser.launch`
+                               (--remote-debugging-port=0, port read from the profile's
+                               DevToolsActivePort, socket opened directly so no proxy
+                               applies), `Page` (navigate → load event, evaluate awaiting
+                               promises, viewport, screenshot), `chromium_said`
+    handout.py        the slides with their speaker notes: `handout_body`
+                               (`.h-item`s, each svg in a `.trim` for fit.js),
+                               `handout_page` (layouts notes / compact, paper a4 /
+                               letter, `bar` = the view's controls); the server's
+                               `/handout` (not for a view link: it shows the notes) and
+                               `export.build_handout_pdf` (`inkflow export --handout`)
     assets.py         asset reference resolution. `AssetRoots` holds the allowed roots
                                (project dir, theme asset dir, and the PDF page cache
                                `.inkflow/cache/pdf/` as `_pdf/`) and converts between an
@@ -328,9 +378,12 @@ src/
                                without a console, as by pythonw)
     cli/              CLI package (entry point inkflow.cli:main). _common.py holds the
                                `main` group (`_Group`: a `DeckError` is one error line),
-                               shared options, and the Project/Target helpers;
+                               shared options, the Project/Target helpers and
+                               `DeckSlides`/`slide_number` (SLIDE = presentation number or id);
                                commands are grouped by area: project.py (init, setup-git,
-                               completion), present.py (serve, build, export), authoring.py
+                               completion), present.py (serve, build, export [--handout]),
+                               render.py (`inkflow render`; `current_slide` asks the
+                               plugins), authoring.py
                                (clean, label2id, add, parent group, sync, layouts [--plain | --json]), color.py (colorize,
                                palette), verify.py. Submodules register on `main` by import,
                                then each plugin's `register_cli` (cli/__init__.py)
@@ -422,16 +475,19 @@ src/
                                size is letterboxed)
     plugins.py        `Plugin` (entry-point group `inkflow.plugins`): `register_cli`,
                                `slide_checks`/`deck_checks`, `server_extensions` +
-                               `serve_options`, `completion_spec`;
+                               `serve_options`, `completion_spec`, `current_slide`
+                               (`inkflow render`'s default);
                                `loaded()` (found once; `INKFLOW_NO_PLUGINS=1` = none),
                                `register`/`unregister` (tests, embedding)
     ns.py             XML namespace constants
     tui.py            terminal UI (Rich)
     presenter.html    shell template — inlined with CSS/JS at serve time
     pdf.html          PDF export template
+    render.html       single-slide page `inkflow render` measures and screenshots
     bundles/          pre-built JS/CSS output (committed; no Node needed at install time)
       presenter.js    navigation, transitions, WebSocket, presenter panel
       presenter.css   all presenter styles including the sidebar panel
+      render.js       single-slide renderer + layout measurement (src/ts/render)
       fit.js          shrink-to-fit for the PDF export page (src/ts/fit, pdf.html)
     theme/            built-in theme: layouts/*.svg (the 16:9 ones: cover, section, title,
                                content, center, two-cols, three-cols, comparison, quad,
@@ -516,6 +572,20 @@ src/
     fit/              main.ts: the PDF export page's script (bundles/fit.js, inlined
                       into pdf.html by export.py): `fitSlide` on every slide, again
                       on load and once fonts are ready
+    render/           the single-slide page behind `inkflow render`: main.ts (step,
+                      `fitSlide`, waits for load/fonts/first video frames, fits
+                      again), measure.ts (zone
+                      text vs its foreignObject box, code blocks cut off, drawn
+                      side-by-side text boxes shrunk to fit by different
+                      amounts (`unevenFits`, a hint: `uneven-fit`),
+                      objects vs the viewBox — skipping clipped/masked content,
+                      unpainted shapes and anything spanning the slide — and text
+                      below 1/80 of the slide height; all in slide units),
+                      boxes.ts (`--boxes`: each id'd element's box after
+                      transforms, zone content extent/free space, text blocks)
+                      contrast.ts (each text run vs the hidden-text shot's pixels
+                      where its glyphs are, worst tenth decides; halo strokes,
+                      shadows that help, alpha blended; pure WCAG maths tested)
   css/                CSS source
     shared/           theme variables, animation keyframes, ink.css (the ink palette)
     presenter/        presenter partials including pv.css (sidebar panel)
@@ -549,7 +619,7 @@ Non-fatal records collected during the rebuild (`inkflow.logging.collect_logs`, 
 The HTTP response includes `Cache-Control: no-store` so hard refreshes always get fresh content.
 
 **A served deck rebuilds what a change touched (`incremental.py`).**
-The watcher still rebuilds on every change of any project file, and `server.rebuild` still runs deck.py and walks every slide, but `process_deck(cache=)` takes a slide from the last build unless one of its inputs changed (`server.Kept`: a `SlideCache` per served deck; `build`, `export`, `verify` pass none and are untouched). A slide's inputs and how each is watched: the files it read or looked for, recorded by `deps.note` while it is processed and compared by stamp at the next build, "not there" included (so its layout chain and overlays, its Markdown and style file, chart data, PDFs and their converted or committed pages, a drawn-in diagram, each candidate of a name search: a `slides/x.svg` that now shadows the layout `x` is a change); what deck.py says of it and of the deck, compared by value (`frozen`: types count, `Inline("a")` is not the path `"a"`; a class deck.py defines is a new class on every load, so slides using one are always processed; a Markdown reveal's `type=Name` makes the slide depend on deck.py, whether the name was found or not); its id. **Not** its number or the slide count: they reach the output only as the root's `inkflow-slide-N` id (and the `@scope` naming it) and the text of `zone-slide-number`/`-total`, so the cache processes a slide with stand-in numbers and puts the real ones into the result (`_Template`), and inserting or moving a slide processes no other slide (a slide whose result shows a stand-in anywhere else is kept by its numbers instead, `_plain`). The notes file is a cache entry of its own, so typing a note processes no slide. What is deliberately outside the cache and done for every slide on every build: sections, the asset time stamps (`server._versioned`, which is how a changed picture reaches the pages), the keys, the deck stylesheet, fonts (their per-slide specs are memoized by SVG text in fonts.py), transitions. A slide whose build fell short for a reason that may pass (a PDF page that could not be converted) is not kept (`deps.retry`). Warnings logged while a slide (or its notes) was processed are logged again when it is kept; the one "no PDF converter" warning per build is said by `Build.finish`, and the converter is part of the deck's key, so one installed while the server runs shows the figures. Whoever adds a file read to the slide pipeline must `note` it: tests/test_incremental.py compares every incremental build with a full one and holds each slide's recorded files to what an audit hook saw Python open. `r` in the terminal (`rebuild(full=True)`) forgets what is kept; the TUI says how many slides a rebuild processed (`(N changed)`).
+The watcher still rebuilds on every change of any project file, and `server.rebuild` still runs deck.py and walks every slide, but `process_deck(cache=)` takes a slide from the last build unless one of its inputs changed (`server.Kept`: a `SlideCache` per served deck; `build`, `export`, `render`, `verify` pass none and are untouched). A slide's inputs and how each is watched: the files it read or looked for, recorded by `deps.note` while it is processed and compared by stamp at the next build, "not there" included (so its layout chain and overlays, its Markdown and style file, chart data, PDFs and their converted or committed pages, a drawn-in diagram, each candidate of a name search: a `slides/x.svg` that now shadows the layout `x` is a change); what deck.py says of it and of the deck, compared by value (`frozen`: types count, `Inline("a")` is not the path `"a"`; a class deck.py defines is a new class on every load, so slides using one are always processed; a Markdown reveal's `type=Name` makes the slide depend on deck.py, whether the name was found or not); its id. **Not** its number or the slide count: they reach the output only as the root's `inkflow-slide-N` id (and the `@scope` naming it) and the text of `zone-slide-number`/`-total`, so the cache processes a slide with stand-in numbers and puts the real ones into the result (`_Template`), and inserting or moving a slide processes no other slide (a slide whose result shows a stand-in anywhere else is kept by its numbers instead, `_plain`). The notes file is a cache entry of its own, so typing a note processes no slide. What is deliberately outside the cache and done for every slide on every build: sections, the asset time stamps (`server._versioned`, which is how a changed picture reaches the pages), the keys, the deck stylesheet, fonts (their per-slide specs are memoized by SVG text in fonts.py), transitions. A slide whose build fell short for a reason that may pass (a PDF page that could not be converted) is not kept (`deps.retry`). Warnings logged while a slide (or its notes) was processed are logged again when it is kept; the one "no PDF converter" warning per build is said by `Build.finish`, and the converter is part of the deck's key, so one installed while the server runs shows the figures. Whoever adds a file read to the slide pipeline must `note` it: tests/test_incremental.py compares every incremental build with a full one and holds each slide's recorded files to what an audit hook saw Python open. `r` in the terminal (`rebuild(full=True)`) forgets what is kept; the TUI says how many slides a rebuild processed (`(N changed)`).
 
 **Position sync is a dumb relay with client-side authority + modes.**
 Clients send `{"type":"nav","slideIndex","step"}` (validated + clamped server-side by `_coerce_nav_position`; a view link's are dropped, and its page starts in `follow`); the server stores the last position and rebroadcasts it as `{"type":"position",...}` to the *other* clients, and pushes it once to each newly connected client. A window that booted from a deep link (a slide named in the URL, captured by `readURL()` before `syncURL()` rewrites the bar) or reconnected asserts its own position and ignores that first push; a bare window adopts it. Each client also has a per-tab **sync mode** (`two-way`/`present`/`follow`/`solo`, `shared/types.ts`) deciding locally whether it broadcasts nav (`sends()`) and applies incoming positions (`receives()`) — the server knows nothing about modes. `s` cycles the mode; `syncmenu.ts` owns the status-bar widget, `websocket.ts` the network/state. Switching into a receiving mode sends `{"type":"sync-request"}` to catch up. Persisted in `sessionStorage`.
@@ -598,7 +668,7 @@ For second-screen use, open the same URL in two windows and toggle the panel in 
 
 Search order: `<project>/fonts/` → the active theme's `fonts/` → `SHIPPED_FONTS_DIR` (whatever the theme) → user font dir → system dirs. A variable font is one record over its `wght` range (`weight_range`; "Inter Variable" is indexed as Inter, `_family_key`); `@font-face` rules describe the *file* (weight range, real style; a colour font `1 1000`), deduped per (family, file), so the browser synthesises only what no file has. Specs come from the slides' `font-family` values and from the token declarations in the deck CSS (`_specs_from_tokens`: every family of each list, upright/italic × 400/700; later families are `need="fallback"`, the math token's `need="math"`).
 
-Serve (`embed_fonts_css`, index cached per process): shipped files are linked as `/_inkflow/fonts/<file>` (`shipped_font_url`; the server route, behind the door like every request, serves only those files, cacheable), anything else is a full base64 data URI. Build/export (`embed_fonts_css_subsetted`): every face is subset (fontTools, WOFF2, all layout features and the name table kept) to the slides' codepoints + printable ASCII + CSS `content` strings; with MathML, plus `_MATH_BASE` (radicals, fences) and every styled form of each letter in a formula (`_math_alphanumerics`: a browser draws `<mi>x</mi>` as U+1D465); a fallback family (emoji) only when the deck has characters the first families lack, the math font only with formulas. Subsets are cached by font content + codepoints in `$INKFLOW_CACHE_DIR` or the user cache dir (`_subset_cached`; tests point it at a session temp dir). If subsetting fails the full file is embedded. The PDF: Chromium writes variable and CFF faces as Type 3 (outlines, text selectable), static TrueType as TrueType; `pdf.html` hides video controls (their 0:00 is a system font).
+Serve (`embed_fonts_css`, index cached per process): shipped files are linked as `/_inkflow/fonts/<file>` (`shipped_font_url`; the server route, behind the door like every request, serves only those files, cacheable), anything else is a full base64 data URI. Build/export/render (`embed_fonts_css_subsetted`): every face is subset (fontTools, WOFF2, all layout features and the name table kept) to the slides' codepoints + printable ASCII + CSS `content` strings; with MathML, plus `_MATH_BASE` (radicals, fences) and every styled form of each letter in a formula (`_math_alphanumerics`: a browser draws `<mi>x</mi>` as U+1D465); a fallback family (emoji) only when the deck has characters the first families lack, the math font only with formulas. Subsets are cached by font content + codepoints in `$INKFLOW_CACHE_DIR` or the user cache dir (`_subset_cached`; tests point it at a session temp dir). If subsetting fails the full file is embedded. The PDF: Chromium writes variable and CFF faces as Type 3 (outlines, text selectable), static TrueType as TrueType; `pdf.html` hides video controls (their 0:00 is a system font).
 
 The presenter's interface uses `"Inkflow UI"` (Inter), `"Inkflow UI Mono"` (JetBrains Mono), `"Inkflow UI Symbols"` (STIX) and `"Inkflow UI Emoji"` (Twemoji), names of their own so they never mix with a deck's subset: `server.build_html` adds `ui_fonts_css()` (URLs) to the page CSS, a static build passes `ui_fonts_css(text)` subset to the presenter's own text, slide titles and notes.
 
@@ -669,7 +739,7 @@ The target zone is the `zones` dict key (`"content"` → `zone-content`); `TextB
 Inline styles are only emitted when the corresponding param is non-`None`; CSS variables handle layout-level defaults without touching the element's `style`.
 
 **Text size and shrink-to-fit are source; the fitted size is the browser's.**
-A zone's text size is a factor, `--inkflow-font-scale`, and whether it shrinks to fit is `--inkflow-fit` (`none` = never; anything else, the default, shrinks). Both follow the alignment layers: `TextBox(size=, fit=)` or a marker's `size=80%`/`fit=none` go on the wrapper's inline style (`content.py`), which beats the zone shape's own style (carried onto the foreignObject like `--inkflow-padding`, so a text box of the slide or a layout's zone for all its slides), which beats layout/theme CSS (a deck-wide `:root { --inkflow-fit: none }` in styles.css works because custom properties inherit). contract.css sizes `.inkflow-wrapper` as `calc(1em * var(--inkflow-font-scale, 1) * var(--inkflow-fit-scale, 1))`; everything inside is in em. Fitting needs real text layout (fonts, line breaks, formulas), so it runs in the browser, in every page that shows a slide, with one module (`src/ts/shared/fit.ts`): the presenter on `slideMounted` (before a transition takes the slide; refit on fonts loaded only when no transition is in flight) and its overview/next preview, so the static build too; the PDF page (`fit.js` in pdf.html, at parse, on load and on fonts ready); and any frontend's canvas (`scheduleFit`, a frame later once attached). `fitZone` bisects the factor (to 1 %) between 1 and the floor, measuring with every step shown (reveals are transparent, not removed, so the wrapper children's layout heights count them; `display: none` content does not take room) plus code blocks that scroll and tables wider than the box; the floor is the larger of a third of the box's own text size and the readable minimum: 1/80 of the slide's height (`MIN_TEXT_FRACTION`) or, on a printed slide, `data-inkflow-min-text` that the pipeline stamps on the root (`sizes.print_min_text`: `PRINT_MIN_TEXT` of the sheet's body size). The result is an inline `--inkflow-fit-scale` on the wrapper and `data-inkflow-fit`/`data-inkflow-overflow` on the foreignObject, for a page to show. Nothing fitted is ever written to a file. contract.css also resets margins and padding inside `.inkflow-wrapper` (`:where()`, as weak as the presenter's `*` reset), so an editor and the PDF page lay text out exactly as the presenter does and fit it to the same size.
+A zone's text size is a factor, `--inkflow-font-scale`, and whether it shrinks to fit is `--inkflow-fit` (`none` = never; anything else, the default, shrinks). Both follow the alignment layers: `TextBox(size=, fit=)` or a marker's `size=80%`/`fit=none` go on the wrapper's inline style (`content.py`), which beats the zone shape's own style (carried onto the foreignObject like `--inkflow-padding`, so a text box of the slide or a layout's zone for all its slides), which beats layout/theme CSS (a deck-wide `:root { --inkflow-fit: none }` in styles.css works because custom properties inherit). contract.css sizes `.inkflow-wrapper` as `calc(1em * var(--inkflow-font-scale, 1) * var(--inkflow-fit-scale, 1))`; everything inside is in em. Fitting needs real text layout (fonts, line breaks, formulas), so it runs in the browser, in every page that shows a slide, with one module (`src/ts/shared/fit.ts`): the presenter on `slideMounted` (before a transition takes the slide; refit on fonts loaded only when no transition is in flight) and its overview/next preview, so the static build too; the PDF page (`fit.js` in pdf.html, at parse, on load and on fonts ready) and the handout; `inkflow render` before measuring, so `render --check` sees what the slide shows; and any frontend's canvas (`scheduleFit`, a frame later once attached). `fitZone` bisects the factor (to 1 %) between 1 and the floor, measuring with every step shown (reveals are transparent, not removed, so the wrapper children's layout heights count them; `display: none` content does not take room) plus code blocks that scroll and tables wider than the box; the floor is the larger of a third of the box's own text size and the readable minimum: 1/80 of the slide's height (`MIN_TEXT_FRACTION`, shared with measure.ts) or, on a printed slide, `data-inkflow-min-text` that the pipeline stamps on the root (`sizes.print_min_text`: `PRINT_MIN_TEXT` of the sheet's body size, the constant render.py's print check uses). The result is an inline `--inkflow-fit-scale` on the wrapper and `data-inkflow-fit`/`data-inkflow-overflow` on the foreignObject, for a page to show (measure.ts's `scale` on an overflow finding: "even shrunk to N%"). Nothing fitted is ever written to a file. contract.css also resets margins and padding inside `.inkflow-wrapper` (`:where()`, as weak as the presenter's `*` reset), so an editor and the PDF page lay text out exactly as the presenter does and fit it to the same size.
 
 **Charts are drawn at build time from data files, in theme tokens.**
 A `Chart` zone value or a ```` ```chart ```` Markdown fence is turned into plain SVG by `charts.py` while the deck builds, so serve, the static build, the PDF export and an editor's thumbnails show the same chart and nothing runs in the browser. The data is a CSV/TSV/JSON file (or inline `data={...}` / a Markdown table), its path resolving against the file it is written in like any asset; it is inlined into the slide, so nothing is copied or versioned, and the watcher's rebuild on any project file is what redraws a chart when its data changes. `zones.build_slide_content` resolves a deck chart to a `ResolvedChart` (data read, or the error to draw in its place) and expands fence placeholders with the Markdown file's `AssetSource`; `content.py` swaps the zone shape for a nested `<svg>` with the zone's box and user units (provenance carried, so an editor moves and resizes it as the zone rect). `y_min`/`y_max` fix the value axis's ends (`_bounded`: the fixed end is the first/last tick, round ticks too close to it dropped) and `y2` puts columns on a second axis on the right (`_Series.axis`, with `y2_min`/`y2_max`; refused for stacked or horizontal bars); with any end fixed the marks are clipped to the plot (`<id>-clip`). Marks are painted with the palette tokens (`charts.PALETTE`, the chromatic part of `colors.SVG_TOKENS` in a fixed order) in `style` (never presentation attributes, where `var()` is invalid) and text with the text tokens, so charts follow the theme and colour mode. Chart text is `PageSize.chart_text_scale` of the body size (0.6 on a screen, 1.0 on paper; `DeckContext.chart_scale`, `charts.fence_font` for a fence). Every series is a `<g id="<zone>-series-<slug>">` holding its marks, value labels and legend entry (pie slices `-slice-`), which is what `animations=[...]` targets to reveal them one by one (`verify` draws a slide's charts to know those ids, and reports unreadable data). A fence chart is inline SVG inside a zone's HTML: `html_fragment_to_xml` restores the camelCase names lxml's HTML parser lowercases, and `_replace_with_foreignobject` attaches the foreignObject before its content because lxml otherwise drops the inline `<svg>`'s xmlns as "redundant" with the slide root's.
@@ -703,7 +773,10 @@ Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop +
   changed slide at a new URL. build/export never stamp
 - `/_inkflow/fonts/<file>`: the fonts inkflow ships (`fonts.shipped_font_file`,
   nothing else in that folder or outside it), `Cache-Control: public`
-- anything else an extension's `http` answers, then the presenter at any path
+- anything else an extension's `http` answers, then
+  `/handout?layout=notes|compact&paper=a4|letter` (the handout view,
+  handout.py; a view link gets 403, `_VIEW_ONLY`: it shows the notes) and
+  the presenter at any path
 - WebSocket on the same port at `/_inkflow/ws` (`access.WS_PATH`): the HTTP
   handler reads the request head, checks it, and hands an upgrade to
   `wsbridge.Bridge` (websockets 16.0's `ServerConnection` adopted onto the

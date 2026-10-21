@@ -164,6 +164,7 @@ layouts for the A paper sizes), listed with their zones in [Layouts](../design/l
 [Markdown zone markers](../authoring/markdown.md#explicit-markers)
 such as `::left::` and `::quote::` target the named zones in each layout.
 
-<!-- The screenshots are themes-tour/deck.py, slides 1 2 4 5 6 9 10 13 20, with
-     INKFLOW_TOUR_THEME (default, paper, stage) and INKFLOW_TOUR_MODE (dark,
-     light) set, as a contact sheet at a quarter of the size, converted to WebP. -->
+<!-- The screenshots are themes-tour/deck.py, slides 1 2 4 5 6 9 10 13 20:
+     INKFLOW_TOUR_THEME=paper INKFLOW_TOUR_MODE=light inkflow render
+       --deck themes-tour/deck.py --sheet -s 1 -s 2 ... --scale 0.25 -o paper-light.png
+     then converted to WebP. -->

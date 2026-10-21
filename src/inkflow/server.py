@@ -101,6 +101,7 @@ from inkflow.fonts import (
     shipped_font_url,
     ui_fonts_css,
 )
+from inkflow.handout import handout_page
 from inkflow.incremental import SlideCache, as_patch, keys_of, set_keys
 from inkflow.loaders import load_deck_scripts, load_deck_styles
 from inkflow.logging import Levels, collect_logs, logger, report, resolve_levels
@@ -983,6 +984,24 @@ def build_html(
     return html.encode("utf-8")
 
 
+def build_handout_html(state: State, request_path: str) -> bytes:
+    """The handout view (handout.py): the served slides with their notes,
+    ``?layout=notes|compact&paper=a4|letter``."""
+    from urllib.parse import parse_qs, urlsplit
+
+    query = parse_qs(urlsplit(request_path).query)
+    page = handout_page(
+        state["slides"],
+        served_ui_fonts() + "\n" + state["styles_css"],
+        title=state["title"],
+        data_theme="" if state["mode"] == ColorMode.DARK else "light",
+        layout=(query.get("layout") or ["notes"])[0],
+        paper=(query.get("paper") or ["a4"])[0],
+        bar=True,
+    )
+    return page.encode("utf-8")
+
+
 _SERVED_SUFFIXES = set(MIME_TYPES)
 
 
@@ -1158,6 +1177,11 @@ _SSH_401 = (
     + "shared the deck with you, open the link they sent."
 )
 
+_VIEW_ONLY = (
+    "This link shows the presentation only: the handout, with the speaker "
+    + "notes, is for the people presenting it."
+)
+
 
 def _probe_body() -> bytes:
     deck = _served.deck_path
@@ -1268,10 +1292,19 @@ def make_http_route(
                 writer, "404 Not Found", "No deck open", "This server has no deck open."
             )
             return
-        # Opening a source file in a program is the owner's alone.
-        body = build_html(
-            _state, ws_port, edit_commands if role == "owner" else NO_EDIT_COMMANDS
-        )
+        if path == "/handout":
+            # The handout shows the speaker notes.
+            if role == "viewer":
+                await _refuse(writer, "403 Forbidden", "View-only link", _VIEW_ONLY)
+                return
+            body = build_handout_html(_state, request.target)
+        else:
+            # Opening a source file in a program is the owner's alone.
+            body = build_html(
+                _state,
+                ws_port,
+                edit_commands if role == "owner" else NO_EDIT_COMMANDS,
+            )
         await _respond(writer, "200 OK", body)
 
     return route

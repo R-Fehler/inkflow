@@ -18,7 +18,9 @@ adds:
 - ``server_extensions`` adds pages, messages and build steps to the server
   (``inkflow.extensions.ServerExtension``), ``serve_options`` options to
   ``inkflow serve`` for them;
-- ``completion_spec`` adds its commands to the shell completion spec.
+- ``completion_spec`` adds its commands to the shell completion spec;
+- ``current_slide`` says which slide the author is looking at, for commands
+  that default to it (``inkflow render``).
 
 Plugins are found once per process. ``INKFLOW_NO_PLUGINS=1`` turns them all
 off (the core on its own, as a test or a bug report wants it); ``register``
@@ -88,6 +90,12 @@ class Plugin:
         """Carapace command blocks for ``inkflow completion carapace``: YAML
         list items (``  - name: …``) as the core's spec lists its commands;
         a block named like a core command replaces the core's."""
+        return None
+
+    def current_slide(self, project_dir: Path) -> int | None:
+        """The slide (presentation number, 1-based) the author has open, if
+        this plugin knows it."""
+        del project_dir
         return None
 
 

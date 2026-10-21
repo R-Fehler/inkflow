@@ -17,7 +17,14 @@ from inkflow.cli.present import add_serve_options
 from inkflow.logging import logger
 
 # Import each submodule for its side effect: registering commands on ``main``.
-for _submodule in ("authoring", "color", "present", "project", "verify"):
+for _submodule in (
+    "authoring",
+    "color",
+    "present",
+    "project",
+    "render",
+    "verify",
+):
     import_module(f"inkflow.cli.{_submodule}")
 
 for _plugin in plugins.loaded():

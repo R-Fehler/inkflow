@@ -6,10 +6,17 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 from html import escape as escape_html
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import cast
+
+from typing_extensions import override
 
 from inkflow import ns
 from inkflow.assets import (
@@ -19,6 +26,7 @@ from inkflow.assets import (
     is_local_ref,
     rewrite_references,
 )
+from inkflow.cdp import chromium_said
 from inkflow.enums import ColorMode
 from inkflow.extensions import State
 from inkflow.fonts import embed_fonts_css_subsetted, ui_fonts_css
@@ -36,7 +44,7 @@ from inkflow.titles import resolve_deck_title
 # ── build ─────────────────────────────────────────────────────────────────────
 
 
-def _asset_roots(deck: Deck, project_dir: Path) -> AssetRoots:
+def asset_roots(deck: Deck, project_dir: Path) -> AssetRoots:
     return AssetRoots(project_dir, deck.theme.asset_dir())
 
 
@@ -58,11 +66,11 @@ def build_static_html(
 
     # After font subsetting: inlining stuffs base64 into the same slide strings the
     # subsetter scans for used characters, and every one of them would be kept.
-    roots = _asset_roots(deck, project_dir)
+    roots = asset_roots(deck, project_dir)
     if inline_assets:
         _inline_assets(slides, roots, out_dir)
     else:
-        _copy_assets(slides, roots, out_dir)
+        copy_assets(slides, roots, out_dir)
 
     state: State = {
         "slides": slides,
@@ -147,7 +155,7 @@ def _referenced_assets(slides: list[SlideData]) -> dict[str, str]:
     return by_ref
 
 
-def _copy_assets(slides: list[SlideData], roots: AssetRoots, out_dir: Path) -> None:
+def copy_assets(slides: list[SlideData], roots: AssetRoots, out_dir: Path) -> None:
     """Copy every asset the slides reference into `out_dir`, mirroring the source tree.
 
     A canonical ref is relative and free of ``..`` by construction, so `out_dir /
@@ -224,7 +232,7 @@ def _inline_assets(slides: list[SlideData], roots: AssetRoots, out_dir: Path) ->
 # ── export (PDF) ──────────────────────────────────────────────────────────────
 
 
-def _slide_dimensions(svg_str: str) -> tuple[int, int]:
+def slide_dimensions(svg_str: str) -> tuple[int, int]:
     """Extract slide width and height from an SVG viewBox, falling back to 1920x1080."""
     m = re.search(r'viewBox="[-\d.]+\s+[-\d.]+\s+([\d.]+)\s+([\d.]+)"', svg_str)
     if m:
@@ -344,8 +352,17 @@ def _canvas(svg: str) -> tuple[float, float]:
     box = parse_view_box(attrs.get("viewBox"))
     if box is not None:
         return box[2], box[3]
-    w, h = _slide_dimensions(svg)
+    w, h = slide_dimensions(svg)
     return float(w), float(h)
+
+
+def is_paper_svg(svg: str) -> bool:
+    """Whether an SVG is drawn on paper: its ``width`` or ``height`` is a
+    length in mm, cm, in, pt or pc (an Inkscape A0 page)."""
+    attrs = _root_attrs(svg)
+    return any(
+        physical_length_pt(attrs.get(a)) is not None for a in ("width", "height")
+    )
 
 
 def _own_page(svg: str, canvas: tuple[float, float]) -> tuple[float, float]:
@@ -524,7 +541,7 @@ def build_pdf(
 
     target = output.resolve()
     with tempfile.TemporaryDirectory() as tmp:
-        _copy_assets(slides, _asset_roots(deck, project_dir), Path(tmp))
+        copy_assets(slides, asset_roots(deck, project_dir), Path(tmp))
         slides_html = "\n".join(
             _slide_html(s["svg"], page, name)
             for s, page, name in zip(slides, pages, classes, strict=True)
@@ -560,6 +577,79 @@ def build_pdf(
     )
 
 
+_TAG = re.compile(r"<[^>]+>")
+
+
+def build_handout_pdf(
+    deck_path: Path,
+    output: Path,
+    chromium: str | None = None,
+    no_sandbox: bool = False,
+    layout: str = "notes",
+    paper: str = "a4",
+) -> None:
+    """Print the deck's handout (handout.py: every shown slide with its
+    speaker notes, ``layout`` ``notes`` or ``compact``, on ``paper`` ``a4``
+    or ``letter``) to a PDF."""
+    from inkflow.handout import handout_page
+
+    exe = chromium or find_chromium()
+    if exe is None:
+        raise RuntimeError(
+            "Chromium not found. Install chromium or google-chrome,"
+            + " or pass --chromium PATH."
+        )
+    deck = load_deck(deck_path)
+    project_dir = deck_path.parent
+    slides = process_deck(deck, project_dir, deck_path)
+    if not slides:
+        raise RuntimeError("Cannot export a handout: the deck has no visible slides.")
+    styles_css = load_deck_styles(deck, project_dir)
+    if deck.embed_fonts:
+        font_css = embed_fonts_css_subsetted(
+            slides, project_dir, deck.theme.fonts_dir, styles_css=styles_css
+        )
+        if font_css:
+            styles_css = (font_css + "\n" + styles_css).strip()
+    # The handout's own words (titles, notes) are in the interface's font,
+    # subset to them: the page is printed from a folder, not the server.
+    words = " ".join(
+        f"{s.get('title') or ''} {s.get('id')} {_TAG.sub(' ', s.get('notes') or '')}"
+        for s in slides
+    )
+    styles_css = (
+        f"{ui_fonts_css(words + ' 0123456789 Handout · No notes')}\n{styles_css}"
+    )
+    html = handout_page(
+        slides,
+        styles_css,
+        title=resolve_deck_title(deck, project_dir),
+        data_theme="" if deck.effective_mode == ColorMode.DARK else "light",
+        layout=layout,
+        paper=paper,
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        copy_assets(slides, asset_roots(deck, project_dir), Path(tmp))
+        (Path(tmp) / "handout.html").write_text(html, encoding="utf-8")
+        target = output.resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.unlink(missing_ok=True)
+        with served(Path(tmp)) as url:
+            cmd = [
+                exe,
+                "--headless",
+                "--disable-gpu",
+                "--print-to-pdf-no-header",
+                # (What newer Chromium reads: no date, title, URL, page.)
+                "--no-pdf-header-footer",
+                f"--print-to-pdf={target}",
+                f"{url}/handout.html",
+            ]
+            if no_sandbox:
+                cmd.insert(1, "--no-sandbox")
+            _run_chromium(cmd, target, b"%PDF")
+
+
 def _slide_html(svg: str, page: PdfPage, name: str) -> str:
     bleed_class = ""
     if page.bleed > 0:
@@ -572,6 +662,66 @@ def _slide_html(svg: str, page: PdfPage, name: str) -> str:
         f'<div class="slide {name}{bleed_class}"><div class="bleed">'
         f'<div class="trim">{svg}</div></div>{marks}</div>'
     )
+
+
+@contextmanager
+def served(directory: Path) -> Generator[str]:
+    """Serve ``directory`` on a loopback port for the length of the block.
+
+    The page is handed to Chromium over HTTP rather than as a ``file://`` URL:
+    a Chromium installed as a snap (Ubuntu's ``chromium``) or a Flatpak has its
+    own private ``/tmp`` and cannot see the temporary directory the page is
+    written to, so it would print its "file not found" page instead of the
+    deck. Every confined browser can still reach localhost.
+    """
+    handler = partial(_QuietHandler, directory=str(directory))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+class _QuietHandler(SimpleHTTPRequestHandler):
+    @override
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
+def _run_chromium(cmd: list[str], target: Path, magic: bytes) -> None:
+    """Run Chromium to write ``target`` and check that it did.
+
+    Chromium reports most failures only on stderr, and a confined one (snap,
+    Flatpak) that may not write where it was asked exits 0 without a file, so
+    both the exit status and the file itself are checked, and either failure
+    is raised with what Chromium said.
+    """
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        raise RuntimeError(f"could not start {cmd[0]}: {exc}") from exc
+    said = chromium_said(result.stderr)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"{Path(cmd[0]).name} failed (exit status {result.returncode})" + said
+        )
+    try:
+        with target.open("rb") as f:
+            ok = f.read(len(magic)) == magic
+    except OSError:
+        ok = False
+    if not ok:
+        raise RuntimeError(
+            f"{Path(cmd[0]).name} did not write {target}. A Chromium installed as"
+            + " a snap or Flatpak may only write inside your home folder (not in"
+            + " /tmp or a hidden folder): pick an output there, or pass"
+            + " --chromium with another Chromium-based browser."
+            + said
+        )
 
 
 def find_chromium() -> str | None:
