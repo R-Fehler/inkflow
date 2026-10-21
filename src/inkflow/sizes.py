@@ -373,14 +373,17 @@ def parse_view_box(text: str | None) -> tuple[float, float, float, float] | None
 
 def print_body_pt(width_pt: float, height_pt: float) -> float:
     """The body text size a sheet of paper is read at, in points: its shorter
-    side over 80 (30 pt on A0, 21 pt on A1), never below 10 pt: what
-    `PageSize.base_font` gives a print deck."""
+    side over 80 (30 pt on A0, 21 pt on A1), never below 10 pt. What
+    `PageSize.base_font` gives a print deck, and what `inkflow render` checks
+    printed text against."""
     return max(min(width_pt, height_pt) / PRINT_TEXT_RATIO, PRINT_MIN_BODY_PT)
 
 
 PRINT_MIN_TEXT = 0.6
-"""Shrink-to-fit never takes printed text below this fraction of the sheet's
-body size."""
+"""Printed text below this fraction of the sheet's body size is a hint
+(`inkflow render`), and shrink-to-fit never goes below it."""
+PRINT_MIN_BODY = 0.8
+"""Printed body text below this fraction of the sheet's body size is a hint."""
 
 
 def print_min_text(page_pt: tuple[float, float], canvas: tuple[float, float]) -> float:

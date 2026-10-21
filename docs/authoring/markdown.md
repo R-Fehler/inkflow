@@ -117,13 +117,15 @@ This zone keeps its size even when the text runs past the box.
 
 **Every text zone shrinks its text to fit, by default.** When a zone's text
 runs past its box, the slide shows it smaller, just enough to fit: in the
-presenter (its overview and next-slide preview too), the static build and the
-PDF export alike. Nothing is written to your files; only `size` and `fit` are.
+presenter (its overview and next-slide preview too), the static build, the
+PDF export and `inkflow render` alike. Nothing is written to your files; only
+`size` and `fit` are.
 
 Shrinking stops at a floor: a third of the zone's own size, or the smallest
-readable text (1/80 of the slide's height on a screen; on a printed deck, 0.6
-of the sheet's body size), whichever is larger. Text that still does not fit
-at the floor stays there and overflows.
+text `inkflow render --check` calls readable (1/80 of the slide's height on a
+screen; on a printed deck, 0.6 of the sheet's body size), whichever is larger.
+Text that still does not fit at the floor stays there and overflows, and
+[`inkflow render --check`](checking.md) reports it.
 
 The same two settings are CSS custom properties, so they have the three layers
 alignment has. The slide's own text wins (a marker parameter, or

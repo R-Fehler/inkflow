@@ -48,6 +48,29 @@ commands:
       flag:
         deck: ["$files([\".py\"])"]
 
+  - name: render
+    description: Render slides to PNG images and report layout problems.
+    flags:
+      -d, --deck=: Path to deck.py
+      -s, --slide=: Slide number (1-based); repeatable
+      --all: Render every slide
+      --step=: Build step to show
+      --sheet: One contact-sheet PNG of the slides
+      --check: Only measure the layout; exit 1 on a problem
+      -o, --output=: PNG file or directory
+      --by-id: Name the images <id>.png instead of slide-N.png
+      --scale=: Image scale
+      --boxes: Print every element's rendered box (no images unless -o)
+      --no-contrast: Skip the text contrast check
+      --json: Print the result as JSON
+      --chromium=: Path to a Chromium/Chrome binary
+      --no-sandbox: Pass --no-sandbox to Chromium
+    completion:
+      flag:
+        deck: ["$files([\".py\"])"]
+        output: ["$files"]
+        chromium: ["$files"]
+
   - name: clean
     description: Strip Inkscape editor metadata from SVG files.
     flags:
@@ -147,11 +170,16 @@ commands:
       --size=: Page size for every page (a0, a1-landscape, 841x1189mm, 1920x1080)
       --bleed=: Print the background this far past each edge (3mm)
       --crop-marks: Mark the corners outside the bleed
+      --handout: A handout instead (every slide with its speaker notes)
+      --layout=: Handout layout
+      --paper=: Handout paper size
     completion:
       flag:
         deck: ["$files([\".py\"])"]
         size: ["16:9", "4:3", "9:16", "a0", "a1", "a2", "a3", "a4", "a0-landscape", "a1-landscape", "letter"]
         bleed: ["3mm", "5mm", "0.125in"]
+        layout: ["notes", "compact"]
+        paper: ["a4", "letter"]
 
   - name: sync
     description: Refresh layout layers and preview styles in slide SVGs.

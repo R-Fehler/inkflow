@@ -66,6 +66,7 @@ What a plugin can add:
 | `server_extensions(config)` | Pages, messages and build steps on the deck's server (below) |
 | `serve_options()` | Options of `inkflow serve`, read back as `config.options` |
 | `completion_spec()` | Its commands in `inkflow completion carapace` |
+| `current_slide(project_dir)` | The slide `inkflow render` shows when none is named |
 
 A check that raises is reported as a warning line naming the plugin, not as
 a crash of `verify`; a plugin whose commands fail to load is logged and

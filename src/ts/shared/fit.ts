@@ -1,9 +1,10 @@
 // Text size per box and shrink-to-fit, shared by every page that shows a
 // slide: the presenter (and so the static build), its overview and next
-// preview, the PDF export page, and any editor's canvas. Fitting needs the
-// browser's own text layout (fonts, line breaks, formulas), so it runs where
-// the slide is shown, on the same rule everywhere; nothing it finds is ever
-// written to a file. What the author sets is source:
+// preview, the PDF export page, `inkflow render`, and any editor's canvas.
+// Fitting needs the browser's own text layout (fonts, line breaks,
+// formulas), so it runs where the slide is shown, on the same rule
+// everywhere; nothing it finds is ever written to a file. What the author
+// sets is source:
 //
 //   --inkflow-font-scale  a factor on the zone's text (0.8 = 80 %): the zone
 //                         shape's style, layout CSS, a marker's `size=`,
@@ -16,7 +17,7 @@
 // so every size inside (headings, code, tables, formulas: all in em) follows.
 // The foreignObject gets `data-inkflow-fit` (the factor, when shrunk) and
 // `data-inkflow-overflow` (it does not fit even at the floor, or fitting is
-// off), for a page to show.
+// off), for a page to show and `inkflow render` to report.
 
 import { parseViewBox } from "./viewbox";
 

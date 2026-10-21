@@ -14,6 +14,9 @@ declare global {
     const __EDIT_COMMANDS_JSON__: EditCommandsConfig;
     const __ERROR_JSON__: string | null;
     const __LOGS_JSON__: LogEntry[];
+    const __RENDER_SVG__: string;
+    const __RENDER_STEP__: number | null;
+    const __RENDER_PRINT__: import("./render/measure").PrintCheck | null;
 
     interface Window {
         inkflow: {

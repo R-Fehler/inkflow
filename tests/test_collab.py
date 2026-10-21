@@ -496,6 +496,11 @@ def test_a_viewer_follows_and_moves_no_one(shared: int) -> None:
     assert fetch(port, "/", viewer)[0] == 200
     assert fetch(port, "/slides/one.svg", viewer)[0] == 200
     assert fetch(port, "/_inkflow/instance", viewer)[0] == 404  # the owner's
+    # The handout shows the speaker notes: not for a view link.
+    status, _, body = fetch(port, "/handout", viewer)
+    assert status == 403 and b"View-only" in body
+    status, _, body = fetch(port, "/handout?layout=compact&paper=letter")
+    assert status == 200 and b"layout-compact" in body and b"8.5in 11in" in body
     status, _, body = fetch(port, "/_inkflow/instance")
     probe = cast("dict[str, object]", json.loads(body))
     assert status == 200 and str(probe["deck"]).endswith("deck.py")

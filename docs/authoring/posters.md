@@ -141,13 +141,26 @@ little closer. `Deck(font_size=...)` still sets the body size in units
 - **Drawings**: an SVG stays vector and prints sharp at any size. Prefer it to
   a screenshot.
 - **Photos** need pixels: at least 150 dpi at their printed size (a picture
-  30 cm wide wants 1800 px).
+  30 cm wide wants 1800 px). `inkflow render --check` reports any below.
 
 ## Check it
 
 ```bash
 inkflow verify          # slides of another shape than the deck's
+inkflow render --check  # text and pictures, measured as printed
+inkflow render          # a PNG to look at
 ```
+
+On a print deck [`inkflow render`](checking.md) measures the slide as printed:
+
+- text in points against the sheet's body size: below 0.6 of it is a hint
+  (18 pt on A0), body text (paragraphs, lists, tables) below 0.8 of it (24 pt);
+- every raster picture's resolution at its printed size: below 150 dpi a hint
+  (it prints soft), below 100 dpi a problem (pixelated). SVG and PDF figures are
+  never low resolution.
+
+Slides of a deck without a size are checked this way when their SVG is drawn
+on paper (`width="841mm"`).
 
 ## Export
 

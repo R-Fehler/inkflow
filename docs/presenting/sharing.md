@@ -21,7 +21,8 @@ reaches the page reaches the live connection too.
 A viewer's page starts in [follow](sync.md#sync-modes) mode. It can still look
 around on its own (switch to *solo*), but its navigation never moves anyone
 else's slide, it draws [ink](ink.md) on no one else's screen and never saves
-any, and it cannot open the deck's files in a program.
+any, and it cannot open the deck's files in a program or see the
+[handout](export.md#handouts), which shows the speaker notes.
 
 ## On the same network (or VPN)
 

@@ -1,4 +1,5 @@
-"""Plugins: installed packages that add commands, verify lines and completions."""
+"""Plugins: installed packages that add commands, verify lines, completions
+and the slide the author has open."""
 
 from __future__ import annotations
 
@@ -72,6 +73,10 @@ class Checker(Plugin):
     def completion_spec(self) -> str | None:
         return "  - name: hello-plugin\n    description: Say hello\n"
 
+    @override
+    def current_slide(self, project_dir: Path) -> int | None:
+        return 2 if (project_dir / "deck.py").is_file() else None
+
 
 @pytest.fixture
 def checker() -> Iterator[Checker]:
@@ -114,6 +119,21 @@ def test_a_plugin_adds_to_the_completion_spec(checker: Checker) -> None:
     spec = carapace_spec()
     assert "  - name: hello-plugin\n" in spec
     assert "  - name: verify\n" in spec  # the core's are all still there
+
+
+def test_a_plugin_says_which_slide_is_open(project: Path, tmp_path: Path) -> None:
+    from inkflow.cli.render import current_slide
+
+    assert Plugin().current_slide(project) is None  # the default knows none
+    assert current_slide(project) == 1  # no plugin: the first
+    checker = Checker()
+    plugins.register(checker)
+    try:
+        assert current_slide(project) == 2
+        # A plugin that does not know is passed over.
+        assert current_slide(tmp_path / "elsewhere") == 1
+    finally:
+        plugins.unregister(checker)
 
 
 def test_no_plugins_when_turned_off(monkeypatch: pytest.MonkeyPatch) -> None:

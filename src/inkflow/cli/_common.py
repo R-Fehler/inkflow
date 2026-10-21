@@ -12,6 +12,7 @@ from inkflow import logging as inkflow_logging
 from inkflow import sync
 from inkflow.enums import ColorMode
 from inkflow.manifest import Deck
+from inkflow.pipeline import slide_ids
 from inkflow.server import DeckError, load_deck
 from inkflow.themes import Theme
 
@@ -219,3 +220,78 @@ mode_option = click.option(
     default=None,
     help="Color mode for preview style (default: deck mode; dark with --no-deck).",
 )
+
+
+@dataclass(frozen=True)
+class DeckSlides:
+    """The deck as a command addresses it: numbers and ids by deck index."""
+
+    deck: Deck
+    path: Path
+    ids: list[str]
+    numbers: list[int | None]
+    """Presentation number per deck index; None for a hidden slide."""
+
+    @classmethod
+    def load(cls, deck_path: Path) -> DeckSlides:
+        resolved = resolve_deck_path(deck_path)
+        try:
+            deck = load_deck(resolved)
+        except Exception as exc:
+            raise click.ClickException(
+                f"deck.py does not load ({type(exc).__name__}: {exc}); fix it first"
+            ) from exc
+        visible = [s for s in deck.slides if s.visible]
+        shown = dict(zip(map(id, visible), slide_ids(visible), strict=True))
+        numbers: list[int | None] = []
+        count = 0
+        for slide in deck.slides:
+            if slide.visible:
+                count += 1
+            numbers.append(count if slide.visible else None)
+        # A hidden slide has no id in the presentation; it goes by the one it
+        # would infer, numbered on (-2, -3…) past any shown slide's id.
+        taken = set(shown.values())
+        ids: list[str] = []
+        for slide in deck.slides:
+            name = shown.get(id(slide))
+            if name is None:
+                raw = slide_ids([slide])[0]
+                name, n = raw, 2
+                while name in taken:
+                    name, n = f"{raw}-{n}", n + 1
+                taken.add(name)
+            ids.append(name)
+        return cls(deck, resolved, ids, numbers)
+
+    @property
+    def project_dir(self) -> Path:
+        return self.path.parent
+
+    def index(self, ref: str) -> int:
+        """The deck index of SLIDE (a presentation number or an id)."""
+        ref = ref.strip()
+        if ref.isdigit():
+            if int(ref) in self.numbers:
+                return self.numbers.index(int(ref))
+            shown = sum(n is not None for n in self.numbers)
+            raise click.BadParameter(
+                f"no slide {ref}: the deck shows {shown} slides "
+                + "(a hidden slide goes by its id)",
+                param_hint="SLIDE",
+            )
+        if ref in self.ids:  # unique: see load
+            return self.ids.index(ref)
+        raise click.BadParameter(f"no slide with id {ref!r}", param_hint="SLIDE")
+
+
+def slide_number(deck_path: Path, ref: str) -> int:
+    """SLIDE as the presenter numbers it: a number, or a slide id."""
+    ref = ref.strip()
+    if ref.isdigit():
+        return int(ref)
+    slides = DeckSlides.load(deck_path)
+    number = slides.numbers[slides.index(ref)]
+    if number is None:
+        raise click.BadParameter(f"slide {ref!r} is hidden", param_hint="SLIDE")
+    return number

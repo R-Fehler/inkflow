@@ -1,10 +1,10 @@
 """A tour of a theme: the built-in layouts with text, code, a table and charts.
 
-The screenshots on the built-in themes page are this deck shown with each
+The screenshots on the built-in themes page are this deck rendered with each
 theme in both colour modes:
 
     INKFLOW_TOUR_THEME=paper INKFLOW_TOUR_MODE=light \
-        inkflow serve --deck themes-tour/deck.py
+        inkflow render --deck themes-tour/deck.py --sheet
 
 INKFLOW_TOUR_THEME is default, paper or stage; INKFLOW_TOUR_MODE is dark or
 light (the theme's own mode when not set).
