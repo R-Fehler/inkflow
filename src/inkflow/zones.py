@@ -22,7 +22,14 @@ from inkflow.charts import (
 from inkflow.deps import note_class, note_code
 from inkflow.enums import Align, Trigger, VAlign
 from inkflow.logging import logger
-from inkflow.manifest import Chart, Media, TextBox, Video, ZoneContent
+from inkflow.manifest import (
+    Chart,
+    Media,
+    TextBox,
+    Video,
+    ZoneContent,
+    parse_text_scale,
+)
 from inkflow.markdown import (
     html_fragment_to_xml,
     markdown_to_html,
@@ -492,6 +499,92 @@ def _reroute_zones(
     return result
 
 
+# ── Text size and fit parameters ─────────────────────────────────────────────
+
+_FIT_VALUES = {
+    "shrink": True,
+    "on": True,
+    "true": True,
+    "yes": True,
+    "none": False,
+    "off": False,
+    "false": False,
+    "no": False,
+}
+
+
+def _marker_size(zone: str, value: str | None) -> float | None:
+    """A marker's ``size=80%`` (or ``size=0.8``) as a factor."""
+    if value is None:
+        return None
+    try:
+        return parse_text_scale(value)
+    except ValueError as exc:
+        logger.warning(f"::{zone}:: size={value}: {exc}; ignored")
+        return None
+
+
+def _marker_fit(zone: str, value: str | None) -> bool | None:
+    """A marker's ``fit=shrink`` / ``fit=none``."""
+    if value is None:
+        return None
+    fit = _FIT_VALUES.get(value.strip().lower())
+    if fit is None:
+        logger.warning(f"::{zone}:: fit={value}: use fit=shrink or fit=none; ignored")
+    return fit
+
+
+def zone_params(source: str, zone: str) -> dict[str, str]:
+    """The parameters on zone ``zone``'s marker (``{"size": "80%"}``), empty
+    when it has none or no marker."""
+    params: dict[str, str] = {}
+    for m in _ZONE_PATTERN.finditer(source):
+        if m.group(1) == zone:
+            params.update(_parse_zone_params(m.group(2)))
+    return params
+
+
+def set_zone_params(source: str, zone: str, updates: dict[str, str | None]) -> str:
+    """``source`` with zone ``zone``'s marker parameters changed: each key of
+    ``updates`` set to its value, or removed when it is ``None``; every other
+    parameter and every byte outside the marker kept.
+
+    A zone without a marker gets one: text auto-extracted into it (a leading
+    ``#`` heading, the text after the headings) gets an explicit marker, and
+    so do the auto-extracted zones after it, so each keeps its text; a zone
+    the file does not name (filled from the whole file, or not at all) gets
+    an empty marker at the end, which carries the parameters and no text."""
+    markers = list(_ZONE_PATTERN.finditer(source))
+    own = [m for m in markers if m.group(1) == zone]
+    if own:
+        out = source
+        for m in reversed(own):
+            params = _parse_zone_params(m.group(2))
+            for key, value in updates.items():
+                if value is None:
+                    params.pop(key, None)
+                else:
+                    params[key] = value
+            written = "".join(f" {k}={v}" for k, v in params.items())
+            out = out[: m.start(2)] + written + out[m.end(2) :]
+        return out
+    added = "".join(f" {k}={v}" for k, v in updates.items() if v is not None)
+    if not added:
+        return source
+    head_end = markers[0].start() if markers else len(source)
+    auto = _auto_spans(source, 0, head_end)
+    if zone in auto:
+        order = [z for z in ("title", "subtitle", "content") if z in auto]
+        out = source
+        for name in reversed(order[order.index(zone) :]):
+            start = auto[name][0]
+            params = added if name == zone else ""
+            out = out[:start] + f"::{name}{params}::\n" + out[start:]
+        return out
+    gap = "\n\n" if source.strip() else ""
+    return source.rstrip() + gap + f"::{zone}{added}::\n"
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
@@ -573,6 +666,8 @@ def build_slide_content(
             align=Align(p["align"]) if "align" in p else None,
             valign=VAlign(p["valign"]) if "valign" in p else None,
             padding=float(p["padding"]) if "padding" in p else None,
+            size=_marker_size(zone_name, p.get("size")),
+            fit=_marker_fit(zone_name, p.get("fit")),
         )
 
     for key, val in extra.items():
@@ -588,3 +683,48 @@ def build_slide_content(
     return SlideContent(
         content=result, notes=notes_html, animations=animations, max_step=base_step
     )
+
+
+# ── Source spans (for a frontend writing back) ───────────────────────────────
+
+
+def _strip_span(text: str, start: int, end: int) -> tuple[int, int] | None:
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    return (start, end) if end > start else None
+
+
+def _auto_spans(text: str, start: int, end: int) -> dict[str, tuple[int, int]]:
+    """``_auto_extract``'s title/subtitle/content split, as spans."""
+    spans: dict[str, tuple[int, int]] = {}
+    pos = start
+
+    def next_nonblank(p: int) -> int:
+        while p < end:
+            line_end = text.find("\n", p, end)
+            line_end = end if line_end == -1 else line_end + 1
+            if text[p:line_end].strip():
+                return p
+            p = line_end
+        return end
+
+    def line_end(p: int) -> int:
+        e = text.find("\n", p, end)
+        return end if e == -1 else e
+
+    i = next_nonblank(pos)
+    if i < end and text.startswith("# ", i):
+        e = line_end(i)
+        spans["title"] = (i, len(text[:e].rstrip()))
+        pos = min(end, e + 1)
+        j = next_nonblank(pos)
+        if j < end and text.startswith("## ", j):
+            e2 = line_end(j)
+            spans["subtitle"] = (j, len(text[:e2].rstrip()))
+            pos = min(end, e2 + 1)
+    rest = _strip_span(text, pos, end)
+    if rest is not None:
+        spans["content"] = rest
+    return spans

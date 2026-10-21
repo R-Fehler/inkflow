@@ -378,6 +378,19 @@ def print_body_pt(width_pt: float, height_pt: float) -> float:
     return max(min(width_pt, height_pt) / PRINT_TEXT_RATIO, PRINT_MIN_BODY_PT)
 
 
+PRINT_MIN_TEXT = 0.6
+"""Shrink-to-fit never takes printed text below this fraction of the sheet's
+body size."""
+
+
+def print_min_text(page_pt: tuple[float, float], canvas: tuple[float, float]) -> float:
+    """The smallest readable text on a slide of ``canvas`` units printed on a
+    ``page_pt`` sheet, in slide units: `PRINT_MIN_TEXT` of its body size."""
+    (w, h), (cw, ch) = page_pt, canvas
+    pt_per_unit = min(w / cw, h / ch)
+    return print_body_pt(w, h) * PRINT_MIN_TEXT / pt_per_unit
+
+
 ASPECT_TOLERANCE = 0.01
 """How far apart two aspect ratios may be and still count as the same shape
 (the A sizes differ by under 0.1% from rounding to whole millimetres)."""

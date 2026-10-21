@@ -45,8 +45,10 @@ from inkflow.ns import INKFLOW_HINT
 from inkflow.overlay import Overlay
 from inkflow.pdf import PdfPages
 from inkflow.provenance import INK, stamper
+from inkflow.sizes import physical_length_pt, print_min_text
 from inkflow.steps import StepResolver
 from inkflow.svg import (
+    canvas_size,
     compose_overlays,
     compose_with_ancestors,
     duplicate_zone_ids,
@@ -700,6 +702,21 @@ class SlideSvg:
     def theme_generic_fonts(self) -> None:
         self.root = theme_generic_fonts(self.root)
 
+    def mark_min_text(self, ctx: DeckContext) -> None:
+        """On a printed slide, the smallest readable text in slide units
+        (``data-inkflow-min-text``): the floor shrink-to-fit keeps to there,
+        as on a screen 1/80 of the slide's height (src/ts/shared/fit.ts)."""
+        canvas = canvas_size(self.root)
+        page = ctx.print_page
+        if page is None and not ctx.sized:
+            w = physical_length_pt(self.root.get("width"))
+            h = physical_length_pt(self.root.get("height"))
+            page = (w, h) if w is not None and h is not None else None
+        if page is not None and canvas is not None:
+            self.root.set(
+                "data-inkflow-min-text", f"{print_min_text(page, canvas):.4g}"
+            )
+
     def scope_styles(self, slide_number: int) -> None:
         self.root = _scope_slide_styles(self.root, slide_number)
 
@@ -725,6 +742,10 @@ class DeckContext:
     """A chart's text size relative to the body text (`PageSize.chart_text_scale`)."""
     editor: bool = False
     """Stamp source locators and collect ``SlideEditInfo`` (the editor build)."""
+    print_page: tuple[float, float] | None = None
+    """A print deck's sheet in points (every slide is printed on it)."""
+    sized: bool = False
+    """The deck names a size (else a slide drawn in mm is printed on its own)."""
 
 
 def _resolve_autoplay_conflicts(
@@ -869,6 +890,7 @@ def process_slide(
         doc.add_style(zone_placeholder_css(doc.root))
     else:
         doc.prune_zones()
+    doc.mark_min_text(ctx)
     doc.scope_styles(slide_number)
     return ProcessedSlide(doc.to_svg(), md_notes, edit)
 
@@ -955,6 +977,8 @@ def deck_context(
         pdf_pages=PdfPages(assets),
         chart_scale=deck.effective_size.chart_text_scale,
         editor=editor,
+        print_page=deck.effective_size.page_pt if deck.is_print else None,
+        sized=deck.size is not None,
     )
 
 

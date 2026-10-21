@@ -1,3 +1,4 @@
+import { fitSlide } from "../shared/fit";
 import { buildStepRing } from "../shared/ring";
 import { sectionPosition } from "../shared/sections";
 import { applyStepInstant } from "../shared/step";
@@ -123,7 +124,10 @@ export function renderPvNext(): void {
     }
     pvNextInner.innerHTML = previewSvg;
     const svg = pvNextInner.querySelector("svg");
-    if (svg) applyStepInstant(svg, revealStep);
+    if (svg) {
+        fitSlide(svg);
+        applyStepInstant(svg, revealStep);
+    }
     requestAnimationFrame(_scalePvNext);
 }
 
