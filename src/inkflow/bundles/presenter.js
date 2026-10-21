@@ -632,8 +632,8 @@
   }
 
   // src/ts/shared/viewbox.ts
-  var DEFAULT_VIEWBOX = "0 0 1920 1080";
-  function parseViewBox(attr, fallback = DEFAULT_VIEWBOX) {
+  var deckCanvas = { w: 1920, h: 1080 };
+  function parseViewBox(attr, fallback = `0 0 ${deckCanvas.w} ${deckCanvas.h}`) {
     const parts = (attr ?? "").trim().split(/[\s,]+/).map(Number);
     const valid = parts.length === 4 && parts.every((n) => Number.isFinite(n)) && parts[2] > 0 && parts[3] > 0;
     const [x, y, w, h] = valid ? parts : fallback.split(/[\s,]+/).map(Number);

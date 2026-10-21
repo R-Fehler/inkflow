@@ -25,6 +25,7 @@ from inkflow.manifest import (
     ZoneContent,
 )
 from inkflow.overlay import Overlay
+from inkflow.sizes import PageSize
 from inkflow.themes import Palette, Theme, Typography
 from inkflow.transitions import Transition
 
@@ -45,6 +46,7 @@ __all__ = [
     "MediaFit",
     "Muted",
     "Overlay",
+    "PageSize",
     "Palette",
     "Slide",
     "TextBox",

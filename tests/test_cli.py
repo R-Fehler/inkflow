@@ -106,7 +106,7 @@ class TestDeckOption:
     def test_export_bad_size_exits_1(self, runner: CliRunner) -> None:
         result = runner.invoke(main, ["export", "--size", "huge"])
         assert result.exit_code == 1
-        assert "--size must be WxH" in result.output
+        assert "--size: unknown page size 'huge'" in result.output
 
 
 class TestMissingFile:

@@ -17,7 +17,9 @@ from inkflow.layout import (
 from inkflow.loaders import load_md, resolve_content_src
 from inkflow.manifest import Deck, Inline, Media, Slide, Video
 from inkflow.pipeline import resolve_overlay_chains, resolve_slide_src
+from inkflow.sizes import same_aspect
 from inkflow.svg import (
+    canvas_size,
     compose_overlays,
     compose_with_ancestors,
     duplicate_zone_ids,
@@ -27,6 +29,7 @@ from inkflow.sync import PreviewContext, plan_preview, slide_overlays
 from inkflow.zones import build_slide_content, parse_markdown_zones
 
 if TYPE_CHECKING:
+    from inkflow.svgio import SvgElement
     from inkflow.themes import Theme
 
 Issue = plugins.Issue  # (level, message) — level is "error" or "warn"
@@ -152,14 +155,17 @@ def _check_default_zone(
         return []
     if md is None:
         return []
-    # verify only reads the zone structure, so the asset sources are the plain
-    # project-rooted ones: nothing it returns depends on how a reference resolves.
-    source = AssetSource.for_deck(AssetRoots(project_dir))
+    # verify only reads the zone structure, but each reference still resolves
+    # against its own file, or a Markdown `![](../assets/x.png)` would be warned
+    # about as leaving the project.
+    roots = AssetRoots(project_dir)
+    source = AssetSource.for_deck(roots)
+    md_source = AssetSource.for_file(roots, md.path) if md.path else source
     try:
         build_slide_content(
             parse_markdown_zones(md.text),
             slide.zones,
-            source,
+            md_source,
             source,
             available_zones=zone_ids,
             default_zone=default_zone,
@@ -190,6 +196,26 @@ def _check_overlays(overlay_chains: list[list[Path]]) -> list[Issue]:
                     )
                 )
     return issues
+
+
+def check_size(root: SvgElement, deck: Deck | None) -> list[Issue]:
+    """A slide drawn in another shape than the deck's size: it still shows,
+    fitted (letterboxed) onto the deck's page."""
+    if deck is None or deck.size is None:
+        return []
+    canvas = canvas_size(root)
+    size = deck.effective_size
+    if canvas is None or same_aspect(canvas, size.canvas):
+        return []
+    w, h = (f"{v:g}" for v in canvas)
+    dw, dh = (f"{v:g}" for v in size.canvas)
+    return [
+        (
+            "warn",
+            f"the slide is {w}x{h}, not the shape of the deck's size {size} "
+            + f"({dw}x{dh}): it is shown and printed letterboxed",
+        )
+    ]
 
 
 def _check_sync(src: Path, preview: PreviewContext) -> list[Issue]:
@@ -289,6 +315,7 @@ def verify_slide(
         )
         for zone_id in duplicate_zone_ids(root)
     ]
+    issues += check_size(root, preview.deck)
     issues += _check_sync(src, preview)
     for plugin in plugins.loaded():
         for check in plugin.slide_checks():

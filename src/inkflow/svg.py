@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from typing import cast
 
@@ -9,7 +10,22 @@ from lxml import etree
 
 from inkflow import ns
 from inkflow.clean import strip_preview_layers
+from inkflow.sizes import parse_view_box
 from inkflow.svgio import SvgElement
+
+
+def canvas_size(root: SvgElement) -> tuple[float, float] | None:
+    """An SVG root's drawing size in user units: its viewBox's width and
+    height, else its plain ``width``/``height``; ``None`` when it has neither."""
+    box = parse_view_box(root.get("viewBox"))
+    if box is not None:
+        return box[2], box[3]
+    try:
+        w = float(re.sub(r"px$", "", (root.get("width") or "").strip()))
+        h = float(re.sub(r"px$", "", (root.get("height") or "").strip()))
+    except ValueError:
+        return None
+    return (w, h) if w > 0 and h > 0 else None
 
 
 def ensure_defs(root: SvgElement) -> SvgElement:
