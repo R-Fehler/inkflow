@@ -20,6 +20,7 @@ from inkflow.logging import logger
 for _submodule in (
     "authoring",
     "color",
+    "fonts",
     "present",
     "project",
     "render",

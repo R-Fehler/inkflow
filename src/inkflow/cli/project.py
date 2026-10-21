@@ -6,13 +6,22 @@ import subprocess
 import sys
 from importlib.resources import files
 from pathlib import Path
+from typing import cast
 
 import click
 
-from inkflow import git_setup, init, plugins, sync
+from inkflow import git_setup, init, pack, plugins, publish, sync
 from inkflow.builtin_themes import THEMES
-from inkflow.cli._common import Project, main, resolve_dark_mode
+from inkflow.cli._common import (
+    Project,
+    deck_option,
+    main,
+    resolve_dark_mode,
+    resolve_deck_path,
+)
 from inkflow.logging import console, logger, report
+from inkflow.server import DeckError, load_deck
+from inkflow.titles import resolve_deck_title
 
 
 def _sync_layout_previews(target: Path) -> None:
@@ -35,6 +44,26 @@ def _sync_layout_previews(target: Path) -> None:
     report("Synced", "layout previews for editing")
 
 
+def _self_contained(target: Path) -> None:
+    """A new deck starts self-contained: LF line endings for its sources, the
+    fonts its look names that only this machine has in fonts/, and uv.lock
+    when uv is installed (offline: a note, not a failure)."""
+    if pack.ensure_text_rules(target):
+        report("Wrote", ".gitattributes (LF line endings, SVG diff)")
+    try:
+        project = Project.load(target / "deck.py")
+        bundled = pack.bundle_fonts_now(project.deck, target)
+    except Exception as exc:
+        logger.warning(f"could not check the new deck's fonts: {exc}")
+    else:
+        for family in bundled.families:
+            report("Bundled", f"{family} into fonts/")
+        for warning in bundled.warnings:
+            report("Licence", warning, style="yellow")
+    ok, note = pack.lock_new_deck(target)
+    report("Locked" if ok else "Skipped", note, style="green" if ok else "dim")
+
+
 @main.command("init")
 @click.argument("directory", default=".", type=click.Path(path_type=Path))
 @click.option(
@@ -42,6 +71,12 @@ def _sync_layout_previews(target: Path) -> None:
     "no_git",
     is_flag=True,
     help="Skip git hook setup even when inside a git repository.",
+)
+@click.option(
+    "--no-lfs",
+    "no_lfs",
+    is_flag=True,
+    help="Git only: keep videos and images in git itself, without Git LFS rules.",
 )
 @click.option(
     "--force",
@@ -72,13 +107,30 @@ def _sync_layout_previews(target: Path) -> None:
     help="The deck's theme: the built-in default, paper (quiet, white) or "
     + "stage (big bold type, black).",
 )
+@click.option(
+    "--pages",
+    "pages",
+    type=click.Choice(list(publish.HOSTS)),
+    default=None,
+    help="Publish the deck on GitHub Pages or GitLab Pages at every push "
+    + "(see setup-pages).",
+)
+@click.option(
+    "--release",
+    "release",
+    is_flag=True,
+    help="With --pages: also release the slides (HTML and PDF) at every tag v*.",
+)
 def init_cmd(
     directory: Path,
     no_git: bool,
+    no_lfs: bool,
     force: bool,
     poster: bool,
     size: str | None,
     theme: str,
+    pages: str | None,
+    release: bool,
 ) -> None:
     """Scaffold a new presentation project in DIRECTORY (default: current).
 
@@ -87,6 +139,10 @@ def init_cmd(
     writes a `.gitignore`, and configures the SVG git hooks. Inside an existing
     repository it leaves git alone and points you at `setup-git`. Skip all git steps
     with `--no-git`.
+
+    The deck's `.gitattributes` sends videos, audio, images, fonts and documents
+    through Git LFS (and a new repository gets `git lfs install --local`); with
+    `--no-lfs` it records a "git only" choice instead, for a minimal repository.
 
     Refuses to scaffold into a non-empty directory (dotfiles like `.git` are ignored)
     unless `--force` is given.
@@ -100,7 +156,13 @@ def init_cmd(
     type on black, keynote-style) starts the deck on one of the themes inkflow
     ships instead of the default; it is `Deck(theme=...)` in `deck.py`, so it
     can change any time.
+
+    `--pages github` (or `gitlab`) also writes the CI file publishing the deck
+    at every push, and a README.md linking to it (see `setup-pages`);
+    `--release` adds a release at every tag `v*`.
     """
+    if release and pages is None:
+        raise click.UsageError("--release goes with --pages github or --pages gitlab")
     target = directory.resolve()
     if (target / "deck.py").exists():
         raise click.ClickException(f"deck.py already exists: {target / 'deck.py'}")
@@ -126,10 +188,159 @@ def init_cmd(
     report("Created", "pyproject.toml")
     _sync_layout_previews(target)
     if not no_git:
-        git_setup.init_project_git(target, verbose=False)
+        git_setup.init_project_git(target, verbose=False, lfs=not no_lfs)
+    _self_contained(target)
+    result = None
+    if pages is not None:
+        result = _setup_pages(
+            target / "deck.py",
+            cast("publish.Host", pages),
+            release,
+            force=False,
+            readme=True,
+            fonts=False,
+        )
     rel = str(directory) if str(directory) not in (".", "./") else None
     suffix = f"cd {rel} && inkflow serve" if rel else "inkflow serve"
     console.print(f"\nrun:  {suffix}", markup=False)
+    if result is not None:
+        _print_steps(result)
+
+
+def _setup_pages(
+    deck_path: Path,
+    host: publish.Host,
+    release: bool,
+    *,
+    force: bool,
+    readme: bool,
+    fonts: bool,
+) -> publish.Result:
+    """Write the publishing files and report them (shared by init and setup-pages)."""
+    title: str | None = None
+    deck = None
+    try:
+        deck = load_deck(deck_path)
+        title = resolve_deck_title(deck, deck_path.parent)
+    except DeckError as exc:
+        logger.warning(f"could not load the deck: {exc}")
+    try:
+        result = publish.setup_pages(
+            deck_path, host, release, force, readme=readme, title=title
+        )
+    except publish.PublishError as exc:
+        raise click.ClickException(str(exc)) from exc
+    for rel in result.written:
+        report("Wrote", rel)
+    for rel in result.plan.unchanged:
+        report("Unchanged", rel, style="dim")
+    for warning in result.plan.warnings:
+        report("Warning", warning, style="yellow")
+    if fonts and deck is not None:
+        try:
+            font_notes = publish.font_warnings(deck, deck_path.parent, deck_path)
+        except Exception as exc:
+            logger.warning(f"could not check the deck's fonts: {exc}")
+            font_notes = []
+        for note in font_notes:
+            report("Fonts", note, style="yellow")
+    return result
+
+
+def _print_steps(result: publish.Result) -> None:
+    url = result.plan.url
+    name = publish.HOST_NAMES[result.plan.host]
+    console.print(f"\n{name}: {url or 'address not known yet'}", markup=False)
+    note = result.plan.url_note
+    if note:
+        console.print(f"  ({note})", markup=False)
+    if url and not _readme_links(result.plan.where.root, url):
+        console.print(
+            f"  For README.md (or run again with --readme): {publish.readme_line(url)}",
+            markup=False,
+        )
+    console.print("Next:", markup=False)
+    for i, step in enumerate(result.steps, 1):
+        console.print(f"  {i}. {step}", markup=False)
+
+
+def _readme_links(root: Path, url: str) -> bool:
+    try:
+        return url in (root / "README.md").read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+@main.command("setup-pages")
+@deck_option
+@click.argument("host", required=False, type=click.Choice(list(publish.HOSTS)))
+@click.option(
+    "--release",
+    "release",
+    is_flag=True,
+    help="Also release the slides (one HTML file and a PDF) at every tag v*.",
+)
+@click.option(
+    "--force",
+    "force",
+    is_flag=True,
+    help="Replace workflow files that exist with other contents.",
+)
+@click.option(
+    "--readme",
+    "readme",
+    is_flag=True,
+    help="Add an 'Open the slides' link to README.md (writes one if there is none).",
+)
+@click.option(
+    "--print",
+    "print_only",
+    is_flag=True,
+    help="Print the files instead of writing them.",
+)
+def setup_pages_cmd(
+    deck_path: Path,
+    host: str | None,
+    release: bool,
+    force: bool,
+    readme: bool,
+    print_only: bool,
+) -> None:
+    """Publish the deck on GitHub Pages or GitLab Pages at every push.
+
+    Writes the CI file that builds the deck with `inkflow build` and publishes
+    it: `.github/workflows/pages.yml` for GITHUB, `.gitlab-ci.yml` for GITLAB
+    (default: the host of the `origin` remote), at the repository's root, so a
+    deck in a folder of a larger repository works too. `--release` adds a
+    release at every tag `v*` carrying the slides as one self-contained HTML
+    file and a PDF.
+
+    The workflow fetches Git LFS files and installs a PDF converter when the
+    deck has PDF figures. Fonts installed only on this computer are named: copy
+    them into `fonts/` and commit them, or the published deck falls back to
+    the runner's fonts. Prints the address the slides will have and the one
+    manual step (GitHub: Settings → Pages → Source "GitHub Actions").
+    """
+    resolved = resolve_deck_path(deck_path)
+    chosen = host or publish.host_of(publish.layout(resolved).remote)
+    if chosen is None:
+        raise click.UsageError(
+            "name the host: inkflow setup-pages github (or gitlab); "
+            + "the origin remote does not say"
+        )
+    kind = cast("publish.Host", chosen)
+    if print_only:
+        try:
+            plan = publish.plan(resolved, kind, release)
+        except publish.PublishError as exc:
+            raise click.ClickException(str(exc)) from exc
+        for rel, text in publish.render(kind, plan.where, release).items():
+            click.echo(f"# ── {rel} ──\n{text}")
+        return
+    result = _setup_pages(
+        resolved, kind, release, force=force, readme=readme, fonts=True
+    )
+    _print_steps(result)
 
 
 _COMMAND_BLOCK = re.compile(r"(?=^  - name: )", re.M)

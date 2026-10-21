@@ -854,6 +854,32 @@ def embed_fonts_css(
     return _embed_common(specs, index, _src)
 
 
+def font_sources(
+    slides: list[SlideData],
+    project_dir: Path,
+    theme_fonts_dir: Path | None = None,
+    *,
+    styles_css: str = "",
+) -> list[tuple[str, Path | None]]:
+    """Each font face the deck uses as (family, the file a build embeds for
+    it), the file None when no font directory has the family. Publishing reads
+    it to warn about fonts that only this computer has (a CI runner has none
+    of the author's fonts); `is_shipped` tells a file every inkflow has."""
+    specs, add = _spec_collector()
+    for spec in extract_font_specs(slides):
+        add(spec)
+    _specs_from_tokens(styles_css, add)
+    index = _build_index(project_dir, theme_fonts_dir)
+    out: list[tuple[str, Path | None]] = []
+    for spec in specs:
+        records = _lookup(index, spec.family)
+        match = (
+            _best_match(records, spec.weight_class, spec.is_italic) if records else None
+        )
+        out.append((spec.family, match.path if match else None))
+    return out
+
+
 def embed_fonts_css_subsetted(
     slides: list[SlideData],
     project_dir: Path,
