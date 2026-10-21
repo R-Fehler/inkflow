@@ -100,12 +100,21 @@ class SlideEditInfo(TypedDict):
     ``md-file`` (several Markdown sections merged into a default zone)."""
 
 
+class SlideSection(TypedDict):
+    name: str
+    index: int
+    """Which section of the deck (``Deck.sections``), so two that share a name
+    stay apart."""
+
+
 class SlideData(TypedDict):
     id: str
     svg: str
     title: str
     notes: str
     editableFiles: list[EditableFile]
+    section: NotRequired[SlideSection]
+    """The section the slide is in; absent before the first section."""
     edit: NotRequired[SlideEditInfo]
     """Only in an editor build, and never in what the pages are sent."""
     key: NotRequired[str]
@@ -951,7 +960,7 @@ def deck_context(
 
 class BuiltSlide(NamedTuple):
     """One slide as built from its own files: everything of its `SlideData`
-    but the notes file's text, which is kept apart."""
+    but the notes file's text and its section, which are the deck's."""
 
     svg: str
     title: str
@@ -1021,6 +1030,11 @@ def process_deck(
     visible_slides = [s for s in deck.slides if s.visible]
     ctx = deck_context(deck, project_dir, len(visible_slides), editor=editor)
     ids = slide_ids(visible_slides)
+    sections = {
+        id(deck.slides[i]): k
+        for k, span in enumerate(deck.section_ranges())
+        for i in span
+    }
     build = cache.build(ctx, deck_path) if cache is not None else None
     results: list[SlideData] = []
     for i, (slide, slide_id) in enumerate(zip(visible_slides, ids, strict=True)):
@@ -1040,6 +1054,9 @@ def process_deck(
             "notes": notes,
             "editableFiles": built.editable_files,
         }
+        section = sections.get(id(slide))
+        if section is not None:
+            data["section"] = {"name": deck.sections[section].name, "index": section}
         if built.edit is not None:
             data["edit"] = built.edit
         results.append(data)

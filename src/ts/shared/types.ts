@@ -1,4 +1,5 @@
 import type { Patch } from "./patch";
+import type { SectionRef } from "./sections";
 
 // Every field is always emitted by the Python side (pipeline.py process_deck),
 // so all are required here. Consumers that still guard with `|| ""` are being
@@ -15,6 +16,8 @@ export interface SlideData {
     title: string;
     notes: string;
     editableFiles: EditableFile[];
+    // The Section(...) the slide is in (absent before the first section).
+    section?: SectionRef;
     // A served slide's digest, by which a rebuild names the slides a page
     // already holds (patch.ts); absent in a static build.
     key?: string;

@@ -17,6 +17,7 @@ import {
 import {
     closeOverview,
     overviewCommit,
+    overviewMoveVertical,
     overviewSetActive,
     toggleOverview,
 } from "./overview";
@@ -219,12 +220,12 @@ document.addEventListener("keydown", (e) => {
         }
         if (e.key === "ArrowDown" || e.key === "j") {
             e.preventDefault();
-            overviewSetActive(state._overviewActive + state._overviewCols);
+            overviewMoveVertical(1);
             return;
         }
         if (e.key === "ArrowUp" || e.key === "k") {
             e.preventDefault();
-            overviewSetActive(state._overviewActive - state._overviewCols);
+            overviewMoveVertical(-1);
             return;
         }
         if (e.key === "Enter") {
