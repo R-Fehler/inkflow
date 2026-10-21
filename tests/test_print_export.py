@@ -288,7 +288,9 @@ class TestPrintedPdf:
         (box,) = _boxes(data)
         assert box[2] - box[0] == pytest.approx(A0_PT[0], abs=0.01)
         assert box[3] - box[1] == pytest.approx(A0_PT[1], abs=0.01)
-        # Text stays text: its font is embedded.
+        # Text stays text, in the shipped font: sans-serif is the deck's Inter,
+        # which Chromium embeds as a Type 3 font (outlines) since it is variable.
+        assert b"InterVariable" in data
         assert b"/FontFile" in data or b"/Type3" in data
         # The photo is embedded at its own resolution, not resampled.
         assert re.search(rb"/Width 1200\s*/Height 900|/Height 900\s*/Width 1200", data)

@@ -21,7 +21,7 @@ from inkflow.assets import (
 )
 from inkflow.enums import ColorMode
 from inkflow.extensions import State
-from inkflow.fonts import embed_fonts_css_subsetted
+from inkflow.fonts import embed_fonts_css_subsetted, ui_fonts_css
 from inkflow.loaders import load_deck_scripts, load_deck_styles
 from inkflow.logging import logger
 from inkflow.manifest import Deck
@@ -49,7 +49,9 @@ def build_static_html(
     transitions = resolve_transitions(deck)
     styles_css = load_deck_styles(deck, project_dir)
     if deck.embed_fonts:
-        font_css = embed_fonts_css_subsetted(slides, project_dir, deck.theme.fonts_dir)
+        font_css = embed_fonts_css_subsetted(
+            slides, project_dir, deck.theme.fonts_dir, styles_css=styles_css
+        )
         if font_css:
             styles_css = (font_css + "\n" + styles_css).strip()
     scripts_js = load_deck_scripts(deck, project_dir)
@@ -76,7 +78,33 @@ def build_static_html(
         "theme_dir": deck.theme.asset_dir(),
     }
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "index.html").write_bytes(build_html(state, ws_port=None))
+    ui_fonts = ui_fonts_css(_interface_text(state)) if deck.embed_fonts else ""
+    html = build_html(state, ws_port=None, ui_fonts=ui_fonts)
+    (out_dir / "index.html").write_bytes(html)
+
+
+_JS_ESCAPE_RE = re.compile(r"\\u\{([0-9a-fA-F]+)\}|\\u([0-9a-fA-F]{4})")
+
+
+def _interface_text(state: State) -> str:
+    """Every character the presenter's interface can show for this deck: its
+    own words (template and bundles, whose non-ASCII text esbuild writes as
+    ``\\u`` escapes), slide titles, the deck title and the speaker notes."""
+    pkg = importlib.resources.files("inkflow")
+    parts = [
+        pkg.joinpath("presenter.html").read_text(encoding="utf-8"),
+        pkg.joinpath("bundles", "presenter.css").read_text(encoding="utf-8"),
+    ]
+    js = pkg.joinpath("bundles", "presenter.js").read_text(encoding="utf-8")
+    parts.append(js)
+    parts += [
+        chr(int(m.group(1) or m.group(2), 16)) for m in _JS_ESCAPE_RE.finditer(js)
+    ]
+    parts.append(state["title"])
+    for slide in state["slides"]:
+        parts.append(slide["title"])
+        parts.append(re.sub(r"<[^>]*>", "", slide["notes"]))
+    return "".join(parts)
 
 
 def _local_refs(text: str) -> list[str]:
@@ -479,7 +507,9 @@ def build_pdf(
         raise RuntimeError("Cannot export a PDF: the deck has no visible slides.")
     styles_css = load_deck_styles(deck, project_dir)
     if deck.embed_fonts:
-        font_css = embed_fonts_css_subsetted(slides, project_dir, deck.theme.fonts_dir)
+        font_css = embed_fonts_css_subsetted(
+            slides, project_dir, deck.theme.fonts_dir, styles_css=styles_css
+        )
         if font_css:
             styles_css = (font_css + "\n" + styles_css).strip()
 

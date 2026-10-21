@@ -36,8 +36,10 @@ body {
   background: #000;
   color: var(--text);
   font-family:
-    "JetBrains Mono",
-    "Fira Code",
+    "Inkflow UI Mono",
+    "Inkflow UI",
+    "Inkflow UI Symbols",
+    "Inkflow UI Emoji",
     ui-monospace,
     monospace;
   height: 100vh;

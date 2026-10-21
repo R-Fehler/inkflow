@@ -46,7 +46,12 @@ from inkflow.overlay import Overlay
 from inkflow.pdf import PdfPages
 from inkflow.provenance import INK, stamper
 from inkflow.steps import StepResolver
-from inkflow.svg import compose_overlays, compose_with_ancestors, duplicate_zone_ids
+from inkflow.svg import (
+    compose_overlays,
+    compose_with_ancestors,
+    duplicate_zone_ids,
+    theme_generic_fonts,
+)
 from inkflow.svgio import SvgElement, serialize_svg
 from inkflow.themes import Theme
 from inkflow.titles import humanize
@@ -455,16 +460,18 @@ def resolve_transitions(deck: Deck) -> list[dict[str, object]]:
     ]
 
 
-_KEYFRAMES_RE = re.compile(r"@(?:-webkit-)?keyframes\b")
+_KEYFRAMES_RE = re.compile(r"@(?:(?:-webkit-)?keyframes|font-face)\b")
 
 
 def _extract_keyframes(css: str) -> tuple[str, str]:
-    """Split top-level ``@keyframes`` blocks out of ``css``.
+    """Split top-level ``@keyframes`` and ``@font-face`` blocks out of ``css``.
 
     Returns ``(keyframes_css, remaining_css)``. Animation names are document-global,
     and the step engine discovers custom ``@keyframes`` (from ``Deck(style=...)``) by
     name, so they must stay unscoped — wrapping them in ``@scope`` would hide or
-    invalidate them. The rest of the CSS is still scoped by the caller.
+    invalidate them. An ``@font-face`` (an SVG that carries its own font, such as
+    the demo's title) is not allowed inside ``@scope`` either. The rest of the CSS
+    is still scoped by the caller.
     """
     keyframes: list[str] = []
     rest: list[str] = []
@@ -681,6 +688,9 @@ class SlideSvg:
     def prune_zones(self) -> None:
         self.root = remove_unreferenced_zones(self.root)
 
+    def theme_generic_fonts(self) -> None:
+        self.root = theme_generic_fonts(self.root)
+
     def scope_styles(self, slide_number: int) -> None:
         self.root = _scope_slide_styles(self.root, slide_number)
 
@@ -792,6 +802,7 @@ def process_slide(
             + "zone ids must be unique across a slide and its overlays"
         )
     doc.tag_layout(chain, overlay_chains)
+    doc.theme_generic_fonts()
     doc.number_slides(slide_number, ctx.total_slides)
 
     md_notes = ""

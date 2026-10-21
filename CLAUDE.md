@@ -357,7 +357,14 @@ src/
                                level instead of stdlib's lastResort stderr
     svg.py            SVG tree utilities (ensure_defs, with_namespaces,
                                compose_with_ancestors, compose_overlays,
-                               duplicate_zone_ids, is_full_canvas_fill, canvas_size)
+                               duplicate_zone_ids, is_full_canvas_fill, canvas_size,
+                               theme_generic_fonts)
+    fonts.py          font discovery + embedding (see "Font embedding" below):
+                               `SHIPPED_FONTS_DIR`/`is_shipped`, `embed_fonts_css`
+                               (serve; `font_url=shipped_font_url` links shipped files),
+                               `embed_fonts_css_subsetted` (build/export),
+                               `ui_fonts_css` (the interface's "Inkflow UI*" faces),
+                               `shipped_font_file` (the `/_inkflow/fonts/` route)
     svgio.py          SVG parse/serialize primitives: one hardened parser, SvgElement alias
     extensions.py     `ServerExtension` (build hooks, `messages` with the least `Role`,
                                `welcome`/`hello`/`message`/`disconnected`, `http`, `keys`,
@@ -405,7 +412,8 @@ src/
                                poster-landscape-base with poster-2col/-3col/
                                -landscape-3col/-4col on the A canvas: zones title,
                                authors, affiliations, logos, col-N, references,
-                               contact), icon.svg, showcase/, and
+                               contact), icon.svg, showcase/, fonts/ (the fonts
+                               inkflow ships, licences + README), and
                                styles.css (per-layout zone styling for those layouts,
                                loaded for every deck — keep its rules `.layout-*`-scoped)
     templates/        inkflow init starter files (title.svg, diagram.svg, guide.md,
@@ -467,7 +475,7 @@ Non-fatal records collected during the rebuild (`inkflow.logging.collect_logs`, 
 The HTTP response includes `Cache-Control: no-store` so hard refreshes always get fresh content.
 
 **A served deck rebuilds what a change touched (`incremental.py`).**
-The watcher still rebuilds on every change of any project file, and `server.rebuild` still runs deck.py and walks every slide, but `process_deck(cache=)` takes a slide from the last build unless one of its inputs changed (`server.Kept`: a `SlideCache` per served deck; `build`, `export`, `verify` pass none and are untouched). A slide's inputs and how each is watched: the files it read or looked for, recorded by `deps.note` while it is processed and compared by stamp at the next build, "not there" included (so its layout chain and overlays, its Markdown and style file, chart data, PDFs and their converted or committed pages, a drawn-in diagram, each candidate of a name search: a `slides/x.svg` that now shadows the layout `x` is a change); what deck.py says of it and of the deck, compared by value (`frozen`: types count, `Inline("a")` is not the path `"a"`; a class deck.py defines is a new class on every load, so slides using one are always processed; a Markdown reveal's `type=Name` makes the slide depend on deck.py, whether the name was found or not); its id. **Not** its number or the slide count: they reach the output only as the root's `inkflow-slide-N` id (and the `@scope` naming it) and the text of `zone-slide-number`/`-total`, so the cache processes a slide with stand-in numbers and puts the real ones into the result (`_Template`), and inserting or moving a slide processes no other slide (a slide whose result shows a stand-in anywhere else is kept by its numbers instead, `_plain`). The notes file is a cache entry of its own, so typing a note processes no slide. What is deliberately outside the cache and done for every slide on every build: the asset time stamps (`server._versioned`, which is how a changed picture reaches the pages), the keys, the deck stylesheet, fonts, transitions. A slide whose build fell short for a reason that may pass (a PDF page that could not be converted) is not kept (`deps.retry`). Warnings logged while a slide (or its notes) was processed are logged again when it is kept; the one "no PDF converter" warning per build is said by `Build.finish`, and the converter is part of the deck's key, so one installed while the server runs shows the figures. Whoever adds a file read to the slide pipeline must `note` it: tests/test_incremental.py compares every incremental build with a full one and holds each slide's recorded files to what an audit hook saw Python open. `r` in the terminal (`rebuild(full=True)`) forgets what is kept; the TUI says how many slides a rebuild processed (`(N changed)`).
+The watcher still rebuilds on every change of any project file, and `server.rebuild` still runs deck.py and walks every slide, but `process_deck(cache=)` takes a slide from the last build unless one of its inputs changed (`server.Kept`: a `SlideCache` per served deck; `build`, `export`, `verify` pass none and are untouched). A slide's inputs and how each is watched: the files it read or looked for, recorded by `deps.note` while it is processed and compared by stamp at the next build, "not there" included (so its layout chain and overlays, its Markdown and style file, chart data, PDFs and their converted or committed pages, a drawn-in diagram, each candidate of a name search: a `slides/x.svg` that now shadows the layout `x` is a change); what deck.py says of it and of the deck, compared by value (`frozen`: types count, `Inline("a")` is not the path `"a"`; a class deck.py defines is a new class on every load, so slides using one are always processed; a Markdown reveal's `type=Name` makes the slide depend on deck.py, whether the name was found or not); its id. **Not** its number or the slide count: they reach the output only as the root's `inkflow-slide-N` id (and the `@scope` naming it) and the text of `zone-slide-number`/`-total`, so the cache processes a slide with stand-in numbers and puts the real ones into the result (`_Template`), and inserting or moving a slide processes no other slide (a slide whose result shows a stand-in anywhere else is kept by its numbers instead, `_plain`). The notes file is a cache entry of its own, so typing a note processes no slide. What is deliberately outside the cache and done for every slide on every build: the asset time stamps (`server._versioned`, which is how a changed picture reaches the pages), the keys, the deck stylesheet, fonts (their per-slide specs are memoized by SVG text in fonts.py), transitions. A slide whose build fell short for a reason that may pass (a PDF page that could not be converted) is not kept (`deps.retry`). Warnings logged while a slide (or its notes) was processed are logged again when it is kept; the one "no PDF converter" warning per build is said by `Build.finish`, and the converter is part of the deck's key, so one installed while the server runs shows the figures. Whoever adds a file read to the slide pipeline must `note` it: tests/test_incremental.py compares every incremental build with a full one and holds each slide's recorded files to what an audit hook saw Python open. `r` in the terminal (`rebuild(full=True)`) forgets what is kept; the TUI says how many slides a rebuild processed (`(N changed)`).
 
 **Position sync is a dumb relay with client-side authority + modes.**
 Clients send `{"type":"nav","slideIndex","step"}` (validated + clamped server-side by `_coerce_nav_position`; a view link's are dropped, and its page starts in `follow`); the server stores the last position and rebroadcasts it as `{"type":"position",...}` to the *other* clients, and pushes it once to each newly connected client. A window that booted from a deep link (a slide named in the URL, captured by `readURL()` before `syncURL()` rewrites the bar) or reconnected asserts its own position and ignores that first push; a bare window adopts it. Each client also has a per-tab **sync mode** (`two-way`/`present`/`follow`/`solo`, `shared/types.ts`) deciding locally whether it broadcasts nav (`sends()`) and applies incoming positions (`receives()`) — the server knows nothing about modes. `s` cycles the mode; `syncmenu.ts` owns the status-bar widget, `websocket.ts` the network/state. Switching into a receiving mode sends `{"type":"sync-request"}` to catch up. Persisted in `sessionStorage`.
@@ -504,21 +512,16 @@ Pressing `p` toggles `body.pv-open`, which CSS-transitions the sidebar to 30% wi
 `pv.ts` owns all panel logic (clock, next-preview, notes); it reads directly from `state.slides` so no second WS connection or position sync is needed.
 For second-screen use, open the same URL in two windows and toggle the panel in one.
 
-**Font embedding is automatic and zero-config.**
-After `process_deck()`, `fonts.embed_fonts_css()` (serve) or `fonts.embed_fonts_css_subsetted()`
-(build/export) scans every slide SVG for named `font-family` values, discovers matching font
-files, and injects `@font-face` blocks (base64 data-URI) into the global CSS via `__STYLES__`.
-Generic families (`sans-serif`, `serif`, `monospace`, etc.) are always skipped.
+**Font embedding is automatic and zero-config; the default fonts ship with inkflow.**
+`theme/fonts/` holds Inter (variable, upright + italic), JetBrains Mono (variable), STIX Two Math (OpenType MATH) and Twemoji Mozilla (COLRv0 emoji, drawn by Safari too, unlike COLRv1), ~2 MB of WOFF2 with licences and a README (sources, versions, checksums). `Typography`'s defaults (every theme's) name them first: `"Inter", "Twemoji Mozilla", sans-serif`, `"JetBrains Mono", …, monospace`, and the `math_font` token `"STIX Two Math", math`, which contract.css applies to `math`. contract.css also gives a slide's unstyled text the body font (`svg[id^="inkflow-slide-"]`, never the page's UI font) and maps `font-family="sans-serif|sans|monospace"` *attributes* to the tokens by a rule (any stylesheet rule still wins, as over an attribute); `svg.theme_generic_fonts` (a pipeline step) rewrites the same generics in inline `style`s (Inkscape's default text) in place. A slide's own `@font-face` is lifted out of its `@scope` like `@keyframes`, and its family is not looked up.
 
-Font search order: `<project_dir>/fonts/` → user font dirs → system font dirs (all OS-specific).
-Committing fonts in `fonts/` gives fully reproducible output independent of the host system.
+Search order: `<project>/fonts/` → the active theme's `fonts/` → `SHIPPED_FONTS_DIR` (whatever the theme) → user font dir → system dirs. A variable font is one record over its `wght` range (`weight_range`; "Inter Variable" is indexed as Inter, `_family_key`); `@font-face` rules describe the *file* (weight range, real style; a colour font `1 1000`), deduped per (family, file), so the browser synthesises only what no file has. Specs come from the slides' `font-family` values and from the token declarations in the deck CSS (`_specs_from_tokens`: every family of each list, upright/italic × 400/700; later families are `need="fallback"`, the math token's `need="math"`).
 
-For serve: full font files are embedded; the font index is cached at module level so only the
-first rebuild in a session pays the directory-scan cost. For build/export: fonts are subsetted
-to only the codepoints present in the slides (via `fonttools`), typically 10–30 KB per variant.
-`brotli` is a required dependency, so subsetted fonts are always emitted as WOFF2. If subsetting fails for a given font (for example a corrupt or unreadable file), the full font file is embedded instead.
+Serve (`embed_fonts_css`, index cached per process): shipped files are linked as `/_inkflow/fonts/<file>` (`shipped_font_url`; the server route, behind the door like every request, serves only those files, cacheable), anything else is a full base64 data URI. Build/export (`embed_fonts_css_subsetted`): every face is subset (fontTools, WOFF2, all layout features and the name table kept) to the slides' codepoints + printable ASCII + CSS `content` strings; with MathML, plus `_MATH_BASE` (radicals, fences) and every styled form of each letter in a formula (`_math_alphanumerics`: a browser draws `<mi>x</mi>` as U+1D465); a fallback family (emoji) only when the deck has characters the first families lack, the math font only with formulas. Subsets are cached by font content + codepoints in `$INKFLOW_CACHE_DIR` or the user cache dir (`_subset_cached`; tests point it at a session temp dir). If subsetting fails the full file is embedded. The PDF: Chromium writes variable and CFF faces as Type 3 (outlines, text selectable), static TrueType as TrueType; `pdf.html` hides video controls (their 0:00 is a system font).
 
-Unresolvable fonts produce a yellow TUI warning and fall back to system rendering.
+The presenter's interface uses `"Inkflow UI"` (Inter), `"Inkflow UI Mono"` (JetBrains Mono), `"Inkflow UI Symbols"` (STIX) and `"Inkflow UI Emoji"` (Twemoji), names of their own so they never mix with a deck's subset: `server.build_html` adds `ui_fonts_css()` (URLs) to the page CSS, a static build passes `ui_fonts_css(text)` subset to the presenter's own text, slide titles and notes.
+
+Unresolvable fonts produce a yellow TUI warning (once per family) and fall back to system rendering.
 Opt out per-deck: `Deck(embed_fonts=False)`.
 
 **An asset reference resolves against the file it was written in.**
@@ -614,6 +617,8 @@ Layer classes: `inkflow:layout-src`/`-hash` marks what goes *behind* (backdrop +
   (`_versioned`: `assets/x.png?v=…`; `_resolve_asset` drops the query), because a
   page keeps pictures it loaded by URL: a picture changed on disk is then a
   changed slide at a new URL. build/export never stamp
+- `/_inkflow/fonts/<file>`: the fonts inkflow ships (`fonts.shipped_font_file`,
+  nothing else in that folder or outside it), `Cache-Control: public`
 - anything else an extension's `http` answers, then the presenter at any path
 - WebSocket on the same port at `/_inkflow/ws` (`access.WS_PATH`): the HTTP
   handler reads the request head, checks it, and hands an upgrade to
