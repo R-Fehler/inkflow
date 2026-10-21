@@ -381,7 +381,9 @@ src/
                                shared options, the Project/Target helpers and
                                `DeckSlides`/`slide_number` (SLIDE = presentation number or id);
                                commands are grouped by area: project.py (init, setup-git,
-                               completion), present.py (serve, build, export [--handout]),
+                               setup-pages, completion), present.py (serve, build, export
+                               [--handout]), fonts.py (`inkflow fonts [--json]` = the
+                               fontreport table; plugins add subcommands: `group_deck`),
                                render.py (`inkflow render`; `current_slide` asks the
                                plugins), authoring.py
                                (clean, label2id, add, parent group, sync, layouts [--plain | --json]), color.py (colorize,
@@ -403,10 +405,59 @@ src/
     colors.py         CSS color token extraction, hex→class mapping, SVG colorization, GPL palette
     git_setup.py      git hook + SVG diff driver setup; `init_project_git`
                                bootstraps a fresh project (git init + .gitignore +
-                               hooks), and steps aside when already inside a repo
+                               hooks), and steps aside when already inside a repo;
+                               either way `setup_lfs` writes the deck's LFS section
+    lfs.py            Git LFS for decks: media extensions (PATTERNS), the
+                               .gitattributes section (rules, or the committed
+                               `# inkflow: lfs off` git-only opt-out), `mode` (on/off/none
+                               from the deck's .gitattributes up to the repo root)
+    publish.py        GitHub Pages / GitLab Pages (`inkflow setup-pages`, `init --pages`):
+                               renders templates/ci/ (pages.yml, release.yml, gitlab-ci.yml
+                               + gitlab-release.yml; `__TOKEN__` placeholders) for the
+                               deck's `layout` (repo root, deck folder → `--deck`,
+                               nearest pyproject.toml → `uv run --project`, else
+                               `--with inkflow~=…`; GitHub branch = origin's HEAD or
+                               the current one, GitLab uses $CI_DEFAULT_BRANCH). LFS
+                               and PDF converter are handled at run time (checkout
+                               `lfs: true`; GitLab `git grep filter=lfs`; poppler when
+                               `git ls-files '<deck>/*.pdf'`), so the files do not
+                               depend on them; release names use the repo name at run
+                               time. `parse_remote`/`pages_url`/`settings_url` (user
+                               sites, GitLab subgroups; self-hosted → no URL),
+                               `detect` (the marker `inkflow setup-pages` in the file),
+                               `plan` (conflicts: refuses unless force), `font_warnings`
+                               (fonts.font_sources: fonts outside the project's/theme's
+                               fonts/)
+    fontreport.py     where each font family the deck uses comes from (`font_report`:
+                               effective token values from the styles cascade, other
+                               CSS font-family, every font in the built slides; faces
+                               used, body bold/italic from the HTML): `Where` project /
+                               theme (the active theme's or inkflow's fonts/) /
+                               machine / missing / generic (a generic family first);
+                               its own uncached index over fonts._font_dirs;
+                               `licence_of` (licence files beside the font, name IDs
+                               13/14/0, fsType, `_SYSTEM_FONTS` with open
+                               alternatives); `plan_bundle` (machine fonts' used
+                               files, or a variable font, to fonts/<family>/ with
+                               licences + fonts/README.md table, warnings never
+                               refusals); `token_value` (a font token's value for a
+                               family, for a frontend that sets one)
+    pack.py           the building blocks of a portable deck: `Item`s (key, message,
+                               consequence, fixable), `plan_pyproject` (pin inkflow, the
+                               plugins' requirements and a pip-installed theme, nearest
+                               pyproject.toml or a new one), uv.lock (`run_uv_lock`,
+                               patched out in tests by conftest), `plan_attributes` (LF
+                               rules one per pattern, SVG diff line, LFS block or missing
+                               font rules, lfs-off kept), `make_zip` (git ls-files or
+                               .gitignore, LFS smudged), `show_path`;
+                               `ensure_text_rules`/`bundle_fonts_now`/`lock_new_deck` for
+                               new decks (`inkflow init`). A frontend's "pack" puts them
+                               together with copying in files from outside the deck
     init.py           project scaffolding (inkflow init): copies templates/ into
                                slides/ + notes/, writes a 3-slide deck.py and a bare
-                               pyproject.toml pinning inkflow (`~=` compatible release);
+                               pyproject.toml pinning inkflow (`~=` compatible release,
+                               `compatible_requirement`) and each plugin's
+                               `requirement()` (`deck_requirements`);
                                command refuses a non-empty target (dotfiles ignored)
                                unless --force. `scaffold_poster` (init --poster
                                [--size]): templates/poster/ (poster.md, figures/) on
@@ -440,6 +491,7 @@ src/
                                duplicate_zone_ids, is_full_canvas_fill, canvas_size,
                                theme_generic_fonts)
     fonts.py          font discovery + embedding (see "Font embedding" below):
+                               `font_sources` (each face's file, for publish.py),
                                `SHIPPED_FONTS_DIR`/`is_shipped`, `embed_fonts_css`
                                (serve; `font_url=shipped_font_url` links shipped files),
                                `embed_fonts_css_subsetted` (build/export),
@@ -475,8 +527,9 @@ src/
                                size is letterboxed)
     plugins.py        `Plugin` (entry-point group `inkflow.plugins`): `register_cli`,
                                `slide_checks`/`deck_checks`, `server_extensions` +
-                               `serve_options`, `completion_spec`, `current_slide`
-                               (`inkflow render`'s default);
+                               `serve_options`, `completion_spec`, `requirement`
+                               (pinned beside inkflow in a new deck's pyproject),
+                               `current_slide` (`inkflow render`'s default);
                                `loaded()` (found once; `INKFLOW_NO_PLUGINS=1` = none),
                                `register`/`unregister` (tests, embedding)
     ns.py             XML namespace constants
@@ -516,7 +569,8 @@ src/
                                e.g. `rect.inkflow-fill-accent[y="0"][height="8"]`)
     templates/        inkflow init starter files (title.svg, diagram.svg, guide.md,
                                diagram.md, notes/*.md) copied verbatim into new projects;
-                               poster/ is `init --poster`'s
+                               poster/ is `init --poster`'s; ci/ is publish.py's CI
+                               templates
   ts/                 TypeScript source
     globals.d.ts      ambient declarations for Python-injected globals (__SLIDES_JSON__ etc.)
     shared/           types, step engine (step.ts: WAAPI cue driver + elementActions),
@@ -673,7 +727,7 @@ Serve (`embed_fonts_css`, index cached per process): shipped files are linked as
 The presenter's interface uses `"Inkflow UI"` (Inter), `"Inkflow UI Mono"` (JetBrains Mono), `"Inkflow UI Symbols"` (STIX) and `"Inkflow UI Emoji"` (Twemoji), names of their own so they never mix with a deck's subset: `server.build_html` adds `ui_fonts_css()` (URLs) to the page CSS, a static build passes `ui_fonts_css(text)` subset to the presenter's own text, slide titles and notes.
 
 Unresolvable fonts produce a yellow TUI warning (once per family) and fall back to system rendering.
-Opt out per-deck: `Deck(embed_fonts=False)`.
+Opt out per-deck: `Deck(embed_fonts=False)`. `publish.font_warnings` treats shipped fonts as portable.
 
 **An asset reference resolves against the file it was written in.**
 `assets.py` owns the rule and both halves of it. An `<image href>` resolves against its SVG, a Markdown `![](…)` against its `.md`, an `Image`/`Video`/`Inline` against `deck.py` — what every editor already assumes. The pipeline canonicalises each reference exactly once, while its declaring file is still known (`svg_reader` at each `clean_inkscape_tree` site, `AssetSource.html`/`.ref` for Markdown and zone values), into a path relative to the presentation root. `AssetRoots.locate` is the inverse, and it is the single answer both `server._resolve_asset` and `export._copy_assets` use, so serve and build cannot disagree about what a reference means. On-disk SVGs are never rewritten — only the in-memory tree — so a slide keeps rendering in Inkscape.
@@ -686,6 +740,9 @@ An asset must live under an allowed root: the project dir (canonical prefix `""`
 Browsers show no PDF in `<image>`/`<img>`, so `pdf.PdfPages.apply` (a pipeline step after content injection, so SVG pictures, `Image` zones and Markdown images are covered alike) points each PDF reference at its page converted to SVG in `.inkflow/cache/pdf/` (git-ignored, unwatched; named by content hash + page + converter, so a saved PDF converts again and the watcher's rebuild shows it). The cache is a third `AssetRoots` root with the canonical prefix `_pdf/`, reserved like `_theme/`: `serve`, `build` (copied to `out/_pdf/`, not a hidden folder static hosts may refuse; inlined with `--inline-assets`) and `export` handle a converted page exactly as any picture, with no special case. The PDF reference survives beside it as `data-inkflow-pdf`, which a frontend writing back reads instead of the href, so nothing it writes ever names the cache. PyMuPDF is optional (`inkflow[pdf]`) and loaded with `importlib` so inkflow stays MIT and type-checks without it; the system tools are the fallback. With no converter the picture becomes a placeholder data URI and the build warns once; `verify` (`_check_pdfs`) reports that and a page the PDF does not have.
 
 `build --inline-assets` swaps the copy for `_inline_assets`, which rewrites each reference to a `data:` URI through `assets.rewrite_references` — the same `REFERENCE_PATTERNS` the scan uses, so both halves learn a new reference kind at once. It runs *after* `embed_fonts_css_subsetted`, because the subsetter scans these very slide strings for used characters and base64 would pin the whole font. `assets.MIME_TYPES` is the shared table naming what `serve` sends and what the data URI claims; a suffix missing from it is copied out and warned about rather than dropped, so the build can fall short of one file but never loses an asset. Each reference is inlined where it stands, so a shared asset is carried once per use — the reason this is a flag and not the default.
+
+**A deck is portable when a clone of its folder looks the same anywhere.**
+Only the deck's own files and the pinned inkflow/theme travel with a `git clone`, so `fontreport.py` classifies every font as project / theme (portable) or machine / missing / generic (`inkflow fonts`), and `pack.py` holds the building blocks that take the rest away as `Item`s (fixable or not): pyproject pin + uv.lock, `.gitattributes` LF/diff/LFS rules, the machine fonts copied into `fonts/`, a zip of the source tree. `inkflow init` uses them for every new deck (`_self_contained` in cli/project.py: LF rules, fonts, `uv lock`; `git_setup.setup_lfs` the LFS rules, `--no-lfs` the opt-out); a frontend can put them together with copying in files from outside the deck. Licences warn, never refuse. fontreport only reads fonts.py's discovery (`_font_dirs`, `_read_font_record`) with its own uncached index, so a just-bundled font is seen at once.
 
 **A deck's size is a canvas plus a page, and the A sizes share one canvas.**
 `Deck(size=)` (`sizes.PageSize`) names both: the user units new slides get and the sheet a PDF page is. A slide's own size stays its `viewBox`; the deck size only decides what is created (blank slides from `inkflow add`, the built-in layouts `inkflow layouts` lists, and for a frontend its inserts and thumbnails' shape: `layouts_for`, shared/viewbox.ts `setDeckCanvas`) and what is printed (`export.pdf_pages` fits each viewBox onto the page, letterboxing another shape, which `verify` warns about). All A sizes share A0's canvas so one poster design and the `poster-*` layouts serve every A sheet, and text scales with the sheet (`base_font`: 1/80 of the short side, 30 pt on A0). A print deck is light unless its theme or `mode=` says otherwise. `None` keeps the pre-size behaviour exactly (per-slide pages, 16:9 new slides, theme mode and font).

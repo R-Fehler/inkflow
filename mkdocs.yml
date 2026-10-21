@@ -98,6 +98,8 @@ nav:
     - Drawing with a pen: presenting/ink.md
     - Sharing: presenting/sharing.md
     - Export: presenting/export.md
+    - Publishing online: presenting/publish.md
+    - A deck that looks the same everywhere: presenting/portable.md
   - Reference:
     - Manifest: reference/manifest.md
     - Themes: reference/theme.md

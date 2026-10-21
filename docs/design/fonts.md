@@ -74,7 +74,7 @@ Inkflow looks for each family it finds, in this order, and uses the first match:
 A same-named file in `fonts/` wins over the theme's and inkflow's, so a project can
 always pin its own version. A font found only in 4 or 5 is embedded too, but it is
 on *this* computer only: commit it to `fonts/` so a teammate or a CI runner
-building the deck has it.
+building the deck has it (`inkflow setup-pages` warns about such fonts).
 
 ```
 my-talk/
@@ -90,6 +90,10 @@ TTF, OTF, WOFF and WOFF2 files are read. A variable font is one file for every
 weight; a family of static files is matched weight by weight (regular, bold,
 italic…). A family a slide defines itself with an `@font-face` in its `<style>`
 is used as it is.
+
+`inkflow fonts` lists where each font the deck uses comes from (`project`,
+`theme`, `machine`, `missing`, `generic`): see
+[A deck that looks the same everywhere](../presenting/portable.md).
 
 ## How it is embedded
 
