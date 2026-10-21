@@ -17,6 +17,7 @@ import {
     snapStepRun,
     updateStatus,
 } from "./status";
+import { setEditor } from "./toeditor";
 import { CUT, loadSlide, snapInflight } from "./transitions";
 import { hideError, showError, showLogs, showNotify } from "./ui";
 
@@ -63,12 +64,16 @@ function storedSyncMode(): boolean {
 }
 
 // Who the server says this page is (its "welcome"): a view link follows the
-// presenter (it may still look around alone, in solo mode) and opens no
-// source files.
+// presenter (it may still look around alone, in solo mode), opens no source
+// files and has no editor.
 let role = "owner";
 
-function welcome(msg: { role?: unknown }): void {
+function welcome(msg: { role?: unknown; editor?: unknown }): void {
     role = String(msg.role ?? "owner");
+    // The editor's page, when the server has one (a server extension's).
+    setEditor(
+        role !== "viewer" && typeof msg.editor === "string" ? msg.editor : null,
+    );
     if (role !== "viewer") return;
     const edit = document.getElementById("btn-edit");
     if (edit) edit.style.display = "none";

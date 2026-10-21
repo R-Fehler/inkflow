@@ -1,19 +1,24 @@
-"""One server per deck: the registry of running servers (instances.py), and
-a second ``inkflow serve`` of a deck pointing at the server that has it."""
+"""One server per deck: the registry of running servers (instances.py), a
+second ``inkflow serve`` of a deck pointing at the server that has it, and a
+server stopping once no page is open."""
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
 import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import cast
 
 import pytest
 from typing_extensions import override
+from websockets.asyncio.server import ServerConnection
 
-from inkflow import instances
+from inkflow import instances, server
 
 
 @pytest.fixture(autouse=True)
@@ -108,3 +113,35 @@ def test_a_record_is_this_users_alone(tmp_path: Path) -> None:
     assert record.cookie() == "inkflow-owner-7777=t+k"
     instances.unregister(7)
     assert not (folder / "7.json").exists()
+
+
+def test_a_record_leads_to_the_page_its_owner_opens() -> None:
+    """A server whose extension has a ``home`` records it: another inkflow
+    pointing there opens that page, not the presenter."""
+    for port in _answering(4243, None):
+        instances.register(
+            instances.Instance(4243, "127.0.0.1", port, port, None, home="/start")
+        )
+        (found,) = instances.running()
+        assert found.home == "/start"
+        assert found.url() == f"http://127.0.0.1:{port}/start"
+        assert found.url("/") == f"http://127.0.0.1:{port}/"
+    # An older record (no home) leads to the presenter.
+    assert instances.Instance(1, "localhost", 7777, 7777, None).url().endswith("/")
+
+
+def test_an_idle_server_stops_and_a_watched_one_does_not() -> None:
+    async def run(clients: set[object]) -> bool:
+        server._state["ws_clients"] = cast("set[ServerConnection]", clients)  # pyright: ignore[reportPrivateUsage]
+        shutdown = asyncio.Event()
+        task = asyncio.create_task(server._quit_when_idle(shutdown, 2))  # pyright: ignore[reportPrivateUsage]
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(shutdown.wait(), timeout=3.5)
+        _ = task.cancel()
+        return shutdown.is_set()
+
+    try:
+        assert asyncio.run(run(set()))
+        assert not asyncio.run(run({object()}))
+    finally:
+        server._state["ws_clients"] = set()  # pyright: ignore[reportPrivateUsage]

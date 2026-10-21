@@ -153,6 +153,9 @@ class _Served:
     edit_commands: EditCommands = NO_EDIT_COMMANDS
     address: dict[str, object] = field(default_factory=dict)
     """Where this machine's own pages and programs reach the server."""
+    switch_to: Path | None = None
+    """The deck an extension asked to serve next (``open_deck``)."""
+    switch: asyncio.Event | None = None
     shutdown: asyncio.Event | None = None
     rebuild: Callable[[bool], Awaitable[None]] | None = None
     """Build the served deck again (set while serving)."""
@@ -194,7 +197,40 @@ _share = _Share()
 # ── Deck loader ───────────────────────────────────────────────────────────────
 
 
+class DeckError(Exception):
+    """deck.py did not load: the file, line and error, without the traceback
+    through inkflow (the cause stays chained for the server's error overlay)."""
+
+
+def _deck_failure(deck_path: Path, exc: BaseException) -> str:
+    """Where in deck.py ``exc`` happened, as ``deck.py:41: NameError: …``."""
+    lineno, line = None, None
+    if isinstance(exc, SyntaxError) and exc.filename == str(deck_path):
+        lineno, line = exc.lineno, exc.text
+    else:
+        frames = [
+            f
+            for f in traceback.extract_tb(exc.__traceback__)
+            if f.filename == str(deck_path)
+        ]
+        if frames:
+            lineno, line = frames[-1].lineno, frames[-1].line
+    where = f"{deck_path.name}:{lineno}" if lineno else deck_path.name
+    detail = f"\n    {line.strip()}" if line and line.strip() else ""
+    return f"{where}: {type(exc).__name__}: {exc}{detail}"
+
+
 def load_deck(deck_path: Path) -> Deck:
+    """Run deck.py's ``main()``; any failure in it is a ``DeckError``."""
+    try:
+        return _load_deck(deck_path)
+    except DeckError:
+        raise
+    except Exception as exc:
+        raise DeckError(_deck_failure(deck_path, exc)) from exc
+
+
+def _load_deck(deck_path: Path) -> Deck:
     spec = importlib.util.spec_from_file_location("_inkflow_deck", deck_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load module from {deck_path}")
@@ -1063,7 +1099,8 @@ def make_http_route(
     and the share ``token`` that admitted them): pages, pictures, and
     whatever the extensions answer. A request that came another way
     (``ServerContext.serve_request``) is answered by this too, so what each
-    role may fetch is decided here once."""
+    role may fetch is decided here once. Without a ``project_dir`` (serving
+    no deck) only the extensions' pages are there."""
 
     async def route(
         request: AccessRequest,
@@ -1109,6 +1146,12 @@ def make_http_route(
             if await ext.http(extension_request):
                 return
 
+        if project_dir is None:
+            # Serving without a deck: only the extensions' pages exist.
+            await _refuse(
+                writer, "404 Not Found", "No deck open", "This server has no deck open."
+            )
+            return
         # Opening a source file in a program is the owner's alone.
         body = build_html(
             _state, ws_port, edit_commands if role == "owner" else NO_EDIT_COMMANDS
@@ -1276,7 +1319,7 @@ def _open_browser(url: str) -> None:
 
 
 async def _read_keys(
-    deck_path: Path,
+    deck_path: Path | None,
     base: str,
     http_port: int,
     ui: LiveUI,
@@ -1300,8 +1343,10 @@ async def _read_keys(
                 shutdown.set()
                 return
             elif ch == "o":
-                _open_browser(f"{base}:{http_port}{_share.access.owner_path('/')}")
-            elif ch == "r":
+                _open_browser(
+                    f"{base}:{http_port}{_share.access.owner_path(owner_page())}"
+                )
+            elif ch == "r" and deck_path is not None:
                 # Asked for by hand: every slide again, whatever is kept.
                 async with lock:
                     await rebuild(deck_path, ui, levels, full=True)
@@ -1413,12 +1458,18 @@ def _shares(host: str) -> bool:
 
 def editor_page() -> str | None:
     """Where an editor link leads, when an extension takes editors (one of its
-    messages is for editors). None: nothing on this server edits, so it
-    offers view links only."""
+    messages is for editors): its ``home``, else the presenter. None: nothing
+    on this server edits, so it offers view links only."""
     for ext in _served.extensions:
         if "editor" in ext.messages.values():
-            return "/"
+            return ext.home or "/"
     return None
+
+
+def owner_page() -> str:
+    """The page the owner opens: the first extension's ``home`` (an editor's
+    page), else the presenter."""
+    return next((e.home for e in _served.extensions if e.home), "/")
 
 
 def owner_lines(access: Access, port: int) -> list[str]:
@@ -1429,7 +1480,7 @@ def owner_lines(access: Access, port: int) -> list[str]:
     server = next(iter(server_names()), "<this server>")
     user = login_user() or "<you>"
     return [
-        f"{access.scheme}://localhost:{port}{access.owner_path('/')}",
+        f"{access.scheme}://localhost:{port}{access.owner_path(owner_page())}",
         f"open it through: ssh -L {port}:localhost:{port} {user}@{server}",
     ]
 
@@ -1470,7 +1521,7 @@ def share_lines(access: Access, port: int) -> list[str]:
         lines.append("no network address found: use --host <address>")
     lines.append(
         f"ssh   ssh -L {port}:localhost:{port} <you>@<this machine>, "
-        + f"then http://localhost:{port}/ (as the owner)"
+        + f"then http://localhost:{port}{owner_page()} (as the owner)"
     )
     return lines + _extension_lines()
 
@@ -1494,8 +1545,7 @@ class _Context:
         return _share.access
 
     @property
-    def deck_path(self) -> Path:
-        assert _served.deck_path is not None, "the server is not serving yet"
+    def deck_path(self) -> Path | None:
         return _served.deck_path
 
     @property
@@ -1532,6 +1582,11 @@ class _Context:
     async def rebuild(self, *, full: bool = False) -> None:
         if _served.rebuild is not None:
             await _served.rebuild(full)
+
+    def open_deck(self, deck_path: Path) -> None:
+        _served.switch_to = deck_path
+        if _served.switch is not None:
+            _served.switch.set()
 
     def shutdown(self) -> None:
         if _served.shutdown is not None:
@@ -1583,16 +1638,21 @@ def extensions_for(config: ServeConfig) -> list[ServerExtension]:
 
 
 async def serve(
-    deck_path: Path,
+    deck_path: Path | None,
     host: str,
     http_port: int,
     ws_port: int | None,
     levels: Levels,
+    open_path: str | None = None,
+    quit_when_idle: float | None = None,
     auto_ports: bool = False,
     sharing: Sharing | None = None,
     extensions: Sequence[ServerExtension] | None = None,
 ) -> None:
-    """Serve ``deck_path`` until quit.
+    """Serve ``deck_path`` (or no deck) until quit. ``open_path`` (``"/"``)
+    opens a browser on that page once the first build is done. With
+    ``quit_when_idle`` (seconds) it stops once no page has been connected for
+    that long (a server started without a terminal to stop it from).
 
     One port carries everything: pages, pictures and the WebSocket
     (``/_inkflow/ws``). ``ws_port`` additionally opens the old separate
@@ -1606,7 +1666,12 @@ async def serve(
     too, since other machines can reach it.
 
     ``extensions`` add to the server (``inkflow.extensions``); by default the
-    installed plugins' (``extensions_for``).
+    installed plugins' (``extensions_for``). Without a deck (``None``) only
+    an extension that ``serves_without_deck`` can answer the pages.
+
+    When an extension opens another deck (``ServerContext.open_deck``), the
+    server closes this one and starts again on the same port for that deck;
+    open pages reconnect to it.
     """
     sharing = sharing or Sharing()
     _share.access = Access(
@@ -1618,6 +1683,9 @@ async def serve(
     )
     if extensions is None:
         extensions = extensions_for(ServeConfig(deck_path, host, http_port))
+    if deck_path is None and not any(e.serves_without_deck for e in extensions):
+        report("Error", "no deck to serve", style="red")
+        return
     _served.extensions = list(extensions)
     _served.address = _address(_local_host(host), http_port, ws_port, sharing.tls)
     started: list[ServerExtension] = []
@@ -1628,23 +1696,18 @@ async def serve(
                 started.append(ext)
             except Exception:
                 logger.exception(f"{ext.name}: start failed")
-        _served.extensions = list(started)
-        retries = 5 if auto_ports else 0
-        while True:
-            try:
-                await _serve_deck(deck_path, host, http_port, ws_port, levels, sharing)
-            except _PortBusy as busy:
-                if retries <= 0:
-                    report("Error", busy.message, style="red")
-                    return
-                retries -= 1
-                http_port = pick_port(host, None)
-                _share.access.port = http_port
-                _served.address = _address(
-                    _local_host(host), http_port, ws_port, sharing.tls
-                )
-                continue
-            return
+        await _serve_decks(
+            deck_path,
+            host,
+            http_port,
+            ws_port,
+            levels,
+            open_path,
+            quit_when_idle,
+            auto_ports,
+            sharing,
+            started,
+        )
     finally:
         _served.extensions = started
         await _each_extension("stop", lambda ext: ext.stop())
@@ -1663,6 +1726,60 @@ def _address(
     }
 
 
+async def _serve_decks(
+    deck_path: Path | None,
+    host: str,
+    http_port: int,
+    ws_port: int | None,
+    levels: Levels,
+    open_path: str | None,
+    quit_when_idle: float | None,
+    auto_ports: bool,
+    sharing: Sharing,
+    extensions: Sequence[ServerExtension],
+) -> None:
+    """``serve``'s loop: one deck after another, as extensions open them."""
+    retries = 5 if auto_ports else 0
+    while True:
+        # Each deck is opened by every extension that started (one whose
+        # ``open`` failed for the last deck gets this one all the same).
+        _served.extensions = list(extensions)
+        try:
+            next_deck = await _serve_deck(
+                deck_path,
+                host,
+                http_port,
+                ws_port,
+                levels,
+                sharing,
+                open_path,
+                quit_when_idle,
+            )
+        except _PortBusy as busy:
+            if retries <= 0:
+                report("Error", busy.message, style="red")
+                return
+            retries -= 1
+            http_port = pick_port(host, None)
+            _share.access.port = http_port
+            _served.address = _address(
+                _local_host(host), http_port, ws_port, sharing.tls
+            )
+            continue
+        if next_deck is None:
+            return
+        report("Opening", str(next_deck))
+        # The new deck starts from nothing: no slides, position or error of
+        # the last one reach its pages.
+        deck_path, open_path = next_deck, None
+        _state["slides"] = []
+        _state["position"] = {"slideIndex": 0, "step": 0}
+        _state["error"] = None
+        _served.deck = None
+        _served.built_hash = None
+        _served.failed_hash = None
+
+
 class _PortBusy(Exception):
     """A port was taken when the server bound it."""
 
@@ -1671,10 +1788,26 @@ class _PortBusy(Exception):
         self.message: str = message
 
 
+async def _quit_when_idle(shutdown: asyncio.Event, delay: float) -> None:
+    """Stop once no page has been connected for ``delay`` seconds.
+
+    The delay covers a reload, and the moment a deck switch restarts the
+    server, so only closing the last tab (or never opening one) stops it.
+    """
+    idle = 0.0
+    while True:
+        await asyncio.sleep(1)
+        idle = 0.0 if _state["ws_clients"] else idle + 1
+        if idle >= delay:
+            report("Stopping", f"no page open for {delay:g} seconds")
+            shutdown.set()
+            return
+
+
 @contextlib.asynccontextmanager
 async def listening(
     ui: LiveUI,
-    deck_path: Path,
+    deck_path: Path | None = None,
     extensions: Sequence[ServerExtension] = (),
     host: str = "127.0.0.1",
     port: int = 0,
@@ -1682,10 +1815,10 @@ async def listening(
 ) -> AsyncGenerator[int]:
     """The one port as ``serve`` opens it (pages, files, the WebSocket at
     ``/_inkflow/ws``, behind the door), without the terminal UI, watcher or
-    keyboard, serving ``deck_path`` with ``extensions`` (started and opened;
-    nothing built yet): for tests and for embedding. Yields the port it
-    listens on."""
-    project_dir = deck_path.parent
+    keyboard, serving ``deck_path`` (or no deck) with ``extensions`` (started
+    and opened; nothing built yet): for tests and for embedding. Yields the
+    port it listens on."""
+    project_dir = deck_path.parent if deck_path is not None else None
     handler = make_ws_handler(ui, edit_commands)
     bridge = Bridge(handler, forget=_share.people.leave)
     handlers: list[_StreamHandler] = []
@@ -1705,8 +1838,9 @@ async def listening(
     lock = asyncio.Lock()
 
     async def again(full: bool) -> None:
-        async with lock:
-            await rebuild(deck_path, ui, resolve_levels(), full=full)
+        if deck_path is not None:
+            async with lock:
+                await rebuild(deck_path, ui, resolve_levels(), full=full)
 
     _served.rebuild = again
     try:
@@ -1805,17 +1939,24 @@ def _tls_context(tls: tuple[Path, Path] | None) -> ssl.SSLContext | None:
 
 
 async def _serve_deck(
-    deck_path: Path,
+    deck_path: Path | None,
     host: str,
     http_port: int,
     ws_port: int | None,
     levels: Levels,
     sharing: Sharing,
-) -> None:
-    """Serve the deck until quit."""
+    open_path: str | None = None,
+    quit_when_idle: float | None = None,
+) -> Path | None:
+    """Serve one deck until quit (None) or until an extension opens another
+    (its deck.py, returned). Without a deck only the extensions' pages are
+    served: nothing is built or watched, and no files are served."""
     console = Console()
     rebuild_lock = asyncio.Lock()
     shutdown = asyncio.Event()
+    switch = asyncio.Event()
+    _served.switch = switch
+    _served.switch_to = None
     _served.shutdown = shutdown
     _served.deck_path = deck_path
     access = _share.access
@@ -1835,7 +1976,9 @@ async def _serve_deck(
     try:
         edit_commands = resolve_edit_commands()
         _served.edit_commands = edit_commands
-        project_dir = deck_path.parent
+        project_dir = deck_path.parent if deck_path is not None else None
+        if deck_path is None:
+            _state["title"] = "Inkflow"
         ui_ref: list[LiveUI] = []
 
         async def ws_entry(connection: ServerConnection) -> None:
@@ -1881,9 +2024,10 @@ async def _serve_deck(
                 host=browse_host,
                 port=http_port,
                 ws_port=ws_port if ws_port is not None else http_port,
-                deck=str(deck_path.resolve()),
+                deck=str(deck_path.resolve()) if deck_path is not None else None,
                 tls=tls is not None,
                 owner_token=access.owner_token if access.ssh else None,
+                home=owner_page(),
             )
         )
         registered = True
@@ -1906,7 +2050,7 @@ async def _serve_deck(
                 live,
                 browse_host,
                 http_port,
-                project_dir,
+                project_dir or Path.home(),
                 get_clients=lambda: len(_state["ws_clients"]),
                 scheme=scheme,
             )
@@ -1923,8 +2067,9 @@ async def _serve_deck(
             _share.on_change = lambda: ui.set_share(share_lines(access, http_port))
 
             async def again(full: bool) -> None:
-                async with rebuild_lock:
-                    await rebuild(deck_path, ui, levels, full=full)
+                if deck_path is not None:
+                    async with rebuild_lock:
+                        await rebuild(deck_path, ui, levels, full=full)
 
             _served.rebuild = again
             try:
@@ -1939,11 +2084,27 @@ async def _serve_deck(
                                 ssl=_tls_context(tls),
                             )
                         )
-                    await rebuild(deck_path, ui, levels)
-                    tasks = [
-                        asyncio.create_task(
-                            _watch(deck_path, ui, rebuild_lock, levels)
-                        ),
+                    if deck_path is not None:
+                        await rebuild(deck_path, ui, levels)
+                    if open_path is not None:
+                        _open_browser(
+                            f"{scheme}://{browse_host}:{http_port}"
+                            + access.owner_path(open_path)
+                        )
+                    tasks: list[asyncio.Task[None]] = []
+                    if deck_path is not None:
+                        tasks.append(
+                            asyncio.create_task(
+                                _watch(deck_path, ui, rebuild_lock, levels)
+                            )
+                        )
+                    if quit_when_idle is not None:
+                        tasks.append(
+                            asyncio.create_task(
+                                _quit_when_idle(shutdown, quit_when_idle)
+                            )
+                        )
+                    tasks.append(
                         asyncio.create_task(
                             _read_keys(
                                 deck_path,
@@ -1954,10 +2115,14 @@ async def _serve_deck(
                                 shutdown,
                                 levels,
                             )
-                        ),
+                        )
+                    )
+                    waits = [
+                        asyncio.create_task(shutdown.wait()),
+                        asyncio.create_task(switch.wait()),
                     ]
-                    await shutdown.wait()
-                    for t in tasks:
+                    _ = await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+                    for t in [*tasks, *waits]:
                         _ = t.cancel()
                     _ = await asyncio.gather(*tasks, return_exceptions=True)
                     listener.close()
@@ -1979,11 +2144,17 @@ async def _serve_deck(
         _share.ws_handler = None
         _share.route = None
         _served.rebuild = None
-        _served.shutdown = None
+        # Another deck follows (``open_deck``), unless the server stops.
+        switching = switch.is_set() and not shutdown.is_set()
         for ext in opened:
             try:
-                await ext.close(switching=False)
+                await ext.close(switching=switching)
             except Exception:
                 logger.exception(f"{ext.name}: close failed")
+        _served.switch = None
+        _served.shutdown = None
         if registered:
             instances.unregister(os.getpid())
+    if switch.is_set() and not shutdown.is_set():
+        return _served.switch_to
+    return None

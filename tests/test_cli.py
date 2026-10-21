@@ -633,3 +633,32 @@ class TestCarapaceSpec:
             ),
         )
         assert self._spec_flags(spec) == self._click_flags(main)
+
+
+class TestBrokenDeck:
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            (
+                "from inkflow import Deck\n\ndef main():\n    return Deck(mode=Nope)\n",
+                "deck.py:4: NameError: name 'Nope' is not defined\n"
+                + "    return Deck(mode=Nope)",
+            ),
+            ("def main(:\n", "deck.py:1: SyntaxError"),
+            ("x = 1\n", "deck.py: AttributeError:"),
+        ],
+    )
+    def test_is_one_error_not_a_traceback(
+        self,
+        runner: CliRunner,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        source: str,
+        expected: str,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        Path("deck.py").write_text(source, encoding="utf-8")
+        result = runner.invoke(main, ["verify"])
+        assert result.exit_code == 1
+        assert f"Error: {expected}" in result.output
+        assert "Traceback" not in result.output

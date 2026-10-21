@@ -114,10 +114,12 @@ the order they happen:
 - `start(server)` once, with the `ServerContext` to act through: the served
   state, who is connected and the door (`access`), `send`/`broadcast`/
   `send_owners`/`notify`, `rebuild` (`full=True`: keep nothing from earlier
-  builds), `shutdown`, and
+  builds), `open_deck(path)` (serve another deck on the same port: this one
+  is closed, open pages reconnect to the new one), `shutdown`, and
   `serve_connection`/`serve_request` for a page that reached it another way
   (through a relay, say), run exactly as one from the network, for its role;
-- `open(deck_path)` / `close(switching=…)` for the deck served;
+- `open(deck_path)` / `close(switching=…)` for each deck served
+  (`switching`: another deck follows);
 - `before_build()` and `build(build)` in a worker thread, inside each build
   (raising fails the build); `built(build)` once the pages have the new
   slides; `build_failed(...)`. With `provenance = True` every element is
@@ -128,16 +130,21 @@ the order they happen:
   the same slides without the `edit` facts (`build.served`, each with a
   `key`, a digest of its content). A served deck processes only the slides a
   change touched and keeps the others from the last build; `build.fresh`
-  says nothing was kept (the first build, or <kbd>r</kbd> in the terminal),
-  so an extension's own caches should start over too;
+  says nothing was kept (the first build, <kbd>r</kbd> in the terminal, or
+  another deck), so an extension's own caches should start over too;
 - `messages`: the WebSocket message types it handles, each with the least role
   that may send it (`"owner"`, `"editor"`, `"viewer"`); `message(...)` gets
   them, `hello(...)` tells it what each page is (`{"type": "hello", "role":
   "editor"}`), and again with `resync=True` when a page that missed a build
-  asks for everything (`{"type": "resync"}`), `disconnected(...)` when it goes, `welcome(client)` adds fields
-  to the first message a page gets;
+  asks for everything (`{"type": "resync"}`), `disconnected(...)` when it
+  goes, `welcome(client)` adds fields to the first message a page gets (the
+  presenter shows a "back to the editor" button, and takes <kbd>E</kbd> for
+  it, when one names the editor's page: `{"editor": "/edit"}`);
 - `http(request)` for every request the core does not answer itself (the
   deck's files come first, the presenter last);
+- `home`: the page the owner opens instead of the presenter (an editor's
+  `/edit`): where the owner link, the terminal's <kbd>o</kbd> and its SSH
+  hint, an editor link, and another inkflow finding this server send them;
 - `keys()`: keys in the server's terminal, shown on its help line;
 - `share_status()`/`share_op(op, msg)`/`share_lines()`: its part of the
   owner's Share dialog (`{"type": "share", "op": …}` messages, answered with
@@ -155,6 +162,12 @@ from a lesser role than an extension's `messages` names never reaches it, and
 links only when an extension takes a message from editors. Every page also may
 ask `{"type": "build-status"}`: which deck.py the server built last
 (`deckHash`), so a program that edited it can wait for its own edit to build.
+
+A server may also run with **no deck** (`serve(None, ...)`), when an
+extension says `serves_without_deck = True`: nothing is built or watched, its
+`open` gets `None`, and its `http` answers every page (a start page that lists
+decks, say) until it calls `open_deck`. Without such an extension, `serve`
+refuses to start without a deck.
 
 A page that says `{"type": "hello", "patch": true}` is sent each rebuild as
 what changed: in an `update`'s `slides`, a slide the page already holds is its

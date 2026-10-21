@@ -24,6 +24,7 @@ import { openPicker } from "./picker";
 import { togglePv } from "./pv";
 import { state } from "./state";
 import { cycleSyncMode } from "./syncmenu";
+import { backToEditor } from "./toeditor";
 import {
     hideCurtain,
     hideLogs,
@@ -135,6 +136,7 @@ const KEYBINDINGS: Record<
     g: { action: openPicker, preventDefault: true },
     o: { action: toggleOverview, preventDefault: true },
     e: { action: toggleEditMenu },
+    E: { action: backToEditor },
     f: { action: toggleFullscreen },
     b: { action: () => toggleCurtain("black") },
     ".": { action: toggleLaser },

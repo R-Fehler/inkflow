@@ -69,8 +69,8 @@ class Recorder(ServerExtension):
         self.events.append("start")
 
     @override
-    async def open(self, deck_path: Path) -> None:
-        self.events.append(f"open {deck_path.name}")
+    async def open(self, deck_path: Path | None) -> None:
+        self.events.append(f"open {deck_path.name if deck_path else None}")
 
     @override
     async def close(self, *, switching: bool) -> None:

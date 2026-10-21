@@ -12,9 +12,11 @@ command that starts the server (or by a plugin, see ``inkflow.plugins``).
 Every hook has a do-nothing default. In the order they happen:
 
 - ``start(server)`` once, with the ``ServerContext`` it keeps: what the
-  server knows and the things it can do (send, broadcast, rebuild, stop,
-  serve a connection that came another way);
-- ``open(deck_path)`` for the deck served;
+  server knows and the things it can do (send, broadcast, rebuild, open
+  another deck, stop, serve a connection that came another way);
+- ``open(deck_path)`` for each deck served (None: the server runs without a
+  deck, which only an extension that ``serves_without_deck`` allows, and an
+  extension's ``http`` answers every page);
 - per build: ``before_build`` and ``build`` run in a worker thread, inside
   the build (an exception there fails the build: the error overlay);
   ``built`` runs after the pages got the new slides, ``build_failed`` when a
@@ -22,18 +24,22 @@ Every hook has a do-nothing default. In the order they happen:
   stamped with its source locator (``inkflow.provenance``, inert attributes
   every page gets) and each slide's ``edit`` facts (``SlideData.edit``,
   which stay with the extensions: the pages' copies drop them);
-- per page: ``welcome`` adds fields to the first message a page gets;
-  ``hello`` when a page said what it is (``{"type": "hello", "role": ...}``)
-  or asked for everything again (``resync``: it missed a build); ``message``
-  for each message type the extension lists in ``messages`` (with the least
-  role that may send it: anything else from a lesser role is dropped at the
-  door); ``disconnected`` when it goes;
+- per page: ``welcome`` adds fields to the first message a page gets (the
+  presenter shows its "back to the editor" button when one names the
+  ``editor`` page: ``{"editor": "/edit"}``); ``hello`` when a page said what
+  it is (``{"type": "hello", "role": ...}``) or asked for everything again
+  (``resync``: it missed a build); ``message`` for each message type the
+  extension lists in ``messages`` (with the least role that may send it:
+  anything else from a lesser role is dropped at the door); ``disconnected``
+  when it goes;
 - ``http(request)`` for every request the core does not answer itself (the
   deck's assets come first, the presenter last);
-- ``keys()``: keys in the server's terminal;
+- ``home``: the page the owner opens (the owner link, the terminal's ``o``)
+  instead of the presenter; ``keys()``: keys in the server's terminal;
 - ``share_*``: the Share dialog's extra operations and status, the terminal's
   extra share lines (a relay, say);
-- ``close()`` when the deck stops being served, ``stop()`` when the server
+- ``close(switching=...)`` when the deck stops being served (``switching``:
+  another follows, ``ServerContext.open_deck``), ``stop()`` when the server
   stops.
 """
 
@@ -86,7 +92,8 @@ class State(TypedDict):
 class ServeConfig:
     """How a server is about to run, for plugins making its extensions."""
 
-    deck_path: Path
+    deck_path: Path | None
+    """The deck it serves first (None: none yet)."""
     host: str
     port: int
     options: Mapping[str, object] = field(default_factory=dict[str, object])
@@ -110,8 +117,9 @@ class Build:
     """The pages' copies (set once the build is done): no ``edit`` facts,
     each asset stamped with its version (``?v=``), a ``key`` each."""
     fresh: bool = False
-    """Nothing was kept from earlier builds (the first, or ``r`` in the
-    terminal): an extension's own caches should start over too."""
+    """Nothing was kept from earlier builds (the first, ``r`` in the
+    terminal, another deck): an extension's own caches should start over
+    too."""
 
     @property
     def project_dir(self) -> Path:
@@ -182,7 +190,9 @@ class ServerContext(Protocol):
         ...
 
     @property
-    def deck_path(self) -> Path: ...
+    def deck_path(self) -> Path | None:
+        """The deck being served (None: serving without a deck)."""
+        ...
 
     @property
     def last_deck(self) -> Deck | None:
@@ -228,6 +238,12 @@ class ServerContext(Protocol):
         """Build the deck again now (``full``: keep nothing from earlier)."""
         ...
 
+    def open_deck(self, deck_path: Path) -> None:
+        """Serve another deck: the server closes this one (``close(switching=
+        True)``) and starts again on the same port with ``deck_path``; open
+        pages reconnect to it."""
+        ...
+
     def shutdown(self) -> None:
         """Stop the server."""
         ...
@@ -263,6 +279,12 @@ class ServerExtension:
     messages: Mapping[str, Role] = {}
     """WebSocket message types this extension handles, each with the least
     role that may send it (``"owner"``, ``"editor"`` or ``"viewer"``)."""
+    serves_without_deck: bool = False
+    """The server may run with no deck (``serve(None)``): this extension's
+    ``http`` answers the pages then (a start page, say)."""
+    home: str | None = None
+    """The page the owner opens instead of the presenter (``/edit``): what
+    the owner link, the terminal and an editor link lead to."""
 
     async def start(self, server: ServerContext) -> None:
         del server
@@ -270,7 +292,7 @@ class ServerExtension:
     async def stop(self) -> None:
         pass
 
-    async def open(self, deck_path: Path) -> None:
+    async def open(self, deck_path: Path | None) -> None:
         del deck_path
 
     async def close(self, *, switching: bool) -> None:
